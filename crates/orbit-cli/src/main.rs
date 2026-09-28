@@ -374,10 +374,11 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
-        /// Make agents start search with Orbit. Claude Code sometimes skips
-        /// Orbit, so this blocks its first search or file read each session
-        /// and points it to the graph. Later calls get the usual nudge.
-        /// Override at runtime with ORBIT_GRAPH_FIRST=1 or 0.
+        /// Make agents start search with Orbit. Agents sometimes skip Orbit,
+        /// so this blocks their first code search or file read each session
+        /// and points them to the graph. GitLab Duo, whose hooks cannot
+        /// block, gets a session-start reminder instead. Later calls get the
+        /// usual nudge. Override at runtime with ORBIT_GRAPH_FIRST=1 or 0.
         #[arg(long)]
         graph_first: bool,
 

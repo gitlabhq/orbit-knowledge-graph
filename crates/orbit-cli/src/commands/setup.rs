@@ -134,8 +134,8 @@ fn ask_which_agents(
         choices.push(tui::Choice {
             key: GRAPH_FIRST_KEY.to_string(),
             label: "Make agents start search with Orbit".to_string(),
-            hint: "Claude Code sometimes skips Orbit. This blocks its first search or file read \
-                   each session and points it to the graph."
+            hint: "Agents sometimes skip Orbit. This blocks their first code search or file read \
+                   each session and points them to the graph. GitLab Duo gets a session reminder."
                 .to_string(),
             section: Some("Options".to_string()),
         });
@@ -416,7 +416,7 @@ mod tests {
 
         assert!(dir.path().join("CLAUDE.md").is_file());
         assert!(!dir.path().join(".mcp.json").exists());
-        assert!(!dir.path().join(".codex").exists());
+        assert!(!dir.path().join(".codex/config.toml").exists());
         assert!(!dir.path().join("opencode.json").exists());
 
         install_with_mcp(&["claude"], dir.path());
@@ -837,7 +837,48 @@ mod tests {
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
-        assert!(plugin.contains("run orbit grep"));
+        assert!(plugin.contains(r#"const LAUNCHER = "orbit".split(" ");"#));
+        assert!(plugin.contains(r#"const MCP_SERVER = "orbit";"#));
         assert!(!plugin.contains("{{"));
+    }
+
+    #[test]
+    fn graph_first_setup_reaches_every_agent_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = [
+            ".claude/settings.json",
+            ".codex/hooks.json",
+            ".gitlab/duo/hooks.json",
+            ".opencode/plugins/orbit.js",
+            ".pi/extensions/orbit.ts",
+        ];
+        for graph_first in [true, false] {
+            let options = Options {
+                graph_first,
+                ..options_for(&["claude", "codex", "duo", "opencode", "pi"])
+            };
+            install(options, project(dir.path()), &bare_machine()).unwrap();
+            for file in files {
+                let contents = std::fs::read_to_string(dir.path().join(file)).unwrap();
+                assert!(contents.contains("hook-guard"), "{file}: {contents}");
+                assert_eq!(
+                    contents.contains("--graph-first"),
+                    graph_first,
+                    "{file}: {contents}"
+                );
+            }
+        }
+        let codex = read_json(&dir.path().join(".codex/hooks.json"));
+        assert_eq!(codex["hooks"]["PreToolUse"][0]["matcher"], "Bash");
+        let duo = read_json(&dir.path().join(".gitlab/duo/hooks.json"));
+        assert_eq!(
+            duo["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "orbit hook-guard session"
+        );
+
+        uninstall_named(&["codex", "duo", "opencode", "pi"], dir.path());
+        for file in &files[1..] {
+            assert!(!dir.path().join(file).exists(), "{file} survived uninstall");
+        }
     }
 }

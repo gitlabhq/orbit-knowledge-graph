@@ -1,7 +1,20 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
+# GitLab Duo CLI hooks only run at session start, so graph-first is a stronger session reminder
+# rather than a block. Project hooks run only with --enable-project-hooks.
 name: duo
 title: GitLab Duo
 detect: ["~/.gitlab/duo"]
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+json_merges:
+  - file:
+      project: .gitlab/duo/hooks.json
+      global: "~/.gitlab/duo/hooks.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard session{{graph_first}}"
+            timeout: 10

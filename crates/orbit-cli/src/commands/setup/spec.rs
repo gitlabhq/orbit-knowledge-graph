@@ -24,6 +24,8 @@ struct SetupTexts {
     nudge_search: String,
     nudge_read: String,
     graph_first_deny: String,
+    session_start: String,
+    graph_first_session: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -36,6 +38,8 @@ static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
 
 pub(crate) const DIRECT_LAUNCHER: &str = "orbit";
 pub(crate) const GLAB_LAUNCHER: &str = "glab orbit";
+
+pub(super) const GRAPH_FIRST_FLAG: &str = " --graph-first";
 
 pub(crate) fn launcher() -> &'static str {
     static LAUNCHER: LazyLock<&'static str> = LazyLock::new(|| {
@@ -72,6 +76,12 @@ static RENDERED_NUDGE_READ: LazyLock<String> =
 
 static RENDERED_GRAPH_FIRST_DENY: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.graph_first_deny.trim_end(), launcher()));
+
+static RENDERED_SESSION_START: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.session_start.trim_end(), launcher()));
+
+static RENDERED_GRAPH_FIRST_SESSION: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.graph_first_session.trim_end(), launcher()));
 
 fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -126,6 +136,13 @@ pub(crate) fn read_nudge_text() -> &'static str {
 
 pub(crate) fn graph_first_deny_text() -> &'static str {
     &RENDERED_GRAPH_FIRST_DENY
+}
+
+pub(crate) fn session_start_text(graph_first: bool) -> &'static str {
+    match graph_first {
+        true => &RENDERED_GRAPH_FIRST_SESSION,
+        false => &RENDERED_SESSION_START,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,21 +282,31 @@ pub(crate) fn agent_names() -> Vec<&'static str> {
 
 impl AgentSpec {
     pub(super) fn supports_graph_first(&self) -> bool {
-        self.json_merges
+        let merged = self
+            .json_merges
             .iter()
             .flat_map(|merge| &merge.entries)
-            .any(|entry| entry.to_string().contains("{{graph_first}}"))
+            .any(|entry| entry.to_string().contains("{{graph_first}}"));
+        let templated = self
+            .template_files
+            .iter()
+            .any(|file| read_embedded_text(&file.template).contains("{{graph_first}}"));
+        merged || templated
     }
 }
 
 const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
-    pub(super) fn render(&self) -> String {
+    pub(super) fn render(&self, graph_first: bool) -> String {
         let mut body = read_embedded_text(&self.template);
         for (name, value) in &TEXTS.template_vars {
             body = body.replace(&format!("{{{{{name}}}}}"), value);
         }
+        let flag = if graph_first { GRAPH_FIRST_FLAG } else { "" };
+        let body = body
+            .replace("{{graph_first}}", flag)
+            .replace("{{mcp_server}}", &TEXTS.mcp_server.name);
         let body = substitute_launcher(&body, launcher());
         format!("{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}", sha256_hex(&body))
     }
@@ -309,8 +336,7 @@ mod tests {
             assert!(agent_named(name).is_some(), "missing spec for {name}");
         }
         assert_eq!(agent_names().len(), agents().count());
-        assert!(agent_named("claude").unwrap().supports_graph_first());
-        assert!(!agent_named("codex").unwrap().supports_graph_first());
+        assert!(agents().all(|agent| agent.supports_graph_first()));
     }
 
     #[test]
@@ -358,11 +384,24 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plugin_uses_default_graph_without_shell_interpolation() {
-        let contents = agent_named("opencode").unwrap().template_files[0].render();
-        assert!(contents.contains(r#"join(homedir(), ".gitlab", "orbit")"#));
-        assert!(!contents.contains('`'));
-        assert!(!contents.contains("$("));
+    fn templates_use_default_graph_without_shell_interpolation() {
+        for name in ["opencode", "pi"] {
+            let template = &agent_named(name).unwrap().template_files[0];
+            for graph_first in [false, true] {
+                let contents = template.render(graph_first);
+                assert!(contents.contains(r#"join(homedir(), ".gitlab", "orbit")"#));
+                assert!(
+                    !contents.contains('`') && !contents.contains("$("),
+                    "{name}"
+                );
+                assert!(!contents.contains("{{"), "{name}: unresolved token");
+                assert_eq!(
+                    contents.contains(r#"" --graph-first".split"#),
+                    graph_first,
+                    "{name}"
+                );
+            }
+        }
 
         for (name, text) in &TEXTS.template_vars {
             assert!(

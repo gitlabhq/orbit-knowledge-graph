@@ -87,7 +87,13 @@ fn install_for_agent(
         if !written_by_orbit {
             backup_once(&path, &label, report)?;
         }
-        write_unless_unchanged(&path, &label, &template_file.render(), "written", report)?;
+        write_unless_unchanged(
+            &path,
+            &label,
+            &template_file.render(graph_first),
+            "written",
+            report,
+        )?;
     }
 
     for registration in &agent.registrations {
@@ -154,7 +160,7 @@ fn substitute_tokens_in_json(value: &Value, graph_first: bool) -> Value {
         Value::String(s) => {
             let (flag, matcher) = match graph_first {
                 true => (
-                    " --graph-first",
+                    spec::GRAPH_FIRST_FLAG,
                     format!("|mcp__{}__.*", spec::mcp_server().name),
                 ),
                 false => ("", String::new()),

@@ -126,7 +126,7 @@
         "template": {
           "type": "string",
           "minLength": 1,
-          "description": "Template location under config/setup/, e.g. opencode_plugin.js."
+          "description": "Template location under config/setup/, e.g. opencode_plugin.js. `{{orbit}}` resolves to the launcher, `{{graph_first}}` to ` --graph-first` or nothing, and `{{mcp_server}}` to the MCP server name."
         }
       }
     },

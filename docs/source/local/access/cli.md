@@ -204,10 +204,10 @@ For every agent it configures, `orbit setup`:
   scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
-- Adds entries to that agent's JSON configuration, where the agent
-  supports it. For Claude Code this is a `PreToolUse` hook in
-  `settings.json`; for OpenCode it is a plugin file and its registration.
-  Entries carry an `orbit` marker, and only marked entries are ever replaced or
+- Adds a hook that reminds the agent to use `orbit grep` in indexed
+  repositories. With `--graph-first`, it also blocks the first code search of
+  each session. Codex runs the hook only after you trust it in `/hooks`. Hook
+  entries carry an `orbit` marker, and only marked entries are ever replaced or
   removed.
 
 By default it writes to your user-global configuration, such as
