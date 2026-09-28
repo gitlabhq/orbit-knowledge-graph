@@ -861,10 +861,12 @@ local dashboard(uid, title, tags, description, items, annotations=[]) = {
 // stay valid where cluster/env are never set.
 local CLUSTER_SEL = if IS_DEDICATED then 'cluster=~".*"' else 'cluster=~"$cluster"';
 
-local GKG_WEB_SEL = 'container="gkg-webserver", ' + CLUSTER_SEL;
-local GKG_IDX_SEL = 'container="gkg-indexer", ' + CLUSTER_SEL;
-local GKG_DSP_SEL = 'container="gkg-dispatcher", ' + CLUSTER_SEL;
-local GKG_ANY_SEL = 'container=~"gkg-.*", ' + CLUSTER_SEL;
+// Chart 4.0 names containers `orbit-*`. Installs with `nameOverride: gkg`
+// and series scraped before 4.0 carry `gkg-*`, so both names match.
+local GKG_WEB_SEL = 'container=~"(gkg|orbit)-webserver", ' + CLUSTER_SEL;
+local GKG_IDX_SEL = 'container=~"(gkg|orbit)-indexer", ' + CLUSTER_SEL;
+local GKG_DSP_SEL = 'container=~"(gkg|orbit)-dispatcher", ' + CLUSTER_SEL;
+local GKG_ANY_SEL = 'container=~"(gkg|orbit)-.*", ' + CLUSTER_SEL;
 local SIPHON_SEL = 'namespace="siphon", ' + CLUSTER_SEL;
 local NATS_SEL = CLUSTER_SEL;
 local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
@@ -874,25 +876,41 @@ local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
 // The chart classifies every indexer Deployment by the engine modules it
 // registers (`code`, `sdlc`, `universal`, or `custom`) and the PodMonitor
 // promotes that classification onto app metrics as
-// `gkg_gitlab_com_indexer_modules`. cAdvisor and kube-state-metrics are
+// `orbit_gitlab_com_indexer_modules`. cAdvisor and kube-state-metrics are
 // scraped by different jobs and carry no pod labels, so infra series have to
 // recover the kind by joining on pod identity against the app scrape target.
-local IDX_KIND = 'gkg_gitlab_com_indexer_modules';
+//
+// Installs with `indexer.poolLabelPrefix: gkg.gitlab.com` and series scraped
+// before chart 4.0 carry `gkg_gitlab_com_indexer_modules` instead. PromQL
+// cannot match either label name in one selector, so both are copied into
+// the neutral `indexer_modules` label.
+local IDX_KIND_GKG = 'gkg_gitlab_com_indexer_modules';
+local IDX_KIND_ORBIT = 'orbit_gitlab_com_indexer_modules';
+local IDX_KIND = 'indexer_modules';
+
+local copyIdxKind(expr, label) =
+  'label_replace(%s, "%s", "$1", "%s", "(.+)")' % [expr, IDX_KIND, label];
+
+// `up` of every indexer pod, with the pool kind in IDX_KIND.
+local idxUp = copyIdxKind(copyIdxKind('up{%s}' % GKG_IDX_SEL, IDX_KIND_GKG), IDX_KIND_ORBIT);
 
 // `group by` always evaluates to 1, unlike `up` itself which is 0 while a
 // scrape is failing and would zero out anything multiplied by it.
-local idxKindVector = 'group by (cluster, namespace, pod, %s) (up{%s})' % [IDX_KIND, GKG_IDX_SEL];
+local idxKindVector = 'group by (cluster, namespace, pod, %s) (%s)' % [IDX_KIND, idxUp];
 
 local withIdxKind(expr) =
   '(%s) * on (cluster, namespace, pod) group_left(%s) %s' % [expr, IDX_KIND, idxKindVector];
 
-local idxKindSel(kind) = GKG_IDX_SEL + ', %s="%s"' % [IDX_KIND, kind];
+// `up` of the indexer pods of one pool kind. A pod carries one of the two
+// labels, so the union holds no duplicates.
+local idxKindUp(kind) =
+  '(up{%s, %s="%s"} or up{%s, %s="%s"})' % [GKG_IDX_SEL, IDX_KIND_GKG, kind, GKG_IDX_SEL, IDX_KIND_ORBIT, kind];
 
 // Replica count for one pool kind. Deliberately not `or vector(0)`: a cluster
 // that runs no pool of this kind must render the stat panel's no-value dash,
 // not a zero that reads like "the pool exists and is scaled to nothing".
 local idxReplicaStat(kind, title, description, ds_var, w=PANEL_W, h=STAT_H) = (
-  local expr = 'count(up{%s})' % [idxKindSel(kind)];
+  local expr = 'count(%s)' % [idxKindUp(kind)];
   stat(title, description, target(expr, title, ds_var), 'short', w, h, [exploreLink(expr)])
 );
 
@@ -1063,8 +1081,9 @@ local deployAnnotation(ds_var, selector, name='Deploys', color='rgba(0, 211, 255
   RAILS_SEL: RAILS_SEL,
   // Indexer pools
   IDX_KIND: IDX_KIND,
+  idxUp: idxUp,
   withIdxKind: withIdxKind,
-  idxKindSel: idxKindSel,
+  idxKindUp: idxKindUp,
   idxReplicaStat: idxReplicaStat,
   idxKindPanel: idxKindPanel,
   idxKindAvgMax: idxKindAvgMax,
