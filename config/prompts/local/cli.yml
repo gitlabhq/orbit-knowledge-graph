@@ -1,6 +1,5 @@
 name: cli
 version: 1.0.0
-# `summary` renders as the top-level help footer (clap `after_help`), not as a CLI summary.
 summary: >-
   Coding agents: load the instance-matched usage guidance first with
   `glab orbit skills get orbit`, then follow the returned skill.
