@@ -598,7 +598,7 @@ fn fail(test: &str, severity: Severity, message: String) -> Failure {
 /// Parses a suite; `None` when every test is skipped and there is nothing to run.
 pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
-    if suite.tests.iter().all(|t| t.skip) {
+    if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
         eprintln!(
             "[PASS] Suite: {} ({} tests, all skipped)",
             suite.name,
