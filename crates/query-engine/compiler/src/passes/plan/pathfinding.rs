@@ -55,7 +55,6 @@ where
     nodes.insert(end_alias.clone(), end_np);
 
     Ok(Plan {
-        scope_requirements: Vec::new(),
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,

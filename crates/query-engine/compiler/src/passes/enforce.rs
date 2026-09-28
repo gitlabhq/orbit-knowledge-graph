@@ -551,12 +551,14 @@ fn enforce_return_columns(
 }
 
 fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
-    match from {
-        TableRef::Scan { alias, .. }
+    let mut found = false;
+    crate::ast::visit::visit_relations(from, &mut |relation| {
+        if let TableRef::Scan { alias, .. }
         | TableRef::Subquery { alias, .. }
-        | TableRef::Union { alias, .. } => alias == target,
-        TableRef::Join { left, right, .. } => {
-            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
+        | TableRef::Union { alias, .. } = relation
+        {
+            found |= alias == target;
         }
-    }
+    });
+    found
 }

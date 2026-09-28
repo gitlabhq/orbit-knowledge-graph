@@ -26,6 +26,7 @@ use regex::Regex;
 
 use serde_json::Value;
 
+use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
@@ -60,12 +61,7 @@ pub fn apply_security_context(
         ));
     }
     match node {
-        Node::Query(q) => {
-            for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx, model)?;
-            }
-            apply_to_query(q, ctx, model)
-        }
+        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -95,45 +91,7 @@ fn apply_to_query(
         );
     }
 
-    apply_security_to_from(&mut q.from, ctx, model)?;
-
-    if let Some(where_clause) = &mut q.where_clause {
-        apply_security_to_expr(where_clause, ctx, model)?;
-    }
-
-    for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, model)?;
-    }
-
     Ok(())
-}
-
-fn apply_security_to_expr(
-    expr: &mut Expr,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => apply_to_query(query, ctx, model),
-        Expr::BinaryOp { left, right, .. } => {
-            apply_security_to_expr(left, ctx, model)?;
-            apply_security_to_expr(right, ctx, model)
-        }
-        Expr::UnaryOp { expr, .. }
-        | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, model),
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                apply_security_to_expr(arg, ctx, model)?;
-            }
-            Ok(())
-        }
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::Star => Ok(()),
-    }
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
@@ -190,43 +148,15 @@ pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, String)> {
-    match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, model) => {
-            vec![(alias.clone(), table.clone())]
+    let mut aliases = Vec::new();
+    visit_relations(table_ref, &mut |relation| {
+        if let TableRef::Scan { table, alias, .. } = relation
+            && should_apply_security_filter(table, model)
+        {
+            aliases.push((alias.clone(), table.clone()));
         }
-        TableRef::Scan { .. } => vec![],
-        TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left, model);
-            aliases.extend(collect_aliased_tables(right, model));
-            aliases
-        }
-        // Derived tables don't have traversal_path columns themselves.
-        // Their arms get security filters via apply_security_to_from.
-        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
-    }
-}
-
-fn apply_security_to_from(
-    table_ref: &mut TableRef,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match table_ref {
-        TableRef::Union { queries, .. } => {
-            for arm in queries {
-                apply_to_query(arm, ctx, model)?;
-            }
-        }
-        TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx, model)?;
-        }
-        TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx, model)?;
-            apply_security_to_from(right, ctx, model)?;
-        }
-        TableRef::Scan { .. } => {}
-    }
-    Ok(())
+    });
+    aliases
 }
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed

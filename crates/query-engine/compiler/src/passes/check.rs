@@ -8,7 +8,8 @@
 
 use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::visit::visit_queries;
+use crate::ast::{Expr, Node, Query};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
@@ -24,12 +25,7 @@ pub fn check_ast(
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match node {
-        Node::Query(q) => {
-            for cte in &q.ctes {
-                check_query(&cte.query, ctx, model)?;
-            }
-            check_query(q, ctx, model)
-        }
+        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -48,66 +44,7 @@ fn check_query(
         }
     }
 
-    // Recurse into UNION ALL arms (defense-in-depth: currently only
-    // recursive CTE arms which scan CTE names, not gl_* tables).
-    for arm in &q.union_all {
-        check_query(arm, ctx, model)?;
-    }
-
-    if let Some(where_clause) = q.where_clause.as_ref() {
-        check_subqueries_in_expr(where_clause, ctx, model)?;
-    }
-
-    check_derived_tables_in_from(&q.from, ctx, model)
-}
-
-fn check_subqueries_in_expr(
-    expr: &Expr,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, model),
-        Expr::BinaryOp { left, right, .. } => {
-            check_subqueries_in_expr(left, ctx, model)?;
-            check_subqueries_in_expr(right, ctx, model)
-        }
-        Expr::UnaryOp { expr, .. }
-        | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx, model),
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                check_subqueries_in_expr(arg, ctx, model)?;
-            }
-            Ok(())
-        }
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::Star => Ok(()),
-    }
-}
-
-fn check_derived_tables_in_from(
-    table_ref: &TableRef,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match table_ref {
-        TableRef::Subquery { query, .. } => check_query(query, ctx, model),
-        TableRef::Union { queries, .. } => {
-            for arm in queries {
-                check_query(arm, ctx, model)?;
-            }
-            Ok(())
-        }
-        TableRef::Join { left, right, .. } => {
-            check_derived_tables_in_from(left, ctx, model)?;
-            check_derived_tables_in_from(right, ctx, model)
-        }
-        TableRef::Scan { .. } => Ok(()),
-    }
+    Ok(())
 }
 
 /// Checks whether `expr` scopes `alias` to the user's eligible paths.
@@ -216,6 +153,111 @@ mod tests {
         let mut node = project_query(None);
         apply_security(&mut node, &ctx, &ontology);
         assert!(check(&node, &ctx, &ontology).is_ok());
+    }
+
+    #[test]
+    fn security_injection_and_check_cover_nested_query_positions() {
+        use crate::ast::{Cte, JoinType, OrderExpr};
+
+        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ontology = Ontology::new().with_nodes(["Project"]);
+        for position in [
+            "select",
+            "where",
+            "having",
+            "group",
+            "order",
+            "limit_by",
+            "join",
+            "in_operand",
+            "lambda",
+            "nested_cte",
+            "union",
+            "derived",
+            "table_union",
+        ] {
+            let inner = Query {
+                select: vec![SelectExpr::col("protected", "id")],
+                from: TableRef::scan("gl_project", "protected"),
+                ..Default::default()
+            };
+            let scalar = Expr::Scalar(Box::new(inner.clone()));
+            let mut query = Query {
+                select: vec![SelectExpr::new(Expr::int(1), "result")],
+                from: TableRef::scan("constant_source", "outer"),
+                ..Default::default()
+            };
+            match position {
+                "select" => query.select = vec![SelectExpr::new(scalar, "result")],
+                "where" => query.where_clause = Some(Expr::eq(scalar, Expr::int(1))),
+                "having" => query.having = Some(Expr::eq(scalar, Expr::int(1))),
+                "group" => query.group_by.push(scalar),
+                "order" => query.order_by.push(OrderExpr::asc(scalar)),
+                "limit_by" => query.limit_by = Some((1, vec![scalar])),
+                "join" => {
+                    query.from = TableRef::join(
+                        JoinType::Inner,
+                        query.from,
+                        TableRef::scan("constant_source", "other"),
+                        Expr::eq(scalar, Expr::int(1)),
+                    )
+                }
+                "in_operand" => {
+                    query.where_clause = Some(Expr::InSelect {
+                        expr: Box::new(scalar),
+                        query: Box::new(Query {
+                            from: TableRef::scan("constant_source", "lookup"),
+                            ..Default::default()
+                        }),
+                    })
+                }
+                "lambda" => {
+                    query.select = vec![SelectExpr::new(
+                        Expr::func("arrayMap", vec![Expr::lambda("x", scalar)]),
+                        "result",
+                    )]
+                }
+                "nested_cte" => query.ctes.push(Cte::new(
+                    "outer_cte",
+                    Query {
+                        ctes: vec![Cte::new("inner_cte", inner)],
+                        from: TableRef::scan("inner_cte", "nested"),
+                        ..Default::default()
+                    },
+                )),
+                "union" => query.union_all.push(inner),
+                "derived" => query.from = TableRef::subquery(inner, "derived"),
+                "table_union" => query.from = TableRef::union_all(vec![inner], "arms"),
+                _ => unreachable!(),
+            }
+            let mut node = Node::Query(Box::new(query));
+            assert!(check(&node, &context, &ontology).is_err(), "{position}");
+            apply_security(&mut node, &context, &ontology);
+            check(&node, &context, &ontology).unwrap_or_else(|error| panic!("{position}: {error}"));
+            let Node::Query(query) = &node else {
+                unreachable!()
+            };
+            let mut protected_scans = 0;
+            visit_queries(query, &mut |query| {
+                if matches!(&query.from, TableRef::Scan { alias, .. } if alias == "protected") {
+                    protected_scans += 1;
+                    assert_eq!(
+                        query.where_clause,
+                        Some(Expr::func(
+                            "startsWith",
+                            vec![
+                                Expr::col("protected", "traversal_path"),
+                                Expr::string("42/43/")
+                            ],
+                        )),
+                        "{position}"
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(protected_scans, 1, "{position}");
+        }
     }
 
     #[test]
