@@ -114,11 +114,19 @@ impl Resolver {
         &self.reqs
     }
 
-    pub fn remap(&mut self, old_labels: &[String], label_to_fi: &FxHashMap<&str, u32>) {
+    /// Renumbers the resolver's memory after files left the graph. Returns
+    /// the retained files that lost a visible name, whatever brought it in:
+    /// an import or a `visible_from` directive. They must resolve again.
+    pub fn remap(
+        &mut self,
+        old_labels: &[String],
+        label_to_fi: &FxHashMap<&str, u32>,
+    ) -> FxHashSet<usize> {
         let n = label_to_fi.len();
         let mut remapped: VisibleMap = (0..n)
             .map(|_| FxHashMap::with_capacity_and_hasher(16, Default::default()))
             .collect();
+        let mut lost_a_name = FxHashSet::default();
         for (old_fi, names) in self.visible.iter().enumerate() {
             let Some(&new_fi) = old_labels
                 .get(old_fi)
@@ -127,12 +135,17 @@ impl Resolver {
                 continue;
             };
             for (&sym, &loc) in names {
-                if let Some(&target_new_fi) = old_labels
+                match old_labels
                     .get(loc.fi)
                     .and_then(|l| label_to_fi.get(l.as_str()))
                 {
-                    remapped[new_fi as usize]
-                        .insert(sym, Loc::new(target_new_fi as usize, loc.node));
+                    Some(&target_new_fi) => {
+                        remapped[new_fi as usize]
+                            .insert(sym, Loc::new(target_new_fi as usize, loc.node));
+                    }
+                    None => {
+                        lost_a_name.insert(new_fi as usize);
+                    }
                 }
             }
         }
@@ -158,6 +171,7 @@ impl Resolver {
                 })
             })
             .collect();
+        lost_a_name
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1323,5 +1337,31 @@ mod alias_tests {
             apply_aliases("application/foo", &aliases),
             "application/foo"
         );
+    }
+}
+
+#[cfg(test)]
+mod remap_tests {
+    use super::*;
+
+    /// `a` sees a name from `b`, `c` sees a name from `a`. Dropping `b`
+    /// must report `a` and leave `c` alone, however the name got there.
+    #[test]
+    fn files_that_lost_a_visible_name_are_reported() {
+        let lang = Lang::new();
+        let mut resolver = Resolver::new(&lang);
+        let name = 7;
+        resolver.visible = vec![
+            FxHashMap::from_iter([(name, Loc::new(1, 0))]),
+            FxHashMap::default(),
+            FxHashMap::from_iter([(name, Loc::new(0, 0))]),
+        ];
+        let old_labels: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        let label_to_fi = FxHashMap::from_iter([("a", 0u32), ("c", 1u32)]);
+
+        let lost = resolver.remap(&old_labels, &label_to_fi);
+
+        assert_eq!(lost, FxHashSet::from_iter([0]));
+        assert_eq!(resolver.visible[1].get(&name), Some(&Loc::new(0, 0)));
     }
 }

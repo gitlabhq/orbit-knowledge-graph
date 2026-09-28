@@ -139,7 +139,6 @@ impl Phase<ReindexInput> for Remap {
 }
 
 /// `Parse` entries this crate has a grammar for become the lazy workset,
-/// read from `root` when a worker takes them. Everything else is listed
 /// Drops the dirty trees, renumbers what remains, and returns the retained
 /// files whose resolution depended on a dropped one.
 fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<usize> {
@@ -185,8 +184,9 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         .map(|&fi| fi as usize)
         .collect();
 
-    state.resolver.remap(old_labels, &label_to_fi);
-    reverse_dirty
+    let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
+    dependents.extend(reverse_dirty);
+    dependents
 }
 
 /// Runs an `ItemPhase` over every item of a workset in parallel. An item that
