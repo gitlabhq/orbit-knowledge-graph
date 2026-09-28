@@ -38,6 +38,7 @@ fn map_phase(phase: Phase) -> IndexingPhase {
         Phase::NotStarted => IndexingPhase::NotStarted,
         Phase::Syncing => IndexingPhase::Syncing,
         Phase::Ready => IndexingPhase::Ready,
+        Phase::Error => IndexingPhase::Error,
     }
 }
 
@@ -46,6 +47,7 @@ impl From<ProjectCoverage> for ProjectsStatus {
         Self {
             indexed: coverage.indexed,
             total_known: coverage.total_known,
+            gaps: coverage.gaps,
         }
     }
 }

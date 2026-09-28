@@ -197,7 +197,8 @@ async fn run_webserver(
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry));
+    .with_resolver_registry(Arc::new(resolver_registry))
+    .with_datalake(&config.datalake);
 
     if config.query.default.graph_query_cache_enabled == Some(true) {
         info!("graph query cache enabled");

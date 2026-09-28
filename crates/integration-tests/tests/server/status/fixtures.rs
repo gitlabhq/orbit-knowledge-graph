@@ -14,23 +14,37 @@ const INCREMENTAL_CURSOR: &str = r#"{"c":["1/100/","42"],"f":"2026-09-22T00:00:0
 pub struct CheckpointRow {
     cursor: &'static str,
     indexed_at: &'static str,
+    attempts: i64,
+    written_at: &'static str,
 }
 
 pub const COMPLETED: CheckpointRow = CheckpointRow {
     cursor: NO_CURSOR,
     indexed_at: "now()",
+    attempts: 0,
+    written_at: "now64(6)",
 };
 pub const INCREMENTAL: CheckpointRow = CheckpointRow {
     cursor: INCREMENTAL_CURSOR,
-    indexed_at: "now()",
+    ..COMPLETED
 };
 pub const PAGING_FIRST_PASS: CheckpointRow = CheckpointRow {
     cursor: FIRST_PASS_CURSOR,
     indexed_at: "NULL",
+    attempts: 1,
+    written_at: "now64(6)",
 };
 pub const STARTED_FIRST_PASS: CheckpointRow = CheckpointRow {
     cursor: NO_CURSOR,
-    indexed_at: "NULL",
+    ..PAGING_FIRST_PASS
+};
+pub const FAILED_FIRST_PASS: CheckpointRow = CheckpointRow {
+    attempts: 3,
+    ..PAGING_FIRST_PASS
+};
+pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
+    written_at: "now64(6) - INTERVAL 3 HOUR",
+    ..PAGING_FIRST_PASS
 };
 
 pub fn admin_context() -> SecurityContext {
@@ -66,12 +80,12 @@ pub async fn seed_namespaces(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) VALUES
-         ('1/100/1000/', 1000, 'main', 1, now()),
-         ('1/101/1001/', 1001, 'main', 2, now()),
-         ('1/100/1999/', 1999, 'main', 3, now()),
-         ('1/107/1070/', 1070, 'main', 4, now()),
-         ('1/112/1120/', 1120, 'main', 5, now())",
+        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at, is_default_branch) VALUES
+         ('1/100/1000/', 1000, 'main', 1, now(), true),
+         ('1/101/1001/', 1001, 'main', 2, now(), true),
+         ('1/100/1999/', 1999, 'main', 3, now(), true),
+         ('1/107/1070/', 1070, 'main', 4, now(), true),
+         ('1/112/1120/', 1120, 'main', 5, now(), true)",
         t("code_indexing_checkpoint")
     ))
     .await;
@@ -123,12 +137,33 @@ pub async fn seed_plans(ctx: &TestContext, root: i64, overrides: &[(&str, Checkp
 pub async fn insert_checkpoints(ctx: &TestContext, rows: &[(String, CheckpointRow)]) {
     let values: Vec<String> = rows
         .iter()
-        .map(|(key, row)| format!("('{key}', now(), '{}', {})", row.cursor, row.indexed_at))
+        .map(|(key, row)| {
+            format!(
+                "('{key}', now(), '{}', {}, {}, {})",
+                row.cursor, row.indexed_at, row.attempts, row.written_at
+            )
+        })
         .collect();
     ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values, indexed_at) VALUES {}",
+        "INSERT INTO {} (key, watermark, cursor_values, indexed_at, attempts, _version) VALUES {}",
         t("checkpoint"),
         values.join(", ")
+    ))
+    .await;
+}
+
+pub async fn seed_project_gap(ctx: &TestContext, root: i64, project: i64) {
+    let path = format!("2/{root}/{project}/");
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
+         ({project}, 'Failing Project', 'public', '{path}')",
+        t("gl_project")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at, attempts, is_default_branch) VALUES
+         ('{path}', {project}, 'main', 1, NULL, 5, true)",
+        t("code_indexing_checkpoint")
     ))
     .await;
 }

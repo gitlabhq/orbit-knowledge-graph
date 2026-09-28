@@ -1,5 +1,6 @@
 mod checkpoints;
 mod domains;
+mod enabled;
 mod phase;
 mod projects;
 mod response;
@@ -7,6 +8,7 @@ mod response;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
@@ -20,6 +22,7 @@ pub use self::response::build_indexing_status_response;
 
 use self::checkpoints::PlanCheckpoints;
 use self::phase::combine_phases;
+use self::projects::PROJECT_NODE;
 use crate::active_schema::SchemaSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,11 +37,20 @@ pub struct ScopeStatus {
 
 pub struct IndexingStatusService {
     client: Arc<ArrowClickHouseClient>,
+    datalake: Option<Arc<ArrowClickHouseClient>>,
 }
 
 impl IndexingStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            datalake: None,
+        }
+    }
+
+    pub fn with_datalake(mut self, datalake: Arc<ArrowClickHouseClient>) -> Self {
+        self.datalake = Some(datalake);
+        self
     }
 
     pub async fn read_scope_statuses(
@@ -57,9 +69,10 @@ impl IndexingStatusService {
         roots.sort_unstable();
         roots.dedup();
 
-        let (checkpoints, coverage) = tokio::join!(
+        let (checkpoints, coverage, enabled_at) = tokio::join!(
             checkpoints::read_plan_checkpoints(&self.client, schema, &roots),
             projects::read_project_coverage(&self.client, &schema.ontology, scopes),
+            self.read_enabled_at(&roots),
         );
         let checkpoints = checkpoints
             .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
@@ -68,6 +81,7 @@ impl IndexingStatusService {
             .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
             .ok();
 
+        let now = Utc::now();
         let plans: Vec<PipelineDescriptor> = schema
             .ontology
             .pipeline_descriptors()
@@ -84,9 +98,21 @@ impl IndexingStatusService {
                     scope,
                     checkpoints.as_ref(),
                     coverage.as_ref(),
+                    &enabled_at,
+                    now,
                 )
             })
             .collect()
+    }
+
+    async fn read_enabled_at(&self, roots: &[i64]) -> HashMap<i64, DateTime<Utc>> {
+        let Some(datalake) = &self.datalake else {
+            return HashMap::new();
+        };
+        enabled::read_enabled_at(datalake, roots)
+            .await
+            .inspect_err(|error| warn!(%error, "Indexing status could not read enabled namespaces"))
+            .unwrap_or_default()
     }
 }
 
@@ -96,17 +122,28 @@ fn build_scope_status(
     scope: &TraversalPath,
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
+    enabled_at: &HashMap<i64, DateTime<Utc>>,
+    now: DateTime<Utc>,
 ) -> ScopeStatus {
     let root = scope.top_level_namespace_id();
+    let root_enabled_at = root.and_then(|root| enabled_at.get(&root).copied());
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
-        .map(|plan| (plan, get_root_plan_phase(checkpoints, root, &plan.name)))
+        .map(|plan| {
+            let phase = get_root_plan_phase(checkpoints, root, &plan.name, root_enabled_at, now);
+            (plan, phase)
+        })
         .collect();
 
+    // The Project plan writes the project list, so the code total is final only once it settles.
+    let project_list_settled = plan_phases
+        .iter()
+        .filter(|(plan, _)| plan.entity == PROJECT_NODE)
+        .all(|(_, phase)| phase.is_settled());
     let projects =
         coverage.map(|by_scope| by_scope.get(scope.as_str()).copied().unwrap_or_default());
     let code_phase = match projects {
-        Some(projects) => projects.get_code_phase(),
+        Some(projects) => projects.get_code_phase(project_list_settled),
         None => Some(Phase::Unknown),
     };
 
@@ -129,13 +166,15 @@ fn get_root_plan_phase(
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     root: Option<i64>,
     plan: &str,
+    enabled_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
 ) -> Phase {
     let (Some(by_root), Some(root)) = (checkpoints, root) else {
         return Phase::Unknown;
     };
+    let no_checkpoints = PlanCheckpoints::default();
     by_root
         .get(&root)
-        .map_or(Phase::NotStarted, |root_checkpoints| {
-            root_checkpoints.get_plan_phase(plan)
-        })
+        .unwrap_or(&no_checkpoints)
+        .get_plan_phase(plan, enabled_at, now)
 }

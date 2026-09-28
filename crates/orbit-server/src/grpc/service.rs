@@ -178,6 +178,13 @@ impl OrbitServiceImpl {
         self
     }
 
+    pub fn with_datalake(mut self, datalake_config: &ClickHouseConfiguration) -> Self {
+        self.indexing_status = self
+            .indexing_status
+            .with_datalake(Arc::new(datalake_config.build_client()));
+        self
+    }
+
     pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.pipeline = self.pipeline.with_cache_broker(broker);
         self
