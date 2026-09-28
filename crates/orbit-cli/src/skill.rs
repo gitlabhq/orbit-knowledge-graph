@@ -485,7 +485,9 @@ fn newest_cached_tree(origin: &str, name: &str) -> Option<CachedTree> {
     cleanup_stale_temporary_dirs_now(&root);
     let mut candidates = Vec::new();
     for entry in fs::read_dir(root).ok()?.flatten() {
-        let file_type = entry.file_type().ok()?;
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if !file_type.is_dir() || entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
