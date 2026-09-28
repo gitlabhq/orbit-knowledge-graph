@@ -591,6 +591,8 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 
 Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
+The response lists the center node alongside its neighbors, so leave the center out
+when counting neighbors.
 
 ```json orbit-query
 {
