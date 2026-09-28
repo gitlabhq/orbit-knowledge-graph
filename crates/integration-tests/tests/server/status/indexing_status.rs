@@ -4,13 +4,17 @@ use integration_testkit::{run_subtests_shared, t};
 use orbit_server::indexing_status::{IndexingStatusService, Phase, ProjectCoverage, ScopeStatus};
 use orbit_utils::traversal_path::TraversalPath;
 
-use super::fixtures::{pinned_schema, seed_namespaces, seed_plans};
+use super::fixtures::{
+    FAILED_FIRST_PASS, PAGING_FIRST_PASS, STALE_FIRST_PASS, pinned_schema, seed_namespaces,
+    seed_plans, seed_project_gap,
+};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
 async fn indexing_status() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_namespaces(&ctx).await;
+    seed_gaps(&ctx).await;
 
     run_subtests_shared!(
         &ctx,
@@ -30,7 +34,52 @@ async fn indexing_status() {
         tombstone_clears_the_completion,
         many_scopes_in_request_order,
         projects_count_distinct_ids,
+        plan_with_all_attempts_used_is_a_gap,
+        plan_without_a_write_for_two_hours_is_a_gap,
+        project_with_all_attempts_used_is_a_gap,
+        gap_does_not_end_syncing_while_a_plan_pages,
+        indexed_project_is_no_longer_a_gap,
+        source_code_waits_for_the_project_list,
+        only_the_default_branch_counts,
     );
+}
+
+async fn seed_gaps(ctx: &TestContext) {
+    seed_plans(ctx, 130, &[("MergeRequest", FAILED_FIRST_PASS)]).await;
+    seed_plans(ctx, 131, &[("MergeRequest", STALE_FIRST_PASS)]).await;
+    seed_plans(ctx, 134, &[]).await;
+    seed_project_gap(ctx, 134, 1340).await;
+    seed_plans(ctx, 135, &[("MergeRequest", PAGING_FIRST_PASS)]).await;
+    seed_project_gap(ctx, 135, 1350).await;
+    seed_plans(ctx, 136, &[]).await;
+    seed_project_gap(ctx, 136, 1360).await;
+    seed_plans(ctx, 137, &[("Project", PAGING_FIRST_PASS)]).await;
+    seed_plans(ctx, 138, &[]).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
+         (1370, 'Listed Late Project', 'public', '2/137/1370/'),
+         (1380, 'Feature Branch Project', 'public', '2/138/1380/')",
+        t("gl_project")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at, is_default_branch, _version) VALUES
+         ('2/136/1360/', 1360, 'main', 2, now(), true, now64(6) + INTERVAL 1 SECOND),
+         ('2/137/1370/', 1370, 'main', 1, now(), true, now64(6)),
+         ('2/138/1380/', 1380, 'feature', 1, now(), false, now64(6))",
+        t("code_indexing_checkpoint")
+    ))
+    .await;
+}
+
+async fn remove_plan(ctx: &TestContext, root: i64, plan: &str) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values, _version, _deleted) VALUES
+         ('ns.{root}.{plan}', now(), '', now64(6) + INTERVAL 1 SECOND, true)",
+        t("checkpoint")
+    ))
+    .await;
 }
 
 async fn read(ctx: &TestContext, scopes: &[&str]) -> Vec<ScopeStatus> {
@@ -194,6 +243,7 @@ async fn unreadable_checkpoints_are_unknown(ctx: &TestContext) {
 
     assert_eq!(status.phase, Phase::Unknown);
     assert_eq!(status.sdlc_phase, Phase::Unknown);
+    assert_eq!(status.code_phase, Some(Phase::Unknown));
     assert_eq!(domain_phase(&status, "source_code"), Phase::Unknown);
     assert_eq!(status.projects.total_known, 2);
 }
@@ -201,12 +251,7 @@ async fn unreadable_checkpoints_are_unknown(ctx: &TestContext) {
 async fn tombstone_clears_the_completion(ctx: &TestContext) {
     let db = ctx.fork("indexing_status_tombstone").await;
     seed_plans(&db, 121, &[]).await;
-    db.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values, _version, _deleted) VALUES
-         ('ns.121.MergeRequest', now(), '', now64(6) + INTERVAL 1 SECOND, true)",
-        t("checkpoint")
-    ))
-    .await;
+    remove_plan(&db, 121, "MergeRequest").await;
 
     let status = read_one(&db, "1/121/").await;
 
@@ -229,6 +274,7 @@ async fn many_scopes_in_request_order(ctx: &TestContext) {
         statuses[1].projects,
         ProjectCoverage {
             indexed: 1,
+            gaps: 0,
             total_known: 2
         }
     );
@@ -236,6 +282,7 @@ async fn many_scopes_in_request_order(ctx: &TestContext) {
         statuses[2].projects,
         ProjectCoverage {
             indexed: 1,
+            gaps: 0,
             total_known: 1
         }
     );
@@ -257,7 +304,85 @@ async fn projects_count_distinct_ids(ctx: &TestContext) {
         status.projects,
         ProjectCoverage {
             indexed: 4,
+            gaps: 0,
             total_known: 6
         }
     );
+}
+
+async fn plan_with_all_attempts_used_is_a_gap(ctx: &TestContext) {
+    let status = read_one(ctx, "2/130/").await;
+
+    assert_eq!(entity_phase(&status, "MergeRequest"), Some(Phase::Error));
+    assert_eq!(domain_phase(&status, "code_review"), Phase::Error);
+    assert_eq!(domain_phase(&status, "plan"), Phase::Ready);
+    assert_eq!(status.phase, Phase::Error);
+}
+
+async fn plan_without_a_write_for_two_hours_is_a_gap(ctx: &TestContext) {
+    let status = read_one(ctx, "2/131/").await;
+
+    assert_eq!(entity_phase(&status, "MergeRequest"), Some(Phase::Error));
+    assert_eq!(status.sdlc_phase, Phase::Error);
+}
+
+async fn project_with_all_attempts_used_is_a_gap(ctx: &TestContext) {
+    let status = read_one(ctx, "2/134/").await;
+
+    assert_eq!(
+        status.projects,
+        ProjectCoverage {
+            indexed: 0,
+            gaps: 1,
+            total_known: 1
+        }
+    );
+    assert_eq!(status.code_phase, Some(Phase::Error));
+    assert_eq!(domain_phase(&status, "source_code"), Phase::Error);
+    assert_eq!(status.phase, Phase::Error);
+}
+
+async fn gap_does_not_end_syncing_while_a_plan_pages(ctx: &TestContext) {
+    let status = read_one(ctx, "2/135/").await;
+
+    assert_eq!(status.projects.gaps, 1);
+    assert_eq!(domain_phase(&status, "source_code"), Phase::Error);
+    assert_eq!(domain_phase(&status, "code_review"), Phase::Syncing);
+    assert_eq!(status.phase, Phase::Syncing);
+}
+
+async fn indexed_project_is_no_longer_a_gap(ctx: &TestContext) {
+    let status = read_one(ctx, "2/136/").await;
+
+    assert_eq!(
+        status.projects,
+        ProjectCoverage {
+            indexed: 1,
+            gaps: 0,
+            total_known: 1
+        }
+    );
+    assert_eq!(status.phase, Phase::Ready);
+}
+
+async fn source_code_waits_for_the_project_list(ctx: &TestContext) {
+    let status = read_one(ctx, "2/137/").await;
+
+    assert_eq!(status.projects.indexed, status.projects.total_known);
+    assert_eq!(status.code_phase, Some(Phase::Syncing));
+    assert_eq!(entity_phase(&status, "Project"), Some(Phase::Syncing));
+}
+
+async fn only_the_default_branch_counts(ctx: &TestContext) {
+    let status = read_one(ctx, "2/138/").await;
+
+    assert_eq!(
+        status.projects,
+        ProjectCoverage {
+            indexed: 0,
+            gaps: 0,
+            total_known: 1
+        }
+    );
+    assert_eq!(status.code_phase, Some(Phase::NotStarted));
 }

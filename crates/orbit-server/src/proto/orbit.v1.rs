@@ -604,6 +604,9 @@ pub struct ProjectsStatus {
     pub indexed: i64,
     #[prost(int64, tag = "2")]
     pub total_known: i64,
+    /// projects that used all attempts without an index
+    #[prost(int64, tag = "3")]
+    pub gaps: i64,
 }
 /// Entity counts for a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -901,6 +904,8 @@ pub enum IndexingPhase {
     NotStarted = 1,
     Syncing = 2,
     Ready = 3,
+    /// indexing is done, but some data failed to index
+    Error = 4,
 }
 impl IndexingPhase {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -913,6 +918,7 @@ impl IndexingPhase {
             Self::NotStarted => "INDEXING_PHASE_NOT_STARTED",
             Self::Syncing => "INDEXING_PHASE_SYNCING",
             Self::Ready => "INDEXING_PHASE_READY",
+            Self::Error => "INDEXING_PHASE_ERROR",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -922,6 +928,7 @@ impl IndexingPhase {
             "INDEXING_PHASE_NOT_STARTED" => Some(Self::NotStarted),
             "INDEXING_PHASE_SYNCING" => Some(Self::Syncing),
             "INDEXING_PHASE_READY" => Some(Self::Ready),
+            "INDEXING_PHASE_ERROR" => Some(Self::Error),
             _ => None,
         }
     }

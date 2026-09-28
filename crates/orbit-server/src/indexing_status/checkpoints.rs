@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
@@ -10,10 +11,16 @@ use super::phase::Phase;
 use crate::active_schema::SchemaSnapshot;
 use crate::status_query::{QueryCache, fetch_status_query_batches, map_column_extraction_error};
 
+const MAX_SDLC_ATTEMPTS: i64 = 5;
+// The hourly sweep retries a dead run, so wait for two sweeps.
+const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
+
 // Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
-const PLAN_COMPLETIONS_SQL: &str = "\
+const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
-       toBool(isNotNull(maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at))) AS completed \
+       toBool(isNotNull(maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at))) AS completed, \
+       argMax(attempts, _version) AS attempts, \
+       max(_version) AS written_at \
   FROM (SELECT *, \
                toInt64OrZero(splitByChar('.', key)[2]) AS root, \
                splitByChar('.', key)[3] AS plan, \
@@ -25,17 +32,31 @@ SELECT root, plan, \
  GROUP BY key, root, plan \
 HAVING argMax(_deleted, _version) = false";
 
+struct PlanCheckpoint {
+    completed: bool,
+    attempts: i64,
+    written_at: DateTime<Utc>,
+}
+
 #[derive(Default)]
 pub struct PlanCheckpoints {
-    completed_by_plan: HashMap<String, bool>,
+    by_plan: HashMap<String, PlanCheckpoint>,
 }
 
 impl PlanCheckpoints {
-    pub fn get_plan_phase(&self, plan: &str) -> Phase {
-        match self.completed_by_plan.get(plan) {
-            Some(true) => Phase::Ready,
-            Some(false) => Phase::Syncing,
-            None => Phase::NotStarted,
+    pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
+        let Some(checkpoint) = self.by_plan.get(plan) else {
+            return Phase::NotStarted;
+        };
+
+        if checkpoint.completed {
+            Phase::Ready
+        } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS
+            || now - checkpoint.written_at > STALE_AFTER
+        {
+            Phase::Error
+        } else {
+            Phase::Syncing
         }
     }
 }
@@ -52,7 +73,7 @@ pub async fn read_plan_checkpoints(
     let table = prefixed_table_name(CHECKPOINT_TABLE, schema.migration_version);
     let batches = fetch_status_query_batches(
         client,
-        PLAN_COMPLETIONS_SQL,
+        PLAN_CHECKPOINTS_SQL,
         "plan checkpoints",
         QueryCache::Skip,
         |query| {
@@ -67,14 +88,28 @@ pub async fn read_plan_checkpoints(
     let roots = i64::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let plans = String::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
     let completed = bool::extract_column(&batches, 2).map_err(map_column_extraction_error)?;
+    let attempts = i64::extract_column(&batches, 3).map_err(map_column_extraction_error)?;
+    let written_at =
+        DateTime::<Utc>::extract_column(&batches, 4).map_err(map_column_extraction_error)?;
 
     let mut checkpoints: HashMap<i64, PlanCheckpoints> = HashMap::new();
-    for ((root, plan), completed) in roots.into_iter().zip(plans).zip(completed) {
+    for ((((root, plan), completed), attempts), written_at) in roots
+        .into_iter()
+        .zip(plans)
+        .zip(completed)
+        .zip(attempts)
+        .zip(written_at)
+    {
+        let checkpoint = PlanCheckpoint {
+            completed,
+            attempts,
+            written_at,
+        };
         checkpoints
             .entry(root)
             .or_default()
-            .completed_by_plan
-            .insert(plan, completed);
+            .by_plan
+            .insert(plan, checkpoint);
     }
     Ok(checkpoints)
 }

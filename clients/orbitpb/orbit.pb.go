@@ -384,6 +384,7 @@ const (
 	IndexingPhase_INDEXING_PHASE_NOT_STARTED IndexingPhase = 1
 	IndexingPhase_INDEXING_PHASE_SYNCING     IndexingPhase = 2
 	IndexingPhase_INDEXING_PHASE_READY       IndexingPhase = 3
+	IndexingPhase_INDEXING_PHASE_ERROR       IndexingPhase = 4 // indexing is done, but some data failed to index
 )
 
 // Enum value maps for IndexingPhase.
@@ -393,12 +394,14 @@ var (
 		1: "INDEXING_PHASE_NOT_STARTED",
 		2: "INDEXING_PHASE_SYNCING",
 		3: "INDEXING_PHASE_READY",
+		4: "INDEXING_PHASE_ERROR",
 	}
 	IndexingPhase_value = map[string]int32{
 		"INDEXING_PHASE_UNKNOWN":     0,
 		"INDEXING_PHASE_NOT_STARTED": 1,
 		"INDEXING_PHASE_SYNCING":     2,
 		"INDEXING_PHASE_READY":       3,
+		"INDEXING_PHASE_ERROR":       4,
 	}
 )
 
@@ -3623,6 +3626,7 @@ type ProjectsStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Indexed       int64                  `protobuf:"varint,1,opt,name=indexed,proto3" json:"indexed,omitempty"`
 	TotalKnown    int64                  `protobuf:"varint,2,opt,name=total_known,json=totalKnown,proto3" json:"total_known,omitempty"`
+	Gaps          int64                  `protobuf:"varint,3,opt,name=gaps,proto3" json:"gaps,omitempty"` // projects that used all attempts without an index
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3667,6 +3671,13 @@ func (x *ProjectsStatus) GetIndexed() int64 {
 func (x *ProjectsStatus) GetTotalKnown() int64 {
 	if x != nil {
 		return x.TotalKnown
+	}
+	return 0
+}
+
+func (x *ProjectsStatus) GetGaps() int64 {
+	if x != nil {
+		return x.Gaps
 	}
 	return 0
 }
@@ -4425,11 +4436,12 @@ const file_orbit_proto_rawDesc = "" +
 	"\adomains\x18\x02 \x03(\v2\x1b.orbit.v1.GraphStatusDomainR\adomains\x124\n" +
 	"\bindexing\x18\x03 \x01(\v2\x18.orbit.v1.IndexingStatusR\bindexing\x12=\n" +
 	"\rsdlc_indexing\x18\x04 \x01(\v2\x18.orbit.v1.IndexingStatusR\fsdlcIndexing\x12=\n" +
-	"\rcode_indexing\x18\x05 \x01(\v2\x18.orbit.v1.IndexingStatusR\fcodeIndexing\"K\n" +
+	"\rcode_indexing\x18\x05 \x01(\v2\x18.orbit.v1.IndexingStatusR\fcodeIndexing\"_\n" +
 	"\x0eProjectsStatus\x12\x18\n" +
 	"\aindexed\x18\x01 \x01(\x03R\aindexed\x12\x1f\n" +
 	"\vtotal_known\x18\x02 \x01(\x03R\n" +
-	"totalKnown\"X\n" +
+	"totalKnown\x12\x12\n" +
+	"\x04gaps\x18\x03 \x01(\x03R\x04gaps\"X\n" +
 	"\x11GraphStatusDomain\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12/\n" +
 	"\x05items\x18\x02 \x03(\v2\x19.orbit.v1.GraphStatusItemR\x05items\"y\n" +
@@ -4490,12 +4502,13 @@ const file_orbit_proto_rawDesc = "" +
 	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
 	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
 	"\x16INDEXING_STATE_UNKNOWN\x10\x04\x12\x1b\n" +
-	"\x17INDEXING_STATE_INDEXING\x10\x05*\x81\x01\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x05*\x9b\x01\n" +
 	"\rIndexingPhase\x12\x1a\n" +
 	"\x16INDEXING_PHASE_UNKNOWN\x10\x00\x12\x1e\n" +
 	"\x1aINDEXING_PHASE_NOT_STARTED\x10\x01\x12\x1a\n" +
 	"\x16INDEXING_PHASE_SYNCING\x10\x02\x12\x18\n" +
-	"\x14INDEXING_PHASE_READY\x10\x032\xab\t\n" +
+	"\x14INDEXING_PHASE_READY\x10\x03\x12\x18\n" +
+	"\x14INDEXING_PHASE_ERROR\x10\x042\xab\t\n" +
 	"\fOrbitService\x12D\n" +
 	"\tListTools\x12\x1a.orbit.v1.ListToolsRequest\x1a\x1b.orbit.v1.ListToolsResponse\x12\\\n" +
 	"\x11ListAgentCommands\x12\".orbit.v1.ListAgentCommandsRequest\x1a#.orbit.v1.ListAgentCommandsResponse\x12_\n" +
