@@ -1,7 +1,3 @@
-# Known gap: a family suite. Files of two languages share one graph, so each
-# needs its own grammar and rules inside one run. The engine is one language
-# per run today; the reference passed only by parsing the other language with
-# this pipeline's grammar, which the incremental engine no longer does.
 name: "C/C++ cross-language resolution — .cpp calling through .h to .c definitions"
 pipeline: cpp
 
@@ -84,7 +80,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "All file extensions discovered (.h, .c, .hh, .cc, .cxx, .hxx, .hpp, .cpp)"
-    skip: true
     query: |
       MATCH (f:File)
       RETURN f.path AS path
@@ -106,7 +101,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
@@ -117,7 +111,6 @@ tests:
       - { row: { src: "engine.cxx", tgt: "math/ops.c" } }
 
   - name: "C++ engine.cxx calls C multiply() via ops.h -> ops.c"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
@@ -128,7 +121,6 @@ tests:
       - { row: { src: "engine.cxx", tgt: "math/ops.c" } }
 
   - name: "C++ engine.cxx calls C log_result() via format.hh -> format.cc"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'engine::engine::compute'
@@ -142,7 +134,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
@@ -153,7 +144,6 @@ tests:
       - { row: { src: "main.cpp", tgt: "alt/data.cpp" } }
 
   - name: "main.cpp calls add via ops.h -> ops.c"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'main::run'
@@ -168,7 +158,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "Struct defined in .hxx header exists"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'data::Record'

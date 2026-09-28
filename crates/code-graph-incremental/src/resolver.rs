@@ -1301,7 +1301,9 @@ fn resolve_submodule(
     index_names: &[String],
     file_index: &FileIndex,
 ) -> Option<usize> {
-    let stem = support_lang.strip_extension(target_path);
+    let stem = SupportLang::from_path(target_path)
+        .unwrap_or(support_lang)
+        .strip_extension(target_path);
     let dir = index_names.iter().find_map(|idx| {
         stem.strip_suffix(idx.as_str())
             .and_then(|s| s.strip_suffix(PATH_SEP))

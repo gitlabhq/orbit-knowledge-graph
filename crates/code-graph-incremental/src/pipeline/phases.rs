@@ -55,8 +55,7 @@ fn workset(
     entries: Vec<FileInventoryEntry>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
-    let pipeline = env.lang_id.pipeline();
-    let manifest_names = &env.rules.config.resolve.parse_files;
+    let manifest_names = &env.resolve.config.parse_files;
     let is_manifest = |path: &str| {
         let name = path.rsplit('/').next().unwrap_or(path);
         manifest_names.iter().any(|pf| pf.name == name)
@@ -70,8 +69,8 @@ fn workset(
             decision,
             label,
         } = entry;
-        let in_pipeline = SupportLang::from_path(&path).is_some_and(|l| l.pipeline() == pipeline);
-        if decision == Decision::Parse && in_pipeline {
+        let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
+        if decision == Decision::Parse && in_family {
             listed.candidates.insert(path.clone(), size);
             candidates.push(path);
             continue;
@@ -254,8 +253,7 @@ impl<T: Send> IntoParallel for Lazy<T> {
     }
 }
 
-/// tree-sitter, with the grammar the file's own extension names (TSX inside
-/// the TypeScript pipeline).
+/// tree-sitter, with the grammar of the file's own language.
 pub struct Parse;
 
 impl ItemPhase<SourceFile> for Parse {
@@ -288,7 +286,7 @@ impl ItemPhase<Parsed> for Rewrite {
         Parsed(mut tree): Parsed,
     ) -> Result<Rewritten, Killed> {
         let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
-        for stage in &env.rules.rewrite_stages {
+        for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
         }
         Ok(Rewritten(tree))
@@ -434,8 +432,8 @@ impl Phase<DirtyGraph> for Resolve {
             .collect();
         let walk = ProjectTree::build(
             &env.lang,
-            &env.rules.config.resolve,
-            &env.rules.resolve_stages,
+            &env.resolve.config,
+            &env.resolve.stages,
             &paths,
             Some(&state.configs),
         );
@@ -446,7 +444,7 @@ impl Phase<DirtyGraph> for Resolve {
             &dirty,
             env.lang_id,
             &walk.prefixes,
-            &env.rules.config.resolve,
+            &env.resolve.config,
             &walk.aliases,
             env,
             &context.run,
@@ -488,7 +486,7 @@ impl Phase<Resolved> for Display {
             let _ = pattern::apply_rewrites_with_edges(
                 tree,
                 &env.lang,
-                &env.rules.display_rules,
+                &env.rules_for(&tree.label).display_rules,
                 true,
                 &ctx,
                 &[],

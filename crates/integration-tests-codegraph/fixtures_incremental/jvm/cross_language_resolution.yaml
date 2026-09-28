@@ -1,7 +1,3 @@
-# Known gap: a family suite. Files of two languages share one graph, so each
-# needs its own grammar and rules inside one run. The engine is one language
-# per run today; the reference passed only by parsing the other language with
-# this pipeline's grammar, which the incremental engine no longer does.
 name: "JVM: cross-language Java/Kotlin resolution"
 pipeline: java
 
@@ -72,7 +68,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "Kotlin UserService calls Java User.create (static method via import)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'createUser'
@@ -88,7 +83,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "Kotlin UserService calls Kotlin capitalize"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'createUser'
@@ -103,7 +97,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "Java User.create calls Java User (same file)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'com.example.model.User.create'
@@ -118,7 +111,6 @@ tests:
   # ══════════════════════════════════════════════════════════════
 
   - name: "All 5 files discovered"
-    skip: true
     query: |
       MATCH (f:File)
       RETURN f.path AS path
@@ -127,7 +119,6 @@ tests:
       - { unique: path }
 
   - name: "Java and Kotlin definitions coexist in same graph"
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN [
