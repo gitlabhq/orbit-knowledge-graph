@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.32.1
+version: 0.32.2
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -28,7 +28,7 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to read the bundled local skill and list any additional runtime skills, or `glab orbit skills get orbit references/local/sql.md` to read one of its files. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
 
 If you must introspect, call `glab orbit ontology <Entity...>` with explicit entity names. The unscoped form returns about 17 KB of output. Call it at most once per session, because the ontology does not change mid-session. In JSON mode, `glab orbit dsl` prints the DSL JSON Schema. In GQL mode, run `CALL db.schema()` instead. The ontology command returns an object with a `nodes` array and does not accept `--jq`, so pipe into `jq`. Per-node `outgoing_edges` and `incoming_edges` are arrays of edge type names, not objects:
 
