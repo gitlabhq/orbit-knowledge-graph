@@ -16,7 +16,7 @@ use super::runner::create_test_db;
 use super::validator::{Failure, load_suite, report, run_suite, write_fixtures, write_suite_files};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
-    if let Some(pipeline) = suite.pipeline.as_deref() {
+    if let Some(pipeline) = suite.pipeline.as_deref().filter(|p| *p != "generic") {
         return SupportLang::from_alias(pipeline)
             .unwrap_or_else(|| panic!("suite {:?}: unknown pipeline {pipeline:?}", suite.name));
     }

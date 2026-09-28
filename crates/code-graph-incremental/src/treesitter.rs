@@ -80,6 +80,10 @@ static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|
 pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
     match lang_id {
         SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
+            Some(include_str!("../langs/typescript.yaml"))
+        }
+        SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
         SupportLang::Go => Some(include_str!("../langs/go.yaml")),
         SupportLang::Php => Some(include_str!("../langs/php.yaml")),
         SupportLang::Java => Some(include_str!("../langs/java.yaml")),
