@@ -22,8 +22,6 @@ const SEARCH_COMMANDS: &[&str] = &[
     "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
 ];
 
-const CONTENT_SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
-
 const READ_COMMANDS: &[&str] = &["bat", "cat", "head", "less", "more", "sed", "tail"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
@@ -172,21 +170,17 @@ fn invokes_orbit(command: &str) -> bool {
 }
 
 fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
-    let tool_input = call.get("tool_input").unwrap_or(call);
-    let path = |key: &str| tool_input.get(key).and_then(Value::as_str).unwrap_or("");
-    match kind {
-        Kind::Search => match call.get("tool_name").and_then(Value::as_str) {
-            Some("Glob") => false,
-            _ => {
-                let command = command_of(call);
-                let is_pattern_tool = command.is_empty() && !path("pattern").is_empty();
-                (is_pattern_tool && in_project(path("path"), call, graph_first))
-                    || invokes_search(command, CONTENT_SEARCH_COMMANDS)
-                    || reads_source(command)
-            }
-        },
-        Kind::Read => in_project(path("file_path"), call, graph_first),
-    }
+    let key = match kind {
+        Kind::Search => "path",
+        Kind::Read => "file_path",
+    };
+    let path = call
+        .get("tool_input")
+        .unwrap_or(call)
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    in_project(path, call, graph_first)
 }
 
 fn in_project(path: &str, call: &Value, graph_first: &GraphFirst) -> bool {
@@ -227,7 +221,7 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
                     .get("pattern")
                     .and_then(Value::as_str)
                     .is_some_and(|p| !p.is_empty());
-            is_pattern_tool || invokes_search(command, SEARCH_COMMANDS) || reads_source(command)
+            is_pattern_tool || invokes_search(command) || reads_source(command)
         }
         Kind::Read => {
             let path = tool_input
@@ -239,13 +233,13 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
     }
 }
 
-fn invokes_search(command: &str, commands: &[&str]) -> bool {
+fn invokes_search(command: &str) -> bool {
     command
         .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| segment_invokes_search(segment, commands))
+        .any(segment_invokes_search)
 }
 
-fn segment_invokes_search(segment: &str, commands: &[&str]) -> bool {
+fn segment_invokes_search(segment: &str) -> bool {
     for token in segment.split_whitespace() {
         if token.starts_with('-') || token.contains('=') {
             continue;
@@ -254,7 +248,7 @@ fn segment_invokes_search(segment: &str, commands: &[&str]) -> bool {
         if COMMAND_WRAPPERS.contains(&name) {
             continue;
         }
-        return commands.contains(&name);
+        return SEARCH_COMMANDS.contains(&name);
     }
     false
 }
@@ -401,8 +395,8 @@ mod tests {
             (Kind::Read, read("a", "/repo/src/main.rs"), "deny"),
             (Kind::Read, read("a", "/repo/src/main.rs"), "nudge"),
             (Kind::Search, bash("b", "cd repo && rg foo"), "deny"),
-            (Kind::Search, glob, "nudge"),
-            (Kind::Search, bash("c", "find . -name '*.rs'"), "nudge"),
+            (Kind::Search, glob, "deny"),
+            (Kind::Search, bash("c2", "find . -name '*.rs'"), "deny"),
             (Kind::Search, bash("d", "glab orbit grep foo"), "none"),
             (Kind::Read, read("d", "/repo/src/main.rs"), "nudge"),
             (Kind::Search, bash("g", "time orbit grep foo"), "none"),

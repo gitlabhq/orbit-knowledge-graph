@@ -21,6 +21,6 @@ nudge_search: |
 nudge_read: |
   Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
 graph_first_deny: |
-  Blocked once: this session has not used Orbit yet. Run `{{orbit}} grep 'words'` first (FTS; terms AND, `a|b` OR; add --path/--kind). 
+  Blocked once: this session has not used Orbit yet. Run `{{orbit}} grep 'words'` first; it matches symbol names and file paths (FTS; terms AND, `a|b` OR; add --path/--kind).
 template_vars:
   reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS."
