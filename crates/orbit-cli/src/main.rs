@@ -24,9 +24,14 @@ use tracing::{Level, debug};
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
+const CLI_ABOUT: &str = "Orbit - query the local code graph or the remote Orbit API";
+const CLI_LONG_ABOUT: &str = "Orbit - query the local code graph or the remote Orbit API.\n\n\
+Coding agents: load the instance-matched usage guidance first with \
+`glab orbit skills get orbit`, then follow the returned skill.";
+
 #[derive(Parser)]
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
-#[command(about = "Orbit - query the local code graph or the remote Orbit API")]
+#[command(about = CLI_ABOUT, long_about = CLI_LONG_ABOUT)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -263,7 +268,7 @@ struct SkillsArgs {
 enum SkillsCommands {
     #[command(
         about = "Print an instance-matched agent skill file.",
-        long_about = "Print a file from the selected instance's agent skill, composed with local CLI guidance."
+        long_about = "Print a file from the selected instance's agent skill, composed with local CLI guidance. Coding agents should start with `glab orbit skills get orbit`."
     )]
     Get {
         /// Skill name.
@@ -730,6 +735,20 @@ mod tests {
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn help_directs_coding_agents_to_the_orbit_skill() {
+        let top_level = Cli::command().render_long_help().to_string();
+        assert!(top_level.contains("glab orbit skills get orbit"));
+
+        let mut command = Cli::command();
+        let skills = command
+            .find_subcommand_mut("skills")
+            .expect("skills subcommand exists")
+            .render_long_help()
+            .to_string();
+        assert!(skills.contains("glab orbit skills get orbit"));
     }
 
     #[test]
