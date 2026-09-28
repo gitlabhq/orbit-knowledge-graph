@@ -151,10 +151,20 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
 
 fn substitute_tokens_in_json(value: &Value, graph_first: bool) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
-            "{{graph_first}}",
-            if graph_first { " --graph-first" } else { "" },
-        )),
+        Value::String(s) => {
+            let (flag, matcher) = match graph_first {
+                true => (
+                    " --graph-first",
+                    format!("|mcp__{}__.*", spec::mcp_server().name),
+                ),
+                false => ("", String::new()),
+            };
+            Value::String(
+                s.replace("{{orbit}}", spec::launcher())
+                    .replace("{{graph_first}}", flag)
+                    .replace("{{graph_first_matcher}}", &matcher),
+            )
+        }
         Value::Array(items) => Value::Array(
             items
                 .iter()

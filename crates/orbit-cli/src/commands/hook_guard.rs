@@ -110,7 +110,8 @@ fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
 }
 
 fn session_dir() -> Option<PathBuf> {
-    Some(std::env::temp_dir().join("orbit-hook-sessions"))
+    let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    Some(base.join("orbit-hook-sessions"))
 }
 
 fn session_id(call: &Value) -> Option<String> {

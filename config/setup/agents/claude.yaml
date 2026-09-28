@@ -15,7 +15,7 @@ json_merges:
     path: [hooks, PreToolUse]
     marker: hook-guard
     entries:
-      - matcher: "Bash|Grep|Glob|mcp__orbit__.*"
+      - matcher: "Bash|Grep|Glob{{graph_first_matcher}}"
         hooks:
           - type: command
             command: "{{orbit}} hook-guard search{{graph_first}}"

@@ -764,6 +764,7 @@ mod tests {
                 graph_first,
                 "{settings}"
             );
+            assert_eq!(settings.contains("mcp__orbit__"), graph_first, "{settings}");
         }
     }
 
