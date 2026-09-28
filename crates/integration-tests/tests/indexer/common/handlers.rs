@@ -21,9 +21,6 @@ pub fn handler_context() -> HandlerContext {
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
-            mock_nats,
-        )),
     )
 }
 
