@@ -21,8 +21,8 @@ use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::planner::{self, LoweredMetadata};
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
-    response_policy, restrict, security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, normalize, relationships, response_policy, restrict,
+    security, settings, validate,
 };
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
@@ -30,7 +30,8 @@ use query_data_model::QueryDataModel;
 enum QueryPlan {
     ClickHouse {
         bound: planner::BoundCatalog<query_data_model::ClickHouseDataModel>,
-        parity: Box<plan::QueryPlan>,
+        candidate: Option<planner::Candidate<planner::ClickHouse>>,
+        scope_requirements: Vec<crate::scope::ScopeProof>,
     },
     DuckDb {
         bound: planner::BoundCatalog<query_data_model::DuckDbDataModel>,
@@ -301,18 +302,18 @@ fn plan_clickhouse(
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let planned = planner::clickhouse(input.clone(), ctx.data_model_arc(), hydration_options)?;
     let scope_proofs = ctx.scope_proofs().as_ref().cloned().unwrap_or_default();
-    let parity = plan::plan_clickhouse(
-        &input,
-        &scope_proofs,
-        ctx.data_model(),
+    let planned = planner::clickhouse(
+        input.clone(),
+        ctx.data_model_arc(),
         hydration_options,
+        &scope_proofs,
     )?;
     ctx.set_input(input);
     ctx.set_query_plan(QueryPlan::ClickHouse {
         bound: planned.bound,
-        parity: Box::new(parity),
+        candidate: Some(planned.candidate),
+        scope_requirements: planned.scope_requirements,
     });
     Ok(())
 }
@@ -335,34 +336,19 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let lowered = match query_plan {
         QueryPlan::ClickHouse {
             bound,
-            parity,
+            candidate,
+            scope_requirements,
         } => {
-            let lowered = lower::emit(&parity, &bound.input)?;
-            let mut aliases = crate::aliases::AliasManager::default();
-            for node in &bound.input.nodes {
-                aliases.reserve(&node.id);
-            }
-            let lowered = planner::LoweredPlan {
-                ast: lowered.ast,
-                metadata: planner::LoweredMetadata {
-                    node_sources: lowered.metadata.node_sources,
-                    aliases,
-                    edges: lowered
-                        .metadata
-                        .edges
-                        .into_iter()
-                        .map(|edge| planner::LoweredEdge {
-                            column_prefix: edge.column_prefix,
-                            path_column: edge.path_column,
-                            rel_types: edge.rel_types,
-                        })
-                        .collect(),
-                    stable_order: lowered.metadata.stable_order,
+            let lowered = planner::lower_clickhouse(
+                &bound,
+                planner::SelectedPlan {
+                    candidate: require(candidate, "physical candidate")?,
                 },
-            };
+            )?;
             ctx.set_query_plan(QueryPlan::ClickHouse {
                 bound,
-                parity,
+                candidate: None,
+                scope_requirements,
             });
             lowered
         }
@@ -385,9 +371,11 @@ fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let mut node = require(ctx.take_node(), "node")?;
     if let Node::Query(query) = &mut node
-        && let QueryPlan::ClickHouse { parity, .. } = &query_plan
+        && let QueryPlan::ClickHouse {
+            scope_requirements, ..
+        } = &query_plan
     {
-        for requirement in &parity.scope_requirements {
+        for requirement in scope_requirements {
             let guard = crate::scope::resolved_scope_guard(requirement);
             query.where_clause = Some(match query.where_clause.take() {
                 Some(existing) => crate::ast::Expr::and(existing, guard),

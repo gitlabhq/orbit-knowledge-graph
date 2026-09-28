@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 pub use bind::{bind, bind_with_options};
 pub use explain::{explain, explain_clickhouse, explain_duckdb};
-pub use lower::lower_duckdb;
+pub use lower::{lower_clickhouse, lower_duckdb};
 pub use optimize::optimize;
 pub use physical_clickhouse::plan_clickhouse;
 pub use physical_duckdb::plan_duckdb;
@@ -25,6 +25,7 @@ pub use physical_duckdb::plan_duckdb;
 pub struct PlannedClickHouse {
     pub bound: BoundCatalog<query_data_model::ClickHouseDataModel>,
     pub candidate: Candidate<ClickHouse>,
+    pub scope_requirements: Vec<crate::scope::ScopeProof>,
 }
 
 pub struct PlannedDuckDb {
@@ -36,13 +37,16 @@ pub fn clickhouse(
     input: Input,
     model: Arc<query_data_model::ClickHouseDataModel>,
     hydration_options: HydrationCompileOptions,
+    scope_proofs: &std::collections::HashMap<String, crate::scope::ScopeProof>,
 ) -> Result<PlannedClickHouse> {
     let (bound, logical) = bind_with_options(input, model, hydration_options)?;
-    let (bound, logical) = optimize(bound, logical);
+    let (bound, logical) = optimize(bound, logical, scope_proofs);
+    let scope_requirements = logical.scope_requirements.clone();
     let selected = plan_clickhouse(&bound, logical)?.selected;
     Ok(PlannedClickHouse {
         bound,
         candidate: selected.candidate,
+        scope_requirements,
     })
 }
 

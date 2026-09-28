@@ -15,10 +15,8 @@ pub fn plan_clickhouse(
 ) -> Result<PlanningResult<ClickHouse>> {
     let catalog = clickhouse_catalog(bound);
     let mut plan = map_clickhouse(bound, &logical.root, &catalog, false);
-    if bound.input.query_type == crate::input::QueryType::Aggregation
-        && bound.input.relationships.len() > 1
-    {
-        plan = deduplicate_edges(plan, bound);
+    if bound.input.query_type == crate::input::QueryType::Aggregation {
+        plan = deduplicate_edges(plan, bound, bound.input.relationships.len() > 1);
     }
     let ordinary = clickhouse_candidate(bound, plan);
     if bound.input.query_type == crate::input::QueryType::Aggregation
@@ -62,11 +60,12 @@ pub fn plan_clickhouse(
 fn deduplicate_edges(
     mut plan: Plan<ClickHouse>,
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    multiple_edges: bool,
 ) -> Plan<ClickHouse> {
     plan.inputs = plan
         .inputs
         .into_iter()
-        .map(|input| deduplicate_edges(input, bound))
+        .map(|input| deduplicate_edges(input, bound, multiple_edges))
         .collect();
     let Operator::Scan(scan) = &plan.operator else {
         return plan;
@@ -78,7 +77,11 @@ fn deduplicate_edges(
         Plan::unary(
             Operator::CurrentRows {
                 keys: vec![],
-                strategy: ClickHouseCurrentRows::Final,
+                strategy: if multiple_edges {
+                    ClickHouseCurrentRows::Final
+                } else {
+                    ClickHouseCurrentRows::LimitBy
+                },
             },
             plan,
         )
@@ -488,9 +491,14 @@ fn edge_property_facts(
                 let Some(property_id) = bound.model.graph().property_id(entity_id, property) else {
                     continue;
                 };
-                let Some(definition) = bound.model.denormalized().property(
-                    query_data_model::DenormalizedKey { property: property_id, direction },
-                )
+                let Some(definition) =
+                    bound
+                        .model
+                        .denormalized()
+                        .property(query_data_model::DenormalizedKey {
+                            property: property_id,
+                            direction,
+                        })
                 else {
                     continue;
                 };
@@ -504,8 +512,7 @@ fn edge_property_facts(
                 let Some(source) = bound.column_id(node_relation, property) else {
                     continue;
                 };
-                let Some(edge_columns) = access_paths[&edge_relation].access.edge_columns()
-                else {
+                let Some(edge_columns) = access_paths[&edge_relation].access.edge_columns() else {
                     continue;
                 };
                 let Some(column) = edge_columns.iter().find_map(|(column, physical)| {
@@ -557,7 +564,11 @@ fn node_layout(
     let RelationOrigin::Node { entity, .. } = bound.relation(relation).origin else {
         unreachable!()
     };
-    let table = bound.model.query_backend().entity_table(entity).unwrap_or_default();
+    let table = bound
+        .model
+        .query_backend()
+        .entity_table(entity)
+        .unwrap_or_default();
     table_layout(bound, table)
 }
 
@@ -591,8 +602,15 @@ fn table_layout(
     TableLayout {
         table: TableName(table.into()),
         columns: layout.columns.iter().cloned().map(PhysicalColumn).collect(),
-        sort_key: layout.sort_key.iter().cloned().map(PhysicalColumn).collect(),
-        global: layout.entity.is_some_and(|entity| bound.model.query_backend().entity_is_global(entity)),
+        sort_key: layout
+            .sort_key
+            .iter()
+            .cloned()
+            .map(PhysicalColumn)
+            .collect(),
+        global: layout
+            .entity
+            .is_some_and(|entity| bound.model.query_backend().entity_is_global(entity)),
     }
 }
 
@@ -629,12 +647,10 @@ fn map_clickhouse(
         Operator::Bind(relation) => Operator::Bind(*relation),
         Operator::Sort(keys) => Operator::Sort(keys.clone()),
         Operator::Limit(limit) => Operator::Limit(*limit),
-        Operator::CurrentRows { keys, .. } => {
-            Operator::CurrentRows {
-                keys: keys.clone(),
-                strategy: ClickHouseCurrentRows::LimitBy,
-            }
-        }
+        Operator::CurrentRows { keys, .. } => Operator::CurrentRows {
+            keys: keys.clone(),
+            strategy: ClickHouseCurrentRows::LimitBy,
+        },
         _ => unreachable!("ordinary traversal operator"),
     };
     let plan = Plan { operator, inputs };
@@ -720,7 +736,8 @@ mod tests {
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "MergeRequest"])
             .with_edges(["AUTHORED"]);
-        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let model =
+            Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
         let (bound, logical) = bind(input, model).unwrap();
         assert_eq!(
             plan_clickhouse(&bound, logical)
@@ -762,7 +779,8 @@ mod tests {
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "MergeRequest"])
             .with_edges(["AUTHORED"]);
-        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let model =
+            Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
         let (bound, _) = bind(input, model).unwrap();
 
         let clickhouse = clickhouse_catalog(&bound);
@@ -803,7 +821,8 @@ mod tests {
             ..Default::default()
         };
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let model =
+            Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
         let (bound, _) = bind(input, model).unwrap();
         let catalog = clickhouse_catalog(&bound);
         let access = &catalog.foreign_keys[0];
@@ -849,7 +868,8 @@ mod tests {
             ..Default::default()
         };
         let ontology = ontology::Ontology::new().with_nodes(["User"]);
-        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let model =
+            Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
         let (bound, logical) = bind(input, model).unwrap();
         let catalog = clickhouse_catalog(&bound);
         let plan = map_clickhouse(&bound, &logical.root, &catalog, false);
@@ -864,5 +884,4 @@ mod tests {
         assert_eq!(candidates.candidates.len(), 1);
         assert_eq!(candidates.select().unwrap().candidate.cost, cheaper.cost);
     }
-
 }

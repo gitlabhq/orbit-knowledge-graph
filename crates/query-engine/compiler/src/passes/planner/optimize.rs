@@ -4,17 +4,11 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 pub fn optimize<M: QueryDataModel>(
     mut bound: BoundCatalog<M>,
     mut logical: LogicalPlan,
+    scope_proofs: &std::collections::HashMap<String, crate::scope::ScopeProof>,
 ) -> (BoundCatalog<M>, LogicalPlan) {
     prune_fk_aggregation_leaves(&mut bound, &mut logical);
+    elide_scope_container(&mut bound, &mut logical, scope_proofs);
     defer_traversal_outputs(&bound, &mut logical);
-    if bound
-        .input
-        .relationships
-        .iter()
-        .any(|edge| relationship_foreign_key(&bound, edge).is_some())
-    {
-        return (bound, logical);
-    }
     loop {
         let previous = logical.root.clone();
         logical.root = rewrite(logical.root, &mut bound, BTreeSet::new());
@@ -26,6 +20,102 @@ pub fn optimize<M: QueryDataModel>(
         logical.root = add_sip(logical.root, &mut bound);
     }
     (bound, logical)
+}
+
+fn elide_scope_container<M: QueryDataModel>(
+    bound: &mut BoundCatalog<M>,
+    logical: &mut LogicalPlan,
+    scope_proofs: &std::collections::HashMap<String, crate::scope::ScopeProof>,
+) {
+    if bound.input.query_type != crate::input::QueryType::Aggregation
+        || bound
+            .input
+            .relationships
+            .iter()
+            .filter(|relationship| relationship_foreign_key(bound, relationship).is_none())
+            .count()
+            != 1
+    {
+        return;
+    }
+    let Some((relationship_index, anchor)) =
+        bound
+            .input
+            .relationships
+            .iter()
+            .enumerate()
+            .find_map(|(index, relationship)| {
+                if relationship_foreign_key(bound, relationship).is_some()
+                    || !relationship.filters.is_empty()
+                {
+                    return None;
+                }
+                let from = bound
+                    .input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == relationship.from)?;
+                let to = bound
+                    .input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == relationship.to)?;
+                let source = from.entity.as_deref()?;
+                let target = to.entity.as_deref()?;
+                let scope_preserving = relationship.types.iter().all(|kind| {
+                    bound
+                        .model
+                        .variant_scope(kind, source, target)
+                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                });
+                let anchor = [from, to].into_iter().find(|node| {
+                    scope_proofs.contains_key(&node.id)
+                        && crate::scope::is_scope_only(node)
+                        && bound
+                            .input
+                            .relationships
+                            .iter()
+                            .filter(|candidate| {
+                                candidate.from == node.id || candidate.to == node.id
+                            })
+                            .count()
+                            == 1
+                        && !bound
+                            .input
+                            .aggregation
+                            .group_by
+                            .iter()
+                            .any(|group| group.node() == node.id)
+                        && !bound
+                            .input
+                            .aggregation
+                            .metrics
+                            .iter()
+                            .any(|metric| metric.expr.node() == node.id)
+                })?;
+                scope_preserving.then_some((index, anchor.id.clone()))
+            })
+    else {
+        return;
+    };
+    let Some(requirement) = scope_proofs.get(&anchor).cloned() else {
+        return;
+    };
+    let removed: BTreeSet<_> = bound
+        .relations()
+        .filter_map(|(relation, metadata)| match metadata.origin {
+            RelationOrigin::Node { input, .. } if bound.input.nodes[input.0].id == anchor => {
+                Some(relation)
+            }
+            RelationOrigin::Edge {
+                input: Some(input), ..
+            } if input == InputRelationshipId(relationship_index) => Some(relation),
+            _ => None,
+        })
+        .collect();
+    logical.root = remove_relations(logical.root.clone(), bound, &removed);
+    logical.scope_requirements.push(requirement);
+    bound.remove_relations(&removed);
 }
 
 fn defer_traversal_outputs<M: QueryDataModel>(bound: &BoundCatalog<M>, logical: &mut LogicalPlan) {
@@ -173,11 +263,15 @@ fn prune_fk_aggregation_leaves<M: QueryDataModel>(
             } else {
                 ontology::DenormDirection::Target
             };
-            denormalized_property(bound, entity, property, direction)
-                .is_some_and(|definition| relationship.types.iter().any(|kind| {
-                    bound.model.graph().relationship_id(kind)
+            denormalized_property(bound, entity, property, direction).is_some_and(|definition| {
+                relationship.types.iter().any(|kind| {
+                    bound
+                        .model
+                        .graph()
+                        .relationship_id(kind)
                         .is_some_and(|relationship| definition.carries(relationship))
-                }))
+                })
+            })
         }) {
             continue;
         }
@@ -260,11 +354,17 @@ fn relationship_carries_node_filter<M: QueryDataModel>(
         ontology::DenormDirection::Target
     };
     node.filters.keys().any(|property| {
-        denormalized_property(bound, entity, property, direction.clone())
-            .is_some_and(|definition| relationship.types.iter().any(|kind| {
-                bound.model.graph().relationship_id(kind)
-                    .is_some_and(|relationship| definition.carries(relationship))
-            }))
+        denormalized_property(bound, entity, property, direction.clone()).is_some_and(
+            |definition| {
+                relationship.types.iter().any(|kind| {
+                    bound
+                        .model
+                        .graph()
+                        .relationship_id(kind)
+                        .is_some_and(|relationship| definition.carries(relationship))
+                })
+            },
+        )
     })
 }
 
@@ -355,12 +455,8 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
-        let elevated = bound
-            .model
-            .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())
-            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
         if bound.input.query_type == crate::input::QueryType::Aggregation
-            && (!elevated
+            && (!bound.input.aggregation.group_by.is_empty()
                 || !node.filters.is_empty()
                 || node.id_range.is_some()
                 || node.node_ids.is_empty())
@@ -418,7 +514,10 @@ fn rewrite(
     plan
 }
 
-fn add_sip(mut plan: Plan<Logical>, bound: &mut BoundCatalog<impl QueryDataModel>) -> Plan<Logical> {
+fn add_sip(
+    mut plan: Plan<Logical>,
+    bound: &mut BoundCatalog<impl QueryDataModel>,
+) -> Plan<Logical> {
     plan.inputs = plan
         .inputs
         .into_iter()
@@ -585,10 +684,13 @@ fn denormalized_property<'a, M: QueryDataModel>(
         ontology::DenormDirection::Source => query_data_model::DenormalizedDirection::Source,
         ontology::DenormDirection::Target => query_data_model::DenormalizedDirection::Target,
     };
-    bound.model.denormalized().property(query_data_model::DenormalizedKey {
-        property,
-        direction,
-    })
+    bound
+        .model
+        .denormalized()
+        .property(query_data_model::DenormalizedKey {
+            property,
+            direction,
+        })
 }
 
 fn compare(op: CompareOp, left: Expr, right: Expr) -> Expr {

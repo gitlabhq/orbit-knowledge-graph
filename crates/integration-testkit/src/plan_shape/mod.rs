@@ -14,8 +14,7 @@ pub fn run_dir(root: &str) {
             .expect("ClickHouse model"),
     );
     let duckdb_model = Arc::new(
-        query_data_model::DuckDbDataModel::derive(Arc::clone(&ontology))
-            .expect("DuckDB model"),
+        query_data_model::DuckDbDataModel::derive(Arc::clone(&ontology)).expect("DuckDB model"),
     );
     let mut files = Vec::new();
     discover(root, &mut files);
@@ -36,21 +35,22 @@ pub fn run_dir(root: &str) {
         let query = scenario.query();
         let normalized = compiler::validate_normalize(&query, &ontology)
             .unwrap_or_else(|error| panic!("{}: normalize failed: {error}", scenario.name));
-        let (bound, logical) = compiler::passes::planner::bind(
-            normalized.clone(),
-            Arc::clone(&clickhouse_model),
-        )
-            .unwrap_or_else(|error| panic!("{}: bind failed: {error}", scenario.name));
+        let (bound, logical) =
+            compiler::passes::planner::bind(normalized.clone(), Arc::clone(&clickhouse_model))
+                .unwrap_or_else(|error| panic!("{}: bind failed: {error}", scenario.name));
+        let logical_bound = bound.clone();
+        let (bound, optimized) =
+            compiler::passes::planner::optimize(bound, logical.clone(), &Default::default());
         check_plan(
             &scenario.name,
             "logical",
             &scenario.logical,
-            &compiler::passes::planner::explain(&bound, &logical.root),
+            &compiler::passes::planner::explain(&logical_bound, &logical.root),
             &mut failures,
         );
         if let Some(expected) = scenario.physical.clickhouse.as_ref() {
-            let planned = compiler::passes::planner::plan_clickhouse(&bound, logical.clone())
-                .unwrap();
+            let planned =
+                compiler::passes::planner::plan_clickhouse(&bound, optimized.clone()).unwrap();
             let plan = compiler::passes::planner::explain_clickhouse(
                 &bound,
                 &planned.selected.candidate.plan,
@@ -63,13 +63,35 @@ pub fn run_dir(root: &str) {
                 &mut failures,
             );
         }
+        if !scenario.expect.is_empty() || !scenario.reject.is_empty() || scenario.plan.is_some() {
+            let planned = compiler::passes::planner::plan_clickhouse(&bound, optimized)
+                .unwrap_or_else(|error| {
+                    panic!("{}: ClickHouse plan failed: {error}", scenario.name)
+                });
+            let top_level = PlanExpect {
+                expect: scenario.expect.clone(),
+                reject: scenario.reject.clone(),
+                plan: scenario.plan.clone(),
+            };
+            check_plan(
+                &scenario.name,
+                "physical.clickhouse",
+                &top_level,
+                &compiler::passes::planner::explain_clickhouse(
+                    &bound,
+                    &planned.selected.candidate.plan,
+                ),
+                &mut failures,
+            );
+        }
         if let Some(expected) = scenario.physical.duckdb.as_ref() {
-            let (duck_bound, duck_logical) = compiler::passes::planner::bind(
-                normalized,
-                Arc::clone(&duckdb_model),
-            )
-            .unwrap_or_else(|error| panic!("{}: DuckDB bind failed: {error}", scenario.name));
-            let planned = compiler::passes::planner::plan_duckdb(&duck_bound, duck_logical).unwrap();
+            let (duck_bound, duck_logical) =
+                compiler::passes::planner::bind(normalized, Arc::clone(&duckdb_model))
+                    .unwrap_or_else(|error| {
+                        panic!("{}: DuckDB bind failed: {error}", scenario.name)
+                    });
+            let planned =
+                compiler::passes::planner::plan_duckdb(&duck_bound, duck_logical).unwrap();
             check_plan(
                 &scenario.name,
                 "physical.duckdb",
