@@ -120,7 +120,7 @@ fn build_scope_status(
             .filter(|(plan, _)| plan.entity == PROJECT_NODE)
             .map(|(_, phase)| *phase),
     )
-    .unwrap_or(Phase::Ready);
+    .unwrap_or(Phase::Unknown);
     let projects =
         coverage.map(|by_scope| by_scope.get(scope.as_str()).copied().unwrap_or_default());
     let code_phase = match projects {
