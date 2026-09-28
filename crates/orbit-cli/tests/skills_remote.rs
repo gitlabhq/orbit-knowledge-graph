@@ -444,7 +444,7 @@ fn missing_etag_uses_cache_or_embedded_skill() {
         "{}",
         stderr(&cached_fallback)
     );
-    assert!(stderr(&cached_fallback).contains("last validated"));
+    assert!(stderr(&cached_fallback).contains("no ETag; using the last validated tree"));
     assert!(
         String::from_utf8_lossy(&cached_fallback.stdout).contains("Cached before missing ETag")
     );
@@ -458,7 +458,7 @@ fn missing_etag_uses_cache_or_embedded_skill() {
         "{}",
         stderr(&embedded_fallback)
     );
-    assert!(stderr(&embedded_fallback).contains("embedded local skill"));
+    assert!(stderr(&embedded_fallback).contains("no ETag; using the embedded local skill"));
     assert!(String::from_utf8_lossy(&embedded_fallback.stdout).contains("name: orbit-cli"));
 }
 
