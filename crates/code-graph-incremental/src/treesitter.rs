@@ -41,8 +41,6 @@ pub struct LangEntry {
     aliases: Vec<String>,
     grammar: String,
     #[serde(default)]
-    family: Option<String>,
-    #[serde(default)]
     fqn_separator: Option<String>,
     #[serde(default, rename = "package_markers")]
     _package_markers: Vec<String>,
@@ -59,7 +57,14 @@ impl LangEntry {
 }
 
 #[derive(serde::Deserialize)]
+struct Family {
+    members: Vec<SupportLang>,
+}
+
+#[derive(serde::Deserialize)]
 struct LangConfig {
+    #[serde(default)]
+    families: std::collections::HashMap<String, Family>,
     languages: std::collections::HashMap<SupportLang, LangEntry>,
 }
 
@@ -110,26 +115,22 @@ impl SupportLang {
         Self::from_extension(ext)
     }
 
-    /// Languages that resolve against each other share a graph: one run,
-    /// each file parsed and rewritten by its own language. Declared with
-    /// `family:` in `config/languages.yaml`; a language without one stands alone.
+    /// The family this language indexes with, from `families:` in
+    /// `config/languages.yaml`; a language in none stands alone under its own name.
     pub fn family(self) -> &'static str {
-        LANG_CONFIG.languages[&self]
-            .family
-            .as_deref()
-            .unwrap_or_else(|| self.into())
+        LANG_CONFIG
+            .families
+            .iter()
+            .find(|(_, f)| f.members.contains(&self))
+            .map_or_else(|| self.into(), |(name, _)| name.as_str())
     }
 
+    /// The family's members in declared order; a standalone language alone.
     pub fn family_members(self) -> Vec<Self> {
-        let family = self.family();
-        let mut members: Vec<Self> = LANG_CONFIG
-            .languages
-            .keys()
-            .copied()
-            .filter(|l| l.family() == family)
-            .collect();
-        members.sort_by_key(|l| <&str>::from(l));
-        members
+        LANG_CONFIG
+            .families
+            .get(self.family())
+            .map_or_else(|| vec![self], |f| f.members.clone())
     }
 
     pub fn ts_language(&self) -> tree_sitter::Language {
