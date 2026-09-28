@@ -904,7 +904,7 @@ pub enum IndexingPhase {
     NotStarted = 1,
     Syncing = 2,
     Ready = 3,
-    /// every part settled, at least one gap
+    /// indexing is done, but some data failed to index
     Error = 4,
 }
 impl IndexingPhase {

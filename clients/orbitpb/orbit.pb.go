@@ -384,7 +384,7 @@ const (
 	IndexingPhase_INDEXING_PHASE_NOT_STARTED IndexingPhase = 1
 	IndexingPhase_INDEXING_PHASE_SYNCING     IndexingPhase = 2
 	IndexingPhase_INDEXING_PHASE_READY       IndexingPhase = 3
-	IndexingPhase_INDEXING_PHASE_ERROR       IndexingPhase = 4 // every part settled, at least one gap
+	IndexingPhase_INDEXING_PHASE_ERROR       IndexingPhase = 4 // indexing is done, but some data failed to index
 )
 
 // Enum value maps for IndexingPhase.
