@@ -16,7 +16,7 @@ pub fn plan_clickhouse(
     let catalog = clickhouse_catalog(bound);
     let mut plan = map_clickhouse(bound, &logical.root, &catalog, false);
     if bound.input.query_type == crate::input::QueryType::Aggregation {
-        plan = deduplicate_edges(plan, bound, bound.input.relationships.len() > 1);
+        plan = deduplicate_edges(plan, bound);
     }
     let ordinary = clickhouse_candidate(bound, plan);
     if bound.input.query_type == crate::input::QueryType::Aggregation
@@ -60,12 +60,11 @@ pub fn plan_clickhouse(
 fn deduplicate_edges(
     mut plan: Plan<ClickHouse>,
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-    multiple_edges: bool,
 ) -> Plan<ClickHouse> {
     plan.inputs = plan
         .inputs
         .into_iter()
-        .map(|input| deduplicate_edges(input, bound, multiple_edges))
+        .map(|input| deduplicate_edges(input, bound))
         .collect();
     let Operator::Scan(scan) = &plan.operator else {
         return plan;
@@ -77,11 +76,7 @@ fn deduplicate_edges(
         Plan::unary(
             Operator::CurrentRows {
                 keys: vec![],
-                strategy: if multiple_edges {
-                    ClickHouseCurrentRows::Final
-                } else {
-                    ClickHouseCurrentRows::LimitBy
-                },
+                strategy: ClickHouseCurrentRows::Final,
             },
             plan,
         )

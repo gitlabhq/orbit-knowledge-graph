@@ -16,9 +16,6 @@ pub fn optimize<M: QueryDataModel>(
             break;
         }
     }
-    if matches!(bound.input.query_type, crate::input::QueryType::Traversal) {
-        logical.root = add_sip(logical.root, &mut bound);
-    }
     (bound, logical)
 }
 
@@ -512,103 +509,6 @@ fn rewrite(
         plan = plan.semi_join(producer, condition);
     }
     plan
-}
-
-fn add_sip(
-    mut plan: Plan<Logical>,
-    bound: &mut BoundCatalog<impl QueryDataModel>,
-) -> Plan<Logical> {
-    plan.inputs = plan
-        .inputs
-        .into_iter()
-        .map(|input| add_sip(input, bound))
-        .collect();
-    let Operator::Join(conditions) = &plan.operator else {
-        return plan;
-    };
-    let relations: BTreeMap<_, _> = plan
-        .inputs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, input)| input.relation().map(|relation| (relation, index)))
-        .collect();
-    let mut selective: BTreeSet<_> = relations
-        .keys()
-        .copied()
-        .filter(|relation| relation_selective(bound, *relation))
-        .collect();
-    loop {
-        let mut changed = false;
-        for condition in conditions {
-            let Some((left, right)) = equality(condition) else {
-                continue;
-            };
-            let left_relation = bound.column(left).relation;
-            let right_relation = bound.column(right).relation;
-            let (producer_column, consumer_column) = match (
-                selective.contains(&left_relation),
-                selective.contains(&right_relation),
-            ) {
-                (true, false) => (left, right),
-                (false, true) => (right, left),
-                _ => continue,
-            };
-            let producer_relation = bound.column(producer_column).relation;
-            let consumer_relation = bound.column(consumer_column).relation;
-            let (Some(&producer_index), Some(&consumer_index)) = (
-                relations.get(&producer_relation),
-                relations.get(&consumer_relation),
-            ) else {
-                continue;
-            };
-            if matches!(plan.inputs[consumer_index].operator, Operator::SemiJoin(_)) {
-                selective.insert(consumer_relation);
-                continue;
-            }
-            let consumer = plan.inputs[consumer_index].clone();
-            plan.inputs[consumer_index] = consumer.semi_join(
-                plan.inputs[producer_index].clone(),
-                compare(
-                    CompareOp::Eq,
-                    Expr::Column(consumer_column),
-                    Expr::Column(producer_column),
-                ),
-            );
-            selective.insert(consumer_relation);
-            changed = true;
-        }
-        if !changed {
-            return plan;
-        }
-    }
-}
-
-fn relation_selective(bound: &BoundCatalog<impl QueryDataModel>, relation: RelationId) -> bool {
-    match bound.relation(relation).origin {
-        RelationOrigin::Node { input, .. } => {
-            let node = &bound.input.nodes[input.0];
-            !node.node_ids.is_empty() || node.id_range.is_some() || !node.filters.is_empty()
-        }
-        RelationOrigin::Edge {
-            input: Some(input), ..
-        } => {
-            let edge = &bound.input.relationships[input.0];
-            !edge.filters.is_empty()
-                || [&edge.from, &edge.to].into_iter().any(|name| {
-                    bound
-                        .input
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == **name)
-                        .is_some_and(|node| {
-                            !node.node_ids.is_empty()
-                                || node.id_range.is_some()
-                                || !node.filters.is_empty()
-                        })
-                })
-        }
-        RelationOrigin::Edge { input: None, .. } => false,
-    }
 }
 
 fn expressions<F: Flavor>(operator: &Operator<F>) -> Vec<&Expr> {
