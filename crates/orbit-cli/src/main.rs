@@ -730,7 +730,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{CLI_AGENT_HELP, Cli, Commands, IndexArgs, SchemaArgs};
     use clap::{CommandFactory, Parser};
 
     #[test]
@@ -740,11 +740,13 @@ mod tests {
 
     #[test]
     fn help_directs_coding_agents_to_the_orbit_skill() {
+        // Assert on the agent-facing sentences, not the bare command: `skills get orbit`
+        // also appears in ordinary usage text, so a deleted pointer would otherwise pass.
         let short_help = Cli::command().render_help().to_string();
-        assert!(short_help.contains("glab orbit skills get orbit"));
+        assert!(short_help.contains(CLI_AGENT_HELP));
 
         let long_help = Cli::command().render_long_help().to_string();
-        assert!(long_help.contains("glab orbit skills get orbit"));
+        assert!(long_help.contains(CLI_AGENT_HELP));
 
         let mut command = Cli::command();
         let skills = command
@@ -752,7 +754,7 @@ mod tests {
             .expect("skills subcommand exists")
             .render_long_help()
             .to_string();
-        assert!(skills.contains("glab orbit skills get orbit"));
+        assert!(skills.contains("Coding agents should start with `glab orbit skills get orbit`"));
     }
 
     #[test]
