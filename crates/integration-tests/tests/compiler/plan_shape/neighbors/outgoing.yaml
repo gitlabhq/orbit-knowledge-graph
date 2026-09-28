@@ -1,0 +1,8 @@
+name: "Neighbors outgoing: one union arm over every edge table, no FINAL"
+input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":20}
+expect:
+  - (Project e.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (Union AS e (...)))
+  - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, ... (Scan gl_edge AS _e))
+reject:
+  - (Scan _ FINAL)
+  - (Scan gl_edge AS _e FINAL)

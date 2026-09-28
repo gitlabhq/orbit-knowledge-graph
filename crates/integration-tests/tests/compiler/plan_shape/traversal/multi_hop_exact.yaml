@@ -1,0 +1,10 @@
+name: "Exact 2 hops: one depth arm, aliased as the hop, outer filter reads it like an edge"
+input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
+expect:
+  - |
+    (Filter e0.source_kind = 'Group', e0.source_id = 1, e0.target_kind = 'Project', !deleted(e0)
+      (Union AS e0
+        (Project ..., e2.target_id AS target_id, ..., 2 AS depth, ...
+          (Join ON e1.target_id = e2.source_id (_) (_)))))
+reject:
+  - (Project ..., 1 AS depth, ... (_))

@@ -1,0 +1,4 @@
+name: "Both directions with a center filter: each arm joins the center table"
+input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
+expect:
+  - (Union AS _union (Project ... (Join ON e.source_id = mr.id (_) (_))) (Project ... (Join ON e.target_id = mr.id (_) (_))))

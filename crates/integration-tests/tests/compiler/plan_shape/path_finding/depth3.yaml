@@ -1,0 +1,5 @@
+name: "Depth 3: forward frontier is a union of two arms, backward one arm"
+input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
+expect:
+  - (forward = (Union AS _frontier (Project ..., 1 AS depth (_)) (Project ..., 2 AS depth (_))))
+  - (backward = (Union AS _frontier (Project ..., 1 AS depth (_))))

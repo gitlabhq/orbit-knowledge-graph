@@ -18,15 +18,36 @@ use crate::passes::codegen::PaginationContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
-use crate::passes::plan::QueryPlan;
+use crate::passes::planner::{self, LoweredMetadata};
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
+    check, codegen, cursor, enforce, hydrate, normalize, relationships,
     response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
+
+#[derive(Debug, Clone)]
+enum QueryPlan {
+    ClickHouse {
+        bound: planner::BoundCatalog<query_data_model::ClickHouseDataModel>,
+        candidate: Option<planner::Candidate<planner::ClickHouse>>,
+        scope_requirements: Vec<crate::scope::ScopeProof>,
+    },
+    DuckDb {
+        bound: planner::BoundCatalog<query_data_model::DuckDbDataModel>,
+        candidate: Option<planner::Candidate<planner::DuckDb>>,
+    },
+}
+
+impl QueryPlan {
+    fn hop_count(&self) -> usize {
+        match self {
+            Self::ClickHouse { bound, .. } => bound.input.relationships.len(),
+            Self::DuckDb { bound, .. } => bound.input.relationships.len(),
+        }
+    }
+}
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
@@ -276,45 +297,63 @@ where
 fn plan_clickhouse(
     ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
 ) -> Result<()> {
-    plan_with(ctx, plan::plan_clickhouse)
-}
-
-fn plan_duckdb(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>,
-) -> Result<()> {
-    plan_with(ctx, plan::plan_duckdb)
-}
-
-fn plan_with<C>(
-    ctx: &mut C,
-    build: impl FnOnce(
-        &Input,
-        &std::collections::HashMap<String, crate::scope::ScopeProof>,
-        &C::Model,
-        HydrationCompileOptions,
-    ) -> Result<QueryPlan>,
-) -> Result<()>
-where
-    C: CompilerCtx,
-{
     let input = require(ctx.take_input(), "input")?;
-    let scope_proofs = ctx.scope_proofs().as_ref().cloned().unwrap_or_default();
     let hydration_options = ctx
         .hydration_options()
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let query_plan = build(&input, &scope_proofs, ctx.data_model(), hydration_options)?;
+    let (bound, candidate, scope_requirements, _) =
+        planner::clickhouse(input.clone(), ctx.data_model_arc(), hydration_options)?;
     ctx.set_input(input);
-    ctx.set_query_plan(query_plan);
+    ctx.set_query_plan(QueryPlan::ClickHouse {
+        bound,
+        candidate: Some(candidate),
+        scope_requirements,
+    });
+    Ok(())
+}
+
+fn plan_duckdb(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>,
+) -> Result<()> {
+    let input = require(ctx.take_input(), "input")?;
+    let (bound, candidate, _, _) = planner::duckdb(input.clone(), ctx.data_model_arc())?;
+    ctx.set_input(input);
+    ctx.set_query_plan(QueryPlan::DuckDb {
+        bound,
+        candidate: Some(candidate),
+    });
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input)?;
-    ctx.set_query_plan(query_plan);
+    let lowered = match query_plan {
+        QueryPlan::ClickHouse {
+            bound,
+            candidate,
+            scope_requirements,
+        } => {
+            let candidate = require(candidate, "physical candidate")?;
+            let lowered = planner::lower_clickhouse(&bound, planner::SelectedPlan { candidate })?;
+            ctx.set_query_plan(QueryPlan::ClickHouse {
+                bound,
+                candidate: None,
+                scope_requirements,
+            });
+            lowered
+        }
+        QueryPlan::DuckDb { bound, candidate } => {
+            let candidate = require(candidate, "physical candidate")?;
+            let lowered = planner::lower_duckdb(&bound, planner::SelectedPlan { candidate })?;
+            ctx.set_query_plan(QueryPlan::DuckDb {
+                bound,
+                candidate: None,
+            });
+            lowered
+        }
+    };
     ctx.set_node(lowered.ast);
     ctx.set_lowered_metadata(lowered.metadata);
     Ok(())
@@ -323,8 +362,10 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let mut node = require(ctx.take_node(), "node")?;
-    if let Node::Query(query) = &mut node {
-        for requirement in &query_plan.scope_requirements {
+    if let Node::Query(query) = &mut node
+        && let QueryPlan::ClickHouse { scope_requirements, .. } = &query_plan
+    {
+        for requirement in scope_requirements {
             let guard = crate::scope::resolved_scope_guard(requirement);
             query.where_clause = Some(match query.where_clause.take() {
                 Some(existing) => crate::ast::Expr::and(existing, guard),
@@ -350,10 +391,10 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::QueryDataModel,
 {
-    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
+    let mut metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model())?;
+    enforce::enforce_role_scans(&mut node, &input, &mut metadata, ctx.data_model())?;
     let result_context =
         enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
     ctx.set_node(node);
@@ -437,14 +478,14 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
         derived.enable_materialized_cte = q.ctes.iter().any(|c| c.materialized);
         derived.optimize_move_to_prewhere_if_final =
             scans_final(q) || q.ctes.iter().any(|c| scans_final(&c.query));
-        if !q.ctes.is_empty() {
+        if !q.ctes.is_empty() || contains_in_select(q) {
             derived.use_index_for_in_with_subqueries_max_values =
                 Some(IN_SUBQUERY_INDEX_MAX_VALUES);
         }
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    if query_plan.hops.len() >= 3 {
+    if query_plan.hop_count() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
@@ -469,6 +510,26 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn scans_final(q: &Query) -> bool {
     matches!(q.from, TableRef::Scan { final_: true, .. })
+}
+
+fn contains_in_select(query: &Query) -> bool {
+    fn expression_has_in_select(expression: &crate::ast::Expr) -> bool {
+        match expression {
+            crate::ast::Expr::InSelect { .. } => true,
+            crate::ast::Expr::BinaryOp { left, right, .. } => {
+                expression_has_in_select(left) || expression_has_in_select(right)
+            }
+            crate::ast::Expr::UnaryOp { expr, .. } => expression_has_in_select(expr),
+            crate::ast::Expr::FuncCall { args, .. } => args.iter().any(expression_has_in_select),
+            crate::ast::Expr::Lambda { body, .. } => expression_has_in_select(body),
+            _ => false,
+        }
+    }
+
+    query
+        .where_clause
+        .as_ref()
+        .is_some_and(expression_has_in_select)
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {

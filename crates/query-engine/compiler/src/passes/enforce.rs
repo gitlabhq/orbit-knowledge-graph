@@ -12,7 +12,7 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
-use crate::passes::lower::LoweredMetadata;
+use crate::passes::planner::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::EntityAuthConfig;
@@ -213,7 +213,7 @@ fn enforce_lowered_return_with(
 pub fn enforce_role_scans(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &mut LoweredMetadata,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
@@ -238,7 +238,10 @@ pub fn enforce_role_scans(
         let table = model.entity_table(entity).ok_or_else(|| {
             QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
         })?;
-        let role_alias = format!("_role_{}", input_node.id);
+        let role_alias = metadata.aliases.generated(
+            &format!("_role_{}", input_node.id),
+            format!("role:{}", input_node.id),
+        );
         let scan = TableRef::scan_final(table, &role_alias);
         let on = Expr::eq(
             Expr::col(source_alias, source_column),

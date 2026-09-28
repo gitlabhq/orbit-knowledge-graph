@@ -10,3 +10,11 @@ fn query_scenario_fixtures_parse() {
         "/tests/server/data_correctness/scenarios"
     ));
 }
+
+#[test]
+fn plan_shape_scenarios() {
+    integration_testkit::plan_shape::run_dir(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/compiler/plan_shape"
+    ));
+}

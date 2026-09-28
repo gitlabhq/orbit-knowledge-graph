@@ -1,0 +1,6 @@
+name: "A pinned node id is a predicate on the edge column; the node table is not joined"
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
+expect:
+  - (Filter ..., e0.source_id = 1 (Scan gl_edge AS e0))
+reject:
+  - (Scan gl_merge_request ...)

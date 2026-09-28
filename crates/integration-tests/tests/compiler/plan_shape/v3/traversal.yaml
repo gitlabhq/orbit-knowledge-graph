@@ -1,0 +1,21 @@
+name: "relational traversal is shared by ClickHouse and DuckDB physical plans"
+input: {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"callee","entity":"Definition","columns":["name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":10}
+logical:
+  expect:
+    - (Limit 11 (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, ... (_)))
+    - (EdgeScan CALLS caller->callee AS e0)
+    - (NodeScan Definition AS caller)
+    - (NodeScan Definition AS callee)
+physical:
+  clickhouse:
+    expect:
+      - (Scan EdgeTables(gl_code_edge) AS e0)
+      - (Scan Table(gl_definition) AS caller)
+      - (Scan Table(gl_definition) AS callee)
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e0)
+      - (Scan Table(gl_definition) AS caller)
+      - (Scan Table(gl_definition) AS callee)
+    reject:
+      - (Deduplicate ...)

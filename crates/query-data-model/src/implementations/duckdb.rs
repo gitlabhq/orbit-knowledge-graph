@@ -14,6 +14,22 @@ pub struct DuckDbEntityLayout {
     pub has_traversal_path: bool,
 }
 
+impl DuckDbEntityLayout {
+    pub fn columns<'a>(
+        &'a self,
+        graph: &'a GraphCatalog,
+        catalog: &'a DuckDbCatalog,
+        entity: EntityId,
+    ) -> impl Iterator<Item = &'a str> {
+        graph
+            .entity(entity)
+            .properties
+            .iter()
+            .filter_map(|property| catalog.property_facts.get(property.index()))
+            .filter_map(|facts| facts.column.as_deref())
+    }
+}
+
 #[derive(Debug)]
 pub struct DuckDbCatalog {
     edge_table: String,

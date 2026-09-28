@@ -4065,6 +4065,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rustls",
  "serde",
+ "serde-saphyr 1.1.0",
  "serde_json",
  "sqlparser",
  "testcontainers",

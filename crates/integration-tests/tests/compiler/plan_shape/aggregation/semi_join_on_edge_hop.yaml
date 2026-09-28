@@ -1,0 +1,9 @@
+name: "Filtered unread node on an edge hop is a semi-join on the edge column"
+# The IN_PROJECT hop is FK-backed but the chain is mixed, so both hops stay
+# edge scans (FK elision is all-or-nothing per chain).
+input: {"query_type":"aggregation","nodes":[{"id":"n","entity":"Note"},{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"name":"gitlab-org"}}],"relationships":[{"type":"IN_PROJECT","from":"n","to":"p"},{"type":"CONTAINS","from":"g","to":"p"}],"group_by":["p"],"aggregations":[{"count":"n","as":"note_count"}],"limit":10}
+expect:
+  - (SemiJoin e1.source_id IN g.id (_) (Filter g.name = ?, !deleted(g) (Scan gl_group AS g FINAL)))
+  - (Join ON e0.target_id = e1.target_id (Filter ... (Scan gl_edge AS e0 FINAL)) (Filter ... (Scan gl_edge AS e1 FINAL)))
+reject:
+  - (Scan gl_note ...)

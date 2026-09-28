@@ -64,6 +64,12 @@ impl ClickHouseCatalog {
         self.tables.values()
     }
 
+    pub fn property_has_text_index(&self, id: PropertyId) -> bool {
+        self.property_facts
+            .get(id.index())
+            .is_some_and(|facts| facts.has_text_index)
+    }
+
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
             .iter()

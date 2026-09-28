@@ -1,0 +1,8 @@
+name: "FK relationship: node tables join on the FK column, no edge scan"
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User","node_ids":[1]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
+expect:
+  - (Join ON mr.author_id = u.id (_) (_))
+  - (Scan gl_user AS u FINAL)
+  - (Project 'AUTHORED' AS e0_type, u.id AS e0_src, mr.id AS e0_dst, ... (_))
+reject:
+  - (Scan gl_edge ...)

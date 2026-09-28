@@ -83,6 +83,12 @@ pub struct DenormalizedProperty {
     pub relationships: Vec<RelationshipId>,
 }
 
+impl DenormalizedProperty {
+    pub fn carries(&self, relationship: RelationshipId) -> bool {
+        self.relationships.contains(&relationship)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DenormalizedCatalog {
     properties: HashMap<DenormalizedKey, DenormalizedProperty>,
@@ -95,6 +101,10 @@ impl DenormalizedCatalog {
 
     pub fn property(&self, key: DenormalizedKey) -> Option<&DenormalizedProperty> {
         self.properties.get(&key)
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = (DenormalizedKey, &DenormalizedProperty)> {
+        self.properties.iter().map(|(key, property)| (*key, property))
     }
 }
 

@@ -1,0 +1,9 @@
+name: "Non-FK relationship scans the edge table; filtered node is joined with FINAL"
+input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"bug"}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
+expect:
+  - |
+    (Join ON e0.target_id = label.id
+      (Filter e0.relationship_kind = 'HAS_LABEL', e0.source_kind = 'MergeRequest', e0.target_kind = 'Label', !deleted(e0), ...
+        (Scan gl_edge AS e0))
+      (Filter label.title = ?, !deleted(label)
+        (Scan gl_label AS label FINAL)))

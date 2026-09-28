@@ -1,0 +1,22 @@
+name: "relational aggregation plans are backend-neutral"
+input: {"query_type":"aggregation","nodes":[{"id":"caller","entity":"Definition","filters":{"definition_type":"Function"}},{"id":"callee","entity":"Definition","node_ids":[1]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"group_by":["caller.definition_type"],"aggregations":[{"count":"caller","as":"n"}],"limit":10}
+logical:
+  expect:
+    - (Aggregate group caller.definition_type AS caller_definition_type, COUNT() AS n (_))
+    - (EdgeScan CALLS caller->callee AS e0)
+    - (NodeScan Definition AS caller)
+    - (NodeScan Definition AS callee)
+  reject:
+    - (Scan Table...)
+    - (Deduplicate ...)
+physical:
+  clickhouse:
+    expect:
+      - (Scan EdgeTables(gl_code_edge) AS e0)
+      - (Scan Table(gl_definition) AS caller)
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e0)
+      - (Scan Table(gl_definition) AS caller)
+    reject:
+      - (Deduplicate ...)

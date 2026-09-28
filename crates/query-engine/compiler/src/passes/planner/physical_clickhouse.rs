@@ -1,0 +1,1004 @@
+use super::*;
+use crate::error::Result;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
+
+pub fn plan_clickhouse(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    logical: LogicalPlan,
+) -> Result<PlanningResult<ClickHouse>> {
+    let catalog = clickhouse_catalog(bound);
+    let mut plan = map_clickhouse(bound, &logical.root, &catalog, false);
+    if bound.input.query_type == crate::input::QueryType::Aggregation
+        && bound.input.relationships.len() > 1
+    {
+        plan = deduplicate_edges(plan, bound);
+    }
+    let ordinary = clickhouse_candidate(bound, plan);
+    if bound.input.query_type == crate::input::QueryType::Aggregation
+        && catalog.facts.edge_properties.len() == 1
+        && bound.input.relationships.len() > 1
+    {
+        let edge_property = edge_property_candidate(&catalog, ordinary);
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan {
+                candidate: edge_property,
+            },
+        });
+    }
+    let mut candidates = CandidateSet::default();
+    candidates.insert(ordinary.clone());
+    if let Some(candidate) = foreign_key_candidate(&catalog, ordinary.clone()) {
+        candidates.insert(candidate);
+    }
+    let edge_property = edge_property_candidate(&catalog, ordinary);
+    let edge_count = bound
+        .relations
+        .values()
+        .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
+        .count();
+    if !catalog.facts.edge_properties.is_empty() && catalog.facts.foreign_keys.len() != edge_count {
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan {
+                candidate: edge_property,
+            },
+        });
+    }
+    candidates.insert(edge_property);
+    for access in &catalog.facts.denormalized_joins {
+        candidates.insert(denormalized_join_candidate(&catalog, &logical, access));
+    }
+    Ok(PlanningResult {
+        logical,
+        selected: candidates.select().unwrap(),
+    })
+}
+
+fn deduplicate_edges(
+    mut plan: Plan<ClickHouse>,
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> Plan<ClickHouse> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| deduplicate_edges(input, bound))
+        .collect();
+    let Operator::Scan(scan) = &plan.operator else {
+        return plan;
+    };
+    if matches!(
+        bound.relation(scan.relation).origin,
+        RelationOrigin::Edge { .. }
+    ) {
+        Plan::unary(
+            Operator::CurrentRows {
+                keys: vec![],
+                strategy: ClickHouseCurrentRows::Final,
+            },
+            plan,
+        )
+    } else {
+        plan
+    }
+}
+
+fn denormalized_join_candidate(
+    catalog: &BackendCatalog<'_, ClickHouse>,
+    logical: &LogicalPlan,
+    access: &DenormalizedAccess,
+) -> Candidate<ClickHouse> {
+    let mapped = map_clickhouse(catalog.bound, &logical.root, catalog, false);
+    let mut candidate =
+        clickhouse_candidate(catalog.bound, replace_with_denormalized(mapped, access));
+    candidate.columns.columns = access
+        .columns
+        .keys()
+        .copied()
+        .map(|column| (column, Expr::Column(column)))
+        .collect();
+    candidate.cost = plan_cost(&candidate.plan);
+    candidate
+}
+
+fn replace_with_denormalized(
+    mut plan: Plan<ClickHouse>,
+    access: &DenormalizedAccess,
+) -> Plan<ClickHouse> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| replace_with_denormalized(input, access))
+        .collect();
+    if matches!(plan.operator, Operator::Join(_)) {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.replace_inputs(
+            |input| {
+                input
+                    .relation()
+                    .is_some_and(|relation| access.relations.contains(&relation))
+            },
+            Plan::leaf(Operator::Scan(PhysicalScan {
+                relation: access.scan_relation,
+                access: ClickHouseAccess::DenormalizedJoin(access.clone()),
+                columns: access.columns.keys().copied().collect(),
+            })),
+        );
+        return join.finish();
+    }
+    plan
+}
+
+fn edge_property_candidate(
+    catalog: &BackendCatalog<'_, ClickHouse>,
+    mut candidate: Candidate<ClickHouse>,
+) -> Candidate<ClickHouse> {
+    let mut predicates: BTreeMap<RelationId, Vec<Expr>> = BTreeMap::new();
+    for access in &catalog.facts.edge_properties {
+        predicates
+            .entry(access.edge)
+            .or_default()
+            .push(Expr::ListContains {
+                list: Box::new(Expr::Column(access.column)),
+                values: access.tokens.clone(),
+            });
+    }
+    if predicates.len() > 1 {
+        let selected: BTreeSet<_> = catalog
+            .facts
+            .edge_properties
+            .iter()
+            .map(|access| access.edge)
+            .collect();
+        predicates.retain(|relation, _| selected.contains(relation));
+    }
+    if predicates.is_empty() {
+        return candidate;
+    }
+    let physical_columns: BTreeMap<_, _> = catalog
+        .facts
+        .edge_properties
+        .iter()
+        .map(|access| (access.column, access.edge_column.clone()))
+        .collect();
+    candidate.plan = inject_edge_predicates(candidate.plan, &predicates, &physical_columns);
+    candidate.cost = plan_cost(&candidate.plan);
+    candidate.cost.residual_filters = candidate.cost.residual_filters.saturating_sub(2);
+    candidate
+}
+
+fn inject_edge_predicates(
+    mut plan: Plan<ClickHouse>,
+    predicates: &BTreeMap<RelationId, Vec<Expr>>,
+    physical_columns: &BTreeMap<ColumnId, PhysicalColumn>,
+) -> Plan<ClickHouse> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| inject_edge_predicates(input, predicates, physical_columns))
+        .collect();
+    let Operator::Scan(scan) = &mut plan.operator else {
+        return plan;
+    };
+    let Some(predicates) = predicates.get(&scan.relation) else {
+        return plan;
+    };
+    scan.columns
+        .extend(predicates.iter().flat_map(Expr::columns));
+    if let ClickHouseAccess::EdgeTables(access) = &mut scan.access {
+        access
+            .columns
+            .extend(scan.columns.iter().filter_map(|column| {
+                physical_columns
+                    .get(column)
+                    .map(|name| (*column, name.clone()))
+            }));
+    }
+    Plan::unary(
+        Operator::Filter(if predicates.len() == 1 {
+            predicates[0].clone()
+        } else {
+            Expr::And(predicates.clone())
+        }),
+        plan,
+    )
+}
+
+fn foreign_key_candidate(
+    catalog: &BackendCatalog<'_, ClickHouse>,
+    mut candidate: Candidate<ClickHouse>,
+) -> Option<Candidate<ClickHouse>> {
+    let bound = catalog.bound;
+    let mut required = BTreeSet::new();
+    candidate.plan.visit(&mut |plan| {
+        if let Operator::Scan(scan) = &plan.operator
+            && matches!(
+                bound.relation(scan.relation).origin,
+                RelationOrigin::Edge { input: Some(_), .. }
+            )
+        {
+            required.insert(scan.relation);
+        }
+    });
+    let available: BTreeSet<_> = catalog
+        .facts
+        .foreign_keys
+        .iter()
+        .map(|access| access.relationship)
+        .collect();
+    if required.is_empty() || !required.is_subset(&available) {
+        return None;
+    }
+    let mut substitutions = BTreeMap::new();
+    let mut relationships = BTreeSet::new();
+    let mut join_conditions = Vec::new();
+    for access in catalog
+        .facts
+        .foreign_keys
+        .iter()
+        .filter(|access| required.contains(&access.relationship))
+    {
+        let holder_column = bound.column_id(access.holder, &access.column.0)?;
+        let referenced_column = bound.column_id(access.referenced, DEFAULT_PRIMARY_KEY)?;
+        join_conditions.push(Expr::from(holder_column).eq(referenced_column));
+        substitutions.extend(access.substitutions.clone());
+        relationships.insert(access.relationship);
+    }
+    if relationships.is_empty() {
+        return None;
+    }
+    candidate.plan = rewrite_fk_plan(
+        candidate.plan,
+        &relationships,
+        &join_conditions,
+        &substitutions,
+    );
+    candidate.columns.columns.extend(substitutions.clone());
+    candidate.outputs.nodes = candidate
+        .outputs
+        .nodes
+        .into_iter()
+        .map(|(node, mut output)| {
+            if let Some(Expr::Column(column)) = substitutions.get(&output.primary_key) {
+                output.primary_key = *column;
+                output.relation = bound.column(*column).relation;
+            }
+            (node, output)
+        })
+        .collect();
+    candidate.cost = plan_cost(&candidate.plan);
+    Some(candidate)
+}
+
+fn rewrite_fk_plan(
+    mut plan: Plan<ClickHouse>,
+    relationships: &BTreeSet<RelationId>,
+    join_conditions: &[Expr],
+    substitutions: &BTreeMap<ColumnId, Expr>,
+) -> Plan<ClickHouse> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| rewrite_fk_plan(input, relationships, join_conditions, substitutions))
+        .collect();
+    let is_join = matches!(plan.operator, Operator::Join(_));
+    let mut plan = if is_join {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.retain_inputs(|input| {
+            input
+                .relation()
+                .is_none_or(|relation| !relationships.contains(&relation))
+        });
+        join.add_conditions(join_conditions.iter().cloned());
+        join.retain_conditions(|condition| !tautology(condition));
+        join.finish()
+    } else {
+        plan
+    };
+    plan = plan.map_expressions(&mut |expression| match expression {
+        Expr::Column(column) => substitutions
+            .get(&column)
+            .cloned()
+            .unwrap_or(Expr::Column(column)),
+        expression => expression,
+    });
+    if matches!(plan.operator, Operator::Join(_)) {
+        let mut join = JoinEditor::new(plan).unwrap();
+        join.retain_conditions(|condition| !tautology(condition));
+        plan = join.finish();
+    }
+    plan
+}
+
+fn tautology(expression: &Expr) -> bool {
+    matches!(expression, Expr::Compare { op: CompareOp::Eq, left, right } if left == right)
+}
+
+fn node_relation(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    name: &str,
+) -> Option<RelationId> {
+    bound.node_relation(name)
+}
+
+fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
+    let mut cost = Cost::default();
+    plan.visit(&mut |plan| match &plan.operator {
+        Operator::Scan(scan) => {
+            cost.scans += 1;
+            cost.columns_read += scan.column_count() as u32;
+        }
+        Operator::CurrentRows { strategy, .. } => {
+            if *strategy == ClickHouseCurrentRows::Final {
+                cost.final_reads += 1;
+            }
+        }
+        Operator::Join(_) => cost.joins += 1,
+        Operator::SemiJoin(_) => cost.semi_joins += 1,
+        Operator::Union => cost.union_arms += plan.inputs.len().saturating_sub(1) as u32,
+        Operator::Filter(_) => cost.residual_filters += 1,
+        _ => {}
+    });
+    cost
+}
+
+fn clickhouse_catalog(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> BackendCatalog<'_, ClickHouse> {
+    let relations = physical_relations(bound);
+    let mut next_column = bound
+        .columns
+        .keys()
+        .map(|column| column.0)
+        .max()
+        .unwrap_or_default()
+        + 1;
+    let access_paths = relations
+        .iter()
+        .map(|(relation, physical)| {
+            let (access, physical_columns) = match physical {
+                PhysicalRelation::Node { layout, .. } => (
+                    ClickHouseAccess::Table(TableAccess {
+                        layout: layout.clone(),
+                    }),
+                    BTreeMap::new(),
+                ),
+                PhysicalRelation::Edge { layouts, .. } => {
+                    let columns: BTreeMap<_, _> = layouts
+                        .iter()
+                        .flat_map(|layout| &layout.columns)
+                        .filter(|physical| bound.column_id(*relation, &physical.0).is_none())
+                        .map(|physical| {
+                            let column = ColumnId(next_column);
+                            next_column += 1;
+                            (column, physical.clone())
+                        })
+                        .collect();
+                    (
+                        ClickHouseAccess::EdgeTables(EdgeTableAccess {
+                            layouts: layouts.clone(),
+                            columns: columns.clone(),
+                        }),
+                        columns,
+                    )
+                }
+            };
+            let mut columns = candidate::relation_columns(bound, *relation);
+            columns.extend(physical_columns.keys());
+            (
+                *relation,
+                vec![PhysicalScan {
+                    relation: *relation,
+                    access,
+                    columns,
+                }],
+            )
+        })
+        .collect();
+    let facts = clickhouse_facts(bound, &access_paths);
+    BackendCatalog {
+        bound,
+        relations,
+        access_paths,
+        current_rows: bound
+            .relations
+            .keys()
+            .map(|relation| {
+                (
+                    *relation,
+                    vec![ClickHouseCurrentRows::Final, ClickHouseCurrentRows::LimitBy],
+                )
+            })
+            .collect(),
+        facts,
+    }
+}
+
+fn physical_relations(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> BTreeMap<RelationId, PhysicalRelation> {
+    bound
+        .relations
+        .iter()
+        .map(|(relation, metadata)| {
+            let physical = match metadata.origin {
+                RelationOrigin::Node { .. } => PhysicalRelation::Node {
+                    relation: *relation,
+                    layout: node_layout(bound, *relation),
+                },
+                RelationOrigin::Edge { .. } => PhysicalRelation::Edge {
+                    relation: *relation,
+                    layouts: edge_layouts(bound, metadata),
+                },
+            };
+            (*relation, physical)
+        })
+        .collect()
+}
+
+fn clickhouse_facts(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
+) -> ClickHouseFacts {
+    ClickHouseFacts {
+        foreign_keys: foreign_key_facts(bound),
+        denormalized_joins: denormalized_join_facts(bound),
+        edge_properties: edge_property_facts(bound, access_paths),
+        text_indexes: text_index_facts(bound),
+    }
+}
+
+fn foreign_key_facts(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> Vec<ForeignKeyAccess> {
+    bound
+        .relations
+        .iter()
+        .filter_map(|(relationship, metadata)| {
+            let RelationOrigin::Edge {
+                input: Some(input),
+                depth,
+                ..
+            } = metadata.origin
+            else {
+                return None;
+            };
+            let edge = &bound.input.relationships[input.0];
+            if depth.is_some_and(|depth| depth > 1)
+                || !edge.filters.is_empty()
+                || edge.direction == crate::input::Direction::Both
+            {
+                return None;
+            }
+            let (source_name, target_name) = physical_endpoints(edge)?;
+            let source = node_relation(bound, source_name)?;
+            let target = node_relation(bound, target_name)?;
+            let source_entity = bound
+                .input
+                .nodes
+                .iter()
+                .find(|node| node.id == source_name)
+                .and_then(|node| node.entity.as_deref())?;
+            let target_entity = bound
+                .input
+                .nodes
+                .iter()
+                .find(|node| node.id == target_name)
+                .and_then(|node| node.entity.as_deref())?;
+            let source_entity_id = bound.model.graph().entity_id(source_entity)?;
+            let target_entity_id = bound.model.graph().entity_id(target_entity)?;
+            let relationship_ids: Vec<_> = edge
+                .types
+                .iter()
+                .filter_map(|kind| bound.model.graph().relationship_id(kind))
+                .collect();
+            let foreign_key = bound.model.query_backend().foreign_key(
+                bound.model.graph(),
+                &relationship_ids,
+                source_entity_id,
+                target_entity_id,
+            )?;
+            let column = bound.model.property_column(foreign_key.property)?;
+            let source_holds_key = foreign_key.holder == source_entity_id;
+            let (holder, referenced) = if source_holds_key {
+                (source, target)
+            } else {
+                (target, source)
+            };
+            let source_id = bound.column_id(source, DEFAULT_PRIMARY_KEY)?;
+            let target_id = bound.column_id(target, DEFAULT_PRIMARY_KEY)?;
+            let substitutions = [
+                (
+                    ontology::constants::SOURCE_ID_COLUMN,
+                    Expr::Column(source_id),
+                ),
+                (
+                    ontology::constants::TARGET_ID_COLUMN,
+                    Expr::Column(target_id),
+                ),
+                (
+                    ontology::constants::SOURCE_KIND_COLUMN,
+                    Expr::Literal(Value::String(source_entity.into())),
+                ),
+                (
+                    ontology::constants::TARGET_KIND_COLUMN,
+                    Expr::Literal(Value::String(target_entity.into())),
+                ),
+                (
+                    ontology::constants::RELATIONSHIP_KIND_COLUMN,
+                    Expr::Literal(Value::String(edge.types.first()?.clone())),
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(name, expression)| {
+                bound
+                    .column_id(*relationship, name)
+                    .map(|column| (column, expression))
+            })
+            .collect();
+            Some(ForeignKeyAccess {
+                relationship: *relationship,
+                holder,
+                referenced,
+                column: PhysicalColumn(column.into()),
+                substitutions,
+            })
+        })
+        .collect()
+}
+
+fn text_index_facts(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> Vec<TextIndexAccess> {
+    bound
+        .columns
+        .iter()
+        .filter_map(|(column, metadata)| {
+            let RelationOrigin::Node { entity, .. } = bound.relation(metadata.relation).origin else {
+                return None;
+            };
+            let property = bound.model.graph().property_id(entity, &metadata.name)?;
+            bound.model.has_text_index(property).then(|| TextIndexAccess {
+                column: *column,
+                tokenizer: Tokenizer(String::new()),
+            })
+        })
+        .collect()
+}
+
+fn edge_property_facts(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
+) -> Vec<EdgePropertyAccess> {
+    let mut facts = Vec::new();
+    for (edge_relation, metadata) in bound.relations() {
+        let RelationOrigin::Edge {
+            input: Some(edge_input),
+            ..
+        } = metadata.origin
+        else {
+            continue;
+        };
+        let edge = &bound.input.relationships[edge_input.0];
+        let Some((source, target)) = physical_endpoints(edge) else {
+            continue;
+        };
+        for (node_name, direction) in [
+            (source, query_data_model::DenormalizedDirection::Source),
+            (target, query_data_model::DenormalizedDirection::Target),
+        ] {
+            let Some(node) = bound.input.nodes.iter().find(|node| node.id == node_name) else {
+                continue;
+            };
+            let Some(entity) = node.entity.as_deref() else {
+                continue;
+            };
+            let Some(node_relation) = node_relation(bound, node_name) else {
+                continue;
+            };
+            for (property, filters) in &node.filters {
+                if !filters
+                    .iter()
+                    .all(|filter| matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In)))
+                {
+                    continue;
+                }
+                let Some(entity_id) = bound.model.graph().entity_id(entity) else {
+                    continue;
+                };
+                let Some(property_id) = bound.model.graph().property_id(entity_id, property) else {
+                    continue;
+                };
+                let Some(definition) = bound.model.denormalized().property(
+                    query_data_model::DenormalizedKey { property: property_id, direction },
+                )
+                else {
+                    continue;
+                };
+                if !definition.relationships.iter().any(|relationship| {
+                    edge.types.iter().any(|kind| {
+                        bound.model.graph().relationship_id(kind) == Some(*relationship)
+                    })
+                }) {
+                    continue;
+                }
+                let Some(source) = bound.column_id(node_relation, property) else {
+                    continue;
+                };
+                let Some(edge_columns) = access_paths[&edge_relation][0].access.edge_columns()
+                else {
+                    continue;
+                };
+                let Some(column) = edge_columns.iter().find_map(|(column, physical)| {
+                    (physical.0 == definition.edge_column).then_some(*column)
+                }) else {
+                    continue;
+                };
+                for filter in filters {
+                    let values: Vec<_> = match filter.value.as_ref() {
+                        Some(serde_json::Value::Array(values)) => values.iter().collect(),
+                        Some(value) => vec![value],
+                        None => continue,
+                    };
+                    facts.push(EdgePropertyAccess {
+                        edge: edge_relation,
+                        source,
+                        column,
+                        edge_column: PhysicalColumn(definition.edge_column.clone()),
+                        tokens: values
+                            .into_iter()
+                            .map(|value| {
+                                let value = value
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| value.to_string());
+                                Value::String(format!("{}:{value}", definition.tag_key))
+                            })
+                            .collect(),
+                    });
+                }
+            }
+        }
+    }
+    facts
+}
+
+fn denormalized_join_facts(
+    _bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> Vec<DenormalizedAccess> {
+    Vec::new()
+}
+
+fn physical_endpoints(relationship: &crate::input::InputRelationship) -> Option<(&str, &str)> {
+    match relationship.direction {
+        crate::input::Direction::Outgoing => Some((&relationship.from, &relationship.to)),
+        crate::input::Direction::Incoming => Some((&relationship.to, &relationship.from)),
+        crate::input::Direction::Both => None,
+    }
+}
+
+fn node_layout(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    relation: RelationId,
+) -> TableLayout {
+    let RelationOrigin::Node { entity, .. } = bound.relation(relation).origin else {
+        unreachable!()
+    };
+    let table = bound.model.query_backend().entity_table(entity).unwrap_or_default();
+    table_layout(bound, table)
+}
+
+fn edge_layouts(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    relation: &BoundRelation,
+) -> Vec<TableLayout> {
+    let RelationOrigin::Edge { relationships, .. } = &relation.origin else {
+        unreachable!()
+    };
+    let tables = if relationships.is_empty()
+        || relationships
+            .iter()
+            .any(|kind| bound.relationship_name(*kind) == "*")
+    {
+        QueryBackendCatalog::edge_tables(bound.model.query_backend(), &[])
+    } else {
+        QueryBackendCatalog::edge_tables(bound.model.query_backend(), relationships)
+    };
+    tables
+        .into_iter()
+        .map(|table| table_layout(bound, &table))
+        .collect()
+}
+
+fn table_layout(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    table: &str,
+) -> TableLayout {
+    let layout = bound.model.backend().table(table).unwrap();
+    TableLayout {
+        table: TableName(table.into()),
+        columns: layout.columns.iter().cloned().map(PhysicalColumn).collect(),
+        sort_key: layout.sort_key.iter().cloned().map(PhysicalColumn).collect(),
+        global: layout.entity.is_some_and(|entity| bound.model.query_backend().entity_is_global(entity)),
+    }
+}
+
+fn map_clickhouse(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    logical: &Plan<Logical>,
+    catalog: &BackendCatalog<'_, ClickHouse>,
+    suppress_current_rows: bool,
+) -> Plan<ClickHouse> {
+    let explicit_current_rows = matches!(logical.operator, Operator::CurrentRows { .. });
+    let inputs = logical
+        .inputs
+        .iter()
+        .map(|input| {
+            map_clickhouse(
+                bound,
+                input,
+                catalog,
+                suppress_current_rows || explicit_current_rows,
+            )
+        })
+        .collect();
+    let operator = match &logical.operator {
+        Operator::Scan(scan) => Operator::Scan(catalog.access_paths[&scan.relation][0].clone()),
+        Operator::Filter(expression) => Operator::Filter(expression.clone()),
+        Operator::Project(columns) => Operator::Project(columns.clone()),
+        Operator::Join(conditions) => Operator::Join(conditions.clone()),
+        Operator::SemiJoin(condition) => Operator::SemiJoin(condition.clone()),
+        Operator::Aggregate { groups, metrics } => Operator::Aggregate {
+            groups: groups.clone(),
+            metrics: metrics.clone(),
+        },
+        Operator::Union => Operator::Union,
+        Operator::Bind(relation) => Operator::Bind(*relation),
+        Operator::Sort(keys) => Operator::Sort(keys.clone()),
+        Operator::Limit(limit) => Operator::Limit(*limit),
+        Operator::CurrentRows { keys, .. } => {
+            let relation = logical.inputs.first().and_then(Plan::relation).unwrap();
+            let strategy = catalog.current_rows[&relation]
+                .iter()
+                .find(|strategy| **strategy == ClickHouseCurrentRows::LimitBy)
+                .copied()
+                .unwrap();
+            Operator::CurrentRows {
+                keys: keys.clone(),
+                strategy,
+            }
+        }
+        _ => unreachable!("ordinary traversal operator"),
+    };
+    let plan = Plan { operator, inputs };
+    if let Operator::Scan(scan) = &plan.operator
+        && !suppress_current_rows
+        && matches!(
+            bound.relation(scan.relation).origin,
+            RelationOrigin::Node { .. }
+        )
+        && catalog.current_rows[&scan.relation].contains(&ClickHouseCurrentRows::Final)
+    {
+        let keys = sort_keys(
+            bound,
+            scan.relation,
+            match &scan.access {
+                ClickHouseAccess::Table(access) => &access.layout,
+                _ => unreachable!(),
+            },
+        );
+        Plan::unary(
+            Operator::CurrentRows {
+                keys,
+                strategy: ClickHouseCurrentRows::Final,
+            },
+            plan,
+        )
+    } else {
+        plan
+    }
+}
+
+fn sort_keys(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    relation: RelationId,
+    layout: &TableLayout,
+) -> Vec<Expr> {
+    layout
+        .sort_key
+        .iter()
+        .filter_map(|name| bound.column_id(relation, &name.0).map(Expr::Column))
+        .collect()
+}
+
+fn clickhouse_candidate(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    plan: Plan<ClickHouse>,
+) -> Candidate<ClickHouse> {
+    let cost = plan_cost(&plan);
+    candidate::build(bound, plan, cost)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::{Direction, InputNode, InputRelationship, QueryType};
+
+    #[test]
+    fn plans_one_hop_for_clickhouse() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    node_ids: vec![1],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "u".into(),
+                to: "mr".into(),
+                hops: Default::default(),
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User", "MergeRequest"])
+            .with_edges(["AUTHORED"]);
+        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let (bound, logical) = bind(input, model).unwrap();
+        assert_eq!(
+            plan_clickhouse(&bound, logical)
+                .unwrap()
+                .selected
+                .candidate
+                .cost
+                .scans,
+            3
+        );
+    }
+
+    #[test]
+    fn builds_clickhouse_catalog_from_stable_ids() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "u".into(),
+                to: "mr".into(),
+                hops: Default::default(),
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        let ontology = ontology::Ontology::new()
+            .with_nodes(["User", "MergeRequest"])
+            .with_edges(["AUTHORED"]);
+        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let (bound, _) = bind(input, model).unwrap();
+
+        let clickhouse = clickhouse_catalog(&bound);
+
+        assert_eq!(clickhouse.relations.len(), bound.relations.len());
+        assert_eq!(clickhouse.access_paths.len(), bound.relations.len());
+        assert_eq!(clickhouse.current_rows.len(), bound.relations.len());
+        assert!(
+            clickhouse
+                .access_paths
+                .iter()
+                .all(|(relation, paths)| { paths.len() == 1 && paths[0].relation == *relation })
+        );
+    }
+
+    #[test]
+    fn incoming_fk_facts_follow_physical_edge_direction() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "note".into(),
+                    entity: Some("Note".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "author".into(),
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "note".into(),
+                to: "author".into(),
+                hops: Default::default(),
+                direction: Direction::Incoming,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let (bound, _) = bind(input, model).unwrap();
+        let catalog = clickhouse_catalog(&bound);
+        let access = &catalog.facts.foreign_keys[0];
+        let edge = bound
+            .relations
+            .iter()
+            .find_map(|(relation, metadata)| {
+                matches!(metadata.origin, RelationOrigin::Edge { .. }).then_some(*relation)
+            })
+            .unwrap();
+        let source = node_relation(&bound, "author").unwrap();
+        let target = node_relation(&bound, "note").unwrap();
+        let source_id = bound.column_ids[&ColumnKey {
+            relation: source,
+            name: DEFAULT_PRIMARY_KEY.into(),
+        }];
+        let target_id = bound.column_ids[&ColumnKey {
+            relation: target,
+            name: DEFAULT_PRIMARY_KEY.into(),
+        }];
+        let edge_source = bound.column_ids[&ColumnKey {
+            relation: edge,
+            name: ontology::constants::SOURCE_ID_COLUMN.into(),
+        }];
+        let edge_target = bound.column_ids[&ColumnKey {
+            relation: edge,
+            name: ontology::constants::TARGET_ID_COLUMN.into(),
+        }];
+
+        assert_eq!(access.substitutions[&edge_source], Expr::Column(source_id));
+        assert_eq!(access.substitutions[&edge_target], Expr::Column(target_id));
+    }
+
+    #[test]
+    fn candidate_set_keeps_the_cheapest_plan_per_property_key() {
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "u".into(),
+                entity: Some("User".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ontology = ontology::Ontology::new().with_nodes(["User"]);
+        let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
+        let (bound, logical) = bind(input, model).unwrap();
+        let catalog = clickhouse_catalog(&bound);
+        let plan = map_clickhouse(&bound, &logical.root, &catalog, false);
+        let cheaper = clickhouse_candidate(&bound, plan.clone());
+        let mut expensive = clickhouse_candidate(&bound, plan);
+        expensive.cost.scans += 1;
+        let mut candidates = CandidateSet::default();
+
+        candidates.insert(expensive);
+        candidates.insert(cheaper.clone());
+
+        assert_eq!(candidates.candidates.len(), 1);
+        assert_eq!(candidates.select().unwrap().candidate.cost, cheaper.cost);
+    }
+
+}

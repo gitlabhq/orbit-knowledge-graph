@@ -1,0 +1,7 @@
+name: "A filtered node table nothing projects becomes a semi-join"
+input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
+expect:
+  - (SemiJoin e0.target_id IN label.id (...))
+  - (SemiJoin e1.target_id IN p.id (...))
+reject:
+  - (Join ON e0.target_id = label.id (...))

@@ -1,0 +1,5 @@
+name: "Variable-length 1..3: three depth arms in one union"
+input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
+expect:
+  - (Union AS e0 (Project ..., 1 AS depth, ... (_)) (Project ..., 2 AS depth, ... (_)) (Project ..., 3 AS depth, ... (_)))
+  - (Project ..., e0.path_nodes AS hop_e0_path_nodes, ... (_))
