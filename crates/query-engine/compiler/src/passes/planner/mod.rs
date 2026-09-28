@@ -265,7 +265,6 @@ pub trait Flavor: Debug + Clone + Copy + PartialEq + Eq + 'static {
     type Scan: Debug + Clone + PartialEq + Eq + ScanRelation;
     type CurrentRows: Debug + Clone + PartialEq + Eq;
     type Extension: Debug + Clone + PartialEq + Eq;
-    type Facts: Debug + Clone + PartialEq + Eq;
 }
 
 pub trait ScanRelation {
@@ -654,7 +653,6 @@ impl Flavor for Logical {
     type Scan = LogicalScan;
     type CurrentRows = ();
     type Extension = ();
-    type Facts = ();
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -787,18 +785,6 @@ pub struct TableLayout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PhysicalRelation {
-    Node {
-        relation: RelationId,
-        layout: TableLayout,
-    },
-    Edge {
-        relation: RelationId,
-        layouts: Vec<TableLayout>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableAccess {
     pub layout: TableLayout,
 }
@@ -879,36 +865,12 @@ impl Flavor for ClickHouse {
     type Scan = PhysicalScan<ClickHouseAccess>;
     type CurrentRows = ClickHouseCurrentRows;
     type Extension = ();
-    type Facts = ClickHouseFacts;
 }
 
 impl Flavor for DuckDb {
     type Scan = PhysicalScan<DuckDbAccess>;
     type CurrentRows = DuckDbCurrentRows;
     type Extension = ();
-    type Facts = DuckDbFacts;
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ClickHouseFacts {
-    pub foreign_keys: Vec<ForeignKeyAccess>,
-    pub edge_properties: Vec<EdgePropertyAccess>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DuckDbFacts;
-
-#[derive(Debug)]
-pub struct BackendCatalog<
-    'catalog,
-    B: Flavor,
-    M: QueryDataModel = query_data_model::ClickHouseDataModel,
-> {
-    pub bound: &'catalog BoundCatalog<M>,
-    pub relations: BTreeMap<RelationId, PhysicalRelation>,
-    pub access_paths: BTreeMap<RelationId, Vec<B::Scan>>,
-    pub current_rows: BTreeMap<RelationId, Vec<B::CurrentRows>>,
-    pub facts: B::Facts,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

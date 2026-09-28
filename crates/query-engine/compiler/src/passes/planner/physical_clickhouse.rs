@@ -2,6 +2,13 @@ use super::*;
 use crate::error::Result;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
+struct ClickHouseCatalog<'a> {
+    bound: &'a BoundCatalog<query_data_model::ClickHouseDataModel>,
+    access_paths: BTreeMap<RelationId, PhysicalScan<ClickHouseAccess>>,
+    foreign_keys: Vec<ForeignKeyAccess>,
+    edge_properties: Vec<EdgePropertyAccess>,
+}
+
 pub fn plan_clickhouse(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
     logical: LogicalPlan,
@@ -15,7 +22,7 @@ pub fn plan_clickhouse(
     }
     let ordinary = clickhouse_candidate(bound, plan);
     if bound.input.query_type == crate::input::QueryType::Aggregation
-        && catalog.facts.edge_properties.len() == 1
+        && catalog.edge_properties.len() == 1
         && bound.input.relationships.len() > 1
     {
         let edge_property = edge_property_candidate(&catalog, ordinary);
@@ -37,7 +44,7 @@ pub fn plan_clickhouse(
         .values()
         .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
         .count();
-    if !catalog.facts.edge_properties.is_empty() && catalog.facts.foreign_keys.len() != edge_count {
+    if !catalog.edge_properties.is_empty() && catalog.foreign_keys.len() != edge_count {
         return Ok(PlanningResult {
             logical,
             selected: SelectedPlan {
@@ -81,11 +88,11 @@ fn deduplicate_edges(
 }
 
 fn edge_property_candidate(
-    catalog: &BackendCatalog<'_, ClickHouse>,
+    catalog: &ClickHouseCatalog<'_>,
     mut candidate: Candidate<ClickHouse>,
 ) -> Candidate<ClickHouse> {
     let mut predicates: BTreeMap<RelationId, Vec<Expr>> = BTreeMap::new();
-    for access in &catalog.facts.edge_properties {
+    for access in &catalog.edge_properties {
         predicates
             .entry(access.edge)
             .or_default()
@@ -96,7 +103,6 @@ fn edge_property_candidate(
     }
     if predicates.len() > 1 {
         let selected: BTreeSet<_> = catalog
-            .facts
             .edge_properties
             .iter()
             .map(|access| access.edge)
@@ -107,7 +113,6 @@ fn edge_property_candidate(
         return candidate;
     }
     let physical_columns: BTreeMap<_, _> = catalog
-        .facts
         .edge_properties
         .iter()
         .map(|access| (access.column, access.edge_column.clone()))
@@ -156,7 +161,7 @@ fn inject_edge_predicates(
 }
 
 fn foreign_key_candidate(
-    catalog: &BackendCatalog<'_, ClickHouse>,
+    catalog: &ClickHouseCatalog<'_>,
     mut candidate: Candidate<ClickHouse>,
 ) -> Option<Candidate<ClickHouse>> {
     let bound = catalog.bound;
@@ -172,7 +177,6 @@ fn foreign_key_candidate(
         }
     });
     let available: BTreeSet<_> = catalog
-        .facts
         .foreign_keys
         .iter()
         .map(|access| access.relationship)
@@ -184,7 +188,6 @@ fn foreign_key_candidate(
     let mut relationships = BTreeSet::new();
     let mut join_conditions = Vec::new();
     for access in catalog
-        .facts
         .foreign_keys
         .iter()
         .filter(|access| required.contains(&access.relationship))
@@ -295,8 +298,7 @@ fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
 
 fn clickhouse_catalog(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-) -> BackendCatalog<'_, ClickHouse> {
-    let relations = physical_relations(bound);
+) -> ClickHouseCatalog<'_> {
     let mut next_column = bound
         .columns
         .keys()
@@ -304,17 +306,19 @@ fn clickhouse_catalog(
         .max()
         .unwrap_or_default()
         + 1;
-    let access_paths = relations
+    let access_paths = bound
+        .relations
         .iter()
-        .map(|(relation, physical)| {
-            let (access, physical_columns) = match physical {
-                PhysicalRelation::Node { layout, .. } => (
+        .map(|(relation, metadata)| {
+            let (access, physical_columns) = match metadata.origin {
+                RelationOrigin::Node { .. } => (
                     ClickHouseAccess::Table(TableAccess {
-                        layout: layout.clone(),
+                        layout: node_layout(bound, *relation),
                     }),
                     BTreeMap::new(),
                 ),
-                PhysicalRelation::Edge { layouts, .. } => {
+                RelationOrigin::Edge { .. } => {
+                    let layouts = edge_layouts(bound, metadata);
                     let columns: BTreeMap<_, _> = layouts
                         .iter()
                         .flat_map(|layout| &layout.columns)
@@ -327,7 +331,7 @@ fn clickhouse_catalog(
                         .collect();
                     (
                         ClickHouseAccess::EdgeTables(EdgeTableAccess {
-                            layouts: layouts.clone(),
+                            layouts,
                             columns: columns.clone(),
                         }),
                         columns,
@@ -338,62 +342,20 @@ fn clickhouse_catalog(
             columns.extend(physical_columns.keys());
             (
                 *relation,
-                vec![PhysicalScan {
+                PhysicalScan {
                     relation: *relation,
                     access,
                     columns,
-                }],
+                },
             )
         })
         .collect();
-    let facts = clickhouse_facts(bound, &access_paths);
-    BackendCatalog {
+    let edge_properties = edge_property_facts(bound, &access_paths);
+    ClickHouseCatalog {
         bound,
-        relations,
         access_paths,
-        current_rows: bound
-            .relations
-            .keys()
-            .map(|relation| {
-                (
-                    *relation,
-                    vec![ClickHouseCurrentRows::Final, ClickHouseCurrentRows::LimitBy],
-                )
-            })
-            .collect(),
-        facts,
-    }
-}
-
-fn physical_relations(
-    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-) -> BTreeMap<RelationId, PhysicalRelation> {
-    bound
-        .relations
-        .iter()
-        .map(|(relation, metadata)| {
-            let physical = match metadata.origin {
-                RelationOrigin::Node { .. } => PhysicalRelation::Node {
-                    relation: *relation,
-                    layout: node_layout(bound, *relation),
-                },
-                RelationOrigin::Edge { .. } => PhysicalRelation::Edge {
-                    relation: *relation,
-                    layouts: edge_layouts(bound, metadata),
-                },
-            };
-            (*relation, physical)
-        })
-        .collect()
-}
-
-fn clickhouse_facts(
-    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
-) -> ClickHouseFacts {
-    ClickHouseFacts {
         foreign_keys: foreign_key_facts(bound),
-        edge_properties: edge_property_facts(bound, access_paths),
+        edge_properties,
     }
 }
 
@@ -498,7 +460,7 @@ fn foreign_key_facts(
 
 fn edge_property_facts(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
-    access_paths: &BTreeMap<RelationId, Vec<PhysicalScan<ClickHouseAccess>>>,
+    access_paths: &BTreeMap<RelationId, PhysicalScan<ClickHouseAccess>>,
 ) -> Vec<EdgePropertyAccess> {
     let mut facts = Vec::new();
     for (edge_relation, metadata) in bound.relations() {
@@ -555,7 +517,7 @@ fn edge_property_facts(
                 let Some(source) = bound.column_id(node_relation, property) else {
                     continue;
                 };
-                let Some(edge_columns) = access_paths[&edge_relation][0].access.edge_columns()
+                let Some(edge_columns) = access_paths[&edge_relation].access.edge_columns()
                 else {
                     continue;
                 };
@@ -650,7 +612,7 @@ fn table_layout(
 fn map_clickhouse(
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
     logical: &Plan<Logical>,
-    catalog: &BackendCatalog<'_, ClickHouse>,
+    catalog: &ClickHouseCatalog<'_>,
     suppress_current_rows: bool,
 ) -> Plan<ClickHouse> {
     let explicit_current_rows = matches!(logical.operator, Operator::CurrentRows { .. });
@@ -667,7 +629,7 @@ fn map_clickhouse(
         })
         .collect();
     let operator = match &logical.operator {
-        Operator::Scan(scan) => Operator::Scan(catalog.access_paths[&scan.relation][0].clone()),
+        Operator::Scan(scan) => Operator::Scan(catalog.access_paths[&scan.relation].clone()),
         Operator::Filter(expression) => Operator::Filter(expression.clone()),
         Operator::Project(columns) => Operator::Project(columns.clone()),
         Operator::Join(conditions) => Operator::Join(conditions.clone()),
@@ -681,15 +643,9 @@ fn map_clickhouse(
         Operator::Sort(keys) => Operator::Sort(keys.clone()),
         Operator::Limit(limit) => Operator::Limit(*limit),
         Operator::CurrentRows { keys, .. } => {
-            let relation = logical.inputs.first().and_then(Plan::relation).unwrap();
-            let strategy = catalog.current_rows[&relation]
-                .iter()
-                .find(|strategy| **strategy == ClickHouseCurrentRows::LimitBy)
-                .copied()
-                .unwrap();
             Operator::CurrentRows {
                 keys: keys.clone(),
-                strategy,
+                strategy: ClickHouseCurrentRows::LimitBy,
             }
         }
         _ => unreachable!("ordinary traversal operator"),
@@ -701,7 +657,6 @@ fn map_clickhouse(
             bound.relation(scan.relation).origin,
             RelationOrigin::Node { .. }
         )
-        && catalog.current_rows[&scan.relation].contains(&ClickHouseCurrentRows::Final)
     {
         let keys = sort_keys(
             bound,
@@ -825,14 +780,12 @@ mod tests {
 
         let clickhouse = clickhouse_catalog(&bound);
 
-        assert_eq!(clickhouse.relations.len(), bound.relations.len());
         assert_eq!(clickhouse.access_paths.len(), bound.relations.len());
-        assert_eq!(clickhouse.current_rows.len(), bound.relations.len());
         assert!(
             clickhouse
                 .access_paths
                 .iter()
-                .all(|(relation, paths)| { paths.len() == 1 && paths[0].relation == *relation })
+                .all(|(relation, path)| path.relation == *relation)
         );
     }
 
@@ -866,7 +819,7 @@ mod tests {
         let model = Arc::new(query_data_model::ClickHouseDataModel::derive(Arc::new(ontology)).unwrap());
         let (bound, _) = bind(input, model).unwrap();
         let catalog = clickhouse_catalog(&bound);
-        let access = &catalog.facts.foreign_keys[0];
+        let access = &catalog.foreign_keys[0];
         let edge = bound
             .relations
             .iter()
