@@ -13,7 +13,7 @@ use ontology::Ontology;
 
 use super::assertions::{TestCase, TestSuite};
 use super::runner::create_test_db;
-use super::validator::{Failure, load_suite, report, run_suite, write_fixtures};
+use super::validator::{Failure, load_suite, report, run_suite, write_fixtures, write_suite_files};
 
 fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
     if let Some(pipeline) = suite.pipeline.as_deref() {
@@ -41,15 +41,11 @@ pub fn run_incremental_suite(yaml: &str) {
     let Some(suite) = load_suite(yaml) else {
         return;
     };
-    assert!(
-        suite.fixture_dir.is_none(),
-        "suite {:?}: fixture_dir is not supported by the incremental runner",
-        suite.name
-    );
-
     let repo = tempfile::tempdir().expect("temp repository");
-    write_fixtures(&suite.fixtures, repo.path());
-    let paths: Vec<String> = suite.fixtures.iter().map(|f| f.path.clone()).collect();
+    let paths: Vec<String> = write_suite_files(&suite, repo.path())
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::for_lang(lang_id).expect("rules compile");
@@ -72,9 +68,9 @@ pub fn run_incremental_suite(yaml: &str) {
         for removed in &step.remove {
             std::fs::remove_file(repo.path().join(removed)).ok();
         }
-        write_fixtures(&step.add, repo.path());
-        write_fixtures(&step.modify, repo.path());
-        let changed = step.add.iter().chain(&step.modify).map(|f| f.path.clone());
+        let mut changed = write_fixtures(&step.add, repo.path());
+        changed.extend(write_fixtures(&step.modify, repo.path()));
+        let changed = changed.into_iter().map(|(path, _)| path);
         let changes = Changes {
             changed: inventory::classify(repo.path(), changed),
             removed: step.remove.clone(),
