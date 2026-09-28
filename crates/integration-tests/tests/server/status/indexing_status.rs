@@ -243,6 +243,7 @@ async fn unreadable_checkpoints_are_unknown(ctx: &TestContext) {
 
     assert_eq!(status.phase, Phase::Unknown);
     assert_eq!(status.sdlc_phase, Phase::Unknown);
+    assert_eq!(status.code_phase, Some(Phase::Unknown));
     assert_eq!(domain_phase(&status, "source_code"), Phase::Unknown);
     assert_eq!(status.projects.total_known, 2);
 }

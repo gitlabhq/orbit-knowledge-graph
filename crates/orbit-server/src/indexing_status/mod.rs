@@ -114,14 +114,17 @@ fn build_scope_status(
         .collect();
 
     // The Project plan writes the project list, so the code total is final only once it settles.
-    let project_list_settled = plan_phases
-        .iter()
-        .filter(|(plan, _)| plan.entity == PROJECT_NODE)
-        .all(|(_, phase)| phase.is_settled());
+    let project_list_phase = combine_phases(
+        plan_phases
+            .iter()
+            .filter(|(plan, _)| plan.entity == PROJECT_NODE)
+            .map(|(_, phase)| *phase),
+    )
+    .unwrap_or(Phase::Ready);
     let projects =
         coverage.map(|by_scope| by_scope.get(scope.as_str()).copied().unwrap_or_default());
     let code_phase = match projects {
-        Some(projects) => projects.get_code_phase(project_list_settled),
+        Some(projects) => projects.get_code_phase(project_list_phase),
         None => Some(Phase::Unknown),
     };
 

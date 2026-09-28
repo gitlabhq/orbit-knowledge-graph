@@ -51,13 +51,15 @@ pub struct ProjectCoverage {
 }
 
 impl ProjectCoverage {
-    pub fn get_code_phase(&self, project_list_settled: bool) -> Option<Phase> {
+    pub fn get_code_phase(&self, project_list_phase: Phase) -> Option<Phase> {
         let settled = self.indexed + self.gaps;
         if self.total_known == 0 {
             None
+        } else if project_list_phase == Phase::Unknown {
+            Some(Phase::Unknown)
         } else if settled == 0 {
             Some(Phase::NotStarted)
-        } else if settled < self.total_known || !project_list_settled {
+        } else if settled < self.total_known || !project_list_phase.is_settled() {
             Some(Phase::Syncing)
         } else if self.gaps > 0 {
             Some(Phase::Error)
