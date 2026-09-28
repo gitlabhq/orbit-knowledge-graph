@@ -2,12 +2,14 @@ name: "A filtered node table nothing projects becomes a semi-join"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
 logical:
   expect:
-    - (Join e0.source_id = e1.source_id AND e0.target_id = label.id AND e1.target_id = p.id (...))
+    - (SemiJoin e0.target_id = label.id (...))
+    - (SemiJoin e1.target_id = p.id (...))
     - (Filter label.title Eq 'group::source code' AND label._deleted = false (NodeScan Label AS label))
     - (Filter p.full_path Eq 'gitlab-org/gitlab' AND p._deleted = false (NodeScan Project AS p))
 physical:
   clickhouse:
     expect:
-      - (Join ON e0.source_id = e1.source_id AND e0.target_id = label.id AND e1.target_id = p.id (...))
+      - (SemiJoin e0.target_id = label.id (...))
+      - (SemiJoin e1.target_id = p.id (...))
       - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e0))
       - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e1))

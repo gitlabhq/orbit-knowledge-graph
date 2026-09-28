@@ -1,4 +1,12 @@
 name: "Neighbors both directions: union of an outgoing and an incoming arm"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both"},"limit":20}
-expect:
-  - (Union AS _union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))
+logical:
+  expect:
+    - (Union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))
+physical:
+  clickhouse:
+    expect:
+      - (FusedNeighbors Both (...))
+  duckdb:
+    expect:
+      - (Union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))

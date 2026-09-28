@@ -1,7 +1,12 @@
 name: "FK-joined node tables project their columns inline (no hydration query)"
 input: {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","filters":{"status":"failed","source":"push"}},{"id":"j","entity":"Job","filters":{"status":"failed"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"},{"type":"IN_PROJECT","from":"pipe","to":"p"}],"limit":10}
-expect:
-  - (Project excerpt(pipe.ref) AS pipe_ref, excerpt(j.name) AS j_name, p.id AS p_id, ... (_))
-  - (Filter p.id = 278964, !deleted(p) (Scan gl_project AS p FINAL))
-reject:
-  - (Scan gl_edge ...)
+logical:
+  expect:
+    - (Project pipe.ref AS pipe_ref, j.name AS j_name, p.id AS p_id, ... (_))
+physical:
+  clickhouse:
+    expect:
+      - (Join ON j.pipeline_id = pipe.id AND pipe.project_id = p.id (...))
+      - (Filter p.id = 278964 AND p._deleted = false (Deduplicate Final p.id (Scan Table(gl_project) AS p)))
+    reject:
+      - (Scan EdgeTables(...))

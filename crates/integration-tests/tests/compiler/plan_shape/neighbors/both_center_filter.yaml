@@ -1,4 +1,10 @@
 name: "Both directions with a center filter: each arm joins the center table"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"both"},"limit":20}
-expect:
-  - (Union AS _union (Project ... (Join ON e.source_id = mr.id (_) (_))) (Project ... (Join ON e.target_id = mr.id (_) (_))))
+logical:
+  expect:
+    - (Union (Project ... (Join e2.source_id = mr.id (...))) (Project ... (Join e4.target_id = mr.id (...))))
+physical:
+  clickhouse:
+    expect:
+      - (FusedNeighbors Both (...))
+      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))

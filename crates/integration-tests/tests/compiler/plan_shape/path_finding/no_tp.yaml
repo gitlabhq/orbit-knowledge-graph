@@ -1,9 +1,11 @@
 name: "Endpoint without traversal_path: pinned ids go straight onto the edge column, no anchor CTEs"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"User","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]},"limit":10}
-expect:
-  - (Filter ..., e1.source_id = 1 (Scan gl_edge AS e1))
-  - (Filter f.depth = 1, f.end_kind = 'Project', f.end_id = 100 (Scan forward AS f))
-reject:
-  - (_nf_start = (_))
-  - (_path_scope_traversal_paths = (_))
-  - (SemiJoin ...)
+logical:
+  expect:
+    - (Filter e1.relationship_kind IN [...] AND e1.source_id = 1 AND e1.target_id = 100 (EdgeScan Edge(MEMBER_OF|CONTAINS) depth=Some(1) hop=Some(1)))
+physical:
+  clickhouse:
+    expect:
+      - (Join ON start.id = e1.source_id AND e1.target_id = e2.source_id (...))
+    reject:
+      - (Join ON ... traversal_path ...)

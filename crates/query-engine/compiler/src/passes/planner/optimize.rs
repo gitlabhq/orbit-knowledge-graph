@@ -16,6 +16,9 @@ pub fn optimize<M: QueryDataModel>(
             break;
         }
     }
+    if matches!(bound.input.query_type, crate::input::QueryType::Traversal) {
+        logical.root = add_sip(logical.root, &mut bound);
+    }
     (bound, logical)
 }
 
@@ -161,6 +164,127 @@ fn remove_deferred_outputs(
         });
     }
     plan
+}
+
+fn add_sip(
+    mut plan: Plan<Logical>,
+    bound: &mut BoundCatalog<impl QueryDataModel>,
+) -> Plan<Logical> {
+    plan.inputs = plan
+        .inputs
+        .into_iter()
+        .map(|input| add_sip(input, bound))
+        .collect();
+    let Operator::Join(conditions) = &plan.operator else {
+        return plan;
+    };
+    let relations: BTreeMap<_, _> = plan
+        .inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, input)| input.relation().map(|relation| (relation, index)))
+        .collect();
+    let mut selective: BTreeSet<_> = relations
+        .keys()
+        .copied()
+        .filter(|relation| relation_selective(bound, *relation))
+        .collect();
+    loop {
+        let mut changed = false;
+        for condition in conditions {
+            let Some((left, right)) = equality(condition) else {
+                continue;
+            };
+            let left_relation = bound.column(left).relation;
+            let right_relation = bound.column(right).relation;
+            let (producer_column, consumer_column) = match (
+                selective.contains(&left_relation),
+                selective.contains(&right_relation),
+            ) {
+                (true, false) => (left, right),
+                (false, true) => (right, left),
+                (true, true) => {
+                    let left_filters = relation_filter_count(bound, left_relation);
+                    let right_filters = relation_filter_count(bound, right_relation);
+                    if left_filters > right_filters {
+                        (left, right)
+                    } else if right_filters > left_filters {
+                        (right, left)
+                    } else {
+                        continue;
+                    }
+                }
+                (false, false) => continue,
+            };
+            let (Some(&producer_index), Some(&consumer_index)) = (
+                relations.get(&bound.column(producer_column).relation),
+                relations.get(&bound.column(consumer_column).relation),
+            ) else {
+                continue;
+            };
+            if matches!(plan.inputs[consumer_index].operator, Operator::SemiJoin(_)) {
+                selective.insert(bound.column(consumer_column).relation);
+                continue;
+            }
+            plan.inputs[consumer_index] = plan.inputs[consumer_index].clone().semi_join(
+                plan.inputs[producer_index].clone(),
+                compare(
+                    CompareOp::Eq,
+                    Expr::Column(consumer_column),
+                    Expr::Column(producer_column),
+                ),
+            );
+            selective.insert(bound.column(consumer_column).relation);
+            changed = true;
+        }
+        if !changed {
+            return plan;
+        }
+    }
+}
+
+fn relation_filter_count(
+    bound: &BoundCatalog<impl QueryDataModel>,
+    relation: RelationId,
+) -> usize {
+    match bound.relation(relation).origin {
+        RelationOrigin::Node { input, .. } => {
+            let node = &bound.input.nodes[input.0];
+            node.filters.len() + usize::from(!node.node_ids.is_empty()) + usize::from(node.id_range.is_some())
+        }
+        RelationOrigin::Edge {
+            input: Some(input), ..
+        } => bound.input.relationships[input.0].filters.len(),
+        RelationOrigin::Edge { input: None, .. } => 0,
+    }
+}
+
+fn relation_selective(bound: &BoundCatalog<impl QueryDataModel>, relation: RelationId) -> bool {
+    match bound.relation(relation).origin {
+        RelationOrigin::Node { input, .. } => {
+            let node = &bound.input.nodes[input.0];
+            !node.node_ids.is_empty() || node.id_range.is_some() || !node.filters.is_empty()
+        }
+        RelationOrigin::Edge {
+            input: Some(input), ..
+        } => {
+            let edge = &bound.input.relationships[input.0];
+            !edge.filters.is_empty()
+                || [&edge.from, &edge.to].into_iter().any(|name| {
+                    bound
+                        .input
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == **name)
+                        .is_some_and(|node| {
+                            !node.node_ids.is_empty()
+                                || node.id_range.is_some()
+                                || !node.filters.is_empty()
+                        })
+                })
+        }
+        RelationOrigin::Edge { input: None, .. } => false,
+    }
 }
 
 fn prune_fk_aggregation_leaves<M: QueryDataModel>(
@@ -436,6 +560,13 @@ fn rewrite(
         let Some(primary_key) = bound.column_id(relation, DEFAULT_PRIMARY_KEY) else {
             continue;
         };
+        if bound.input.query_type == crate::input::QueryType::Aggregation
+            && bound.input.aggregation.metrics.iter().any(|metric| {
+                metric.expr.node() == bound.input.nodes[node_index].id
+            })
+        {
+            continue;
+        }
         let Some((condition_index, consumer)) =
             join.condition_entries()
                 .find_map(|(condition_index, condition)| {
@@ -452,21 +583,16 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
-        if bound.input.query_type == crate::input::QueryType::Aggregation
-            && (!bound.input.aggregation.group_by.is_empty()
-                || !node.filters.is_empty()
-                || node.id_range.is_some()
-                || node.node_ids.is_empty())
-        {
+        let elevated = bound
+            .model
+            .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+        if elevated {
             continue;
         }
         if bound.input.query_type == crate::input::QueryType::Aggregation
-            && bound
-                .input
-                .aggregation
-                .group_by
-                .iter()
-                .any(|group| group.node() == node.id)
+            && !node.node_ids.is_empty()
+            && bound.input.aggregation.group_by.iter().any(|group| group.node() == node.id)
         {
             continue;
         }
@@ -485,7 +611,10 @@ fn rewrite(
                     data_type: Some(ontology::DataType::Int),
                 },
             });
-        } else if !node.filters.is_empty() || node.id_range.is_some() {
+        } else if (!node.filters.is_empty() || node.id_range.is_some())
+            && matches!(bound.relation(bound.column(consumer).relation).origin, RelationOrigin::Edge { .. })
+            && !required_relations.contains(&relation)
+        {
             semi_joins.push((
                 compare(
                     CompareOp::Eq,
@@ -494,6 +623,8 @@ fn rewrite(
                 ),
                 input.clone(),
             ));
+        } else if !node.filters.is_empty() || node.id_range.is_some() {
+            continue;
         }
     }
     condition_remove.sort_unstable_by(|left, right| right.cmp(left));

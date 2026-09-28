@@ -16,7 +16,7 @@ pub fn plan_clickhouse(
     let catalog = clickhouse_catalog(bound);
     let mut plan = map_clickhouse(bound, &logical.root, &catalog, false);
     if bound.input.query_type == crate::input::QueryType::Aggregation {
-        plan = deduplicate_edges(plan, bound);
+        plan = deduplicate_edges(plan, bound, bound.input.relationships.len() > 1);
     }
     let ordinary = clickhouse_candidate(bound, plan);
     if bound.input.query_type == crate::input::QueryType::Aggregation
@@ -31,9 +31,26 @@ pub fn plan_clickhouse(
             },
         });
     }
+    if bound.input.query_type == crate::input::QueryType::Neighbors {
+        let candidate = if bound
+            .input
+            .neighbors
+            .as_ref()
+            .is_some_and(|neighbors| neighbors.direction == crate::input::Direction::Both)
+        {
+            fused_neighbors_candidate(ordinary)
+        } else {
+            ordinary
+        };
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan { candidate },
+        });
+    }
     let mut candidates = CandidateSet::default();
     candidates.insert(ordinary.clone());
-    if let Some(candidate) = foreign_key_candidate(&catalog, ordinary.clone()) {
+    let foreign_key = foreign_key_candidate(&catalog, ordinary.clone());
+    if let Some(candidate) = foreign_key.clone() {
         candidates.insert(candidate);
     }
     let edge_count = bound
@@ -42,6 +59,14 @@ pub fn plan_clickhouse(
         .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
         .count();
     let edge_property = edge_property_candidate(&catalog, ordinary);
+    if catalog.foreign_keys.len() == edge_count
+        && let Some(candidate) = foreign_key
+    {
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan { candidate },
+        });
+    }
     if !catalog.edge_properties.is_empty() && catalog.foreign_keys.len() != edge_count {
         return Ok(PlanningResult {
             logical,
@@ -57,14 +82,39 @@ pub fn plan_clickhouse(
     })
 }
 
+fn fused_neighbors_candidate(mut candidate: Candidate<ClickHouse>) -> Candidate<ClickHouse> {
+    let Operator::Limit(limit) = candidate.plan.operator else {
+        return candidate;
+    };
+    let [union] = candidate.plan.inputs.as_slice() else {
+        return candidate;
+    };
+    let Operator::Union = union.operator else {
+        return candidate;
+    };
+    let [outgoing, incoming] = union.inputs.as_slice() else {
+        return candidate;
+    };
+    candidate.plan = Plan::unary(
+        Operator::Limit(limit),
+        Plan {
+            operator: Operator::Extension(ClickHouseExtension::FusedNeighbors),
+            inputs: vec![outgoing.clone(), incoming.clone()],
+        },
+    );
+    candidate.cost = plan_cost(&candidate.plan);
+    candidate
+}
+
 fn deduplicate_edges(
     mut plan: Plan<ClickHouse>,
     bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    multiple_edges: bool,
 ) -> Plan<ClickHouse> {
     plan.inputs = plan
         .inputs
         .into_iter()
-        .map(|input| deduplicate_edges(input, bound))
+        .map(|input| deduplicate_edges(input, bound, multiple_edges))
         .collect();
     let Operator::Scan(scan) = &plan.operator else {
         return plan;
@@ -76,7 +126,11 @@ fn deduplicate_edges(
         Plan::unary(
             Operator::CurrentRows {
                 keys: vec![],
-                strategy: ClickHouseCurrentRows::Final,
+                strategy: if multiple_edges {
+                    ClickHouseCurrentRows::Final
+                } else {
+                    ClickHouseCurrentRows::LimitBy
+                },
             },
             plan,
         )
@@ -185,6 +239,7 @@ fn foreign_key_candidate(
     let mut substitutions = BTreeMap::new();
     let mut relationships = BTreeSet::new();
     let mut join_conditions = Vec::new();
+    let visible = candidate.plan.visible_relations();
     for access in catalog
         .foreign_keys
         .iter()
@@ -192,8 +247,24 @@ fn foreign_key_candidate(
     {
         let holder_column = bound.column_id(access.holder, &access.column.0)?;
         let referenced_column = bound.column_id(access.referenced, DEFAULT_PRIMARY_KEY)?;
-        join_conditions.push(Expr::from(holder_column).eq(referenced_column));
-        substitutions.extend(access.substitutions.clone());
+        if !visible.contains(&access.holder) {
+            return None;
+        }
+        if visible.contains(&access.referenced) {
+            join_conditions.push(Expr::from(holder_column).eq(referenced_column));
+        }
+        substitutions.extend(access.substitutions.iter().map(|(column, expression)| {
+            (
+                *column,
+                if !visible.contains(&access.referenced)
+                    && expression == &Expr::Column(referenced_column)
+                {
+                    Expr::Column(holder_column)
+                } else {
+                    expression.clone()
+                },
+            )
+        }));
         relationships.insert(access.relationship);
     }
     if relationships.is_empty() {
@@ -265,6 +336,7 @@ fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
     plan.visit(&mut |plan| match &plan.operator {
         Operator::Scan(scan) => {
             cost.scans += 1;
+            cost.edge_scans += matches!(scan.access, ClickHouseAccess::EdgeTables(_)) as u32;
             cost.columns_read += scan.column_count() as u32;
         }
         Operator::CurrentRows { strategy, .. } => {

@@ -1,4 +1,10 @@
 name: "A non-denormalized center filter joins the center table with FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"title":{"contains":"fix"}}}],"neighbors":{"direction":"outgoing"},"limit":20}
-expect:
-  - (Join ON e.source_id = mr.id (_) (Filter mr.title CONTAINS ?, !deleted(mr) (Scan gl_merge_request AS mr FINAL)))
+logical:
+  expect:
+    - (Join e2.source_id = mr.id (_ ) (Filter mr.title Contains 'fix' AND mr._deleted = false (NodeScan MergeRequest AS mr)))
+physical:
+  clickhouse:
+    expect:
+      - (Project e2.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (_))
+      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))

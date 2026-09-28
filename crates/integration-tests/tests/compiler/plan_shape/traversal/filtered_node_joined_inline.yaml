@@ -1,4 +1,10 @@
 name: "A filtered node with requested columns is inner-joined and projected inline"
 input: {"query_type":"traversal","nodes":[{"id":"label","entity":"Label","filters":{"title":"bug"}},{"id":"mr","entity":"MergeRequest"}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"}],"limit":10}
-expect:
-  - (Project ..., excerpt(label.title) AS label_title, ... (Join ON e0.target_id = label.id (_) (Filter label.title = ?, !deleted(label) (Scan gl_label AS label FINAL))))
+logical:
+  expect:
+    - (Project ..., label.title AS label_title, ... (Join e0.target_id = label.id (_ ) (Filter label.title Eq 'bug' AND label._deleted = false (NodeScan Label AS label))))
+physical:
+  clickhouse:
+    expect:
+      - (Deduplicate Final label.id (Scan Table(gl_label) AS label))
+      - (Scan EdgeTables(gl_edge) AS e0)

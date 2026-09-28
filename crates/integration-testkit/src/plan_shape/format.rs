@@ -7,12 +7,6 @@ pub struct PlanScenario {
     pub name: String,
     pub input: Value,
     #[serde(default)]
-    pub expect: Vec<String>,
-    #[serde(default)]
-    pub reject: Vec<String>,
-    #[serde(default)]
-    pub plan: Option<String>,
-    #[serde(default)]
     pub logical: PlanExpect,
     #[serde(default)]
     pub physical: PhysicalExpect,
@@ -48,10 +42,7 @@ impl PlanScenario {
 
     pub fn validate(&self) {
         assert!(
-            !self.expect.is_empty()
-                || !self.reject.is_empty()
-                || self.plan.is_some()
-                || !self.logical.expect.is_empty()
+            !self.logical.expect.is_empty()
                 || !self.logical.reject.is_empty()
                 || self.logical.plan.is_some()
                 || self.physical.clickhouse.is_some()

@@ -1,7 +1,11 @@
 name: "Three-node FK chain: no edge scans, every node table joined"
 input: {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}],"limit":10}
-expect:
-  - (Join ON mr.author_id = u.id (...))
-  - (Join ON mr.project_id = p.id (...))
-reject:
-  - (Scan gl_edge ...)
+logical:
+  expect:
+    - (Join e0.source_id = e1.target_id AND e0.target_id = p.id AND e1.target_id = mr.id AND e1.source_id = u.id (...))
+physical:
+  clickhouse:
+    expect:
+      - (Join ON mr.project_id = p.id AND mr.author_id = u.id (...))
+    reject:
+      - (Scan EdgeTables(...))

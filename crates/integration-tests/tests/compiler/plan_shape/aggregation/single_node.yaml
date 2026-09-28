@@ -1,6 +1,11 @@
 name: "Single-node aggregation: one FINAL scan, no joins"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
-expect:
-  - (Limit 11 (Aggregate ... (Filter ... (Scan gl_merge_request AS mr FINAL))))
-reject:
-  - (Join ...)
+logical:
+  expect:
+    - (Limit 11 (Aggregate ... (Filter mr.state Eq 'merged' AND mr._deleted = false (NodeScan MergeRequest AS mr))))
+physical:
+  clickhouse:
+    expect:
+      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+    reject:
+      - (Join ...)

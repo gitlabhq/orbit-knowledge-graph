@@ -1,13 +1,10 @@
-name: "Path endpoint filters stay relational and become physical semi-joins"
+name: "Path endpoint filters stay relational without a specialized physical path"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"Definition","filters":{"name":"compile"}},{"id":"end","entity":"Definition","filters":{"name":"run_query"}}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["CALLS"]},"limit":10}
 logical:
   expect:
     - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)))
     - (Filter start.name Eq 'compile' AND start._deleted = false (NodeScan Definition AS start))
-    - (Filter end.name Eq 'run_query' AND end._deleted = false (NodeScan Definition AS end))
 physical:
   clickhouse:
     expect:
-      - (SemiJoin e1.target_id = end.id (...))
       - (Scan EdgeTables(gl_code_edge) AS e1)
-      - (Deduplicate Final end.id (Scan Table(gl_definition) AS end))

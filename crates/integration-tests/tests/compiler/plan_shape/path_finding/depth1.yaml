@@ -1,8 +1,12 @@
 name: "Depth 1: forward frontier only, direct hits, no backward CTE"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":1,"rel_types":["IN_PROJECT"]},"limit":10}
-expect:
-  - (With (...) (forward = (_)) (_))
-  - (Filter f.depth = 1, f.end_kind = 'Project' (Scan forward AS f))
-reject:
-  - (backward = (_))
-  - (Scan backward ...)
+logical:
+  expect:
+    - (Union (Project ..., 1 AS depth (...)))
+physical:
+  clickhouse:
+    expect:
+      - (Union (Project ..., 1 AS depth (...)))
+      - (Scan EdgeTables(gl_edge) AS e1)
+    reject:
+      - (Project ..., 2 AS depth, ...)

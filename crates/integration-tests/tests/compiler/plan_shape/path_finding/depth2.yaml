@@ -1,7 +1,11 @@
 name: "Depth 2: forward and backward frontiers meet on end_id"
 input: {"query_type":"path_finding","nodes":[{"id":"start","entity":"MergeRequest","node_ids":[1]},{"id":"end","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"start","to":"end","max_depth":2,"rel_types":["IN_PROJECT","CONTAINS"]},"limit":10}
-expect:
-  - (forward = (_))
-  - (backward = (_))
-  - (Join ON f.end_id = b.end_id AND f.traversal_path = b.traversal_path (Scan forward AS f) (Scan backward AS b))
-  - (Project plus(f.depth, b.depth) AS depth, ... (_))
+logical:
+  expect:
+    - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)))
+physical:
+  clickhouse:
+    expect:
+      - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)))
+      - (Scan EdgeTables(gl_edge) AS e1)
+      - (Scan EdgeTables(gl_edge) AS e2)

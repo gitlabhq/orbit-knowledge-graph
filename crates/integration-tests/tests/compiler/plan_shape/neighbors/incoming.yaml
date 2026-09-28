@@ -1,5 +1,14 @@
 name: "Neighbors incoming to a namespace center pins the traversal path via the tp dictionary"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"incoming"},"limit":20}
-expect:
-  - (SemiJoin e.traversal_path IN _tpd.traversal_path (_) (Filter _tpd.id = 1, !deleted(_tpd) (_)))
-  - (Project e.source_id AS _gkg_neighbor_id, ..., 0 AS _gkg_neighbor_is_outgoing, ... (_))
+logical:
+  expect:
+    - (Project e2.source_id AS _gkg_neighbor_id, ..., 0 AS _gkg_neighbor_is_outgoing, ... (_))
+    - (Filter mr.id = 1 AND mr._deleted = false (NodeScan MergeRequest AS mr))
+physical:
+  clickhouse:
+    expect:
+      - (Project e2.source_id AS _gkg_neighbor_id, ..., 0 AS _gkg_neighbor_is_outgoing, ... (_))
+      - (Scan EdgeTables(gl_ci_edge|gl_edge) AS e2)
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e2)

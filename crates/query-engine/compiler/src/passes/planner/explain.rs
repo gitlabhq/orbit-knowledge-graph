@@ -44,7 +44,11 @@ fn physical_node<M: QueryDataModel>(bound: &BoundCatalog<M>, plan: &Plan<ClickHo
             format!("{strategy:?}"),
             keys.iter().map(|key| expression_text(bound, key)).collect(),
         ),
-        Operator::Extension(()) => unreachable!(),
+        Operator::Extension(ClickHouseExtension::FusedNeighbors) => (
+            "FusedNeighbors",
+            "Both".into(),
+            vec![],
+        ),
         operator => operator_parts(bound, operator),
     };
     PlanNode {

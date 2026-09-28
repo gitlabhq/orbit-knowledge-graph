@@ -1,7 +1,12 @@
 name: "Aggregation over an FK hop: count target stays inner-joined (row multiplication is the semantics)"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"total_mrs"}],"limit":10}
-expect:
-  - (Aggregate group p.id AS p_id, ..., COUNT() AS total_mrs (Join ON mr.project_id = p.id (_) (_)))
-reject:
-  - (SemiJoin ...)
-  - (Scan gl_edge ...)
+logical:
+  expect:
+    - (Aggregate group p.id AS p_id, ..., COUNT() AS total_mrs (...))
+    - (NodeScan MergeRequest AS mr)
+physical:
+  clickhouse:
+    expect:
+      - (Join ON mr.project_id = p.id (...))
+    reject:
+      - (Scan EdgeTables(...))

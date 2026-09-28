@@ -268,7 +268,7 @@ pub struct SortKey {
 pub trait Flavor: Debug + Clone + Copy + PartialEq + Eq + 'static {
     type Scan: Debug + Clone + PartialEq + Eq + ScanRelation;
     type CurrentRows: Debug + Clone + PartialEq + Eq;
-    type Extension: Debug + Clone + PartialEq + Eq;
+    type Extension: Debug + Clone + PartialEq;
 }
 
 pub trait ScanRelation {
@@ -865,10 +865,15 @@ pub enum ClickHouseCurrentRows {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DuckDbCurrentRows;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClickHouseExtension {
+    FusedNeighbors,
+}
+
 impl Flavor for ClickHouse {
     type Scan = PhysicalScan<ClickHouseAccess>;
     type CurrentRows = ClickHouseCurrentRows;
-    type Extension = ();
+    type Extension = ClickHouseExtension;
 }
 
 impl Flavor for DuckDb {
@@ -880,6 +885,7 @@ impl Flavor for DuckDb {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cost {
     pub scans: u32,
+    pub edge_scans: u32,
     pub final_reads: u32,
     pub joins: u32,
     pub semi_joins: u32,

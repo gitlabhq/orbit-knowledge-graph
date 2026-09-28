@@ -32,6 +32,14 @@ trait LowerFlavor: Flavor {
         aliases: &HashMap<RelationId, String>,
     ) -> Query;
 
+    fn extension(
+        bound: &BoundCatalog<Self::Model>,
+        extension: Self::Extension,
+        inputs: Vec<Plan<Self>>,
+        aliases: &HashMap<RelationId, String>,
+        columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+    ) -> Result<Query>;
+
     fn current_rows(
         bound: &BoundCatalog<Self::Model>,
         strategy: Self::CurrentRows,
@@ -112,6 +120,25 @@ impl LowerFlavor for ClickHouse {
         }
     }
 
+    fn extension(
+        bound: &BoundCatalog<Self::Model>,
+        extension: Self::Extension,
+        inputs: Vec<Plan<Self>>,
+        aliases: &HashMap<RelationId, String>,
+        columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+    ) -> Result<Query> {
+        let ClickHouseExtension::FusedNeighbors = extension;
+        let queries = inputs
+            .into_iter()
+            .map(|input| lower_plan::<ClickHouse>(bound, input, aliases, columns))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Query {
+            select: union_projection(&queries),
+            from: TableRef::union_all(queries, "neighbors"),
+            ..Default::default()
+        })
+    }
+
     fn current_rows(
         bound: &BoundCatalog<Self::Model>,
         strategy: Self::CurrentRows,
@@ -164,6 +191,14 @@ impl LowerFlavor for ClickHouse {
                     .collect();
                 query.limit_by = Some((1, keys));
                 query.where_clause = predicates;
+                let alias = table_aliases(&query.from)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| "current".into());
+                query = Query {
+                    from: TableRef::subquery(select_star(query), alias),
+                    ..Default::default()
+                };
             }
         }
         Ok(query)
@@ -193,6 +228,16 @@ impl LowerFlavor for DuckDb {
     ) -> Query {
         and_where(&mut query, expression);
         query
+    }
+
+    fn extension(
+        _bound: &BoundCatalog<Self::Model>,
+        _extension: Self::Extension,
+        _inputs: Vec<Plan<Self>>,
+        _aliases: &HashMap<RelationId, String>,
+        _columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+    ) -> Result<Query> {
+        Err(QueryError::Lowering("DuckDB extension is not populated".into()))
     }
 
     fn current_rows(
@@ -271,7 +316,13 @@ fn lower_plan<F: LowerFlavor>(
     physical_columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
 ) -> Result<Query> {
     match plan.operator {
-        Operator::Scan(scan) => F::scan(bound, scan.clone(), &aliases[&scan.relation()]),
+        Operator::Scan(scan) => {
+            let relation = scan.relation();
+            let alias = aliases.get(&relation).ok_or_else(|| {
+                QueryError::Lowering(format!("relation {} has no physical alias", relation.0))
+            })?;
+            F::scan(bound, scan, alias)
+        }
         Operator::Filter(expression) => {
             let query = only(bound, plan.inputs, aliases, physical_columns)?;
             Ok(F::filter(
@@ -348,7 +399,9 @@ fn lower_plan<F: LowerFlavor>(
             aliases,
             physical_columns,
         ),
-        _ => Err(QueryError::Lowering("operator is not populated".into())),
+        Operator::Extension(extension) => {
+            F::extension(bound, extension, plan.inputs, aliases, physical_columns)
+        }
     }
 }
 

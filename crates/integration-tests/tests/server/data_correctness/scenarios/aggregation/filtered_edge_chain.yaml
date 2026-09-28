@@ -1,5 +1,10 @@
 description: Filtered label and project predicates bound both edge scans before counting
 
+config:
+  extra_seed:
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_LABEL, target_id: 7000, target_kind: Label, source_tags: [state:opened], target_tags: [] }
+
 query:
   json: |
     {

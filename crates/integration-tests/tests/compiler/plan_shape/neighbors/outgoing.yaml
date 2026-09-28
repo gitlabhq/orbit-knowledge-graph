@@ -1,8 +1,16 @@
 name: "Neighbors outgoing: one union arm over every edge table, no FINAL"
 input: {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"outgoing"},"limit":20}
-expect:
-  - (Project e.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (Union AS e (...)))
-  - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, ... (Scan gl_edge AS _e))
-reject:
-  - (Scan _ FINAL)
-  - (Scan gl_edge AS _e FINAL)
+logical:
+  expect:
+    - (Project e2.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (_))
+    - (EdgeScan Edge(CLOSES|DEPLOYED_TO|FIXES|HAS_DIFF|HAS_HEAD_PIPELINE|HAS_LABEL|HAS_LATEST_DIFF|HAS_NOTE|IN_MILESTONE|IN_PROJECT|MENTIONS|MERGED_AT_COMMIT|SOURCE_PROJECT|TRIGGERED) depth=None hop=None)
+physical:
+  clickhouse:
+    expect:
+      - (Project e2.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (_))
+      - (Scan EdgeTables(gl_ci_edge|gl_diff_edge|gl_edge) AS e2)
+    reject:
+      - (Deduplicate Final (...))
+  duckdb:
+    expect:
+      - (Scan Table(gl_edge) AS e2)
