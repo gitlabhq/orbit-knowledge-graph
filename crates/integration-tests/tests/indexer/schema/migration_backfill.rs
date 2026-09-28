@@ -408,8 +408,8 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     );
 }
 
-/// Coverage-driven backfill: a project is due when it is not indexed, is not a
-/// gap, and had no attempt within the retry wait. Without this, each tick
+/// Coverage-driven backfill: a project is due when it is not indexed and had no
+/// attempt within the retry wait, which is longer for a gap. Without this, each tick
 /// re-dispatches the entire project list and relies on NATS per-subject dedup,
 /// which wedges as soon as any message hits max_deliver.
 #[tokio::test]
@@ -422,6 +422,7 @@ async fn backfill_dispatches_only_projects_that_are_due() {
     common::create_project(&context.clickhouse, 12, 100, 1, 20, "1/100/12/").await;
     common::create_project(&context.clickhouse, 13, 100, 1, 20, "1/100/13/").await;
     common::create_project(&context.clickhouse, 14, 100, 1, 20, "1/100/14/").await;
+    common::create_project(&context.clickhouse, 15, 100, 1, 20, "1/100/15/").await;
     context.given_enabled_namespaces([100]).await;
 
     let graph = context.clickhouse.create_client();
@@ -440,7 +441,8 @@ async fn backfill_dispatches_only_projects_that_are_due() {
              VALUES ('1/100/11/', 11, 'main', 0, 'sha', now(), 0, now64(6)), \
                     ('1/100/12/', 12, 'main', 0, '', NULL, 1, now64(6) - INTERVAL 2 HOUR), \
                     ('1/100/13/', 13, 'main', 0, '', NULL, {MAX_CODE_ATTEMPTS}, now64(6) - INTERVAL 2 HOUR), \
-                    ('1/100/14/', 14, 'main', 0, '', NULL, 1, now64(6))"
+                    ('1/100/14/', 14, 'main', 0, '', NULL, 1, now64(6)), \
+                    ('1/100/15/', 15, 'main', 0, '', NULL, {MAX_CODE_ATTEMPTS}, now64(6) - INTERVAL 25 HOUR)"
         ))
         .await;
 
@@ -466,8 +468,8 @@ async fn backfill_dispatches_only_projects_that_are_due() {
     let project_ids: HashSet<i64> = requests.iter().map(|r| r.project_id).collect();
     assert_eq!(
         project_ids,
-        HashSet::from([10, 12]),
-        "indexed 11, gap 13 and in-flight 14 must not be dispatched"
+        HashSet::from([10, 12, 15]),
+        "indexed 11, recent gap 13 and in-flight 14 must not be dispatched"
     );
 }
 
