@@ -23,8 +23,15 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
         .filter_map(|path| SupportLang::from_path(path))
         .collect();
     match langs.len() {
+        0 => panic!(
+            "suite {:?}: no fixture has a known language extension; declare `pipeline:`",
+            suite.name
+        ),
         1 => *langs.iter().next().unwrap(),
-        _ => panic!("suite mixes languages {langs:?}; declare `pipeline:`"),
+        _ => panic!(
+            "suite {:?} mixes languages {langs:?}; declare `pipeline:`",
+            suite.name
+        ),
     }
 }
 

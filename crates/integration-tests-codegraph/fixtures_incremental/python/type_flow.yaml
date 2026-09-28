@@ -96,11 +96,8 @@ fixtures:
 tests:
   - name: "self.db.query() resolves through attribute chain"
     description: |
-      Known gap: self.db is set in __init__ and should be visible in run
-      via instance_attr_prefixes writing to the class scope block.
-      The SSA compound key fallback ("self.db" read from run's block)
-      should find it via predecessor chain, but doesn't yet.
-    skip: false
+      self.db is assigned in __init__; a read of self.db in run resolves
+      through the class scope to the Db type, so self.db.query() lands on Db.query.
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
