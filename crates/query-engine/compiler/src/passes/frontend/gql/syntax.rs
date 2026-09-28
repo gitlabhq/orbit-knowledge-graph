@@ -424,9 +424,13 @@ impl QueryParser {
     }
 
     fn Order(input: Node) -> Result<Sort> {
-        Ok(match_nodes!(input.into_children();
-            [SortItem(sort)] => sort,
-        ))
+        match_nodes!(input.into_children();
+            [SortItem(sort)] => Ok(sort),
+            [SortItem(_), SortItem(mut extra)..] => Err(error_at(
+                extra.next().expect("a second sort key").span,
+                "ORDER BY accepts one sort key; keep the key that matters most and remove the others",
+            )),
+        )
     }
 
     fn SortItem(input: Node) -> Result<Sort> {

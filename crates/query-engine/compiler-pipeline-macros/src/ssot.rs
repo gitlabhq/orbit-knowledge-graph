@@ -232,7 +232,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
     trait_sigs.push(quote! {
         type Model: query_data_model::QueryDataModel + Send + Sync;
         fn data_model(&self) -> &Self::Model;
-        fn data_model_arc(&self) -> std::sync::Arc<Self::Model>;
         fn current_phase(&self) -> &'static str;
         fn set_current_phase(&mut self, phase: &'static str);
     });
@@ -314,10 +313,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     );
                 }
                 &self.data_model
-            }
-
-            fn data_model_arc(&self) -> std::sync::Arc<Self::Model> {
-                std::sync::Arc::clone(&self.data_model)
             }
         });
 

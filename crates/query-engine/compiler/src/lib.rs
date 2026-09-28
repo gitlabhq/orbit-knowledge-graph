@@ -35,7 +35,6 @@
 //! ```
 
 pub mod analytics;
-pub mod aliases;
 pub mod ast;
 pub mod constants;
 pub mod data_model;
@@ -1198,8 +1197,7 @@ mod tests {
             "pinned User node_ids must reach the outer WHERE, got:\n{sql}"
         );
         assert!(
-            sql.contains("e1.target_id = e2.source_id")
-                || sql.contains("e1_1.target_id = e2.source_id"),
+            sql.contains("e1.target_id = e2.source_id"),
             "depth-2 arm must chain edges via JOIN, got:\n{sql}"
         );
     }

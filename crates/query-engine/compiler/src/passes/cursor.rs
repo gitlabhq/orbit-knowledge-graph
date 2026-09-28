@@ -11,7 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
-use crate::passes::planner::LoweredMetadata;
+use crate::passes::lower::LoweredMetadata;
 use orbit_utils::clickhouse::ChType;
 
 pub fn cursor_column(i: usize) -> String {
