@@ -44,21 +44,9 @@ fn physical_node<M: QueryDataModel>(bound: &BoundCatalog<M>, plan: &Plan<ClickHo
             format!("{strategy:?}"),
             keys.iter().map(|key| expression_text(bound, key)).collect(),
         ),
-        Operator::Extension(ClickHouseExtension::FusedNeighbors { .. }) => (
+        Operator::Extension(ClickHouseExtension::FusedNeighbors) => (
             "FusedNeighbors",
             "Both".into(),
-            vec![],
-        ),
-        Operator::Extension(ClickHouseExtension::PathFinding {
-            max_depth,
-            forward_depth,
-            backward_depth,
-            scoped,
-        }) => (
-            "PathFinding",
-            format!(
-                "max_depth={max_depth} forward={forward_depth} backward={backward_depth} scoped={scoped}"
-            ),
             vec![],
         ),
         operator => operator_parts(bound, operator),

@@ -867,13 +867,7 @@ pub struct DuckDbCurrentRows;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClickHouseExtension {
-    FusedNeighbors { center: RelationId },
-    PathFinding {
-        max_depth: u32,
-        forward_depth: u32,
-        backward_depth: u32,
-        scoped: bool,
-    },
+    FusedNeighbors,
 }
 
 impl Flavor for ClickHouse {

@@ -6,5 +6,5 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (PathFinding max_depth=3 forward=2 backward=1 scoped=true (...))
-      - (Scan EdgeTables(gl_edge) AS e1)
+      - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)) (Project ..., 3 AS depth (...)))
+      - (Scan EdgeTables(gl_edge) AS e3)
