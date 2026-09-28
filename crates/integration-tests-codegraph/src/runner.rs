@@ -83,6 +83,11 @@ pub fn run_yaml_suite(yaml: &str) {
     let Some(suite) = load_suite(yaml) else {
         return;
     };
+    assert!(
+        suite.steps.is_empty(),
+        "suite {:?} has incremental steps; only the incremental runner executes them",
+        suite.name
+    );
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
     let mut file_inventory = Vec::new();

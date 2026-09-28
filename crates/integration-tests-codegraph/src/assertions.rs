@@ -9,7 +9,7 @@ pub struct FixtureFile {
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TestSuite {
     pub name: String,
     #[serde(default)]
@@ -25,9 +25,28 @@ pub struct TestSuite {
     #[serde(default)]
     pub trace: bool,
     pub tests: Vec<TestCase>,
+    /// Incremental re-index steps; only the incremental runner executes them.
+    #[serde(default)]
+    pub steps: Vec<IncrementalStep>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct IncrementalStep {
+    pub name: String,
+    /// Save the graph and reload it from the snapshot before this step.
+    #[serde(default)]
+    pub snapshot: bool,
+    #[serde(default)]
+    pub add: Vec<FixtureFile>,
+    #[serde(default)]
+    pub modify: Vec<FixtureFile>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
+    pub tests: Vec<TestCase>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct TestCase {
     pub name: String,
     #[serde(default)]
