@@ -354,7 +354,7 @@ impl CodeIndexingTaskHandler {
             traversal_path: request.traversal_path.clone(),
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
-            checkpoint,
+            checkpoint: checkpoint.clone(),
         };
         let cancel = CancellationToken::new();
         let heartbeat_interval = self.lock_ttl / 3;
@@ -391,10 +391,16 @@ impl CodeIndexingTaskHandler {
                     ),
                 ))
             }
-            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
-                "no indexing lane within {}s",
-                waited.as_secs()
-            ))),
+            Err(IndexError::NoLane { waited }) => {
+                checkpoint.refund_attempt();
+                if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
+                    warn!(project_id, branch = %branch, error = %e, "failed to refund the attempt");
+                }
+                Err(HandlerError::Backpressure(format!(
+                    "no indexing lane within {}s",
+                    waited.as_secs()
+                )))
+            }
             Err(IndexError::Failed(e)) => Err(e),
         };
 
@@ -418,7 +424,9 @@ mod tests {
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::repository::RepositoryResolver;
     use crate::modules::code::repository::cache::LocalRepositoryCache;
-    use crate::modules::code::repository::service::test_utils::MockRepositoryService;
+    use crate::modules::code::repository::service::test_utils::{
+        MockRepositoryService, build_tar_gz,
+    };
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices};
@@ -432,6 +440,7 @@ mod tests {
 
     struct TestContext {
         handler: CodeIndexingTaskHandler,
+        pipeline: Arc<CodeIndexer>,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
@@ -479,7 +488,7 @@ mod tests {
             ));
 
             let handler = CodeIndexingTaskHandler::new(
-                pipeline,
+                Arc::clone(&pipeline),
                 repo_service,
                 Arc::clone(&checkpoint_store),
                 metrics,
@@ -490,6 +499,7 @@ mod tests {
 
             Self {
                 handler,
+                pipeline,
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
@@ -744,6 +754,31 @@ mod tests {
             "no index on the raced attempt"
         );
         assert_eq!(checkpoint.attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn no_free_indexing_lane_backs_off_without_counting_an_attempt() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let _lanes = ctx.pipeline.occupy_small_indexing_lanes().await;
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .load(&TraversalPath::new_unchecked("1/123/"), 123, "main")
+            .await
+            .unwrap()
+            .expect("the refunded attempt is saved");
+        assert_eq!(checkpoint.attempts, 0);
     }
 
     #[tokio::test]

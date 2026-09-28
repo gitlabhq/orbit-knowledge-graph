@@ -146,6 +146,7 @@ impl RepositoryCache for LocalRepositoryCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::code::repository::service::test_utils::build_tar_gz;
     use code_graph::v2::config::SkipReason;
     use tempfile::TempDir;
 
@@ -179,26 +180,6 @@ mod tests {
         Box::pin(futures::stream::once(async {
             Ok(bytes::Bytes::from(data))
         }))
-    }
-
-    fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
-        use flate2::Compression;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-
-        let mut tar_builder = tar::Builder::new(Vec::new());
-        for (path, content) in files {
-            let mut header = tar::Header::new_gnu();
-            header.set_path(path).unwrap();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            tar_builder.append(&header, &content[..]).unwrap();
-        }
-        let tar_bytes = tar_builder.into_inner().unwrap();
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&tar_bytes).unwrap();
-        encoder.finish().unwrap()
     }
 
     #[tokio::test]
