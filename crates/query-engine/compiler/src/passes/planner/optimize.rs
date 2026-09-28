@@ -16,7 +16,13 @@ pub fn optimize<M: QueryDataModel>(
             break;
         }
     }
-    if matches!(bound.input.query_type, crate::input::QueryType::Traversal) {
+    if matches!(bound.input.query_type, crate::input::QueryType::Traversal)
+        && bound
+            .input
+            .relationships
+            .iter()
+            .all(|relationship| relationship_foreign_key(&bound, relationship).is_none())
+    {
         logical.root = add_sip(logical.root, &mut bound);
     }
     (bound, logical)
@@ -455,8 +461,16 @@ fn rewrite(
             continue;
         };
         let node = &bound.input.nodes[node_index];
+        let elevated = bound
+            .model
+            .entity_minimum_access_level(node.entity.as_deref().unwrap_or_default())
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+        let scoped = node
+            .entity
+            .as_deref()
+            .is_some_and(|entity| bound.model.entity_has_traversal_path(entity));
         if bound.input.query_type == crate::input::QueryType::Aggregation
-            && (!bound.input.aggregation.group_by.is_empty()
+            && ((!elevated && scoped)
                 || !node.filters.is_empty()
                 || node.id_range.is_some()
                 || node.node_ids.is_empty())
@@ -514,10 +528,10 @@ fn rewrite(
     plan
 }
 
-fn add_sip(
-    mut plan: Plan<Logical>,
+pub(super) fn add_sip<F: Flavor>(
+    mut plan: Plan<F>,
     bound: &mut BoundCatalog<impl QueryDataModel>,
-) -> Plan<Logical> {
+) -> Plan<F> {
     plan.inputs = plan
         .inputs
         .into_iter()
@@ -565,6 +579,22 @@ fn add_sip(
                 selective.insert(consumer_relation);
                 continue;
             }
+            if bound.input.query_type == crate::input::QueryType::Aggregation
+                && projection_requires_relation(bound, &plan, consumer_relation)
+                && bound
+                    .input
+                    .aggregation
+                    .group_by
+                    .iter()
+                    .any(|group| {
+                        bound
+                            .node_input(consumer_relation)
+                            .is_some_and(|input| bound.input.nodes[input.0].id == group.node())
+                    })
+            {
+                selective.insert(consumer_relation);
+                continue;
+            }
             let consumer = plan.inputs[consumer_index].clone();
             plan.inputs[consumer_index] = consumer.semi_join(
                 plan.inputs[producer_index].clone(),
@@ -581,6 +611,19 @@ fn add_sip(
             return plan;
         }
     }
+}
+
+fn projection_requires_relation<F: Flavor>(
+    bound: &BoundCatalog<impl QueryDataModel>,
+    plan: &Plan<F>,
+    relation: RelationId,
+) -> bool {
+    let required: BTreeSet<_> = expressions(&plan.operator)
+        .into_iter()
+        .flat_map(Expr::columns)
+        .map(|column| bound.column(column).relation)
+        .collect();
+    required.contains(&relation)
 }
 
 fn relation_selective(bound: &BoundCatalog<impl QueryDataModel>, relation: RelationId) -> bool {

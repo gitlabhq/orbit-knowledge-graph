@@ -519,7 +519,18 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn scans_final(q: &Query) -> bool {
-    matches!(q.from, TableRef::Scan { final_: true, .. })
+    fn table_scans_final(table: &TableRef) -> bool {
+        match table {
+            TableRef::Scan { final_, .. } => *final_,
+            TableRef::Join { left, right, .. } => {
+                table_scans_final(left) || table_scans_final(right)
+            }
+            TableRef::Union { queries, .. } => queries.iter().any(scans_final),
+            TableRef::Subquery { query, .. } => scans_final(query),
+        }
+    }
+
+    table_scans_final(&q.from)
 }
 
 fn contains_in_select(query: &Query) -> bool {
@@ -536,10 +547,25 @@ fn contains_in_select(query: &Query) -> bool {
         }
     }
 
+    fn table_contains_in_select(table: &TableRef) -> bool {
+        match table {
+            TableRef::Scan { .. } => false,
+            TableRef::Join { left, right, on, .. } => {
+                expression_has_in_select(on)
+                    || table_contains_in_select(left)
+                    || table_contains_in_select(right)
+            }
+            TableRef::Union { queries, .. } => queries.iter().any(contains_in_select),
+            TableRef::Subquery { query, .. } => contains_in_select(query),
+        }
+    }
+
     query
         .where_clause
         .as_ref()
         .is_some_and(expression_has_in_select)
+        || table_contains_in_select(&query.from)
+        || query.ctes.iter().any(|cte| contains_in_select(&cte.query))
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {

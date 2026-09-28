@@ -33,15 +33,24 @@ pub fn plan_clickhouse(
     }
     let mut candidates = CandidateSet::default();
     candidates.insert(ordinary.clone());
-    if let Some(candidate) = foreign_key_candidate(&catalog, ordinary.clone()) {
+    let foreign_key = foreign_key_candidate(&catalog, ordinary.clone());
+    if let Some(candidate) = foreign_key.clone() {
         candidates.insert(candidate);
     }
-    let edge_property = edge_property_candidate(&catalog, ordinary);
     let edge_count = bound
         .relations
         .values()
         .filter(|metadata| matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. }))
         .count();
+    let edge_property = edge_property_candidate(&catalog, ordinary);
+    if catalog.foreign_keys.len() == edge_count
+        && let Some(candidate) = foreign_key
+    {
+        return Ok(PlanningResult {
+            logical,
+            selected: SelectedPlan { candidate },
+        });
+    }
     if !catalog.edge_properties.is_empty() && catalog.foreign_keys.len() != edge_count {
         return Ok(PlanningResult {
             logical,
@@ -190,6 +199,7 @@ fn foreign_key_candidate(
     let mut substitutions = BTreeMap::new();
     let mut relationships = BTreeSet::new();
     let mut join_conditions = Vec::new();
+    let visible = candidate.plan.visible_relations();
     for access in catalog
         .foreign_keys
         .iter()
@@ -197,8 +207,33 @@ fn foreign_key_candidate(
     {
         let holder_column = bound.column_id(access.holder, &access.column.0)?;
         let referenced_column = bound.column_id(access.referenced, DEFAULT_PRIMARY_KEY)?;
-        join_conditions.push(Expr::from(holder_column).eq(referenced_column));
-        substitutions.extend(access.substitutions.clone());
+        if !visible.contains(&access.holder) {
+            return None;
+        }
+        if visible.contains(&access.holder) && visible.contains(&access.referenced) {
+            join_conditions.push(if bound.input.query_type == crate::input::QueryType::Aggregation
+                && logical_relationship_count(bound) == 1
+                && bound.input.aggregation.group_by.iter().any(|group| {
+                    bound
+                        .node_input(access.referenced)
+                        .is_some_and(|input| bound.input.nodes[input.0].id == group.node())
+                })
+            {
+                Expr::from(referenced_column).eq(holder_column)
+            } else {
+                Expr::from(holder_column).eq(referenced_column)
+            });
+        }
+        substitutions.extend(access.substitutions.iter().map(|(column, expression)| {
+            let expression = if !visible.contains(&access.referenced)
+                && expression == &Expr::Column(referenced_column)
+            {
+                Expr::Column(holder_column)
+            } else {
+                expression.clone()
+            };
+            (*column, expression)
+        }));
         relationships.insert(access.relationship);
     }
     if relationships.is_empty() {
@@ -210,8 +245,20 @@ fn foreign_key_candidate(
         &join_conditions,
         &substitutions,
     );
+    candidate.plan = optimize::add_sip(candidate.plan, &mut bound.clone());
     candidate.cost = plan_cost(&candidate.plan);
     Some(candidate)
+}
+
+fn logical_relationship_count(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+) -> usize {
+    bound
+        .relations()
+        .filter(|(_, metadata)| {
+            matches!(metadata.origin, RelationOrigin::Edge { input: Some(_), .. })
+        })
+        .count()
 }
 
 fn rewrite_fk_plan(
@@ -270,6 +317,7 @@ fn plan_cost(plan: &Plan<ClickHouse>) -> Cost {
     plan.visit(&mut |plan| match &plan.operator {
         Operator::Scan(scan) => {
             cost.scans += 1;
+            cost.edge_scans += matches!(scan.access, ClickHouseAccess::EdgeTables(_)) as u32;
             cost.columns_read += scan.column_count() as u32;
         }
         Operator::CurrentRows { strategy, .. } => {

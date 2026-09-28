@@ -880,6 +880,7 @@ impl Flavor for DuckDb {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cost {
     pub scans: u32,
+    pub edge_scans: u32,
     pub final_reads: u32,
     pub joins: u32,
     pub semi_joins: u32,
