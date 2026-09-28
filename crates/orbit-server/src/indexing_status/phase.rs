@@ -4,6 +4,13 @@ pub enum Phase {
     NotStarted,
     Syncing,
     Ready,
+    Error,
+}
+
+impl Phase {
+    pub fn is_settled(self) -> bool {
+        matches!(self, Phase::Ready | Phase::Error)
+    }
 }
 
 pub fn combine_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> {
@@ -16,6 +23,8 @@ pub fn combine_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> 
         Some(Phase::Unknown)
     } else if all(Phase::Ready) {
         Some(Phase::Ready)
+    } else if phases.iter().all(|each| each.is_settled()) {
+        Some(Phase::Error)
     } else if all(Phase::NotStarted) {
         Some(Phase::NotStarted)
     } else {
