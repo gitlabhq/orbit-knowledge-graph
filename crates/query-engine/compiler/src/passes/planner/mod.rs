@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 pub use bind::{bind, bind_with_options};
 pub use explain::{explain, explain_clickhouse, explain_duckdb};
-pub use lower::{lower_clickhouse, lower_duckdb};
+pub use lower::lower_duckdb;
 pub use optimize::optimize;
 pub use physical_clickhouse::plan_clickhouse;
 pub use physical_duckdb::plan_duckdb;
