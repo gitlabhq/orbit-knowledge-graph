@@ -1,0 +1,40 @@
+description: Incoming pipeline self-join uses the canceled pipeline foreign key and preserves edge direction
+
+config:
+  redaction:
+    allow:
+      ci_pipeline: [14200, 14201, 14202, 14203]
+  extra_seed:
+    gl_pipeline:
+      - { id: 14200, iid: 1, status: canceled, source: push, ref: main, project_id: 1000, auto_canceled_by_id: 14201, traversal_path: "1/100/1000/" }
+      - { id: 14201, iid: 2, status: success, source: push, ref: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 14202, iid: 3, status: canceled, source: push, ref: main, project_id: 1001, auto_canceled_by_id: 14203, traversal_path: "1/101/1001/" }
+      - { id: 14203, iid: 4, status: failed, source: push, ref: main, project_id: 1001, traversal_path: "1/101/1001/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
+        {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}
+      ],
+      "limit": 10
+    }
+  gql: |
+    MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10
+
+expect:
+  node_count: 2
+  skip_requirements: ["filter:status"]
+  referential_integrity: true
+  edge_exists:
+    AUTO_CANCELED_BY: [[14200, 14201]]
+  edge_absent:
+    AUTO_CANCELED_BY: [[14201, 14200], [14202, 14203]]
+  nodes:
+    Pipeline:
+      ids: [14200, 14201]

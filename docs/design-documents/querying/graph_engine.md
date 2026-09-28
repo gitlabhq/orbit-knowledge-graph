@@ -62,6 +62,9 @@ Each active schema snapshot derives one immutable query data model from its load
 The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
 Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
 Its authorization catalog resolves GitLab redaction and scope metadata.
+Each stored property realization contains its physical query column. An absent realization means that the backend cannot supply that property.
+Foreign-key facts identify the source or target endpoint that holds the key, its property, and the referenced ID property.
+The endpoint remains unambiguous for self-relationships and incoming traversals.
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
 Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
 All later passes continue to use that AST.

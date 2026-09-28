@@ -328,21 +328,22 @@ where
                 .and_then(|node| node.entity.as_deref());
             let fk = from_entity
                 .zip(to_entity)
-                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
+                .and_then(|(from, to)| match rel.direction {
+                    Direction::Outgoing => model.foreign_key(&rel.types, from, to),
+                    Direction::Incoming => model.foreign_key(&rel.types, to, from),
+                    Direction::Both => None,
+                })
                 .and_then(|foreign_key| {
-                    let holder = &model.graph().entity(foreign_key.holder).name;
                     let fk_column = model.property_column(foreign_key.property)?.to_string();
-                    let fk_node = if from_entity == Some(holder.as_str()) {
-                        rel.from.clone()
-                    } else if to_entity == Some(holder.as_str()) {
-                        rel.to.clone()
+                    let holder_is_from = matches!(
+                        (rel.direction, foreign_key.holder),
+                        (Direction::Outgoing, query_data_model::Endpoint::Source)
+                            | (Direction::Incoming, query_data_model::Endpoint::Target)
+                    );
+                    let (fk_node, target_node) = if holder_is_from {
+                        (rel.from.clone(), rel.to.clone())
                     } else {
-                        return None;
-                    };
-                    let target_node = if fk_node == rel.from {
-                        rel.to.clone()
-                    } else {
-                        rel.from.clone()
+                        (rel.to.clone(), rel.from.clone())
                     };
                     Some(HopFk {
                         fk_node,
