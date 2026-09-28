@@ -426,6 +426,43 @@ fn offline_uses_last_validated_host_tree() {
 }
 
 #[test]
+fn missing_etag_uses_cache_or_embedded_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut missing_etag = tree_reply("1.0.1", "Ignored without ETag");
+    missing_etag.etag = None;
+    let (url, server) = mock_server(vec![
+        tree_reply("1.0.0", "Cached before missing ETag"),
+        missing_etag.clone(),
+    ]);
+
+    let first = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    let cached_fallback = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(
+        cached_fallback.status.success(),
+        "{}",
+        stderr(&cached_fallback)
+    );
+    assert!(stderr(&cached_fallback).contains("last validated"));
+    assert!(
+        String::from_utf8_lossy(&cached_fallback.stdout).contains("Cached before missing ETag")
+    );
+
+    let empty_cache = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![missing_etag]);
+    let embedded_fallback = run_orbit(Some(&url), &empty_cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(
+        embedded_fallback.status.success(),
+        "{}",
+        stderr(&embedded_fallback)
+    );
+    assert!(stderr(&embedded_fallback).contains("embedded local skill"));
+    assert!(String::from_utf8_lossy(&embedded_fallback.stdout).contains("name: orbit-cli"));
+}
+
+#[test]
 fn auth_errors_never_fall_back() {
     for (status, expected_exit) in [(401, 3), (403, 4)] {
         let cache = tempfile::tempdir().unwrap();

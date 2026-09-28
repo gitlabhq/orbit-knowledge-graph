@@ -255,9 +255,18 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
 
     match response.status {
         200 => {
-            let etag = response
-                .etag
-                .ok_or_else(|| anyhow!("Orbit skill response has no ETag"))?;
+            let Some(etag) = response.etag else {
+                if let Some(cached) = cached {
+                    eprintln!(
+                        "warning: Orbit skill response has no ETag; using the last validated tree for {origin}"
+                    );
+                    return Ok(Some(cached.tree));
+                }
+                eprintln!(
+                    "warning: Orbit skill response has no ETag; using the embedded local skill"
+                );
+                return Ok(None);
+            };
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
             if let Err(error) = publish_cache(&origin, &tree) {
                 eprintln!(
