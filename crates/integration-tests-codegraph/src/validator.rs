@@ -609,17 +609,57 @@ pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     Some(suite)
 }
 
-/// Writes the suite's inline fixtures under `root`.
-pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) {
-    for fixture in fixtures {
-        let path = root.join(&fixture.path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .unwrap_or_else(|e| panic!("Failed to create dir {}: {e}", parent.display()));
+fn workspace_root() -> std::path::PathBuf {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version=1", "--no-deps"])
+        .output()
+        .expect("Failed to run cargo metadata");
+    let meta: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Failed to parse cargo metadata");
+    std::path::PathBuf::from(meta["workspace_root"].as_str().unwrap())
+}
+
+/// Copies `fixture_dir` (relative to the workspace root) under `root`, then
+/// writes the inline fixtures over it. Returns every file written with its
+/// size, relative to `root`.
+pub fn write_suite_files(suite: &TestSuite, root: &std::path::Path) -> Vec<(String, u64)> {
+    let mut written = Vec::new();
+    if let Some(dir) = &suite.fixture_dir {
+        let src = workspace_root().join(dir);
+        assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
+        for entry in walkdir::WalkDir::new(&src)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+        {
+            let rel = entry.path().strip_prefix(&src).unwrap();
+            let dst = root.join(rel);
+            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            std::fs::copy(entry.path(), &dst)
+                .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
+            let size = entry.metadata().map_or(0, |m| m.len());
+            written.push((rel.to_string_lossy().replace('\\', "/"), size));
         }
-        std::fs::write(&path, &fixture.content)
-            .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
     }
+    written.extend(write_fixtures(&suite.fixtures, root));
+    written
+}
+
+/// Writes inline fixtures under `root`; returns each path with its size.
+pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) -> Vec<(String, u64)> {
+    fixtures
+        .iter()
+        .map(|fixture| {
+            let path = root.join(&fixture.path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .unwrap_or_else(|e| panic!("Failed to create dir {}: {e}", parent.display()));
+            }
+            std::fs::write(&path, &fixture.content)
+                .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
+            (fixture.path.clone(), fixture.content.len() as u64)
+        })
+        .collect()
 }
 
 /// Prints the outcome; panics when any failure is an error.
