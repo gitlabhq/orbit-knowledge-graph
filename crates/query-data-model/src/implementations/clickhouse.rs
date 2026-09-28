@@ -1,9 +1,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use super::GitLabAuthzCatalog;
+use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
-    Backend, DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn,
-    PropertyId, QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup,
+    DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
+    DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
+    PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -17,20 +18,6 @@ pub struct TableLayout {
     pub path_scopable: bool,
 }
 
-impl TableLayout {
-    pub fn minimum_access_level(&self, authz: &GitLabAuthzCatalog) -> u32 {
-        self.path_columns
-            .iter()
-            .filter_map(|path| {
-                path.entity
-                    .and_then(|entity| authz.entity(entity))
-                    .map(|policy| policy.required_access_level)
-            })
-            .max()
-            .unwrap_or(20)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct EntityLayout {
     pub table: String,
@@ -39,39 +26,29 @@ pub struct EntityLayout {
     pub default_properties: Vec<PropertyId>,
 }
 
-#[derive(Debug, Clone)]
-pub struct VariantLayout {
-    pub foreign_key: Option<PropertyId>,
-}
-
 #[derive(Debug)]
 pub struct ClickHouseCatalog {
     default_edge_table: String,
-    entities: HashMap<EntityId, EntityLayout>,
-    relationships: HashMap<RelationshipId, String>,
-    variants: HashMap<RelationshipVariantId, VariantLayout>,
-    properties: HashMap<PropertyId, String>,
+    entities: Vec<Option<EntityLayout>>,
+    relationships: Vec<Option<String>>,
+    variants: Vec<Option<PropertyId>>,
+    property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
     denormalized: DenormalizedCatalog,
-    text_indexes: HashSet<PropertyId>,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
 
 impl ClickHouseCatalog {
     pub fn entity(&self, id: EntityId) -> Option<&EntityLayout> {
-        self.entities.get(&id)
+        self.entities.get(id.index())?.as_ref()
     }
 
     pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
-        self.relationships.get(&id).map(String::as_str)
-    }
-
-    pub fn variant(&self, id: RelationshipVariantId) -> Option<&VariantLayout> {
-        self.variants.get(&id)
+        self.relationships.get(id.index())?.as_deref()
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
-        self.properties.get(&id).map(String::as_str)
+        self.property_facts.get(id.index())?.column.as_deref()
     }
 
     pub fn table(&self, name: &str) -> Option<&TableLayout> {
@@ -89,8 +66,8 @@ impl ClickHouseCatalog {
 
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
-            .values()
-            .map(String::as_str)
+            .iter()
+            .filter_map(Option::as_deref)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .filter_map(|name| self.tables.get(name))
@@ -98,10 +75,6 @@ impl ClickHouseCatalog {
 
     pub fn default_edge_table(&self) -> &str {
         &self.default_edge_table
-    }
-
-    pub fn has_text_index(&self, property: PropertyId) -> bool {
-        self.text_indexes.contains(&property)
     }
 
     pub fn traversal_path_lookup(
@@ -114,6 +87,10 @@ impl ClickHouseCatalog {
 }
 
 impl QueryBackendCatalog for ClickHouseCatalog {
+    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
+        Self::from_ontology(ontology, graph)
+    }
+
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
@@ -137,13 +114,27 @@ impl QueryBackendCatalog for ClickHouseCatalog {
         ClickHouseCatalog::property_column(self, property)
     }
 
+    fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
+        self.property_facts
+            .get(property.index())
+            .map(|facts| &facts.realization)
+    }
+
+    fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity> {
+        self.property_facts
+            .get(property.index())
+            .map(|facts| facts.selectivity)
+    }
+
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
         self.table(table)
             .and_then(|layout| layout.column_types.get(column).copied())
     }
 
     fn has_text_index(&self, property: PropertyId) -> bool {
-        ClickHouseCatalog::has_text_index(self, property)
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.has_text_index)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {
@@ -185,17 +176,17 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     ) -> Option<ForeignKey> {
         let mut foreign_keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            let property = self.variant(variant)?.foreign_key?;
+            let property = *self.variants.get(variant.index())?.as_ref()?;
             Some(ForeignKey {
                 holder: graph.property(property).entity,
-                column: self.property_column(property)?.to_string(),
+                property,
             })
         });
         let first = foreign_keys.next()??;
         foreign_keys
             .all(|foreign_key| {
                 foreign_key.is_some_and(|foreign_key| {
-                    foreign_key.holder == first.holder && foreign_key.column == first.column
+                    foreign_key.holder == first.holder && foreign_key.property == first.property
                 })
             })
             .then_some(first)
@@ -222,19 +213,16 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     }
 }
 
-pub struct ClickHouse;
-
-impl Backend for ClickHouse {
-    type Catalog = ClickHouseCatalog;
-
-    fn derive(
+impl ClickHouseCatalog {
+    fn from_ontology(
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
-    ) -> Result<Self::Catalog, DataModelError> {
-        let mut entities = HashMap::new();
-        let mut properties = HashMap::new();
+    ) -> Result<Self, DataModelError> {
+        let mut entities = std::iter::repeat_with(|| None)
+            .take(graph.entities().count())
+            .collect::<Vec<_>>();
+        let mut property_facts = derive_property_backend_facts(ontology, graph)?;
         let mut tables = HashMap::new();
-        let mut text_indexes = HashSet::new();
 
         for node in ontology.nodes() {
             let entity_id =
@@ -253,34 +241,28 @@ impl Backend for ClickHouse {
                     }
                 })?;
                 if field.column_name().is_some() {
-                    properties.insert(property_id, field.name.clone());
+                    property_facts[property_id.index()].column = Some(field.name.clone());
                 }
+                property_facts[property_id.index()].has_text_index = ontology
+                    .text_index_tokenizer(&node.name, &field.name)
+                    .is_some();
                 if node.default_columns.iter().any(|name| name == &field.name) {
                     default_properties.push(property_id);
-                }
-                if ontology
-                    .text_index_tokenizer(&node.name, &field.name)
-                    .is_some()
-                {
-                    text_indexes.insert(property_id);
                 }
             }
             if let Some(property) =
                 graph.property_id(entity_id, ontology::constants::DEFAULT_PRIMARY_KEY)
             {
-                properties
-                    .entry(property)
-                    .or_insert_with(|| ontology::constants::DEFAULT_PRIMARY_KEY.to_string());
+                property_facts[property.index()]
+                    .column
+                    .get_or_insert_with(|| ontology::constants::DEFAULT_PRIMARY_KEY.to_string());
             }
-            entities.insert(
-                entity_id,
-                EntityLayout {
-                    table: node.destination_table.clone(),
-                    has_traversal_path: node.has_traversal_path,
-                    global: node.global,
-                    default_properties,
-                },
-            );
+            entities[entity_id.index()] = Some(EntityLayout {
+                table: node.destination_table.clone(),
+                has_traversal_path: node.has_traversal_path,
+                global: node.global,
+                default_properties,
+            });
             tables.insert(
                 node.destination_table.clone(),
                 TableLayout {
@@ -353,8 +335,8 @@ impl Backend for ClickHouse {
             );
         }
 
-        let mut relationships = HashMap::new();
-        let mut variants = HashMap::new();
+        let mut relationships = vec![None; graph.relationships().count()];
+        let mut variants = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {
             let ontology_variants = ontology.get_edge(&relationship.name).unwrap_or_default();
             let table = ontology
@@ -389,13 +371,12 @@ impl Backend for ClickHouse {
                         .property_id(source, column)
                         .or_else(|| graph.property_id(target, column))
                 });
-                variants.insert(variant_id, VariantLayout { foreign_key });
+                variants[variant_id.index()] = foreign_key;
             }
-            relationships.insert(relationship.id, table);
+            relationships[relationship.id.index()] = Some(table);
         }
 
-        let mut denormalized_columns = HashMap::new();
-        let mut denormalized_relationships: HashMap<_, Vec<_>> = HashMap::new();
+        let mut denormalized = HashMap::new();
         for property in ontology.denormalized_properties() {
             let entity = graph.entity_id(&property.node_kind).ok_or_else(|| {
                 DataModelError::UnknownReference {
@@ -403,26 +384,29 @@ impl Backend for ClickHouse {
                     name: property.node_kind.clone(),
                 }
             })?;
-            if graph.property_id(entity, &property.property_name).is_none() {
+            let Some(property_id) = graph.property_id(entity, &property.property_name) else {
                 continue;
-            }
-            let direction = match property.direction {
-                ontology::DenormDirection::Source => "source",
-                ontology::DenormDirection::Target => "target",
             };
-            let key = (
-                property.node_kind.clone(),
-                property.property_name.clone(),
-                direction.to_string(),
-            );
-            denormalized_columns.insert(
-                key.clone(),
-                (property.edge_column.clone(), property.tag_key.clone()),
-            );
-            denormalized_relationships
-                .entry(key)
-                .or_default()
-                .push(property.relationship_kind.clone());
+            let direction = match property.direction {
+                ontology::DenormDirection::Source => DenormalizedDirection::Source,
+                ontology::DenormDirection::Target => DenormalizedDirection::Target,
+            };
+            let Some(relationship) = graph.relationship_id(&property.relationship_kind) else {
+                continue;
+            };
+            denormalized
+                .entry(DenormalizedKey {
+                    property: property_id,
+                    direction,
+                })
+                .and_modify(|layout: &mut DenormalizedProperty| {
+                    layout.relationships.push(relationship)
+                })
+                .or_insert_with(|| DenormalizedProperty {
+                    edge_column: property.edge_column.clone(),
+                    tag_key: property.tag_key.clone(),
+                    relationships: vec![relationship],
+                });
         }
 
         let mut traversal_path_lookups = HashMap::new();
@@ -453,8 +437,9 @@ impl Backend for ClickHouse {
                 .traversal_path_columns()
                 .map(|(index, name)| PathColumn {
                     name,
-                    entity: entities.iter().find_map(|(entity, layout)| {
-                        (layout.table == join.tables[index].table).then_some(*entity)
+                    entity: entities.iter().enumerate().find_map(|(entity, layout)| {
+                        (layout.as_ref()?.table == join.tables[index].table)
+                            .then_some(EntityId(entity))
                     }),
                 })
                 .collect();
@@ -493,13 +478,9 @@ impl Backend for ClickHouse {
             entities,
             relationships,
             variants,
-            properties,
+            property_facts,
             tables,
-            denormalized: DenormalizedCatalog {
-                columns: denormalized_columns,
-                relationships: denormalized_relationships,
-            },
-            text_indexes,
+            denormalized: DenormalizedCatalog::new(denormalized),
             traversal_path_lookups,
         })
     }

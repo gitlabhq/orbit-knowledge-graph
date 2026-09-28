@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use ontology::DataType;
-use query_data_model::PropertyRealization;
-
 use crate::ast::{Expr, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
+use ontology::DataType;
 
 const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
@@ -40,8 +38,8 @@ pub fn apply_text_excerpts(
                 .map(|property| property.name.clone())
                 .collect();
             for property in &entity.properties {
-                if let PropertyRealization::Virtual(source) =
-                    &model.graph().property(*property).realization
+                if let Some(query_data_model::PropertyRealization::Virtual(source)) =
+                    model.property_realization(*property)
                 {
                     for dependency in &source.depends_on {
                         excerpted.remove(dependency);

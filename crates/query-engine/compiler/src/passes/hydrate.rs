@@ -243,8 +243,10 @@ fn build_dynamic_specs(
                     .iter()
                     .map(|property| model.graph().property(*property))
                     .filter(|property| {
-                        !matches!(property.realization, PropertyRealization::Virtual(_))
-                            && property.name != "_version"
+                        !matches!(
+                            model.property_realization(property.id),
+                            Some(PropertyRealization::Virtual(_))
+                        ) && property.name != "_version"
                             && property.name != "_deleted"
                     })
                     .filter(|property| !admin_only.contains(property.name.as_str()))
@@ -300,9 +302,7 @@ fn inject_model_virtual_dependencies(
             if !columns.contains(dependency)
                 && model
                     .property_for_entity_id(entity, dependency)
-                    .is_some_and(|property| {
-                        matches!(property.realization, PropertyRealization::Stored)
-                    })
+                    .is_some_and(|property| model.property_is_stored(property.id))
             {
                 columns.push(dependency.clone());
                 injected.push(dependency.clone());
@@ -321,8 +321,11 @@ fn split_model_columns(
     let mut virtual_columns = Vec::new();
 
     for col_name in requested {
-        match model.property_for_entity_id(entity, col_name) {
-            Some(field) => match &field.realization {
+        match model
+            .property_for_entity_id(entity, col_name)
+            .and_then(|property| model.property_realization(property.id))
+        {
+            Some(realization) => match realization {
                 PropertyRealization::Stored => columns.push(col_name.clone()),
                 PropertyRealization::Virtual(VirtualSource {
                     service,

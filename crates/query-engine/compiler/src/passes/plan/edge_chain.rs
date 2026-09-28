@@ -6,11 +6,14 @@ use ontology::constants::*;
 
 use crate::input::*;
 
-use super::{BoundFilter, Plan, PlanBody};
+use super::{
+    BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Plan, PlanBody,
+};
 use query_data_model::QueryDataModel;
 
 pub struct Hop {
     pub rel_types: Vec<String>,
+    pub relationships: Vec<query_data_model::RelationshipId>,
     pub edge_table: String,
     pub from_node: String,
     pub to_node: String,
@@ -216,12 +219,11 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
-    let denorm_columns = model.denormalized().columns.clone();
-    let denorm_rel_kinds = model.denormalized().relationships.clone();
+    let denormalized = super::denormalized_facts(input, model);
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
-            node_plan.hydration = determine_hydration(node_plan, input, &hops, &denorm_rel_kinds);
+            node_plan.hydration = determine_hydration(node_plan, input, &hops, &denormalized);
         } else {
             node_plan.hydration = HydrationStrategy::Join;
         }
@@ -296,8 +298,7 @@ where
         strategy,
         node_edge_mappings,
         scope_requirements,
-        denorm_columns,
-        denorm_rel_kinds,
+        denormalized,
         table_columns,
         table_sort_keys,
         body,
@@ -333,6 +334,7 @@ where
                 .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
                 .and_then(|foreign_key| {
                     let holder = &model.graph().entity(foreign_key.holder).name;
+                    let fk_column = model.property_column(foreign_key.property)?.to_string();
                     let fk_node = if from_entity == Some(holder.as_str()) {
                         rel.from.clone()
                     } else if to_entity == Some(holder.as_str()) {
@@ -347,7 +349,7 @@ where
                     };
                     Some(HopFk {
                         fk_node,
-                        fk_column: foreign_key.column,
+                        fk_column,
                         target_node,
                     })
                 });
@@ -378,6 +380,11 @@ where
             };
             Hop {
                 rel_types: rel.types.clone(),
+                relationships: rel
+                    .types
+                    .iter()
+                    .filter_map(|kind| model.graph().relationship_id(kind))
+                    .collect(),
                 edge_table,
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
@@ -526,6 +533,7 @@ fn elide_hops(
                     fk_column,
                     BoundFilter {
                         filter,
+                        property: None,
                         data_type: Some(ontology::DataType::Int),
                         selectivity: ontology::FieldSelectivity::High,
                     },
@@ -668,7 +676,7 @@ fn determine_hydration(
     node_plan: &NodePlan,
     input: &Input,
     hops: &[Hop],
-    denorm_rel_kinds: &HashMap<(String, String, String), Vec<String>>,
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -692,11 +700,10 @@ fn determine_hydration(
 
     // Skip the node table only when every filter is carried by a hop's edge
     // tag; an uncovered filter stays on the node table so it isn't dropped.
-    let entity = node_plan.entity.as_deref().unwrap_or("");
     let has_uncovered_filter = node_plan
         .filters
         .iter()
-        .any(|(prop, _)| !filter_covered_by_denorm(entity, prop, alias, hops, denorm_rel_kinds));
+        .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
 
     if has_uncovered_filter {
         return HydrationStrategy::FilterOnly;
@@ -708,12 +715,14 @@ fn determine_hydration(
 // Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag
 // push must agree on which hop carries a denorm.
 fn filter_covered_by_denorm(
-    entity: &str,
-    prop: &str,
+    filter: &BoundFilter,
     alias: &str,
     hops: &[Hop],
-    denorm_rel_kinds: &HashMap<(String, String, String), Vec<String>>,
+    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
+    let Some(property) = filter.property else {
+        return false;
+    };
     hops.iter().any(|hop| {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
             return false;
@@ -725,15 +734,21 @@ fn filter_covered_by_denorm(
                 if node.as_str() != alias {
                     return false;
                 }
-                let dir = if *id_col == SOURCE_ID_COLUMN {
-                    "source"
+                let direction = if *id_col == SOURCE_ID_COLUMN {
+                    DenormalizedDirection::Source
                 } else {
-                    "target"
+                    DenormalizedDirection::Target
                 };
-                let key = (entity.to_string(), prop.to_string(), dir.to_string());
-                denorm_rel_kinds
-                    .get(&key)
-                    .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
+                denormalized
+                    .get(&DenormalizedKey {
+                        property,
+                        direction,
+                    })
+                    .is_some_and(|facts| {
+                        hop.relationships
+                            .iter()
+                            .any(|relationship| facts.relationships.contains(relationship))
+                    })
             })
     })
 }
@@ -910,6 +925,7 @@ mod tests {
     fn fk_hop(from: &str, to: &str, scope_preserving: bool) -> Hop {
         Hop {
             rel_types: vec!["REL".to_string()],
+            relationships: Vec::new(),
             edge_table: "gl_edge".to_string(),
             from_node: from.to_string(),
             to_node: to.to_string(),

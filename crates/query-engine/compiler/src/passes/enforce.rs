@@ -365,6 +365,7 @@ fn enforce_return_columns(
                                     prop,
                                     &crate::passes::plan::BoundFilter {
                                         filter: filter.clone(),
+                                        property: None,
                                         data_type,
                                         selectivity: ontology::FieldSelectivity::High,
                                     },

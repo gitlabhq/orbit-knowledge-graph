@@ -124,14 +124,16 @@ pub fn ordered_filters(
         .into_iter()
         .flat_map(|(property, filters)| {
             let metadata = entity.and_then(|entity| model.property_for_entity_id(entity, property));
+            let property_id = metadata.map(|property| property.id);
             filters.iter().map(move |filter| {
                 (
                     property.clone(),
                     BoundFilter {
                         filter: filter.clone(),
+                        property: property_id,
                         data_type: metadata.map(|property| property.data_type),
-                        selectivity: metadata
-                            .map(|property| property.selectivity)
+                        selectivity: property_id
+                            .map(|property| model.property_selectivity(property))
                             .unwrap_or_default(),
                     },
                 )
@@ -373,15 +375,26 @@ pub fn dedup_subquery(
 }
 
 pub fn has_non_denorm_filters(
-    entity: &str,
     filters: &[(String, BoundFilter)],
-    denorm_map: &HashMap<(String, String, String), (String, String)>,
+    denormalized: &HashMap<
+        query_data_model::DenormalizedKey,
+        query_data_model::DenormalizedProperty,
+    >,
 ) -> bool {
-    filters.iter().any(|(prop, _)| {
-        let src =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "source".to_string()));
-        let tgt =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "target".to_string()));
-        !src && !tgt
+    filters.iter().any(|(_, filter)| {
+        let Some(property) = filter.property else {
+            return true;
+        };
+        [
+            query_data_model::DenormalizedDirection::Source,
+            query_data_model::DenormalizedDirection::Target,
+        ]
+        .into_iter()
+        .all(|direction| {
+            !denormalized.contains_key(&query_data_model::DenormalizedKey {
+                property,
+                direction,
+            })
+        })
     })
 }

@@ -17,10 +17,12 @@ pub use edge_chain::{
 };
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::QueryDataModel;
+pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 #[derive(Clone)]
 pub struct BoundFilter {
     pub filter: InputFilter,
+    pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
 }
@@ -33,10 +35,7 @@ pub struct Plan {
     pub hops: Vec<Hop>,
     pub strategy: Strategy,
     pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
-    /// Relationship kinds whose edge writes each denorm tag, keyed like
-    /// `denorm_columns`.
-    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
+    pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     /// Per-table column sets from the ontology. Used by the lowerer to
     /// push node-level filters (e.g. project_id, branch) down to edge
     /// scans when the edge table has those columns.
@@ -45,6 +44,35 @@ pub struct Plan {
     pub table_sort_keys: HashMap<String, Vec<String>>,
     pub scope_requirements: Vec<crate::scope::ScopeProof>,
     pub body: PlanBody,
+}
+
+pub fn denormalized_facts(
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+) -> HashMap<DenormalizedKey, DenormalizedProperty> {
+    input
+        .nodes
+        .iter()
+        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
+        .flat_map(|(entity, node)| {
+            [DenormalizedDirection::Source, DenormalizedDirection::Target]
+                .into_iter()
+                .flat_map(move |direction| {
+                    node.filters.keys().filter_map(move |property| {
+                        let property = model.graph().property_id(entity, property)?;
+                        let key = DenormalizedKey {
+                            property,
+                            direction,
+                        };
+                        model
+                            .denormalized()
+                            .property(key)
+                            .cloned()
+                            .map(|facts| (key, facts))
+                    })
+                })
+        })
+        .collect()
 }
 
 impl Plan {

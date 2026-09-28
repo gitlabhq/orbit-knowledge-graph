@@ -255,16 +255,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             .map(|property| property.data_type)
     }
 
-    fn field_flag(
-        &self,
-        entity: &str,
-        property: &str,
-        flag: impl Fn(&query_data_model::Property) -> bool,
-        _fallback: impl Fn(&ontology::Field) -> bool,
-    ) -> bool {
-        self.property(entity, property).map(flag).unwrap_or(false)
-    }
-
     /// Validate what the JSON schema used to enforce, natively on `Input`, so
     /// every frontend is held to the same rules. Complexity caps live in
     /// [`Self::check_depth`].
@@ -622,7 +612,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     .and_then(|n| n.entity.as_deref());
                 if let Some(entity) = entity {
                     self.check_field(entity, prop)?;
-                    if !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable) {
+                    if !self.model.get().property_is_filterable(entity, prop) {
                         return Err(QueryError::AllowlistRejected(format!(
                             "join predicate on \"{prop}\" for {entity}: field is not filterable"
                         )));
@@ -669,7 +659,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
                     && self.model.get().entity_has_traversal_path(entity);
                 if !is_traversal_path_filter
-                    && !self.field_flag(entity, prop, |f| f.filterable, |f| f.filterable)
+                    && !self.model.get().property_is_filterable(entity, prop)
                 {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
@@ -723,12 +713,11 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                             .and_then(|n| n.entity.as_deref());
                         if let Some(rhs_entity) = rhs_entity {
                             self.check_field(rhs_entity, rhs_prop)?;
-                            if !self.field_flag(
-                                rhs_entity,
-                                rhs_prop,
-                                |f| f.filterable,
-                                |f| f.filterable,
-                            ) {
+                            if !self
+                                .model
+                                .get()
+                                .property_is_filterable(rhs_entity, rhs_prop)
+                            {
                                 return Err(QueryError::AllowlistRejected(format!(
                                     "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
                                 )));
@@ -847,7 +836,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
         );
 
-        if is_like_op && !self.field_flag(entity, prop, |f| f.like_allowed, |f| f.like_allowed) {
+        if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
@@ -1111,19 +1100,14 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 QueryError::AllowlistRejected(format!("invalid property in group_by[{i}]: {e}"))
             })?;
 
-            if !self.field_flag(entity, property, |f| f.filterable, |f| f.filterable) {
+            if !self.model.get().property_is_filterable(entity, property) {
                 return Err(QueryError::Validation(format!(
                     "group_by[{i}] on \"{}\" for {entity}: field is not filterable",
                     property
                 )));
             }
 
-            if self.property(entity, property).is_some_and(|field| {
-                matches!(
-                    field.realization,
-                    query_data_model::PropertyRealization::Virtual(_)
-                )
-            }) {
+            if self.virtual_source(entity, property).is_some() {
                 return Err(QueryError::Validation(format!(
                     "group_by[{i}] on \"{}\" for {entity}: field is virtual and cannot be grouped in SQL",
                     property

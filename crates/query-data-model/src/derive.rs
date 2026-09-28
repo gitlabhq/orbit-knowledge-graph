@@ -2,7 +2,10 @@
 mod tests {
     use std::sync::Arc;
 
-    use crate::{ClickHouseDataModel, DuckDbDataModel, PropertyRealization};
+    use crate::{
+        ClickHouseDataModel, DuckDbDataModel, PropertyRealization, QueryBackendCatalog,
+        QueryDataModel,
+    };
     use ontology::FieldSource;
 
     #[test]
@@ -41,15 +44,12 @@ mod tests {
         let relationship = graph.relationship_id("IN_PROJECT").unwrap();
         let source = graph.entity_id("Vulnerability").unwrap();
         let target = graph.entity_id("Project").unwrap();
-        let variant = graph.variant_id(relationship, source, target).unwrap();
+        assert!(graph.variant_id(relationship, source, target).is_some());
         let foreign_key = model
-            .backend()
-            .variant(variant)
-            .unwrap()
-            .foreign_key
+            .foreign_key(&["IN_PROJECT".to_string()], "Vulnerability", "Project")
             .unwrap();
 
-        assert_eq!(graph.property(foreign_key).name, "project_id");
+        assert_eq!(graph.property(foreign_key.property).name, "project_id");
     }
 
     #[test]
@@ -74,8 +74,8 @@ mod tests {
             matches!(source, FieldSource::DatabaseColumn(source) if source == "target_project_id")
         );
         assert!(matches!(
-            model.graph().property(property).realization,
-            PropertyRealization::Stored
+            model.backend().property_realization(property),
+            Some(PropertyRealization::Stored)
         ));
         assert_eq!(
             model.backend().property_column(property),

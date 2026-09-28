@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use crate::{
-    Authz, DataModelError, EntityId, GraphCatalog, PropertyId, QueryAuthorizationCatalog,
+    DataModelError, EntityId, GraphCatalog, PropertyId, QueryAuthorizationCatalog,
     RelationshipVariantId,
 };
 
@@ -16,18 +16,6 @@ pub struct EntityAuthConfig {
     pub required_access_level: u32,
 }
 
-impl Default for EntityAuthConfig {
-    fn default() -> Self {
-        Self {
-            resource_type: String::new(),
-            ability: String::new(),
-            auth_id_column: DEFAULT_PRIMARY_KEY.to_string(),
-            owner_entity: None,
-            required_access_level: ontology::RequiredRole::Reporter.as_access_level(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct EntityAuthorization {
     pub resource_type: String,
@@ -37,30 +25,42 @@ pub struct EntityAuthorization {
     pub required_access_level: u32,
 }
 
+#[derive(Debug, Clone)]
+struct PropertyPolicy {
+    admin_only: bool,
+    filterable: bool,
+    like_allowed: bool,
+}
+
 #[derive(Debug)]
 pub struct GitLabAuthzCatalog {
-    entities: HashMap<EntityId, EntityAuthorization>,
+    entities: Vec<Option<EntityAuthorization>>,
     entity_auth: HashMap<String, EntityAuthConfig>,
-    admin_only: HashMap<PropertyId, bool>,
-    variant_scopes: HashMap<RelationshipVariantId, ontology::EdgeVariantScope>,
+    properties: Vec<PropertyPolicy>,
+    variant_scopes: Vec<Option<ontology::EdgeVariantScope>>,
     anchor_foreign_keys: HashMap<String, EntityId>,
 }
 
 impl GitLabAuthzCatalog {
     pub fn entity(&self, id: EntityId) -> Option<&EntityAuthorization> {
-        self.entities.get(&id)
+        self.entities.get(id.index())?.as_ref()
     }
 
     pub fn is_admin_only(&self, id: PropertyId) -> bool {
-        self.admin_only.get(&id).copied().unwrap_or(false)
+        self.properties
+            .get(id.index())
+            .is_some_and(|policy| policy.admin_only)
     }
 
     pub fn variant_scope(&self, id: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
-        self.variant_scopes.get(&id).copied()
+        *self.variant_scopes.get(id.index())?
     }
 
     pub fn entities(&self) -> impl Iterator<Item = (EntityId, &EntityAuthorization)> {
-        self.entities.iter().map(|(id, policy)| (*id, policy))
+        self.entities
+            .iter()
+            .enumerate()
+            .filter_map(|(id, policy)| Some((EntityId(id), policy.as_ref()?)))
     }
 
     pub fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
@@ -69,6 +69,10 @@ impl GitLabAuthzCatalog {
 }
 
 impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
+    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
+        Self::from_ontology(ontology, graph)
+    }
+
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
     }
@@ -79,6 +83,18 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
 
     fn is_admin_only(&self, property: PropertyId) -> bool {
         GitLabAuthzCatalog::is_admin_only(self, property)
+    }
+
+    fn is_filterable(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.filterable)
+    }
+
+    fn is_like_allowed(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.like_allowed)
     }
 
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
@@ -95,15 +111,11 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
     }
 }
 
-pub struct GitLabAuthz;
-
-impl Authz for GitLabAuthz {
-    type Catalog = GitLabAuthzCatalog;
-
-    fn derive(
+impl GitLabAuthzCatalog {
+    fn from_ontology(
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
-    ) -> Result<Self::Catalog, DataModelError> {
+    ) -> Result<Self, DataModelError> {
         let owners: HashMap<&str, EntityId> = ontology
             .nodes()
             .filter_map(|node| {
@@ -116,9 +128,11 @@ impl Authz for GitLabAuthz {
             })
             .collect();
 
-        let mut entities = HashMap::new();
+        let mut entities = std::iter::repeat_with(|| None)
+            .take(graph.entities().count())
+            .collect::<Vec<_>>();
         let mut entity_auth = HashMap::new();
-        let mut admin_only = HashMap::new();
+        let properties = derive_property_policy(ontology, graph)?;
         for node in ontology.nodes() {
             let entity_id =
                 graph
@@ -127,31 +141,16 @@ impl Authz for GitLabAuthz {
                         kind: "entity",
                         name: node.name.clone(),
                     })?;
-            for field in &node.fields {
-                if field.admin_only {
-                    let property_id =
-                        graph.property_id(entity_id, &field.name).ok_or_else(|| {
-                            DataModelError::UnknownReference {
-                                kind: "property",
-                                name: format!("{}.{}", node.name, field.name),
-                            }
-                        })?;
-                    admin_only.insert(property_id, true);
-                }
-            }
             if let Some(redaction) = &node.redaction {
-                entities.insert(
-                    entity_id,
-                    EntityAuthorization {
-                        resource_type: redaction.resource_type.clone(),
-                        ability: redaction.ability.clone(),
-                        id_column: redaction.id_column.clone(),
-                        owner_entity: (redaction.id_column != DEFAULT_PRIMARY_KEY)
-                            .then(|| owners.get(redaction.resource_type.as_str()).copied())
-                            .flatten(),
-                        required_access_level: redaction.required_role.as_access_level(),
-                    },
-                );
+                entities[entity_id.index()] = Some(EntityAuthorization {
+                    resource_type: redaction.resource_type.clone(),
+                    ability: redaction.ability.clone(),
+                    id_column: redaction.id_column.clone(),
+                    owner_entity: (redaction.id_column != DEFAULT_PRIMARY_KEY)
+                        .then(|| owners.get(redaction.resource_type.as_str()).copied())
+                        .flatten(),
+                    required_access_level: redaction.required_role.as_access_level(),
+                });
                 entity_auth.insert(
                     node.name.clone(),
                     EntityAuthConfig {
@@ -168,7 +167,7 @@ impl Authz for GitLabAuthz {
             }
         }
 
-        let mut variant_scopes = HashMap::new();
+        let mut variant_scopes = vec![None; graph.variants().count()];
         let mut anchor_foreign_keys = HashMap::new();
         for edge in ontology.edges() {
             let Some(scope) = edge.scope else {
@@ -193,7 +192,7 @@ impl Authz for GitLabAuthz {
                 }
             })?;
             if let Some(variant) = graph.variant_id(relationship, source, target) {
-                variant_scopes.insert(variant, scope);
+                variant_scopes[variant.index()] = Some(scope);
             }
             if scope == ontology::EdgeVariantScope::NamespaceAnchor
                 && let Some(column) = &edge.fk_column
@@ -205,17 +204,25 @@ impl Authz for GitLabAuthz {
         Ok(GitLabAuthzCatalog {
             entities,
             entity_auth,
-            admin_only,
+            properties,
             variant_scopes,
             anchor_foreign_keys,
         })
     }
 }
 
-#[derive(Debug, Default)]
-pub struct TrustedLocalCatalog;
+#[derive(Debug)]
+pub struct TrustedLocalCatalog {
+    properties: Vec<PropertyPolicy>,
+}
 
 impl QueryAuthorizationCatalog for TrustedLocalCatalog {
+    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
+        Ok(Self {
+            properties: derive_property_policy(ontology, graph)?,
+        })
+    }
+
     fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         None
     }
@@ -228,6 +235,18 @@ impl QueryAuthorizationCatalog for TrustedLocalCatalog {
 
     fn is_admin_only(&self, _property: PropertyId) -> bool {
         false
+    }
+
+    fn is_filterable(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.filterable)
+    }
+
+    fn is_like_allowed(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.like_allowed)
     }
 
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
@@ -245,15 +264,39 @@ impl QueryAuthorizationCatalog for TrustedLocalCatalog {
     }
 }
 
-pub struct TrustedLocal;
-
-impl Authz for TrustedLocal {
-    type Catalog = TrustedLocalCatalog;
-
-    fn derive(
-        _ontology: &ontology::Ontology,
-        _graph: &GraphCatalog,
-    ) -> Result<Self::Catalog, DataModelError> {
-        Ok(TrustedLocalCatalog)
+fn derive_property_policy(
+    ontology: &ontology::Ontology,
+    graph: &GraphCatalog,
+) -> Result<Vec<PropertyPolicy>, DataModelError> {
+    let mut properties = vec![
+        PropertyPolicy {
+            admin_only: false,
+            filterable: true,
+            like_allowed: true,
+        };
+        graph.properties().count()
+    ];
+    for node in ontology.nodes() {
+        let entity =
+            graph
+                .entity_id(&node.name)
+                .ok_or_else(|| DataModelError::UnknownReference {
+                    kind: "entity",
+                    name: node.name.clone(),
+                })?;
+        for field in &node.fields {
+            let property = graph.property_id(entity, &field.name).ok_or_else(|| {
+                DataModelError::UnknownReference {
+                    kind: "property",
+                    name: format!("{}.{}", node.name, field.name),
+                }
+            })?;
+            properties[property.index()] = PropertyPolicy {
+                admin_only: field.admin_only,
+                filterable: field.filterable,
+                like_allowed: field.like_allowed,
+            };
+        }
     }
+    Ok(properties)
 }

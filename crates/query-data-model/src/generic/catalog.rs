@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use ontology::{DataType, EnumType, FieldSelectivity, FieldSource, Ontology, VirtualSource};
+use ontology::{DataType, EnumType, Ontology};
 
 use crate::DataModelError;
 
@@ -14,16 +14,6 @@ pub struct Property {
     pub data_type: DataType,
     pub enum_values: Option<BTreeMap<i64, String>>,
     pub enum_type: EnumType,
-    pub selectivity: FieldSelectivity,
-    pub realization: PropertyRealization,
-    pub filterable: bool,
-    pub like_allowed: bool,
-}
-
-#[derive(Debug)]
-pub enum PropertyRealization {
-    Stored,
-    Virtual(VirtualSource),
 }
 
 #[derive(Debug)]
@@ -97,15 +87,6 @@ impl GraphCatalog {
                     data_type: field.data_type,
                     enum_values: field.enum_values.clone(),
                     enum_type: field.enum_type,
-                    selectivity: field.selectivity,
-                    realization: match &field.source {
-                        FieldSource::DatabaseColumn(_) => PropertyRealization::Stored,
-                        FieldSource::Virtual(source) => {
-                            PropertyRealization::Virtual(source.clone())
-                        }
-                    },
-                    filterable: field.filterable,
-                    like_allowed: field.like_allowed,
                 });
             }
             if !node.fields.iter().any(|field| field.name == "id") {
@@ -119,10 +100,6 @@ impl GraphCatalog {
                     data_type: DataType::Int,
                     enum_values: None,
                     enum_type: EnumType::default(),
-                    selectivity: FieldSelectivity::High,
-                    realization: PropertyRealization::Stored,
-                    filterable: true,
-                    like_allowed: true,
                 });
             }
 

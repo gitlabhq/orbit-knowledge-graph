@@ -38,14 +38,9 @@ where
         crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
     })?;
 
-    let denormalized = model.denormalized();
-    let denorm_columns = denormalized.columns.clone();
-    let denorm_rel_kinds = denormalized.relationships.clone();
-    let has_non_denorm = has_non_denorm_filters(
-        center_np.entity.as_deref().unwrap_or(""),
-        &center_np.filters,
-        &denorm_columns,
-    ) || center_np.id_range.is_some();
+    let denormalized = super::denormalized_facts(input, model);
+    let has_non_denorm =
+        has_non_denorm_filters(&center_np.filters, &denormalized) || center_np.id_range.is_some();
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
@@ -96,8 +91,7 @@ where
         hops: vec![],
         strategy: Strategy::SingleNode,
         node_edge_mappings,
-        denorm_columns,
-        denorm_rel_kinds,
+        denormalized,
         table_columns: HashMap::new(),
         table_sort_keys: HashMap::new(),
         body: PlanBody::Neighbors {

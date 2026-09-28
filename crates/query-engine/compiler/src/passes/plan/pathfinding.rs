@@ -60,8 +60,7 @@ where
         hops: vec![],
         strategy: Strategy::SingleNode,
         node_edge_mappings: HashMap::new(),
-        denorm_columns: HashMap::new(),
-        denorm_rel_kinds: HashMap::new(),
+        denormalized: HashMap::new(),
         table_columns: HashMap::new(),
         table_sort_keys: HashMap::new(),
         body: PlanBody::PathFinding(PathFindingBody {
