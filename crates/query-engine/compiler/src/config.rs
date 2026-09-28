@@ -10,6 +10,7 @@ const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
+use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Node, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
@@ -420,9 +421,9 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node {
         let derived = &mut config.compiler_derived;
-        crate::ast::visit::visit_queries(q, &mut |query| {
+        visit_queries(q, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
-            crate::ast::visit::visit_relations(&query.from, &mut |relation| {
+            visit_relations(&query.from, &mut |relation| {
                 derived.optimize_move_to_prewhere_if_final |=
                     matches!(relation, TableRef::Scan { final_: true, .. });
             });
