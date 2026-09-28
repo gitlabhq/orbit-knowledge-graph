@@ -11,7 +11,9 @@ use super::{
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, TemplateFile};
 
-pub(super) struct Hooks;
+pub(super) struct Hooks {
+    pub(super) graph_first: bool,
+}
 
 impl Installer for Hooks {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
@@ -28,7 +30,7 @@ impl Installer for Hooks {
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for agent in agents {
-            install_for_agent(*agent, target, report)?;
+            install_for_agent(*agent, target, self.graph_first, report)?;
         }
         Ok(())
     }
@@ -55,13 +57,18 @@ impl Installer for Hooks {
     }
 }
 
-fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Result<()> {
+fn install_for_agent(
+    agent: Agent,
+    target: &Target,
+    graph_first: bool,
+    report: &mut Report,
+) -> Result<()> {
     for merge in &agent.json_merges {
         let (path, label) = target.resolve(&merge.file)?;
         let entries: Vec<Value> = merge
             .entries
             .iter()
-            .map(substitute_launcher_in_json)
+            .map(|entry| substitute_tokens_in_json(entry, graph_first))
             .collect();
         let mut root = json::read_object(&path)?;
         if !file_mentions(&path, &merge.marker) {
@@ -142,15 +149,31 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     Ok(())
 }
 
-fn substitute_launcher_in_json(value: &Value) -> Value {
+fn substitute_tokens_in_json(value: &Value, graph_first: bool) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher())),
-        Value::Array(items) => {
-            Value::Array(items.iter().map(substitute_launcher_in_json).collect())
+        Value::String(s) => {
+            let (flag, matcher) = match graph_first {
+                true => (
+                    " --graph-first",
+                    format!("|mcp__{}__.*", spec::mcp_server().name),
+                ),
+                false => ("", String::new()),
+            };
+            Value::String(
+                s.replace("{{orbit}}", spec::launcher())
+                    .replace("{{graph_first}}", flag)
+                    .replace("{{graph_first_matcher}}", &matcher),
+            )
         }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| substitute_tokens_in_json(item, graph_first))
+                .collect(),
+        ),
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), substitute_launcher_in_json(v)))
+                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v, graph_first)))
                 .collect(),
         ),
         other => other.clone(),

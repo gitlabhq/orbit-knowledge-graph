@@ -16,6 +16,7 @@ const APP_ID: &str = "orbit";
 const CATEGORY: &str = "orbit_cli";
 const MCP_COMMAND: &str = "mcp";
 const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
+const HOOK_GUARD_COMMAND: &str = "hook_guard";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
@@ -95,6 +96,25 @@ pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
         cli_version: env!("ORBIT_VERSION").parse().ok(),
     };
     track_outcome(tracker, MCP_TOOL_CALL_ACTION, outcome, coding_agent);
+}
+
+pub fn emit_hook_guard_event<T: AnalyticsTracker + ?Sized>(
+    tracker: &T,
+    action: &str,
+    coding_agent: Option<&str>,
+) {
+    let Ok(command) = HOOK_GUARD_COMMAND.parse() else {
+        return;
+    };
+    let outcome = orbit_cli_command::OrbitCliCommand {
+        command,
+        tool_name: None,
+        success: true,
+        exit_code: None,
+        duration_ms: None,
+        cli_version: env!("ORBIT_VERSION").parse().ok(),
+    };
+    track_outcome(tracker, action, outcome, coding_agent);
 }
 
 fn track_outcome<T: AnalyticsTracker + ?Sized>(
@@ -293,7 +313,10 @@ mod tests {
         let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
         emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
         emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
-        for event in tracker.drain() {
+        emit_hook_guard_event(&tracker, "graph_first_deny", None);
+        let events = tracker.drain();
+        assert_eq!(events[2].action(), "graph_first_deny");
+        for event in events {
             assert_contexts_match_iglu_schemas(&event);
         }
     }
