@@ -207,19 +207,6 @@ fn foreign_key_candidate(
         &join_conditions,
         &substitutions,
     );
-    candidate.columns.columns.extend(substitutions.clone());
-    candidate.outputs.nodes = candidate
-        .outputs
-        .nodes
-        .into_iter()
-        .map(|(node, mut output)| {
-            if let Some(Expr::Column(column)) = substitutions.get(&output.primary_key) {
-                output.primary_key = *column;
-                output.relation = bound.column(*column).relation;
-            }
-            (node, output)
-        })
-        .collect();
     candidate.cost = plan_cost(&candidate.plan);
     Some(candidate)
 }

@@ -873,28 +873,6 @@ impl Flavor for DuckDb {
     type Extension = ();
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ColumnBindings {
-    pub columns: BTreeMap<ColumnId, Expr>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OutputBindings {
-    pub nodes: BTreeMap<InputNodeId, OutputBinding>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutputBinding {
-    pub relation: RelationId,
-    pub primary_key: ColumnId,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PhysicalProperties {
-    pub ordered_by: Vec<SortKey>,
-    pub current_relations: BTreeSet<RelationId>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cost {
     pub scans: u32,
@@ -909,21 +887,12 @@ pub struct Cost {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate<B: Flavor> {
     pub plan: Plan<B>,
-    pub columns: ColumnBindings,
-    pub outputs: OutputBindings,
-    pub properties: PhysicalProperties,
     pub cost: Cost,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PropertyKey {
-    pub ordered_by: Vec<SortKey>,
-    pub current_relations: BTreeSet<RelationId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateSet<B: Flavor> {
-    pub candidates: Vec<(PropertyKey, Candidate<B>)>,
+    pub candidates: Vec<Candidate<B>>,
 }
 
 impl<B: Flavor> Default for CandidateSet<B> {
@@ -934,27 +903,22 @@ impl<B: Flavor> Default for CandidateSet<B> {
 
 impl<B: Flavor> CandidateSet<B> {
     fn insert(&mut self, candidate: Candidate<B>) {
-        let key = PropertyKey {
-            ordered_by: candidate.properties.ordered_by.clone(),
-            current_relations: candidate.properties.current_relations.clone(),
-        };
-        if let Some((_, current)) = self
+        if let Some(current) = self
             .candidates
             .iter_mut()
-            .find(|(current, _)| *current == key)
+            .find(|current| current.plan == candidate.plan)
         {
             if candidate.cost < current.cost {
                 *current = candidate;
             }
-        } else {
-            self.candidates.push((key, candidate));
+            return;
         }
+        self.candidates.push(candidate);
     }
 
     fn select(self) -> Option<SelectedPlan<B>> {
         self.candidates
             .into_iter()
-            .map(|(_, candidate)| candidate)
             .min_by_key(|candidate| candidate.cost)
             .map(|candidate| SelectedPlan { candidate })
     }

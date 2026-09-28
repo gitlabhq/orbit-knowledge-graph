@@ -521,33 +521,19 @@ fn lowered<M: QueryDataModel, B: Flavor>(
     aliases: HashMap<RelationId, String>,
     query: Query,
 ) -> Result<LoweredPlan> {
-    let columns: BTreeMap<_, _> = candidate
-        .columns
-        .columns
-        .into_iter()
-        .map(|(id, expression)| {
-            Ok((
-                id,
-                lower_expr(bound, &expression, &aliases)?,
-            ))
-        })
-        .collect::<Result<_>>()?;
-    let nodes: BTreeMap<_, _> = candidate
-        .outputs
-        .nodes
-        .into_iter()
-        .map(|(node, output)| Ok((node, columns[&output.primary_key].clone())))
-        .collect::<Result<_>>()?;
-    let mut node_sources: HashMap<_, _> = nodes
-        .iter()
-        .filter_map(|(node, binding)| {
-            let ast::Expr::Column { table, column } = binding else {
+    let visible = candidate.plan.visible_relations();
+    let mut node_sources: HashMap<_, _> = bound
+        .relations()
+        .filter_map(|(relation, metadata)| {
+            let RelationOrigin::Node { input, .. } = metadata.origin else {
                 return None;
             };
-            Some((
-                bound.input.nodes[node.0].id.clone(),
-                (table.clone(), column.clone()),
-            ))
+            visible.contains(&relation).then(|| {
+                (
+                    bound.input.nodes[input.0].id.clone(),
+                    (aliases[&relation].clone(), ontology::constants::DEFAULT_PRIMARY_KEY.into()),
+                )
+            })
         })
         .collect();
     let top_level_aliases: BTreeSet<_> = table_aliases(&query.from).into_iter().collect();
