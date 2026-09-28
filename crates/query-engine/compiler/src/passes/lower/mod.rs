@@ -14,16 +14,17 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::plan::{self, Plan, PlanBody, Strategy};
+use super::plan::{Plan, PlanBody, Strategy};
 use super::shared;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct LoweredMetadata {
     pub node_sources: std::collections::HashMap<String, (String, String)>,
     pub edges: Vec<LoweredEdge>,
     pub stable_order: Vec<OrderExpr>,
 }
 
+#[derive(Clone)]
 pub struct LoweredEdge {
     pub column_prefix: String,
     pub path_column: Option<String>,
@@ -108,11 +109,11 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             center_tp_lookup.as_ref(),
         ),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, input, pf),
-        PlanBody::Hydration(nodes) => hydration::emit_hydration(
+        PlanBody::Hydration { nodes, options } => hydration::emit_hydration(
             nodes,
             input.limit,
-            input.hydration_dynamic,
-            input.path_segment_budget,
+            options.dynamic,
+            options.path_segment_budget,
         ),
     }?;
 
@@ -125,7 +126,16 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
                 rhs_column: Some((jp.rhs_node.clone(), jp.rhs_prop.clone())),
                 ..Default::default()
             };
-            let pred = shared::filter_to_expr(&jp.lhs_node, &jp.lhs_prop, &filter);
+            let pred = shared::filter_to_expr(
+                &jp.lhs_node,
+                &jp.lhs_prop,
+                &crate::passes::plan::BoundFilter {
+                    filter,
+                    property: None,
+                    data_type: None,
+                    selectivity: ontology::FieldSelectivity::High,
+                },
+            );
             q.where_clause = Some(match q.where_clause.take() {
                 Some(existing) => Expr::and(existing, pred),
                 None => pred,
@@ -215,13 +225,4 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             stable_order,
         },
     })
-}
-
-pub fn lower(input: &mut Input) -> Result<Node> {
-    let plan = plan::plan(input)?;
-    let mut lowered = emit(&plan, input)?;
-    if let Node::Query(query) = &mut lowered.ast {
-        query.limit = Some(input.fetch_limit());
-    }
-    Ok(lowered.ast)
 }

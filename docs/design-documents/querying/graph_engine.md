@@ -58,6 +58,14 @@ Both frontends compile to parameterized ClickHouse SQL through shared passes.
 `compiler::gql::prepare` parses once: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves ontology metadata inside the GQL frontend without SQL.
 Schema calls have no state in the shared compiler contexts. `compiler::compile` remains query-only for both frontends.
 
+Each active schema snapshot derives one immutable query data model from its loaded ontology.
+The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
+Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
+Its authorization catalog resolves GitLab redaction and scope metadata.
+The current ontology files, archives, DDL, and indexing declarations remain unchanged.
+Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
+All later passes continue to use that AST.
+
 | # | Pass | Responsibility |
 |---|---|---|
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |

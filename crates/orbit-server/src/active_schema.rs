@@ -153,11 +153,13 @@ impl ActiveSchema {
 pub struct SchemaSnapshot {
     pub migration_version: u32,
     pub ontology: Arc<Ontology>,
+    pub data_model: Arc<query_data_model::ClickHouseDataModel>,
     pub named_queries: Arc<NamedQueries>,
 }
 
 impl SchemaSnapshot {
     fn new(migration_version: u32, ontology: Arc<Ontology>) -> anyhow::Result<Self> {
+        let data_model = query_engine::compiler::data_model::clickhouse(Arc::clone(&ontology))?;
         let mut named_queries = NamedQueries::load_embedded()?;
         named_queries.retain(|query| match fits_ontology(query, &ontology) {
             Ok(()) => true,
@@ -174,6 +176,7 @@ impl SchemaSnapshot {
         Ok(Self {
             migration_version,
             ontology,
+            data_model,
             named_queries: Arc::new(named_queries),
         })
     }

@@ -16,13 +16,17 @@ use types::ResourceAuthorization;
 use orbit_server::pipeline::{HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
-    ontology: Arc<Ontology>,
+    data_model: Arc<query_data_model::ClickHouseDataModel>,
     client: Arc<ArrowClickHouseClient>,
 }
 
 impl ProfilerPipelineService {
-    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { ontology, client }
+    pub fn new(
+        ontology: Arc<Ontology>,
+        client: Arc<ArrowClickHouseClient>,
+    ) -> Result<Self, query_data_model::DataModelError> {
+        let data_model = compiler::data_model::clickhouse(Arc::clone(&ontology))?;
+        Ok(Self { data_model, client })
     }
 
     pub async fn run_query(
@@ -34,12 +38,13 @@ impl ProfilerPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
+        server_extensions.insert(Arc::clone(&self.data_model));
 
         let mut ctx = QueryPipelineContext {
             frontend: compiler::Frontend::JsonDsl,
             query_json: query_json.to_string(),
             compiled: None,
-            ontology: Arc::clone(&self.ontology),
+            ontology: Arc::clone(self.data_model.ontology()),
             security_context: Some(security_ctx),
             server_extensions,
             phases: TypeMap::default(),

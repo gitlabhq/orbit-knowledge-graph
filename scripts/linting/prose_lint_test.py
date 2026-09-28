@@ -3,9 +3,14 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6.0"]
 # ///
+import os
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from prose_lint import LintError, check, main, markdown_units, yaml_units
+from prose_lint import LintError, changed_files, check, main, markdown_units, yaml_units
 
 PROMPT = """\
 name: grep
@@ -151,6 +156,36 @@ class Cli(unittest.TestCase):
 
     def test_out_of_scope_file_is_skipped(self):
         self.assertEqual(main([__file__]), 0)
+
+    def test_diff_base_does_not_require_connected_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args], cwd=repository, check=True, capture_output=True, text=True
+                ).stdout.strip()
+
+            git("init")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            (repository / "AGENTS.md").write_text("Base.\n")
+            git("add", "AGENTS.md")
+            git("commit", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            git("checkout", "--orphan", "head")
+            (repository / "AGENTS.md").write_text("Head.\n")
+            git("add", "AGENTS.md")
+            git("commit", "-m", "head")
+            head = git("rev-parse", "HEAD")
+
+            previous = Path.cwd()
+            try:
+                os.chdir(repository)
+                with patch.dict(os.environ, {"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA": head}):
+                    self.assertEqual(changed_files(base), ["AGENTS.md"])
+            finally:
+                os.chdir(previous)
 
 
 class SentenceRules(unittest.TestCase):

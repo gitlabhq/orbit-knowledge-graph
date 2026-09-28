@@ -44,6 +44,13 @@ pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
     }
 }
 
+pub fn derive_clickhouse_data_model(
+    ontology: &std::sync::Arc<ontology::Ontology>,
+) -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+    query_engine::compiler::data_model::clickhouse(std::sync::Arc::clone(ontology))
+        .expect("test ontology should produce a ClickHouse data model")
+}
+
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
 
 /// Version 0 -> "" (empty), version N -> "vN_".

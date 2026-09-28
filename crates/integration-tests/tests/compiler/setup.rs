@@ -1,6 +1,4 @@
-use compiler::passes::lower::lower;
-use compiler::passes::validate::Validator;
-use compiler::{AccessLevel, AuthorizedPath, Node, SecurityContext, normalize};
+use compiler::{AccessLevel, AuthorizedPath, SecurityContext};
 use ontology::{DataType, Ontology};
 use std::sync::Arc;
 
@@ -97,15 +95,4 @@ pub fn compile_pair(
             "frontend acceptance differs for {orbit_query}: JSON={json:?}; Orbit={orbit_query_result:?}"
         ),
     }
-}
-
-pub fn compile_to_ast(json_input: &str, ontology: &Ontology) -> compiler::Result<Node> {
-    let v = Validator::new(ontology);
-    let value = v.check_json(json_input)?;
-    v.check_ontology(&value)?;
-    let input: compiler::Input = serde_json::from_value(value)?;
-    v.check_references(&input)?;
-    let mut input = normalize(input, ontology)?;
-    let node = lower(&mut input)?;
-    Ok(node)
 }

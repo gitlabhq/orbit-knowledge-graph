@@ -41,6 +41,14 @@ pub struct CompiledQueryContext {
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,
+    pub pagination: PaginationContext,
+    pub has_virtual_columns: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PaginationContext {
+    pub query_hash: u64,
+    pub key_count: usize,
 }
 
 impl ParameterizedQuery {

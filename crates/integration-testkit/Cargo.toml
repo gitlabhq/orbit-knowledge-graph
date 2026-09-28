@@ -15,6 +15,7 @@ futures = { workspace = true }
 orbit-server = { path = "../orbit-server" }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }
+query-data-model = { path = "../query-data-model" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
 reqwest = { workspace = true }
 rustls = { workspace = true }
