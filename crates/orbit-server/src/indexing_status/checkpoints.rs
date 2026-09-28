@@ -11,7 +11,7 @@ use super::phase::Phase;
 use crate::active_schema::SchemaSnapshot;
 use crate::status_query::{QueryCache, fetch_status_query_batches, map_column_extraction_error};
 
-const MAX_SDLC_ATTEMPTS: i64 = 3;
+const MAX_SDLC_ATTEMPTS: i64 = 5;
 // Two missed hourly sweeps: a run that dies writes nothing after its start write.
 const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
 

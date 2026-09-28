@@ -39,7 +39,7 @@ pub const STARTED_FIRST_PASS: CheckpointRow = CheckpointRow {
     ..PAGING_FIRST_PASS
 };
 pub const FAILED_FIRST_PASS: CheckpointRow = CheckpointRow {
-    attempts: 3,
+    attempts: 5,
     ..PAGING_FIRST_PASS
 };
 pub const STALE_FIRST_PASS: CheckpointRow = CheckpointRow {
