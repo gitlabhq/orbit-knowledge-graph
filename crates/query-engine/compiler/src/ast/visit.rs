@@ -56,32 +56,40 @@ fn visit_expr_queries_ref(
     expression: &Expr,
     callback: &mut impl FnMut(&Query) -> Result<()>,
 ) -> Result<()> {
+    visit_expressions(expression, &mut |expression| match expression {
+        Expr::InSelect { query, .. } | Expr::Scalar(query) => visit_queries(query, callback),
+        _ => Ok(()),
+    })
+}
+
+pub fn visit_expressions<'a>(
+    expression: &'a Expr,
+    callback: &mut impl FnMut(&'a Expr) -> Result<()>,
+) -> Result<()> {
     match expression {
-        Expr::InSelect { expr, query } => {
-            visit_expr_queries_ref(expr, callback)?;
-            visit_queries(query, callback)
-        }
-        Expr::Scalar(query) => visit_queries(query, callback),
         Expr::BinaryOp { left, right, .. } => {
-            visit_expr_queries_ref(left, callback)?;
-            visit_expr_queries_ref(right, callback)
+            visit_expressions(left, callback)?;
+            visit_expressions(right, callback)?;
         }
-        Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
-            visit_expr_queries_ref(expr, callback)
+        Expr::UnaryOp { expr, .. }
+        | Expr::InSubquery { expr, .. }
+        | Expr::InSelect { expr, .. } => {
+            visit_expressions(expr, callback)?;
         }
-        Expr::Lambda { body, .. } => visit_expr_queries_ref(body, callback),
+        Expr::Lambda { body, .. } => visit_expressions(body, callback)?,
         Expr::FuncCall { args, .. } => {
             for argument in args {
-                visit_expr_queries_ref(argument, callback)?;
+                visit_expressions(argument, callback)?;
             }
-            Ok(())
         }
         Expr::Column { .. }
         | Expr::Identifier(_)
         | Expr::Literal(_)
         | Expr::Param { .. }
-        | Expr::Star => Ok(()),
+        | Expr::Scalar(_)
+        | Expr::Star => {}
     }
+    callback(expression)
 }
 
 pub fn visit_relations<'a>(table: &'a TableRef, callback: &mut impl FnMut(&'a TableRef)) {
