@@ -15,6 +15,32 @@ use crate::status_query::{
 pub(super) const PROJECT_NODE: &str = "Project";
 const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
+// `{in_scopes}` is an OR of `startsWith` per scope: `arrayExists` cannot use the primary key.
+const PROJECT_COVERAGE_SQL: &str = r#"
+SELECT scope,
+       toInt64(uniqExact(projects.id)) AS total_known,
+       toInt64(uniqExactIf(projects.id, code.is_indexed)) AS indexed,
+       toInt64(uniqExactIf(projects.id, code.is_gap)) AS gaps
+FROM (SELECT id, traversal_path
+      FROM {project_table:Identifier} FINAL
+      WHERE _deleted = 0
+        AND {in_scopes}) AS projects
+-- One row for each prefix of the project path, so each requested scope that holds it counts it.
+ARRAY JOIN arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', projects.traversal_path), 1, depth), '/'), '/'),
+                    range(1, length(splitByChar('/', projects.traversal_path)))) AS scope
+LEFT JOIN (SELECT project_id,
+                  countIf(indexed_at IS NOT NULL) > 0 AS is_indexed,
+                  NOT is_indexed AND countIf(attempts >= {max_code_attempts:Int64}) > 0 AS is_gap
+           FROM {code_checkpoint_table:Identifier} FINAL
+           WHERE _deleted = 0
+             AND is_default_branch
+             AND {in_scopes}
+           GROUP BY project_id) AS code
+       ON code.project_id = projects.id
+WHERE scope IN {scopes:Array(String)}
+GROUP BY scope
+"#;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProjectCoverage {
     pub indexed: i64,
@@ -44,7 +70,9 @@ pub async fn read_project_coverage(
     ontology: &Ontology,
     scopes: &[TraversalPath],
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
-    let sql = build_project_coverage_query(ontology, scopes.len())?;
+    let (project_table, code_checkpoint_table) = find_coverage_tables(ontology)?;
+    let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
+    let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
     let batches = fetch_status_query_batches(
         client,
@@ -53,6 +81,8 @@ pub async fn read_project_coverage(
         QueryCache::Skip,
         |query| {
             let query = query
+                .param("project_table", project_table)
+                .param("code_checkpoint_table", code_checkpoint_table)
                 .param("scopes", &scopes)
                 .param("max_code_attempts", MAX_CODE_ATTEMPTS);
             bind_prefix_parameters(query, "scope", &scopes)
@@ -78,7 +108,7 @@ pub async fn read_project_coverage(
         .collect())
 }
 
-fn build_project_coverage_query(ontology: &Ontology, scope_count: usize) -> Result<String, Status> {
+fn find_coverage_tables(ontology: &Ontology) -> Result<(&str, &str), Status> {
     let project_table = &ontology
         .get_node(PROJECT_NODE)
         .ok_or_else(|| Status::internal(format!("ontology missing required node: {PROJECT_NODE}")))?
@@ -93,27 +123,5 @@ fn build_project_coverage_query(ontology: &Ontology, scope_count: usize) -> Resu
             ))
         })?
         .name;
-
-    let in_scopes = build_prefix_match_condition("traversal_path", "scope", scope_count);
-    Ok(format!(
-        "SELECT scope, \
-                toInt64(uniqExact(p.id)) AS total_known, \
-                toInt64(uniqExactIf(p.id, c.is_indexed)) AS indexed, \
-                toInt64(uniqExactIf(p.id, c.is_gap)) AS gaps \
-           FROM (SELECT id, traversal_path FROM {project_table} FINAL \
-                  WHERE _deleted = 0 \
-                    AND {in_scopes}) AS p \
-          ARRAY JOIN arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', p.traversal_path), 1, depth), '/'), '/'), \
-                              range(1, length(splitByChar('/', p.traversal_path)))) AS scope \
-           LEFT JOIN (SELECT project_id, \
-                             countIf(indexed_at IS NOT NULL) > 0 AS is_indexed, \
-                             NOT is_indexed AND countIf(attempts >= {{max_code_attempts:Int64}}) > 0 AS is_gap \
-                        FROM {code_checkpoint_table} FINAL \
-                       WHERE _deleted = 0 AND is_default_branch \
-                         AND {in_scopes} \
-                       GROUP BY project_id) AS c \
-                 ON c.project_id = p.id \
-          WHERE scope IN {{scopes:Array(String)}} \
-          GROUP BY scope"
-    ))
+    Ok((project_table, code_checkpoint_table))
 }
