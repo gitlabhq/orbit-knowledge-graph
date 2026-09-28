@@ -29,7 +29,6 @@ const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 pub const MAX_CODE_ATTEMPTS: i64 = 5;
 pub const CODE_RETRY_AFTER: Duration = Duration::from_secs(3600);
-pub const CODE_GAP_RETRY_AFTER: Duration = Duration::from_secs(24 * 3600);
 
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
@@ -37,11 +36,8 @@ FROM {table:Identifier} FINAL
 WHERE _deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
   AND (indexed_at IS NOT NULL
-       -- A gap (max attempts) waits a day before its retry, so an outage or a fixed bug heals.
-       OR _version > now64(6) - toIntervalSecond(
-            if(attempts >= {max_attempts:Int64},
-               {gap_retry_after_secs:UInt64},
-               {retry_after_secs:UInt64})))
+       OR attempts >= {max_attempts:Int64}
+       OR _version > now64(6) - toIntervalSecond({retry_after_secs:UInt64}))
 "#;
 
 const NAMESPACE_PROJECTS_QUERY: &str = r#"
@@ -162,7 +158,6 @@ impl CodeBackfill {
             .param("traversal_path", traversal_path.as_str())
             .param("max_attempts", MAX_CODE_ATTEMPTS)
             .param("retry_after_secs", CODE_RETRY_AFTER.as_secs())
-            .param("gap_retry_after_secs", CODE_GAP_RETRY_AFTER.as_secs())
             .fetch_arrow_streamed(None)
             .await
             .map_err(|error| {
