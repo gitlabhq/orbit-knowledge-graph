@@ -7,8 +7,8 @@ use orbit_utils::fs_walk::FileInventoryEntry;
 
 use crate::error::Error;
 use crate::pipeline::{
-    Canonicalize, Context, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare, Resolve,
-    Resolved, Rewrite, Sources,
+    Canonicalize, Changes, Context, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
+    ReindexInput, Remap, Resolve, Resolved, Rewrite, Sources, State,
 };
 
 /// Every file of the repository: parse entries go through parse, rewrite,
@@ -28,6 +28,26 @@ where
     };
     Pipeline::new(context, sources)
         .then(Prepare)?
+        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
+        .then(Insert)?
+        .then(Resolve)
+}
+
+/// Only the changed files go through the per-file phases; resolution
+/// revisits them and everything that depended on what they replaced.
+pub fn reindex<'e>(
+    context: Context<'e>,
+    state: State,
+    root: &Path,
+    changes: Changes,
+) -> Result<Pipeline<'e, Resolved>, Error> {
+    let input = ReindexInput {
+        state,
+        root: root.to_path_buf(),
+        changes,
+    };
+    Pipeline::new(context, input)
+        .then(Remap)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
         .then(Resolve)

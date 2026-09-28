@@ -5,14 +5,14 @@ use std::path::PathBuf;
 
 use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
     Canonical, Context, DirtyGraph, Displayed, Error, Exported, ItemPhase, Lazy, LinkedFile,
-    Listed, Parsed, Phase, Resolved, Rewritten, SourceFile, Sources, State, Workset,
+    Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, Sources, State, Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
@@ -21,7 +21,7 @@ use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::Tree;
+use crate::tree::{Edge, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -103,6 +103,90 @@ fn workset(
         dirty,
         listed,
     }
+}
+
+/// Incremental index: removed and modified files leave the graph, edges and
+/// resolver locations follow the compacted file indices, and every retained
+/// file that pointed at a removed one is marked dirty.
+pub struct Remap;
+
+impl Phase<ReindexInput> for Remap {
+    type Output = Workset<Lazy<SourceFile>>;
+
+    fn name(&self) -> Cow<'static, str> {
+        "remap".into()
+    }
+
+    fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
+        let ReindexInput {
+            mut state,
+            root,
+            changes,
+        } = input;
+        let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        let dirty_labels: FxHashSet<&str> = changes
+            .removed
+            .iter()
+            .map(String::as_str)
+            .chain(changes.changed.iter().map(|f| f.path.as_str()))
+            .collect();
+        let dirty = remap(&mut state, &old_labels, &dirty_labels);
+        state
+            .configs
+            .retain(|c| !dirty_labels.contains(c.path.as_str()));
+        Ok(workset(context.env, state, root, changes.changed, dirty))
+    }
+}
+
+/// `Parse` entries this crate has a grammar for become the lazy workset,
+/// Drops the dirty trees, renumbers what remains, and returns the retained
+/// files whose resolution depended on a dropped one.
+fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<usize> {
+    state.trees.retain(|t| !dirty.contains(t.label.as_str()));
+
+    let label_to_fi: FxHashMap<&str, u32> = state
+        .trees
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.label.as_str(), i as u32))
+        .collect();
+
+    state.edges = state
+        .edges
+        .iter()
+        .filter(|e| {
+            old_labels
+                .get(e.from_fi())
+                .is_some_and(|l| !dirty.contains(l.as_str()))
+                && old_labels
+                    .get(e.to_fi())
+                    .is_some_and(|l| !dirty.contains(l.as_str()))
+        })
+        .map(|e| Edge {
+            from_tree: label_to_fi[old_labels[e.from_fi()].as_str()],
+            to_tree: label_to_fi[old_labels[e.to_fi()].as_str()],
+            ..*e
+        })
+        .collect();
+
+    let old_dirty_fis: FxHashSet<usize> = old_labels
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| dirty.contains(l.as_str()))
+        .map(|(i, _)| i)
+        .collect();
+    let reverse_dirty: FxHashSet<usize> = state
+        .resolver
+        .reqs()
+        .iter()
+        .filter(|r| old_dirty_fis.contains(&r.target_fi))
+        .filter_map(|r| label_to_fi.get(old_labels[r.fi].as_str()))
+        .map(|&fi| fi as usize)
+        .collect();
+
+    let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
+    dependents.extend(reverse_dirty);
+    dependents
 }
 
 /// Runs an `ItemPhase` over every item of a workset in parallel. An item that
