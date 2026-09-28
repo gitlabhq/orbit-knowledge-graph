@@ -20,18 +20,21 @@ fn detect_lang(suite: &TestSuite, paths: &[String]) -> SupportLang {
         return SupportLang::from_alias(pipeline)
             .unwrap_or_else(|| panic!("suite {:?}: unknown pipeline {pipeline:?}", suite.name));
     }
-    let langs: std::collections::HashSet<_> = paths
+    let mut langs: Vec<SupportLang> = paths
         .iter()
         .filter_map(|path| SupportLang::from_path(path))
         .collect();
-    match langs.len() {
-        0 => panic!(
+    langs.sort_by_key(|l| <&str>::from(l));
+    langs.dedup();
+    let families: std::collections::HashSet<_> = langs.iter().map(|l| l.family()).collect();
+    match (langs.first(), families.len()) {
+        (None, _) => panic!(
             "suite {:?}: no fixture has a known language extension; declare `pipeline:`",
             suite.name
         ),
-        1 => *langs.iter().next().unwrap(),
+        (Some(&lang), 1) => lang,
         _ => panic!(
-            "suite {:?} mixes languages {langs:?}; declare `pipeline:`",
+            "suite {:?} mixes families {families:?}; declare `pipeline:`",
             suite.name
         ),
     }

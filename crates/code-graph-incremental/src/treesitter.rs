@@ -4,8 +4,9 @@ use crate::intern::Lang;
 use crate::sentinel::Killed;
 use crate::tree::{Node, Tree};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SupportLang {
     Bash,
     C,
@@ -39,6 +40,8 @@ pub struct LangEntry {
     #[serde(default)]
     aliases: Vec<String>,
     grammar: String,
+    #[serde(default)]
+    family: Option<String>,
     #[serde(default)]
     fqn_separator: Option<String>,
     #[serde(default, rename = "package_markers")]
@@ -107,13 +110,26 @@ impl SupportLang {
         Self::from_extension(ext)
     }
 
-    /// The language whose rule file this one shares. TypeScript, TSX, and
-    /// JavaScript differ only in grammar and form one graph.
-    pub fn pipeline(self) -> Self {
-        match self {
-            Self::Tsx | Self::JavaScript => Self::TypeScript,
-            other => other,
-        }
+    /// Languages that resolve against each other share a graph: one run,
+    /// each file parsed and rewritten by its own language. Declared with
+    /// `family:` in `config/languages.yaml`; a language without one stands alone.
+    pub fn family(self) -> &'static str {
+        LANG_CONFIG.languages[&self]
+            .family
+            .as_deref()
+            .unwrap_or_else(|| self.into())
+    }
+
+    pub fn family_members(self) -> Vec<Self> {
+        let family = self.family();
+        let mut members: Vec<Self> = LANG_CONFIG
+            .languages
+            .keys()
+            .copied()
+            .filter(|l| l.family() == family)
+            .collect();
+        members.sort_by_key(|l| <&str>::from(l));
+        members
     }
 
     pub fn ts_language(&self) -> tree_sitter::Language {

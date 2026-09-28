@@ -5,10 +5,12 @@ languages:
 
   c:
     extensions: [c, h]
+    family: c_family
     grammar: tree-sitter-c
 
   cpp:
     extensions: [cpp, cc, cxx, hpp, hh, hxx]
+    family: c_family
     grammar: tree-sitter-cpp
 
   csharp:
@@ -38,12 +40,14 @@ languages:
 
   java:
     extensions: [java]
+    family: jvm
     grammar: tree-sitter-java
     fqn_separator: "."
     package_markers: [package-info.java]
 
   javascript:
     extensions: [js, jsx, mjs, cjs]
+    family: js_ts
     aliases: [js, javascript]
     grammar: tree-sitter-typescript-tsx
     fqn_separator: "::"
@@ -52,6 +56,7 @@ languages:
 
   kotlin:
     extensions: [kt, kts]
+    family: jvm
     grammar: tree-sitter-kotlin-sg
     fqn_separator: "."
 
@@ -93,6 +98,7 @@ languages:
 
   scala:
     extensions: [scala, sc]
+    family: jvm
     grammar: tree-sitter-scala
     fqn_separator: "."
 
@@ -103,6 +109,7 @@ languages:
 
   typescript:
     extensions: [ts, mts, cts]
+    family: js_ts
     aliases: [ts, typescript]
     grammar: tree-sitter-typescript
     fqn_separator: "::"
@@ -111,6 +118,7 @@ languages:
 
   tsx:
     extensions: [tsx]
+    family: js_ts
     aliases: [tsx]
     grammar: tree-sitter-typescript-tsx
     fqn_separator: "::"
