@@ -18,26 +18,29 @@ const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 // {in_scopes} gets one startsWith per scope at runtime. ClickHouse can use the primary key
 // for those, but not for arrayExists.
 const PROJECT_COVERAGE_SQL: &str = r#"
+WITH projects AS (
+         SELECT id,
+                arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, depth), '/'), '/'),
+                         range(1, length(splitByChar('/', traversal_path)))) AS path_prefixes
+         FROM {project_table:Identifier} FINAL
+         WHERE _deleted = 0
+           AND {in_scopes}),
+     code AS (
+         SELECT project_id,
+                countIf(indexed_at IS NOT NULL) > 0 AS is_indexed,
+                NOT is_indexed AND countIf(attempts >= {max_code_attempts:Int64}) > 0 AS is_gap
+         FROM {code_checkpoint_table:Identifier} FINAL
+         WHERE _deleted = 0
+           AND is_default_branch
+           AND {in_scopes}
+         GROUP BY project_id)
 SELECT scope,
        toInt64(uniqExact(projects.id)) AS total_known,
        toInt64(uniqExactIf(projects.id, code.is_indexed)) AS indexed,
        toInt64(uniqExactIf(projects.id, code.is_gap)) AS gaps
-FROM (SELECT id, traversal_path
-      FROM {project_table:Identifier} FINAL
-      WHERE _deleted = 0
-        AND {in_scopes}) AS projects
--- One row for each prefix of the project path, so each requested scope that holds it counts it.
-ARRAY JOIN arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', projects.traversal_path), 1, depth), '/'), '/'),
-                    range(1, length(splitByChar('/', projects.traversal_path)))) AS scope
-LEFT JOIN (SELECT project_id,
-                  countIf(indexed_at IS NOT NULL) > 0 AS is_indexed,
-                  NOT is_indexed AND countIf(attempts >= {max_code_attempts:Int64}) > 0 AS is_gap
-           FROM {code_checkpoint_table:Identifier} FINAL
-           WHERE _deleted = 0
-             AND is_default_branch
-             AND {in_scopes}
-           GROUP BY project_id) AS code
-       ON code.project_id = projects.id
+FROM projects
+ARRAY JOIN path_prefixes AS scope
+LEFT JOIN code ON code.project_id = projects.id
 WHERE scope IN {scopes:Array(String)}
 GROUP BY scope
 "#;
