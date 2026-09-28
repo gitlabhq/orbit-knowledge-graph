@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
@@ -12,12 +11,11 @@ use code_graph::v2::{
 };
 use duckdb_client::DuckDbClient;
 
-use super::assertions::{Severity, TestSuite};
-use super::validator::run_suite;
+use super::validator::{load_suite, report, run_suite, write_fixtures};
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
-fn create_test_db() -> anyhow::Result<DuckDbClient> {
+pub fn create_test_db() -> anyhow::Result<DuckDbClient> {
     let client =
         DuckDbClient::open(Path::new(":memory:")).context("failed to open in-memory DuckDB")?;
     client
@@ -82,16 +80,9 @@ fn copy_dir_recursive(
 }
 
 pub fn run_yaml_suite(yaml: &str) {
-    let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
-
-    if suite.tests.iter().all(|t| t.skip) {
-        eprintln!(
-            "[PASS] Suite: {} ({} tests, all skipped)",
-            suite.name,
-            suite.tests.len()
-        );
+    let Some(suite) = load_suite(yaml) else {
         return;
-    }
+    };
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
     let mut file_inventory = Vec::new();
@@ -103,14 +94,8 @@ pub fn run_yaml_suite(yaml: &str) {
         copy_dir_recursive(&src, tmp.path(), &mut file_inventory);
     }
 
+    write_fixtures(&suite.fixtures, tmp.path());
     for fixture in &suite.fixtures {
-        let path = tmp.path().join(&fixture.path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .unwrap_or_else(|e| panic!("Failed to create dir {}: {e}", parent.display()));
-        }
-        std::fs::write(&path, &fixture.content)
-            .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
         file_inventory.push(FileInventoryEntry {
             path: fixture.path.clone(),
             size: fixture.content.len() as u64,
@@ -237,24 +222,5 @@ pub fn run_yaml_suite(yaml: &str) {
     let db = client.lock().unwrap();
     let failures = run_suite(&suite, &db, &ontology);
     drop(db);
-
-    if failures.is_empty() {
-        eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());
-        return;
-    }
-
-    let mut msg = format!(
-        "\n[FAIL] Suite: {} ({} failures)\n",
-        suite.name,
-        failures.len()
-    );
-    for f in &failures {
-        writeln!(msg, "  [{}] \"{}\" — {}", f.severity, f.test, f.message).unwrap();
-    }
-
-    if failures.iter().any(|f| f.severity == Severity::Error) {
-        panic!("{msg}");
-    } else {
-        eprintln!("{msg}");
-    }
+    report(&suite, &failures);
 }

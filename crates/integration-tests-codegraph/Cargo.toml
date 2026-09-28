@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 code-graph = { path = "../code-graph" }
+code-graph-incremental = { path = "../code-graph-incremental" }
 compiler = { path = "../query-engine/compiler" }
 duckdb-client = { path = "../duckdb-client" }
 ontology = { path = "../ontology" }
