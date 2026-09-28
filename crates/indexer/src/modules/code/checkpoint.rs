@@ -64,6 +64,10 @@ impl CodeCheckpoint {
         self.attempts += 1;
     }
 
+    pub fn refund_attempt(&mut self) {
+        self.attempts = (self.attempts - 1).max(0);
+    }
+
     pub fn complete(
         &mut self,
         task_id: i64,
