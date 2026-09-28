@@ -426,7 +426,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client));
+    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client))?;
     let run_ctx = RunContext {
         service: &service,
         client: &client,

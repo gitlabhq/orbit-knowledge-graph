@@ -1528,6 +1528,7 @@ dependencies = [
  "pest",
  "pest_consume",
  "pest_derive",
+ "query-data-model",
  "regex",
  "serde",
  "serde_json",
@@ -4059,6 +4060,7 @@ dependencies = [
  "orbit-server-config",
  "orbit-utils",
  "orbit-versions",
+ "query-data-model",
  "query-engine",
  "reqwest 0.13.4",
  "rustls",
@@ -4110,6 +4112,7 @@ dependencies = [
  "orbit-utils",
  "parking_lot",
  "prost",
+ "query-data-model",
  "query-engine",
  "rcgen",
  "regex",
@@ -5657,6 +5660,7 @@ dependencies = [
  "orbit-utils",
  "orbit-versions",
  "prost",
+ "query-data-model",
  "query-engine",
  "reqwest 0.13.4",
  "rust-embed",
@@ -6992,6 +6996,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "query-data-model"
+version = "0.1.0"
+dependencies = [
+ "ontology",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "query-engine"
 version = "0.1.0"
 dependencies = [
@@ -7018,6 +7030,7 @@ dependencies = [
  "orbit-utils",
  "orbit-versions",
  "pipeline",
+ "query-data-model",
  "regex",
  "rustls",
  "serde",
@@ -9008,6 +9021,7 @@ dependencies = [
  "ontology",
  "orbit-utils",
  "pipeline",
+ "query-data-model",
  "serde",
  "serde_json",
  "tokio",

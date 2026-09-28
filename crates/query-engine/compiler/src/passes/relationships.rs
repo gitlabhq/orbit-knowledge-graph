@@ -1,16 +1,21 @@
-use ontology::Ontology;
-
 use crate::input::{Direction, HopRange, InputRelationship};
 use crate::{Input, QueryError, Result};
 
-pub fn validate_relationships(input: &Input, ontology: &Ontology) -> Result<()> {
+pub fn validate_relationships(
+    input: &Input,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Result<()> {
     input
         .relationships
         .iter()
-        .try_for_each(|edge| check_direction(input, edge, ontology))
+        .try_for_each(|edge| check_direction(input, edge, model))
 }
 
-fn check_direction(input: &Input, edge: &InputRelationship, ontology: &Ontology) -> Result<()> {
+fn check_direction(
+    input: &Input,
+    edge: &InputRelationship,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Result<()> {
     let entity = |id: &str| {
         input
             .nodes
@@ -26,24 +31,17 @@ fn check_direction(input: &Input, edge: &InputRelationship, ontology: &Ontology)
     }
     let (mut reversed, mut unconnected) = (Vec::new(), Vec::new());
     for kind in &edge.types {
-        let variants: Vec<_> = ontology
-            .get_edge(kind)
-            .unwrap_or_default()
-            .iter()
-            .filter(|variant| !variant.source_kind.is_empty() && !variant.target_kind.is_empty())
-            .collect();
-        if variants.is_empty()
-            || variants
-                .iter()
-                .any(|variant| variant.source_kind == source && variant.target_kind == target)
-        {
+        let graph = model.graph();
+        let Some(relationship) = graph.relationship_id(kind) else {
+            return Ok(());
+        };
+        if graph.variant_named(kind, source, target).is_some() {
             return Ok(());
         }
-        if variants
-            .iter()
-            .any(|variant| variant.source_kind == target && variant.target_kind == source)
-        {
+        if graph.variant_named(kind, target, source).is_some() {
             reversed.push(kind.as_str());
+        } else if graph.relationship(relationship).variants.is_empty() {
+            return Ok(());
         } else {
             unconnected.push(kind.as_str());
         }

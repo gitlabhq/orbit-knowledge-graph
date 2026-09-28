@@ -88,13 +88,18 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     hash
 }
 
-pub fn apply(node: &mut Node, input: &mut Input, metadata: &LoweredMetadata) -> Result<()> {
+pub fn apply(
+    node: &mut Node,
+    input: &Input,
+    metadata: &LoweredMetadata,
+    query_hash: u64,
+) -> Result<usize> {
     let Node::Query(q) = node else {
-        return Ok(());
+        return Ok(0);
     };
     q.limit = Some(input.fetch_limit());
     let Some(cursor) = &input.cursor else {
-        return Ok(());
+        return Ok(0);
     };
     let additional: Vec<_> = metadata
         .stable_order
@@ -104,16 +109,16 @@ pub fn apply(node: &mut Node, input: &mut Input, metadata: &LoweredMetadata) -> 
         .collect();
     q.order_by.extend(additional);
     let order_by = q.order_by.clone();
-    input.compiler.cursor_key_count = order_by.len();
     if order_by.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     append_readback_columns(q, &order_by);
 
-    let Some(values) = &cursor.seek else {
-        return Ok(());
+    let Some(after) = &cursor.after else {
+        return Ok(order_by.len());
     };
+    let values = decode(after, query_hash)?;
     if values.len() != order_by.len() {
         return Err(QueryError::PaginationError(
             "cursor.after was issued for a different query; restart pagination".into(),
@@ -124,13 +129,13 @@ pub fn apply(node: &mut Node, input: &mut Input, metadata: &LoweredMetadata) -> 
         .iter()
         .any(|o| matches!(o.expr, Expr::Identifier(_)));
     if !q.group_by.is_empty() {
-        place_seek_in_having(q, &order_by, values, &nullable);
+        place_seek_in_having(q, &order_by, &values, &nullable);
     } else if !q.union_all.is_empty() || alias_scoped {
-        hoist_page_subquery(q, &order_by, values, &nullable);
+        hoist_page_subquery(q, &order_by, &values, &nullable);
     } else {
-        merge_seek_into_where(q, &order_by, values, &nullable);
+        merge_seek_into_where(q, &order_by, &values, &nullable);
     }
-    Ok(())
+    Ok(order_by.len())
 }
 
 fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {

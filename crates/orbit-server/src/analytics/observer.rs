@@ -55,6 +55,7 @@ impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
         self.metrics.input = Some(ctx.input.clone());
+        self.metrics.has_virtual_columns = ctx.has_virtual_columns;
         self.metrics.hydration = Some(ctx.hydration.clone());
     }
     fn compiled(&mut self, elapsed: Duration) {
@@ -201,6 +202,8 @@ mod tests {
                 }],
                 ..Default::default()
             },
+            pagination: Default::default(),
+            has_virtual_columns: false,
         });
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);

@@ -37,6 +37,7 @@
 pub mod analytics;
 pub mod ast;
 pub mod constants;
+pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
@@ -58,11 +59,12 @@ pub use constants::{
 };
 pub use error::{QueryError, Result};
 pub use input::{
-    ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
-    QueryType, parse_input,
+    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
+    parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
+pub use query_data_model::EntityAuthConfig;
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
@@ -77,7 +79,8 @@ pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::normalize::{build_entity_auth, normalize};
+pub use passes::normalize::build_entity_auth;
+pub use passes::plan::HydrationCompileOptions;
 pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
@@ -106,14 +109,25 @@ pub fn compile(
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    compile_model(raw, fe, &data_model, ctx)
+}
+
+pub fn compile_model(
+    raw: &str,
+    fe: Frontend,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
     match fe {
         Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(Arc::clone(ontology), ctx.clone());
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_json_dsl)
         }
         Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(Arc::clone(ontology), ctx.clone());
+            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_gql)
         }
@@ -130,17 +144,18 @@ pub fn compile_local(
     fe: Frontend,
     ontology: &Arc<Ontology>,
 ) -> Result<CompiledQueryContext> {
-    let mut ont = ontology.as_ref().clone();
-    ont.remove_data_model_optimizations();
-    let ont = Arc::new(ont);
+    let mut ontology = ontology.as_ref().clone();
+    ontology.remove_data_model_optimizations();
+    let data_model = data_model::duckdb(Arc::new(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
         Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&ont));
+            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_json_dsl)
         }
         Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&ont));
+            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
             c.set_raw(raw.to_string());
             finish(&mut c, config::run_duckdb_gql)
         }
@@ -149,7 +164,9 @@ pub fn compile_local(
 
 /// Run only `validate` + `normalize`, returning the normalized [`Input`].
 pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeCtx::new(Arc::clone(ontology));
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    let mut ctx = config::ValidateNormalizeCtx::new(data_model);
     ctx.set_raw(json_input.to_string());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
@@ -161,7 +178,9 @@ pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<
 }
 
 pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeGqlCtx::new(Arc::clone(ontology));
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
     ctx.set_raw(raw.to_string());
     config::run_validate_normalize_gql(&mut ctx)
         .and_then(|()| {
@@ -181,11 +200,24 @@ pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Inp
 /// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
+    options: HydrationCompileOptions,
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    compile_input_model(input, options, &data_model, ctx)
+}
+
+pub fn compile_input_model(
+    input: Input,
+    options: HydrationCompileOptions,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
+    ctx.set_hydration_options(options);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
@@ -231,6 +263,32 @@ mod tests {
             .expect("should compile")
             .base
             .render()
+    }
+
+    #[test]
+    fn relationship_filter_keeps_edge_column_type() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "filters": {"target_id": 2}
+            }]
+        }"#;
+
+        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+        let filter_param = compiled
+            .base
+            .params
+            .values()
+            .find(|param| param.value == serde_json::json!(2))
+            .expect("target_id filter parameter");
+        assert_eq!(filter_param.ch_type, orbit_utils::clickhouse::ChType::Int64);
     }
 
     #[test]
@@ -2053,10 +2111,8 @@ mod tests {
             nodes: vec![InputNode {
                 id: "mr".into(),
                 entity: Some("MergeRequest".into()),
-                table: Some("gl_merge_request".into()),
                 columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
                 node_ids: vec![1],
-                has_traversal_path: true,
                 traversal_paths: vec![TraversalPath::new_unchecked("1/")],
                 ..Default::default()
             }],
@@ -2065,8 +2121,13 @@ mod tests {
         };
 
         let ont = ONTOLOGY.clone();
-        let compiled =
-            compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
+        let compiled = compile_input(
+            input,
+            HydrationCompileOptions::default(),
+            &ont,
+            &security_ctx(),
+        )
+        .expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
             !sql.contains(" FINAL"),

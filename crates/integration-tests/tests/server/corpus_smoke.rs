@@ -20,12 +20,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
+use crate::common::{
+    DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
+    load_ontology,
+};
 use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
-use ontology::Ontology;
 use orbit_server::auth::Claims;
 use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
 use orbit_server::redaction::ResourceAuthorization;
@@ -405,11 +407,12 @@ async fn run_pipeline(
     db: &TestContext,
     json: &str,
     frontend: Frontend,
-    ontology: &Arc<Ontology>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     claims: &Claims,
 ) -> Result<(), PipelineError> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
+    server_extensions.insert(Arc::clone(data_model));
     server_extensions.insert(claims.clone());
     let mut registry = ColumnResolverRegistry::new();
     registry.register("gitaly", Arc::new(MockColumnResolver));
@@ -419,7 +422,7 @@ async fn run_pipeline(
         frontend,
         query_json: json.to_string(),
         compiled: None,
-        ontology: Arc::clone(ontology),
+        ontology: Arc::clone(data_model.ontology()),
         security_context: None,
         server_extensions,
         phases: TypeMap::default(),
@@ -456,7 +459,7 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&load_ontology());
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
@@ -487,7 +490,7 @@ async fn corpus_smoke() {
             }
         };
 
-        let outcome = run_pipeline(&ctx, &json, case.frontend, &ontology, &claims).await;
+        let outcome = run_pipeline(&ctx, &json, case.frontend, &data_model, &claims).await;
 
         match (case.expects_error, outcome) {
             (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),

@@ -1,0 +1,12 @@
+[package]
+name = "query-data-model"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+ontology = { path = "../ontology" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
