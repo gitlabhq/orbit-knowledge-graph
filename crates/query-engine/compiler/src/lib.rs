@@ -266,6 +266,32 @@ mod tests {
     }
 
     #[test]
+    fn relationship_filter_keeps_edge_column_type() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "filters": {"target_id": 2}
+            }]
+        }"#;
+
+        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+        let filter_param = compiled
+            .base
+            .params
+            .values()
+            .find(|param| param.value == serde_json::json!(2))
+            .expect("target_id filter parameter");
+        assert_eq!(filter_param.ch_type, orbit_utils::clickhouse::ChType::Int64);
+    }
+
+    #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
         for fe in [Frontend::JsonDsl, Frontend::Gql] {

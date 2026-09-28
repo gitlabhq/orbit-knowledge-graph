@@ -7,6 +7,11 @@ use crate::constants::*;
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
 
+pub enum FilterOwner<'a> {
+    Entity(query_data_model::EntityId),
+    Table(&'a str),
+}
+
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     let filter = &bound.filter;
     let col = Expr::col(alias, prop);
@@ -115,7 +120,7 @@ pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
 
 pub fn ordered_filters(
     filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
-    entity: Option<query_data_model::EntityId>,
+    owner: FilterOwner<'_>,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
@@ -123,15 +128,20 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let metadata = entity.and_then(|entity| model.property_for_entity_id(entity, property));
-            let property_id = metadata.map(|property| property.id);
+            let metadata = match owner {
+                FilterOwner::Entity(entity) => model
+                    .property_for_entity_id(entity, property)
+                    .map(|property| (Some(property.id), Some(property.data_type))),
+                FilterOwner::Table(table) => Some((None, model.table_column_type(table, property))),
+            };
+            let (property_id, data_type) = metadata.unwrap_or_default();
             filters.iter().map(move |filter| {
                 (
                     property.clone(),
                     BoundFilter {
                         filter: filter.clone(),
                         property: property_id,
-                        data_type: metadata.map(|property| property.data_type),
+                        data_type,
                         selectivity: property_id
                             .map(|property| model.property_selectivity(property))
                             .unwrap_or_default(),

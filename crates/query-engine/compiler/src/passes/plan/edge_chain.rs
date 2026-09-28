@@ -106,7 +106,11 @@ impl NodePlan {
             table: model.entity_table(entity).map(String::from),
             selectivity: Selectivity::from_node(node),
             hydration: HydrationStrategy::Skip,
-            filters: crate::passes::shared::ordered_filters(filters, Some(entity_id), model),
+            filters: crate::passes::shared::ordered_filters(
+                filters,
+                crate::passes::shared::FilterOwner::Entity(entity_id),
+                model,
+            ),
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
@@ -378,6 +382,11 @@ where
                     .cloned()
                 })
             };
+            let filters = crate::passes::shared::ordered_filters(
+                &rel.filters,
+                crate::passes::shared::FilterOwner::Table(&edge_table),
+                model,
+            );
             Hop {
                 rel_types: rel.types.clone(),
                 relationships: rel
@@ -393,7 +402,7 @@ where
                 max_hops: rel.hops.max,
                 fk,
                 scope_preserving,
-                filters: crate::passes::shared::ordered_filters(&rel.filters, None, model),
+                filters,
                 join_prev: None,
                 scope_proof,
                 cascade_anchor: false,
