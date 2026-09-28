@@ -43,6 +43,7 @@ pub(super) fn agent_picker_choices(
             key: agent.name.clone(),
             label: agent.title.clone(),
             hint: location_hints.get(&agent.name).cloned().unwrap_or_default(),
+            section: None,
         })
         .collect()
 }

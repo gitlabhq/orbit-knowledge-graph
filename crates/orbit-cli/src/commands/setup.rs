@@ -36,11 +36,14 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     if interactive {
         let location_hints = summary::detected_location_hints(&detected_agents, machine);
         let every_agent: Vec<_> = spec::agents().collect();
+        let offer_graph_first = selection.components.contains(&Component::Hooks)
+            && every_agent.iter().any(|agent| agent.supports_graph_first());
         selection = ask_which_agents(
             selection,
             "Which agents should use Orbit?",
             &every_agent,
             &location_hints,
+            offer_graph_first,
         )?;
     }
     if selection.agents.is_empty() {
@@ -93,6 +96,7 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
             "Remove Orbit from which agents?",
             &installed_agents,
             &location_hints,
+            false,
         )?;
     }
     if selection.agents.is_empty() {
@@ -121,13 +125,32 @@ fn ask_which_agents(
     question: &str,
     offered_agents: &[spec::Agent],
     location_hints: &BTreeMap<String, String>,
+    offer_graph_first: bool,
 ) -> Result<Selection> {
-    let chosen_agents = tui::multiselect(
-        question,
-        &summary::agent_picker_choices(offered_agents, location_hints),
-        &selection.selected_agent_names(),
-    )?;
-    selection.with_agents_named(&chosen_agents)
+    const GRAPH_FIRST_KEY: &str = "--graph-first";
+    let mut choices = summary::agent_picker_choices(offered_agents, location_hints);
+    let mut preselected = selection.selected_agent_names();
+    if offer_graph_first {
+        choices.push(tui::Choice {
+            key: GRAPH_FIRST_KEY.to_string(),
+            label: "Make agents start search with Orbit".to_string(),
+            hint: "Claude Code sometimes skips Orbit. This blocks its first search or file read \
+                   each session and points it to the graph."
+                .to_string(),
+            section: Some("Options".to_string()),
+        });
+        if selection.graph_first {
+            preselected.push(GRAPH_FIRST_KEY.to_string());
+        }
+    }
+    let mut chosen = tui::multiselect(question, &choices, &preselected)?;
+    let graph_first = chosen.iter().any(|key| key == GRAPH_FIRST_KEY);
+    chosen.retain(|key| key != GRAPH_FIRST_KEY);
+    let mut selection = selection.with_agents_named(&chosen)?;
+    if offer_graph_first {
+        selection.graph_first = graph_first;
+    }
+    Ok(selection)
 }
 
 fn apply_and_report(
@@ -204,6 +227,7 @@ pub(crate) struct Options {
     pub(crate) dry_run: bool,
     pub(crate) verbose: bool,
     pub(crate) index: bool,
+    pub(crate) graph_first: bool,
     pub(crate) components: BTreeSet<Component>,
 }
 
@@ -279,6 +303,7 @@ mod tests {
             dry_run: false,
             verbose: false,
             index: false,
+            graph_first: false,
             components: Component::from_flags(false, &[]),
         }
     }
@@ -721,6 +746,26 @@ mod tests {
         );
         assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(!dir.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn graph_first_setup_installs_guards_and_rerun_reverts_them() {
+        let dir = tempfile::tempdir().unwrap();
+        for graph_first in [true, false] {
+            let options = Options {
+                graph_first,
+                ..options_for(&["claude"])
+            };
+            install(options, project(dir.path()), &bare_machine()).unwrap();
+            let settings =
+                std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
+            assert_eq!(
+                settings.contains("hook-guard read --graph-first"),
+                graph_first,
+                "{settings}"
+            );
+            assert_eq!(settings.contains("mcp__orbit__"), graph_first, "{settings}");
+        }
     }
 
     #[test]
