@@ -121,8 +121,29 @@ pub mod test_utils {
         }
     }
 
+    pub fn build_tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let mut tar_builder = tar::Builder::new(Vec::new());
+        for (path, content) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).unwrap();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar_builder.append(&header, &content[..]).unwrap();
+        }
+        let tar_bytes = tar_builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&tar_bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
     pub struct MockRepositoryService {
         default_branches: Mutex<HashMap<i64, String>>,
+        archives: Mutex<HashMap<i64, Vec<u8>>>,
         download_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
         project_info_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
     }
@@ -139,9 +160,14 @@ pub mod test_utils {
                 .collect();
             Arc::new(Self {
                 default_branches: Mutex::new(map),
+                archives: Mutex::new(HashMap::new()),
                 download_errors: Mutex::new(HashMap::new()),
                 project_info_errors: Mutex::new(HashMap::new()),
             })
+        }
+
+        pub fn set_archive(&self, project_id: i64, archive: Vec<u8>) {
+            self.archives.lock().insert(project_id, archive);
         }
 
         pub fn set_download_error(&self, project_id: i64, error: RepositoryServiceError) {
@@ -185,7 +211,12 @@ pub mod test_utils {
             if let Some(err) = self.download_errors.lock().remove(&project_id) {
                 return Err(err);
             }
-            Ok(Box::pin(futures::stream::empty()))
+            match self.archives.lock().get(&project_id).cloned() {
+                Some(archive) => Ok(Box::pin(futures::stream::once(async {
+                    Ok(bytes::Bytes::from(archive))
+                }))),
+                None => Ok(Box::pin(futures::stream::empty())),
+            }
         }
     }
 

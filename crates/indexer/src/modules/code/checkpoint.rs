@@ -64,6 +64,10 @@ impl CodeCheckpoint {
         self.attempts += 1;
     }
 
+    pub fn refund_attempt(&mut self) {
+        self.attempts -= 1;
+    }
+
     pub fn complete(
         &mut self,
         task_id: i64,
