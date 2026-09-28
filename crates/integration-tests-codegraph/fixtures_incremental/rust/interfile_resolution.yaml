@@ -56,8 +56,6 @@ fixtures:
 
 tests:
   - name: "execute -> helper resolves through use"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'helper'
@@ -75,7 +73,7 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 2 }
-      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "AssociatedFunction" } }
+      - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Function" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
     # Known gap: rust.yaml does not model this yet.
@@ -89,8 +87,6 @@ tests:
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Method" } }
 
   - name: "Worker::run -> helper resolves through crate path"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'helper'

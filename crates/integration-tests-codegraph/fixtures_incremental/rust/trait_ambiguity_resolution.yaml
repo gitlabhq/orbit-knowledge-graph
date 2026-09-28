@@ -88,8 +88,6 @@ fixtures:
 
 tests:
   - name: "method fallback does not jump to an unrelated visible trait item"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_run' AND callee.name = 'run'
@@ -99,8 +97,6 @@ tests:
       - { row: { fqn: 'Service::run' } }
 
   - name: "supertrait default methods resolve to the defining trait item"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_ping' AND callee.name = 'ping'
@@ -110,8 +106,6 @@ tests:
       - { row: { fqn: 'Base::ping', type: 'Method' } }
 
   - name: "cross-file method fallback keeps the concrete impl target"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'cross_call_run' AND callee.name = 'run'
@@ -121,7 +115,7 @@ tests:
       - { row: { src: "src/cross_api.rs", tgt: "src/cross_service.rs", type: "Method" } }
 
   - name: "cross-file supertrait default methods still resolve to the defining trait item"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

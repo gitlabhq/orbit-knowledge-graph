@@ -42,8 +42,6 @@ fixtures:
 
 tests:
   - name: "compound assignment resolves to AddAssign::add_assign impl method"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_add_assign' AND callee.name = 'add_assign'
@@ -53,7 +51,7 @@ tests:
       - { row: { fqn: 'Counter::add_assign' } }
 
   - name: "record expression construction creates edge to the struct"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
+    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

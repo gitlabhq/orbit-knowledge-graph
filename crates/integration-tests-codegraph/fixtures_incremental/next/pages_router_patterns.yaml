@@ -154,7 +154,7 @@ fixtures:
 
 tests:
   - name: Next pages router files are indexed as ordinary module definitions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -219,8 +219,6 @@ tests:
       - { empty: true }
 
   - name: Next pages router cross-file calls resolve JSX components and helpers
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
@@ -234,8 +232,6 @@ tests:
       - { row: { caller: "handler", callee_file: "lib/users.ts", callee: "listUsers" } }
 
   - name: Prop-supplied Next page Component is not fabricated as a code edge
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'App'
@@ -246,7 +242,7 @@ tests:
       - { not: true, row: { callee: "Component" } }
 
   - name: Next pages router dynamic and special files are indexed as modules
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -314,7 +310,7 @@ tests:
       - { row: { file_path: "pages/api/users/[id].ts", fqn: "userHandler", type: "Function" } }
 
   - name: Next pages router dynamic and special files resolve local calls
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

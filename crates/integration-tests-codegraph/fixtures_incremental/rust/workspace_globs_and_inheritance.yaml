@@ -60,7 +60,7 @@ fixtures:
 
 tests:
   - name: "workspace dependency inheritance resolves both local path crates"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -73,7 +73,7 @@ tests:
       - { row: { file: 'crates/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
 
   - name: "excluded crate is still indexed when it is a local path dependency"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -84,7 +84,7 @@ tests:
       - { row: { fqn: 'ignored_lib::secret' } }
 
   - name: "workspace inherited edition and version still yield crate-qualified FQNs"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)

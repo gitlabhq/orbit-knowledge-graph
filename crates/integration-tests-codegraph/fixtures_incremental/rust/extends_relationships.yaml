@@ -200,7 +200,7 @@ tests:
   # Cross-module resolution
   # ─────────────────────────────────────────────────────────────────
   - name: "9. Cross-module supertrait Bark -> traits::Audible resolves through module path"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |
@@ -212,7 +212,7 @@ tests:
           - { row: { parent: "traits::Audible" } }
 
   - name: "10. Cross-module impl File implements io::Reader"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |

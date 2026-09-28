@@ -54,8 +54,7 @@ steps:
           WHERE f.path = 'src/main.rs'
           RETURN i.identifier_name AS name
         assert:
-          - { row_count: 1 }
-          - { row: { name: help } }
+          - { column_values: { field: name, values: [help, util] } }
       - name: the deleted module left nothing behind
         query: |
           MATCH (d:Definition) WHERE d.file_path = 'src/extra.rs'

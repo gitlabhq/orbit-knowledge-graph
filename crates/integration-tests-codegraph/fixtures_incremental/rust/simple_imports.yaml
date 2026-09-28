@@ -37,14 +37,15 @@ tests:
       - { row_count: 1 }
       - { row: { n: 0 } }
 
-  - name: Cross-file call from run to create_user does not resolve
+  - name: Cross-file call from run to create_user resolves through the use
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: run, callee: 'models::create_user' } }
 
   - name: Exactly 2 Rust files
     query: |

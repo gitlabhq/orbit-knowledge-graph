@@ -37,7 +37,7 @@ fixtures:
 
 tests:
   - name: defineAsyncComponent options objects still synthesize Vue component definitions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)

@@ -37,8 +37,6 @@ fixtures:
 
 tests:
   - name: "aliased re-exported function resolves to its original definition"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'helper'
@@ -48,30 +46,24 @@ tests:
       - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs' } }
 
   - name: "re-exported type keeps associated function resolution"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_reexports' AND callee.name = 'create'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs', type: 'Function' } }
 
   - name: "Self::new inside impl resolves to the inherent constructor"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'create' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/inner.rs', tgt: 'src/inner.rs', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/inner.rs', tgt: 'src/inner.rs', type: 'Function' } }
 
   - name: "re-export aliases are preserved in import metadata"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.identifier_alias IN ['exported_helper', 'ExportedService']

@@ -108,7 +108,7 @@ fixtures:
 
 tests:
   - name: Next app router files are indexed as ordinary module definitions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -192,7 +192,7 @@ tests:
       - { empty: true }
 
   - name: Next app router cross-file calls resolve helpers and JSX components
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -216,7 +216,7 @@ tests:
       - { row: { caller: "POST", callee_file: "src/lib/health.ts", callee: "getHealth" } }
 
   - name: Next route handler methods share one helper edge per method
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

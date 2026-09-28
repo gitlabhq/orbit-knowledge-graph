@@ -119,7 +119,7 @@ fixtures:
 
 tests:
   - name: ee_else_ce alias named import targets EE export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -144,7 +144,7 @@ tests:
       - { row: { caller: "title", callee: "dropdowni18nText" } }
 
   - name: Vue default import of CE component targets primary export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -156,7 +156,7 @@ tests:
       - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

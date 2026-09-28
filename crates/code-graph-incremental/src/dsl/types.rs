@@ -39,6 +39,8 @@ pub enum Tf {
     Or(Box<Tf>, Box<Tf>),
     Default(Box<str>),
     TreePath(Box<str>),
+    SiblingIndex,
+    KindName,
     Regex(regex::Regex, Box<str>),
     RegexFirst(regex::Regex, Box<str>),
     RegexLoop(regex::Regex, Box<str>),
@@ -47,6 +49,9 @@ pub enum Tf {
 
 impl Tf {
     pub fn is_node_tf(&self) -> bool {
+        if let Tf::Pipeline(steps) = self {
+            return steps.iter().any(Tf::is_node_tf);
+        }
         matches!(
             self,
             Tf::Field(_)
@@ -61,6 +66,8 @@ impl Tf {
                 | Tf::Concat(_, _, _)
                 | Tf::Or(_, _)
                 | Tf::TreePath(_)
+                | Tf::SiblingIndex
+                | Tf::KindName
                 | Tf::HasEdge(_, _)
         )
     }

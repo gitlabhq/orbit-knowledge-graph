@@ -73,7 +73,7 @@ fixtures:
 
 tests:
   - name: EE barrel named import resolves local EE export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -86,7 +86,7 @@ tests:
       - { row: { import_type: "NamedImport", target: "verificationStatuses" } }
 
   - name: EE barrel star reexport import resolves to CE export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -99,7 +99,7 @@ tests:
       - { row: { import_type: "NamedImport", target: "VERIFIED_CONFIG" } }
 
   - name: Namespace import over EE barrel resolves to local EE function
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -111,7 +111,7 @@ tests:
       - { row: { caller: "useNamespace", callee: "describeCombined" } }
 
   - name: EE barrel local call resolves through to CE definition
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

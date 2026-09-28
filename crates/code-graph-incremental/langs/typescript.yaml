@@ -18,6 +18,11 @@ config:
 stages:
   - name: normalize
     rules:
+      # <div> is an intrinsic element, not a component call
+      - match: '(jsx_self_closing_element name: (identifier "/^[a-z]/") $$$A)'
+        replace: '(jsx_intrinsic $$$A)'
+      - match: '(jsx_opening_element name: (identifier "/^[a-z]/") $$$A)'
+        replace: '(jsx_intrinsic_open $$$A)'
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
@@ -71,6 +76,15 @@ stages:
 
   - name: retag-calls
     rules:
+      # <Comp … /> and <Comp>…</Comp> call the component
+      - match: '(jsx_self_closing_element name: $N:__member $$$A)'
+        replace: '(__call (__callee $N) $$$A)'
+      - match: '(jsx_self_closing_element name: $N:identifier $$$A)'
+        replace: '(__call (__callee @$N) $$$A)'
+      - match: '(jsx_element open_tag: (jsx_opening_element name: $N:__member $$$A) $$$C)'
+        replace: '(__call (__callee $N) $$$A $$$C)'
+      - match: '(jsx_element open_tag: (jsx_opening_element name: $N:identifier $$$A) $$$C)'
+        replace: '(__call (__callee @$N) $$$A $$$C)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
@@ -104,15 +118,30 @@ stages:
       - match: '(import_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
-      # const { a, b } = require('./source') — CJS destructured require
-      - match: '(variable_declarator name: (object_pattern $$$NAMES:shorthand_property_identifier_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
-        replace: '(__import (__source @$S) (__source_path @$S) $$$NAMES=>__name)'
-        tag: { import_type: CjsRequire }
+      # const { a, b: c } = require('./source') — CJS destructured require; aliases finish in cjs-entries
+      - match: '(variable_declarator name: (object_pattern $$$E:shorthand_property_identifier_pattern|pair_pattern) value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
+        replace: '(__import (__source @$S) (__source_path @$S) $$$E->cjs_entry)'
 
       # const x = require('./source') — CJS namespace require
       - match: '(variable_declarator name: $N:identifier value: (__call (__callee "require") (arguments (string $S:string_fragment))))'
         replace: '(__import (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
         tag: { import_type: CjsRequire }
+        tag_on: __name
+
+      # exports.f = function f() {} / module.exports.f = ... → an exported function def
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))'
+        replace: '(__def (__defname @$P) (__function) $B)'
+        tag: { exports: '@$P' }
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression body: $B)))'
+        replace: '(__def (__defname @$P) (__function) $B)'
+        tag: { exports: '@$P' }
+      # exports.X = <value> → an exported variable
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: $V))'
+        replace: '(__def (__defname @$P) (__variable) $V)'
+        tag: { exports: '@$P' }
+      # module.exports = function main() {} → the default export
+      - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (function_expression name: $N body: $B)))'
+        replace: '(__def (__defname @$N) (__default_export "default") (__function) $B)'
 
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
@@ -179,17 +208,20 @@ stages:
         replace: '(__def (__defname @$N) (__function) $$$P $B)'
       - match: '(function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
-      # Methods — static before generic; parameters: captures ctor param properties
+      # Methods — static before generic; parameters: captures ctor param properties.
+      # A computed key ([expr]) is not a named member; `#name` drops the hash.
+      - match: '(method_definition name: (computed_property_name) body: $B)'
+        replace: '(__ssa_hint $B)'
       - match: '(method_definition **/(static) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
         tag: { flavor: static }
       - match: '(method_definition **/(static) name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__method) $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
         tag: { flavor: static }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__method) $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
         replace: '(__def (__defname @$N) (__function) $B)'
         tag: { flavor: generator }
@@ -206,6 +238,15 @@ stages:
       - match: '(abstract_class_declaration name: $N body: $B $$$ANN:__supertype)'
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
         tag: { flavor: abstract }
+
+  - name: cjs-entries
+    rules:
+      - match: '(cjs_entry key: $K value: $V)'
+        replace: '(__name @$K (__alias @$V))'
+        tag: { import_type: CjsRequire }
+      - match: '(cjs_entry)'
+        replace: '(__name @$ROOT)'
+        tag: { import_type: CjsRequire }
 
   - name: exports
     rules:
@@ -293,10 +334,12 @@ display:
           file_path: '@$ROOT|ancestor_tag("file_path")'
   - name: def_type
     rules:
+      - match: '(__def)'
+        tag: { definition_span: "true" }
       - match: '(__def (__function))'
         tag: { def_type: Function }
       - match: '(__def (__method))'
-        tag: { def_type: Method }
+        tag: { def_type: '@$ROOT|tag("flavor")|map("static:StaticMethod", "abstract:Method", "generator:Method")|default("Method")' }
       - match: '(__def (__class))'
         tag: { def_type: Class }
       - match: '(__def (__struct))'
@@ -342,21 +385,17 @@ display:
           source_path: '@$ROOT|child_sym("__source")'
       - match: '(__name "*" (__alias))'
         tag:
-          import_type: NamespaceImport
+          import_type: '@$ROOT|tag("import_type")|default("NamespaceImport")'
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name "*")'
         tag:
-          import_type: WildcardImport
+          import_type: '@$ROOT|tag("import_type")|default("WildcardImport")'
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name "default")'
         tag:
-          import_type: DefaultImport
-          resolved: '@$ROOT|has_incoming("Imports")'
-      - match: '(__name (__alias))'
-        tag:
-          import_type: AliasedImport
+          import_type: '@$ROOT|tag("import_type")|default("DefaultImport")'
           resolved: '@$ROOT|has_incoming("Imports")'
       - match: '(__name)'
         tag:
-          import_type: NamedImport
+          import_type: '@$ROOT|tag("import_type")|default("NamedImport")'
           resolved: '@$ROOT|has_incoming("Imports")'

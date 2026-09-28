@@ -3,6 +3,15 @@
 # method calls, field access, self.x, control flow, bindings.
 
 config:
+  link:
+    builtins: [
+      println, print, eprintln, eprint, format, write, writeln, vec, panic, assert, assert_eq,
+      assert_ne, debug_assert, todo, unimplemented, unreachable, matches, dbg, include_str,
+      env, concat, stringify, line, file, column, cfg,
+      Vec, String, Box, Rc, Arc, Option, Some, None, Result, Ok, Err, Default, Clone, Copy,
+      Iterator, IntoIterator, ToString, From, Into, Drop, Send, Sync, Sized, Fn, FnMut, FnOnce,
+      drop
+    ]
   resolve:
     parse_files:
       - name: "Cargo.toml"
@@ -20,6 +29,10 @@ stages:
         replace: '(__ssa_return $$$VALS)'
       - match: '(macro_invocation macro: (identifier "/^(panic|unreachable|todo|unimplemented)$/") $$$V)'
         replace: '(__ssa_branch $$$V)'
+
+      # size_of::<T>() / Type::method::<T>(): the turbofish is not part of the name
+      - match: '(generic_function function: $F)'
+        replace: '$F'
 
       # match_arm → __ssa_arm (keep only the value expression)
       - match: '(match_arm value: $V)'
@@ -48,6 +61,32 @@ stages:
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
+      # Operators desugar to the trait methods they call
+      - match: '(binary_expression left: $L operator: $OP right: $R)'
+        replace: '(__call (__callee (__member @$OP|kind|map("+:add","-:sub","*:mul","/:div","%:rem","&:bitand","|:bitor","^:bitxor","<<:shl",">>:shr","==:eq","!=:ne","<:lt","<=:le",">:gt",">=:ge") (__object @$L))) $R)'
+      - match: '(compound_assignment_expr left: $L operator: $OP right: $R)'
+        replace: '(__call (__callee (__member @$OP|kind|map("+=:add_assign","-=:sub_assign","*=:mul_assign","/=:div_assign","%=:rem_assign","&=:bitand_assign","|=:bitor_assign","^=:bitxor_assign","<<=:shl_assign",">>=:shr_assign") (__object @$L))) $R)'
+      - match: '(unary_expression $OP $E)'
+        replace: '(__call (__callee (__member @$OP|kind|map("-:neg","!:not","*:deref") (__object @$E))))'
+      - match: '(index_expression $E $I)'
+        replace: '(__call (__callee (__member "index" (__object @$E))) $I)'
+      - match: '(try_expression $E)'
+        replace: '(__call (__callee (__member "branch" (__object @$E))))'
+      - match: '(await_expression $E)'
+        replace: '(__call (__callee (__member "poll" (__object @$E))))'
+      # Record construction is a call to the struct
+      - match: '(struct_expression name: $N body: $B)'
+        replace: '(__call (__callee @$N) $B)'
+
+      # self::f() is the local scope
+      - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
+        replace: '(__call (__callee @$N) $A)'
+      # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
+      - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
+        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
+      # Vec::<u8>::new(): the turbofish is not part of the type name
+      - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
@@ -56,17 +95,82 @@ stages:
 
   - name: imports
     rules:
-      # use crate::foo::Bar;
-      - match: '(use_declaration argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A|replace("::","/")) (__source_path @$A|replace("::","/")) (__name @$A|split_last("::")))' 
+      # mod foo;  (a declaration, the body lives in another file)
+      - match: '(mod_item name: $N !(declaration_list))'
+        replace: '(__import (__source @$N) (__source_path "self") (__name @$N))'
+        tag: { import_type: ModDeclaration }
 
-      # use foo::{A, B};
-      - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$NAMES:identifier)))'
-        replace: '(__import (__source @$P|replace("::","/")) (__source_path @$P|replace("::","/")) $$$NAMES=>__name)'
+      # extern crate x [as y];
+      - match: '(extern_crate_declaration name: $N alias: $A)'
+        replace: '(__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$A)))'
+        tag: { import_type: AliasedExternCrate }
+      - match: '(extern_crate_declaration name: $N)'
+        replace: '(__import (__source @$N) (__source_path @$N) (__name @$N))'
+        tag: { import_type: ExternCrate }
+
+      # use a::b::*;  and  pub use a::b::*;
+      - match: '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        tag: { import_type: ReExportGlob }
+      - match: '(use_declaration argument: (use_wildcard $P))'
+        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        tag: { import_type: GlobUse }
+
+      # use a::b as c;  pub(crate) stays private
+      - match: '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))'
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        tag: { import_type: ReExportAliased }
+      - match: '(use_declaration argument: (use_as_clause path: $P alias: $A))'
+        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        tag: { import_type: AliasedUse }
+
+      # use a::{b, c as d, self};  one import per entry, built in the next stage
+      - match: '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->pub_use_entry)'
+      - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$E)))'
+        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->use_entry)'
+
+      # use crate::foo::Bar;
+      - match: '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)'
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        tag: { import_type: PubUse }
+      - match: '(use_declaration argument: $A:scoped_identifier)'
+        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        tag: { import_type: Use }
 
       # use foo;
       - match: '(use_declaration argument: $A:identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A) (__name @$A))'
+        replace: '(__import (__source @$A) (__source_path "") (__name @$A))'
+        tag: { import_type: Use }
+
+  - name: import-entries
+    rules:
+      - match: '(use_entry path: (self) alias: $A)'
+        replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
+        tag: { import_type: UseGroup }
+      - match: '(pub_use_entry path: (self) alias: $A)'
+        replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::") (__alias @$A)))'
+        tag: { import_type: PubUseGroup }
+      - match: '(use_entry "self")'
+        replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
+        tag: { import_type: UseGroup }
+      - match: '(pub_use_entry "self")'
+        replace: '(__import (__source @$ROOT|ancestor_sym("__source")) (__source_path @$ROOT|ancestor_sym("__source_path")|regex_replace("/?[^/]*$","")) (__name @$ROOT|ancestor_sym("__source")|split_last("::")))'
+        tag: { import_type: PubUseGroup }
+      - match: '(use_entry path: $N alias: $A)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
+        tag: { import_type: UseGroup }
+      - match: '(pub_use_entry path: $N alias: $A)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "field:path")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$N (__alias @$A)))'
+        tag: { import_type: PubUseGroup }
+      - match: '(use_entry)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
+        tag: { import_type: UseGroup }
+      - match: '(pub_use_entry)'
+        replace: '(__import (__source @$ROOT|concat("::", "ancestor_sym:__source", "id")) (__source_path @$ROOT|ancestor_sym("__source_path")) (__name @$ROOT))'
+        tag: { import_type: PubUseGroup }
+      - match: '(use_group $$$I:__import)'
+        replace: '$$$I'
 
   - name: classify
     rules:
@@ -105,23 +209,50 @@ stages:
       - match: '(loop_expression body: $B)'
         replace: '(__ssa_loop $B)'
 
+      # Parameters become typed bindings; the type is the bare type name
+      - match: '(parameter pattern: (mut_pattern $N) type: $T)'
+        replace: '(parameter (identifier @$N) $T)'
+      - match: '(parameter pattern: $N type: (reference_type type: (generic_type type: $T)))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(parameter pattern: $N type: (reference_type type: $T))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(parameter pattern: $N type: (generic_type type: $T))'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(parameter pattern: $N:identifier type: $T)'
+        replace: '(__binding @$N (__ssa_typed @$T))'
+      - match: '(parameter pattern: $N:identifier)'
+        replace: '(__binding @$N)'
+
       # Trait method signatures (no body) — self variant first
-      - match: '(function_signature_item name: $N **/(self_parameter))'
-        replace: '(__def (__defname @$N) (__method))'
+      - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding))'
+        replace: '(__def (__defname @$N) (__method) $$$P)'
         tag: { flavor: self_method }
-      - match: '(function_signature_item name: $N)'
-        replace: '(__def (__defname @$N) (__function))'
+      - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding))'
+        replace: '(__def (__defname @$N) (__function) $$$P)'
 
       # Functions — self variant first, then generic
-      - match: '(function_item name: $N **/(self_parameter) body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__method) $$$ANN $B)'
+      - match: '(function_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__method) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
-      - match: '(function_item name: $N body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__function) $$$ANN $B)'
+      - match: '(function_item name: $N parameters: (parameters $$$P:__binding) body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__function) $$$ANN $$$P $B)'
+
+      # Fields: named ones by name, tuple ones by position
+      - match: '(field_declaration name: $N)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(ordered_field_declaration_list $$$T:primitive_type|type_identifier|generic_type|reference_type|scoped_type_identifier|tuple_type|array_type|pointer_type|dynamic_type|function_type|unit_type)'
+        replace: '(ordered_field_declaration_list $$$T->tuple_field)'
 
       # Containers (after functions)
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
+      - match: '(union_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__struct) $B)'
+        tag: { flavor: union }
+      # Inline modules: a scope in the FQN, exported as a Module definition
+      - match: '(mod_item name: $N body: $B)'
+        replace: '(__def (__defname @$N) (__class) $B)'
+        tag: { flavor: module }
       - match: '(enum_variant name: $N body: $B:ordered_field_declaration_list)'
         replace: '(__def (__defname @$N) (__enum_variant) $B)'
       - match: '(enum_variant name: $N body: $B)'
@@ -147,6 +278,11 @@ stages:
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
       - match: '(impl_item type: $T body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
+
+  - name: tuple-fields
+    rules:
+      - match: '(tuple_field)'
+        replace: '(__def (__defname @$ROOT|sibling_index) (__field_def))'
 
   - name: ssa-cleanup
     rules:
@@ -182,11 +318,23 @@ stages:
       - match: '(__def (__enum))'
         tag: { scoped: "true" }
 
+  - name: tag-module-path
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          mod_self: '@$M|regex_replace("\.rs$","")|regex_replace("(^|/)(mod|lib|main)$","")'
+      - match: '(__import (__source_path "/^(self|super)(/|$)/"))'
+        tag:
+          source_rel: '@$ROOT|child_sym("__source_path")|regex_replace("^self(/|$)","./")|regex_loop("super(/|$)","../")'
+
   - name: resolve-paths
     rules:
       - match: '(__import)'
         tag:
           resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "/^(self|super)(/|$)/"))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:mod_self", "tag:source_rel")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
   stages:
@@ -207,6 +355,7 @@ display:
           entity: File
           file_path: '@$M'
           language: '@$M|split_last(".")|map("rs:rust")'
+          fqn: '@$M|tag("mod_self")|regex_replace("^src(/|$)","")|replace("/","::")'
 
       - match: '(__def)'
         tag:
@@ -220,15 +369,15 @@ display:
       - match: '(__def (__method))'
         tag: { def_type: Method }
       - match: '(__def (__class))'
-        tag: { def_type: Class }
+        tag: { def_type: '@$ROOT|tag("flavor")|map("module:Module")|default("Class")' }
       - match: '(__def (__struct))'
-        tag: { def_type: Struct }
+        tag: { def_type: '@$ROOT|tag("flavor")|map("union:Union")|default("Struct")' }
       - match: '(__def (__interface))'
         tag: { def_type: Interface }
       - match: '(__def (__enum))'
         tag: { def_type: Enum }
       - match: '(__def (__enum_variant))'
-        tag: { def_type: EnumVariant }
+        tag: { def_type: Variant }
       - match: '(__def (__trait))'
         tag: { def_type: Trait }
       - match: '(__def (__impl))'
@@ -253,6 +402,7 @@ display:
         tag:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
       - match: '(__name)'
         tag:
           resolved: '@$ROOT|has_incoming("Imports")'

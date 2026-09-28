@@ -31,8 +31,6 @@ fixtures:
 
 tests:
   - name: "unix cfg items are included in the shell-free server profile"
-    # Known gap: cfg-gated items are not indexed.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['unix_only', 'call_unix']
@@ -41,8 +39,6 @@ tests:
       - { column_values: { field: name, values: ['call_unix', 'unix_only'] } }
 
   - name: "target_os cfg items are included in the shell-free server profile"
-    # Known gap: cfg-gated items are not indexed.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['linux_only', 'call_linux']
@@ -51,8 +47,6 @@ tests:
       - { column_values: { field: name, values: ['call_linux', 'linux_only'] } }
 
   - name: "unix cfg call resolves"
-    # Known gap: cfg-gated items are not indexed.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_unix' AND callee.fqn = 'unix_only::helper'
@@ -62,8 +56,6 @@ tests:
       - { row: { fqn: 'unix_only::helper' } }
 
   - name: "target_os cfg call resolves"
-    # Known gap: cfg-gated items are not indexed.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_linux' AND callee.fqn = 'linux_only::helper'

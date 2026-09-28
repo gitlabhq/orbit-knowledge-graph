@@ -31,7 +31,7 @@ fixtures:
 
 tests:
   - name: "path dependency resolves even without a repo-root manifest"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -44,7 +44,7 @@ tests:
       - { row: { src: 'services/app/src/main.rs', tgt: 'libs/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
 
   - name: "nested manifest local crate keeps its crate-qualified FQN"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)

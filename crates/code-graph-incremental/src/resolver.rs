@@ -293,6 +293,7 @@ impl Resolver {
             trees,
             run,
             file_resolve_ms: env.limits.file_resolve_ms,
+            env,
             extends_of,
             imports_to,
             call_at_site,
@@ -391,6 +392,7 @@ struct ResolveCtx<'a> {
     trees: &'a [Tree],
     run: &'a Sentinel,
     file_resolve_ms: u64,
+    env: &'a Env,
     extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
     call_at_site: FxHashMap<(u32, u32), &'a Edge>,
@@ -485,7 +487,8 @@ fn gather_imports_for(
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let target_path = apply_aliases(raw_path, aliases);
                     let node_idx = cur.index();
-                    let direct = resolve_glob(&target_path, file_index, lookup_prefixes);
+                    let mut direct = resolve_glob(&target_path, file_index, lookup_prefixes);
+                    direct.retain(|&tfi| tfi != fi);
                     let candidates = match direct.is_empty() {
                         false => Either::Left(
                             direct
@@ -1072,8 +1075,11 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
         imports.partition(|n| local(*n) == ctx.wildcard_sym);
     let wild: Vec<u32> = wild.iter().map(|n| n.index()).collect();
     let named: FxHashSet<u32> = named.iter().map(|n| local(*n)).collect();
+    let builtins = &ctx.env.rules_for(&ctx.trees[fi].label).config.link.builtins;
     let unbound = |from: Cursor, sym: u32| -> Vec<Edge> {
-        let wild = wild.iter().filter(|_| !named.contains(&sym));
+        let wild = wild
+            .iter()
+            .filter(|_| !named.contains(&sym) && !builtins.contains(&sym));
         wild.map(|&w| from.edge_to(from.jump(fi as u32, w), EdgeKind::Imports))
             .collect()
     };

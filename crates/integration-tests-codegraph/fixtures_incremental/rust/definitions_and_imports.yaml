@@ -100,8 +100,6 @@ tests:
       - { column_values: { field: name, values: ['ROOT_CONST', 'ROOT_STATIC', 'RootAlias', 'local_macro', 'inner', 'use_everything'] } }
 
   - name: "worker struct has semantic FQN"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name = 'Worker'
@@ -111,8 +109,6 @@ tests:
       - { row: { fqn: 'inner::Worker', type: 'Struct' } }
 
   - name: "record fields are retained"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name = 'id'
@@ -122,8 +118,6 @@ tests:
       - { row: { fqn: 'inner::Worker::id', type: 'Field' } }
 
   - name: "enum variants are retained"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name = 'Ready'
@@ -133,8 +127,6 @@ tests:
       - { row: { fqn: 'inner::Status::Ready', type: 'Variant' } }
 
   - name: "trait and union definitions are retained"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs' AND d.name IN ['Runner', 'Bits']
@@ -145,8 +137,6 @@ tests:
       - { row: { name: 'Bits', type: 'Union' } }
 
   - name: "mod declarations become imports"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ModDeclaration'
@@ -156,8 +146,6 @@ tests:
       - { row: { type: 'ModDeclaration', path: 'generated' } }
 
   - name: "extern crate alias becomes import metadata"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
@@ -167,8 +155,6 @@ tests:
       - { row: { path: 'core', alias: 'rust_core' } }
 
   - name: "grouped imports preserve aliases and names"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
@@ -182,8 +168,6 @@ tests:
       - { row: { type: 'PubUseGroup', path: 'crate::inner::Worker', name: 'Worker' } }
 
   - name: "group import aliases are retained"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
@@ -193,8 +177,6 @@ tests:
       - { column_values: { field: alias, values: ['crate_helper', 'inner_helper', 'inner_mod'] } }
 
   - name: "wildcard imports retain their source path"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'GlobUse'
@@ -204,8 +186,6 @@ tests:
       - { row: { path: 'crate::inner::nested' } }
 
   - name: "restricted visibility uses stay private in import metadata"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.identifier_alias = 'crate_helper'
@@ -224,7 +204,7 @@ tests:
       - { row: { fqn: 'exported_c', type: 'Function' } }
 
   - name: "foreign extern declarations do not create bogus local call edges"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

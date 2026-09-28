@@ -200,7 +200,7 @@ fixtures:
 
 tests:
   - name: CommonJS captures keep their originating import beside shadowed ESM
-    # Known gap: CommonJS require resolution is not implemented.
+    # Known gap: A CommonJS capture shadowed by a later ESM import keeps only the ESM origin.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
@@ -212,9 +212,7 @@ tests:
       - { row: { caller: "nested", path: "inner-sdk", import_line: 3 } }
       - { row: { caller: "other", path: "outer-sdk", import_line: 1 } }
 
-  - name: Destructured require targets named export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
+  - name: Destructured require targets the exported function
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'named/main.js'
@@ -224,8 +222,6 @@ tests:
       - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "helper" } }
 
   - name: Destructured require call resolves to concrete definition
-    # Known gap: CommonJS require resolution is not implemented.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'named/main.js'
@@ -235,20 +231,15 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "helper" } }
 
-  - name: Namespace require targets synthesized module
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
-    skip: true
+  - name: Namespace require member call resolves to the concrete function
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'namespace/main.js'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace/main.js'
+      RETURN callee.fqn AS callee, callee.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "namespace/util.js" } }
-
+      - { row: { callee: helper, file: 'namespace/util.js' } }
   - name: Namespace require call resolves to concrete definition
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'namespace/main.js'
@@ -259,8 +250,6 @@ tests:
       - { row: { caller: "run", callee: "helper" } }
 
   - name: Aliased destructured require preserves source and alias names
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'alias/main.js'
@@ -270,8 +259,6 @@ tests:
       - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "resolve" } }
 
   - name: Aliased destructured require call resolves to concrete definition
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias/main.js'
@@ -282,7 +269,7 @@ tests:
       - { row: { caller: "run", callee: "resolve" } }
 
   - name: Default module.exports require targets the primary export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -293,7 +280,9 @@ tests:
       - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
 
   - name: Default module.exports require call resolves to the exported function
-    # Known gap: CommonJS require resolution is not implemented.
+
+    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -315,7 +304,7 @@ tests:
       - { row: { caller: "run", callee: "helper" } }
 
   - name: Bare require alias chains keep callable primary export identity
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -327,7 +316,9 @@ tests:
       - { row: { caller: "boot", callee: "main" } }
 
   - name: Mixed CJS imports preserve distinct symbol identities
-    # Known gap: CommonJS require resolution is not implemented.
+
+    # Known gap: The old pipeline prefixed JavaScript fqns with the file path; the incremental engine does not.
+
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -349,8 +340,6 @@ tests:
       - { empty: true }
 
   - name: Imported CJS functions still resolve while constants stay inert
-    # Known gap: CommonJS require resolution is not implemented.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'no_false_call/main.js'
@@ -361,7 +350,7 @@ tests:
       - { row: { caller: "run", callee: "trimValue" } }
 
   - name: Transpiled CJS default interop resolves namespace default member calls
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -384,8 +373,6 @@ tests:
       - { row: { file: "external/namespace.js", caller: "report", name: "default", alias: "tracker" } }
 
   - name: External CommonJS duplicate aliases preserve exact imported symbols
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'external/duplicate_aliases.js'
@@ -416,7 +403,9 @@ tests:
       - { empty: true }
 
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
-    # Known gap: CommonJS require resolution is not implemented.
+
+    # Known gap: A CommonJS default import that does not resolve still falls back to the import.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

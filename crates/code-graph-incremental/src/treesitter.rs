@@ -325,7 +325,7 @@ fn from_tree_sitter(
 }
 
 struct TsCache {
-    lang: Option<SupportLang>,
+    lang: Option<(SupportLang, u64)>,
     kinds: Vec<u16>,
     fields: Vec<u16>,
     parser: tree_sitter::Parser,
@@ -333,7 +333,8 @@ struct TsCache {
 
 impl TsCache {
     fn ensure(&mut self, support_lang: SupportLang, lang: &Lang) {
-        if self.lang == Some(support_lang) {
+        let key = (support_lang, lang.kinds.id());
+        if self.lang == Some(key) {
             return;
         }
         let ts = support_lang.ts_language();
@@ -349,7 +350,7 @@ impl TsCache {
         self.parser
             .set_language(&ts)
             .expect("compiled-in grammar matches the tree-sitter ABI");
-        self.lang = Some(support_lang);
+        self.lang = Some(key);
     }
 }
 

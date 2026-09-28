@@ -69,7 +69,7 @@ tests:
       - { row: { fqn: 'bar' } }
 
   - name: "field reassignment tracks both assigned targets"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

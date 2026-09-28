@@ -40,8 +40,6 @@ fixtures:
 
 tests:
   - name: "block-local definitions are retained under the enclosing function"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
@@ -75,7 +73,7 @@ tests:
       - { row: { fqn: 'outer::helper', type: 'Function' } }
 
   - name: "local tuple struct constructors resolve to the local struct"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -86,8 +84,6 @@ tests:
       - { row: { fqn: 'outer::Local', type: 'Struct' } }
 
   - name: "local enum variant constructors resolve to the local variant"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Pick'
@@ -106,7 +102,7 @@ tests:
       - { row: { fqn: 'Container::method::nested', type: 'Function' } }
 
   - name: "function-local modules keep nested definitions"
-    # Known gap: rust.yaml does not model this yet.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (d:Definition)

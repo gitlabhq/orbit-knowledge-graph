@@ -103,7 +103,7 @@ fixtures:
 
 tests:
   - name: Vue child component default import targets primary export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -127,7 +127,7 @@ tests:
       - { not: true, row: { callee: "Helper" } }
 
   - name: Vue GraphQL default import targets primary export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

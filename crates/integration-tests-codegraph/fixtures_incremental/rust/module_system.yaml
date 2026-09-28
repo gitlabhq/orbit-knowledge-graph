@@ -45,11 +45,12 @@ tests:
       - { row_count: 1 }
       - { row: { name: "create_user" } }
 
-  - name: Cross-module call does not resolve (no cross-file edge)
+  - name: Cross-module call resolves to the module file
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'run' AND callee.name = 'create_user'
         AND caller.file_path <> callee.file_path
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
-      - { empty: true }
+      - { row_count: 1 }
+      - { row: { caller: run, callee: 'models::create_user' } }

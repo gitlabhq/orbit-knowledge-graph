@@ -184,7 +184,7 @@ tests:
       - { row: { file_path: "src/Plain.jsx", fqn: "PlainJsx", type: "Function" } }
 
   - name: React barrel imports resolve default named namespace and member targets
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -225,7 +225,7 @@ tests:
       - { empty: true }
 
   - name: External React and JSX package calls target imported symbols
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: Imported-symbol fallback and type-only exclusions differ from the old pipeline.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -239,7 +239,7 @@ tests:
       - { row: { caller: "Home", path: "react", name: "default" } }
 
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -273,8 +273,6 @@ tests:
       - { empty: true }
 
   - name: Cross-file JSX calls resolve from default component internals
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Card'
@@ -287,8 +285,6 @@ tests:
       - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "IconButton" } }
 
   - name: Local JSX calls inside the same TSX file still resolve
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn IN ['IconButton', 'CardFooter']
@@ -300,7 +296,7 @@ tests:
       - { row: { caller: "IconButton", callee_file: "src/components/button.tsx", callee: "Button" } }
 
   - name: JSX fragments children aliases and default imports resolve
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -316,8 +312,6 @@ tests:
       - { row: { caller: "NamespaceDefaultHost", callee_file: "src/components/card.tsx", callee: "Card" } }
 
   - name: Plain JSX files resolve imported TSX components
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'src/Plain.jsx'

@@ -109,8 +109,15 @@ impl<'t> Fold<'t> {
         } else if c.is(C::Def) {
             self.handle_def(c, stack);
         } else if k == C::Call {
+            for import in c.children().filter(|i| i.is(C::Import)) {
+                self.handle_import(import);
+            }
             self.handle_call(c);
-            Self::push_children(c, stack);
+            stack.extend(
+                c.children_rev()
+                    .filter(|ch| !ch.is(C::Import))
+                    .map(|ch| WorkItem::Visit(ch.index())),
+            );
         } else if k == C::Member {
             let is_callee = c.parent().is_some_and(|p| p.kind() == C::Callee);
             if !is_callee {

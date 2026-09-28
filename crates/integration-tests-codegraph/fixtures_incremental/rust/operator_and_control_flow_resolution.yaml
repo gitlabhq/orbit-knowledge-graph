@@ -109,8 +109,6 @@ fixtures:
 
 tests:
   - name: "prefix operator calls resolve to the impl method"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_neg' AND callee.name = 'neg'
@@ -120,8 +118,6 @@ tests:
       - { row: { fqn: 'Number::neg' } }
 
   - name: "binary operator calls resolve to the impl method"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_add' AND callee.name = 'add'
@@ -131,8 +127,6 @@ tests:
       - { row: { fqn: 'Number::add' } }
 
   - name: "index operator calls resolve to the impl method"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_index' AND callee.name = 'index'
@@ -142,8 +136,6 @@ tests:
       - { row: { fqn: 'Buffer::index' } }
 
   - name: "try expressions resolve to the local Try::branch impl"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_try' AND callee.name = 'branch'
@@ -153,8 +145,6 @@ tests:
       - { row: { fqn: 'Maybe::branch' } }
 
   - name: "await expressions resolve to the local Future::poll impl"
-    # Known gap: Operator, await, try and record-expression desugaring to impl methods is not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_await_once' AND callee.name = 'poll'

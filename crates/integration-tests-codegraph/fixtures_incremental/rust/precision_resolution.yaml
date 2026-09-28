@@ -162,7 +162,7 @@ fixtures:
 
 tests:
   - name: "module aliases resolve callable paths"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: rust.yaml does not model this yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -173,8 +173,6 @@ tests:
       - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
 
   - name: "local closure shadowing does not create a bogus local edge"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'local_closure_shadowing'
@@ -191,7 +189,7 @@ tests:
       - { empty: true }
 
   - name: "external imported Rust calls target imported symbols"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: Imported-symbol rows for external crates differ from the old pipeline.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -206,7 +204,7 @@ tests:
       - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
 
   - name: "local callable shadowing does not target imported symbols"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -216,7 +214,7 @@ tests:
       - { empty: true }
 
   - name: "function-scoped Rust imports only affect their own function"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: rust.yaml does not model this yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -229,8 +227,6 @@ tests:
       - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
 
   - name: "function-scoped Rust imports shadow top-level imports with the same name"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
@@ -242,7 +238,7 @@ tests:
       - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
 
   - name: "qualified Rust external imports target imported symbols"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -256,7 +252,7 @@ tests:
       - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -272,23 +268,40 @@ tests:
     assert:
       - { empty: true }
 
-  - name: "Rust built-ins references std calls and wildcard imports do not emit imported-symbol fallback"
+  - name: "Rust built-ins and bare references do not emit imported-symbol fallback"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN [
-        'external_only',
         'builtin_macro_and_std_calls',
-        'explicit_std_import_user',
         'imported_function_reference_only',
-        'imported_module_constant_reference',
-        'wildcard_external_import_user'
+        'imported_module_constant_reference'
       ]
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
 
+  - name: "std calls target the std import they name"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['external_only', 'explicit_std_import_user']
+      RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: external_only, path: 'std::mem', name: size_of } }
+      - { row: { caller: explicit_std_import_user, path: 'core::mem::align_of', name: align_of } }
+      - { row: { caller: explicit_std_import_user, path: 'std::mem::size_of', name: size_of } }
+
+  - name: "a call only a wildcard import can supply targets that import"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'wildcard_external_import_user'
+      RETURN sym.import_path AS path, sym.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: external_actions, name: '*' } }
+
   - name: "associated functions stored in fn pointers still resolve"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -296,10 +309,10 @@ tests:
       RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'Function' } }
 
   - name: "generic trait-bound method calls resolve to the trait method"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -310,7 +323,7 @@ tests:
       - { row: { fqn: 'dep::Pinger::trait_ping', type: 'Method' } }
 
   - name: "generic trait-bound default calls resolve to the trait default method"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -321,8 +334,6 @@ tests:
       - { row: { fqn: 'dep::Pinger::defaulted', type: 'Method' } }
 
   - name: "trait default bodies still resolve their internal calls"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'dep::Pinger::defaulted' AND callee.name = 'helper'

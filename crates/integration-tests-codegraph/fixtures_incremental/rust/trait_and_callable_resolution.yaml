@@ -108,7 +108,7 @@ fixtures:
 
 tests:
   - name: "trait method call resolves to impl method"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -119,7 +119,7 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
 
   - name: "trait UFCS call resolves to impl method"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -130,18 +130,16 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
 
   - name: "associated function call resolves"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'construct'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "tuple struct constructor resolves to struct definition"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: rust.yaml does not model this yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -152,8 +150,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Struct' } }
 
   - name: "enum variant constructor resolves to variant definition"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_enum_variant' AND callee.name = 'Start'
@@ -163,8 +159,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Variant' } }
 
   - name: "function-item alias call still resolves to original function"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_fn_alias' AND callee.name = 'helper'
@@ -174,8 +168,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
 
   - name: "fn pointer coercion still resolves to original function"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_fn_pointer_alias' AND callee.name = 'helper'
@@ -185,8 +177,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
 
   - name: "local alias chain preserves callable target"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_alias_chain' AND callee.name = 'helper'
@@ -196,7 +186,7 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
 
   - name: "trait associated UFCS resolves to impl associated function"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -204,10 +194,10 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "type alias associated call resolves to underlying impl"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -215,10 +205,10 @@ tests:
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'AssociatedFunction' } }
+      - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "autoderef method call resolves through Deref target"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

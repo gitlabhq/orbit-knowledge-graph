@@ -48,7 +48,7 @@ fixtures:
 
 tests:
   - name: "record literal field calls resolve through the stored local target"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -59,7 +59,7 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "record shorthand fields preserve callable aliases"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -70,7 +70,7 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "reassigning a record local invalidates stale field targets"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -81,7 +81,7 @@ tests:
       - { row: { name: 'wrapper' } }
 
   - name: "tuple fields on tuple-struct constructors preserve callable targets"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -92,7 +92,7 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "record destructuring reuses the tracked field target"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
+    # Known gap: Field-sensitive local flow and shadowing are not modelled.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

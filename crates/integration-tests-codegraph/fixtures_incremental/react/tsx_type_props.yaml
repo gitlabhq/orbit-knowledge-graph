@@ -66,8 +66,6 @@ tests:
       - { row: { file_path: "src/Toolbar.tsx", name: "ButtonProps", is_type_only: true, target: "ButtonProps" } }
 
   - name: TSX runtime calls exclude type-only definitions
-    # Known gap: JSX component calls and Next.js route conventions are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']

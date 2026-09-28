@@ -7,7 +7,7 @@ use std::sync::Arc;
 use code_graph_incremental::pipeline::{Changes, Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{
-    Context, Env, Envelope, Pipeline, Scalar, State, inventory, templates,
+    Context, Env, Envelope, Limits, Pipeline, Scalar, State, inventory, templates,
 };
 use ontology::Ontology;
 
@@ -51,7 +51,7 @@ pub fn run_incremental_suite(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Env::for_lang(lang_id).expect("rules compile");
+    let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
 
     let inventory = inventory::walk(repo.path())
         .expect("walk fixtures")

@@ -96,7 +96,7 @@ tests:
   # Cross-file within a single crate
   # ─────────────────────────────────────────────────────────────────
   - name: "1. Trait in sibling module file resolves through crate:: path"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |
@@ -108,7 +108,7 @@ tests:
           - { row: { parent: "zoo::traits::Audible" } }
 
   - name: "2. Impl in one file points at trait declared in another file"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |
@@ -120,7 +120,7 @@ tests:
           - { row: { parent: "zoo::traits::Carnivore" } }
 
   - name: "3. Impl reached via `use` import resolves to the same FQN as absolute path"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |
@@ -132,7 +132,7 @@ tests:
           - { row: { parent: "zoo::traits::Mammal" } }
 
   - name: "4. Carnivore -> Mammal supertrait edge exists inside zoo crate"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     queries:
       - query: |
@@ -147,7 +147,7 @@ tests:
   # Cross-crate within a workspace
   # ─────────────────────────────────────────────────────────────────
   - name: "5. Cross-crate impl resolves trait to its originating crate FQN (via use)"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     queries:
       - query: |
@@ -159,7 +159,7 @@ tests:
           - { row: { parent: "zoo::traits::Audible" } }
 
   - name: "6. Cross-crate impl resolves trait to its originating crate FQN (absolute path)"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     queries:
       - query: |
@@ -171,7 +171,7 @@ tests:
           - { row: { parent: "zoo::traits::Audible" } }
 
   - name: "7. Cross-crate impl of a trait whose supertrait lives in another module"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     queries:
       - query: |
@@ -183,7 +183,7 @@ tests:
           - { row: { parent: "zoo::animals::Bark" } }
 
   - name: "8. Both cross-crate impls of Audible appear when querying the trait's incoming edges"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     queries:
       - query: |

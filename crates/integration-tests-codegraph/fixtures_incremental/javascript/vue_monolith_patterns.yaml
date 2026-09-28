@@ -194,7 +194,7 @@ fixtures:
 
 tests:
   - name: Synthesizes module definitions for Vue SFC files
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -208,7 +208,7 @@ tests:
       - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
 
   - name: jh_else_ce Vue default import targets the primary export proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -220,7 +220,7 @@ tests:
       - { row: { import_type: "DefaultImport", name: "default", target: "GitlabVersionCheckBadge" } }
 
   - name: Barrel named import for Vue component targets the barrel proxy
-    # Known gap: Vue SFC extraction is not implemented.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -268,7 +268,7 @@ tests:
       - { row: { name: "trackRemindMeLaterClick", fqn: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", type: "Method" } }
 
   - name: Namespace imports in Vue SFC target synthesized modules
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -362,7 +362,7 @@ tests:
       - { row: { name: "handleError", fqn: "OncallSchedulesWrapper::handleError", type: "Method" } }
 
   - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     queries:
       - query: |

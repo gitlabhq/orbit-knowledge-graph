@@ -48,8 +48,6 @@ fixtures:
 
 tests:
   - name: "restricted pub(crate) use is indexed as a private use"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
@@ -60,13 +58,13 @@ tests:
       - { row: { type: 'Use' } }
 
   - name: "colliding trait-impl methods are disambiguated with trait name"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
-        AND d.definition_type IN ['Method', 'AssociatedFunction']
+        AND d.definition_type IN ['Method', 'Function']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -76,8 +74,6 @@ tests:
       - { row: { fqn: 'Widget::<Beta>::foo' } }
 
   - name: "deeply nested module items are retained despite excess super segments"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'

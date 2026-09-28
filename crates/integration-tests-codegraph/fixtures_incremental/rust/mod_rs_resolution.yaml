@@ -25,8 +25,6 @@ fixtures:
 
 tests:
   - name: "mod.rs parent module resolves child module calls"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.file_path = 'src/net/mod.rs'
@@ -38,8 +36,6 @@ tests:
       - { row: { caller_fqn: 'net::outer', callee_fqn: 'net::inner::leaf', tgt: 'src/net/inner.rs' } }
 
   - name: "definitions under mod.rs keep nested module FQNs"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/net/inner.rs' AND d.name = 'leaf'

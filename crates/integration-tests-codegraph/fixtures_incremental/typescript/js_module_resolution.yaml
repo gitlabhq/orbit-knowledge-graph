@@ -345,20 +345,13 @@ fixtures:
       }
 
 tests:
-  - name: Synthesizes per-file module definitions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
-    skip: true
+  - name: Files are not definitions
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
-      - { row: { fqn: "named/util.ts" } }
-      - { row: { fqn: "default/util.ts" } }
-      - { row: { fqn: "namespace/util.ts" } }
-      - { row: { fqn: "explicit/index.ts" } }
-      - { row: { fqn: "star/index.ts" } }
-
+      - { empty: true }
   - name: Named import targets export proxy
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -378,9 +371,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "helper" } }
 
-  - name: Default import targets primary export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
+  - name: Default import targets the default export
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'default/main.ts'
@@ -399,17 +390,14 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "helper" } }
 
-  - name: Namespace import targets synthesized module
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
-    skip: true
+  - name: Namespace import member call resolves to the concrete function
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'namespace/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, d.fqn AS target
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'namespace/main.ts' AND caller.name = 'run'
+      RETURN callee.fqn AS callee, callee.file_path AS file
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamespaceImport", path: "./util", target: "namespace/util.ts" } }
-
+      - { row: { callee: helper, file: 'namespace/util.ts' } }
   - name: Namespace import call resolves to concrete definition
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -420,16 +408,14 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "helper" } }
 
-  - name: Explicit reexport targets barrel proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
-    skip: true
+  - name: Explicit reexport resolves through the barrel to the definition
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'explicit/main.ts'
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "explicit/index.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "helper" } }
 
   - name: Explicit reexport call resolves to source definition
     query: |
@@ -623,7 +609,7 @@ tests:
       - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
 
   - name: External aliases preserve exact imported symbols
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -637,7 +623,7 @@ tests:
       - { row: { caller: "inspectExternalAliases", path: "@external/tracking", name: null, alias: "Tracking" } }
 
   - name: Missing members on local namespace imports do not become external calls
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

@@ -46,7 +46,7 @@ fixtures:
 
 tests:
   - name: "members outside workspace root still resolve through workspace.dependencies"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -59,7 +59,7 @@ tests:
       - { row: { caller_fqn: 'app_runner::boot', callee_fqn: 'shared_lib::helper', tgt: 'members/shared/src/lib.rs' } }
 
   - name: "workspace member outside root keeps crate-qualified FQN"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)

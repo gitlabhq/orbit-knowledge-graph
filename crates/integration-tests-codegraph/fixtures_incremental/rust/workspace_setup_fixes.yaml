@@ -47,7 +47,7 @@ fixtures:
 
 tests:
   - name: "multi-workspace forces crate-name prefix even when only one yields a name"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -58,7 +58,7 @@ tests:
       - { row: { fqn: 'crate_a::inner::helper' } }
 
   - name: "crate-a root function also carries crate-name prefix"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)

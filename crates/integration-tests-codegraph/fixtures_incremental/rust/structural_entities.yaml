@@ -71,8 +71,6 @@ fixtures:
 
 tests:
   - name: "tuple struct fields are retained"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
@@ -84,8 +82,6 @@ tests:
       - { row: { fqn: 'inventory::Pair::1', type: 'Field' } }
 
   - name: "enum payload fields are retained for record and tuple variants"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
@@ -104,7 +100,7 @@ tests:
       - { row: { fqn: 'inventory::Packet::Tuple::1', type: 'Field' } }
 
   - name: "trait associated items are retained on the trait definition"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -121,11 +117,9 @@ tests:
       - { row: { fqn: 'inventory::Runner::KIND', type: 'Constant' } }
       - { row: { fqn: 'inventory::Runner::Output', type: 'TypeAlias' } }
       - { row: { fqn: 'inventory::Runner::run', type: 'Method' } }
-      - { row: { fqn: 'inventory::Runner::build', type: 'AssociatedFunction' } }
+      - { row: { fqn: 'inventory::Runner::build', type: 'Function' } }
 
   - name: "impl associated items are retained on the concrete type"
-    # Known gap: Trait impl attribution and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
@@ -142,12 +136,10 @@ tests:
       - { row: { fqn: 'inventory::Service::KIND', type: 'Constant' } }
       - { row: { fqn: 'inventory::Service::Output', type: 'TypeAlias' } }
       - { row: { fqn: 'inventory::Service::run', type: 'Method' } }
-      - { row: { fqn: 'inventory::Service::build', type: 'AssociatedFunction' } }
-      - { row: { fqn: 'inventory::Service::inherent', type: 'AssociatedFunction' } }
+      - { row: { fqn: 'inventory::Service::build', type: 'Function' } }
+      - { row: { fqn: 'inventory::Service::inherent', type: 'Function' } }
 
   - name: "variant imports and aliases retain their metadata"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
@@ -159,8 +151,6 @@ tests:
       - { row: { path: 'crate::inventory::Packet::Record', alias: 'RecordPacket', type: 'UseGroup' } }
 
   - name: "public glob re-exports are retained as imports"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ReExportGlob'
@@ -170,8 +160,6 @@ tests:
       - { row: { path: 'crate::inventory' } }
 
   - name: "extern crate aliases are retained as imports"
-    # Known gap: Enum variant, tuple field and extern item definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'

@@ -81,7 +81,7 @@ fixtures:
 
 tests:
   - name: Generic pipeline indexes module definitions for JS-family extensions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -105,8 +105,6 @@ tests:
       - { row: { fqn: "tsx/component.tsx" } }
 
   - name: Generic pipeline resolves imports across JS-family extensions
-    # Known gap: CommonJS require resolution is not implemented.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
@@ -129,8 +127,6 @@ tests:
       - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", import_type: "NamedImport", target: "renderPanel" } }
 
   - name: Generic pipeline resolves cross-file calls for JS-family extensions
-    # Known gap: CommonJS require resolution is not implemented.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path IN [

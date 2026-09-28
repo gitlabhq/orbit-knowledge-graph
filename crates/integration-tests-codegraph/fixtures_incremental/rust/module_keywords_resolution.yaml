@@ -53,8 +53,6 @@ fixtures:
 
 tests:
   - name: "imported super path resolves"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'via_use_super' AND callee.name = 'parent_helper'
@@ -64,8 +62,6 @@ tests:
       - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer.rs' } }
 
   - name: "direct super path resolves"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'via_super_path' AND callee.name = 'parent_helper'
@@ -75,8 +71,6 @@ tests:
       - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer.rs' } }
 
   - name: "self path resolves inside module"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'via_self_path' AND callee.name = 'local_helper'
@@ -86,8 +80,6 @@ tests:
       - { row: { src: 'src/outer/inner.rs', tgt: 'src/outer/inner.rs' } }
 
   - name: "crate path resolves across modules"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'via_crate_path' AND callee.name = 'root_helper'
@@ -97,8 +89,6 @@ tests:
       - { row: { src: 'src/outer/inner.rs', tgt: 'src/shared.rs' } }
 
   - name: "double super path resolves across nested modules"
-    # Known gap: Module path resolution (crate::, super::, mod.rs, use and re-exports) is incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'via_double_super' AND callee.name = 'parent_helper'

@@ -171,7 +171,7 @@ fixtures:
 
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -182,7 +182,7 @@ tests:
       - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "mountVersionCheck" } }
 
   - name: default imported CE entry preserves aliased helper target
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -193,7 +193,7 @@ tests:
       - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "parseBoolean" } }
 
   - name: aliased import from star barrel preserves identity
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -205,7 +205,7 @@ tests:
       - { row: { name: "DEFAULT_SCOPE", alias: null, target: "DEFAULT_SCOPE" } }
 
   - name: feature flag barrel import preserves underlying module targets
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -228,7 +228,7 @@ tests:
       - { empty: true }
 
   - name: CommonJS require through alias targets the primary export proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -239,7 +239,7 @@ tests:
       - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
 
   - name: CommonJS alias modules emit module and local definitions
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (d:Definition)
@@ -251,7 +251,7 @@ tests:
       - { row: { fqn: "app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
 
   - name: explicit default reexports target the barrel proxy
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -263,7 +263,7 @@ tests:
       - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
 
   - name: project barrel imports preserve explicit, star, and constant targets
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -278,7 +278,7 @@ tests:
       - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB" } }
 
   - name: namespace imports over alias barrels target the synthesized barrel module
-    # Known gap: The old pipeline synthesized a module Definition per file; the incremental engine does not.
+    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -290,7 +290,7 @@ tests:
       - { row: { path: "~/projects/your_work/components", target: "app/assets/javascripts/projects/your_work/components/index.ts" } }
 
   - name: namespace alias barrel calls resolve to concrete component definitions
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -313,7 +313,7 @@ tests:
       - { empty: true }
 
   - name: ee alias helper imports target enterprise utility definitions
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

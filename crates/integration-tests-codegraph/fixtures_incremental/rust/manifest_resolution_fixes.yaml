@@ -67,7 +67,7 @@ tests:
       - { row_count: 0 }
 
   - name: "crate under excluded directory prefix is still indexed as its own workspace"
-    # Known gap: Cargo workspace manifests: crate-qualified FQNs and path dependencies are not resolved yet.
+    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
     skip: true
     query: |
       MATCH (d:Definition)

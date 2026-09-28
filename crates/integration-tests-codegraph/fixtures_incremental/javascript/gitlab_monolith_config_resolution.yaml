@@ -81,7 +81,7 @@ fixtures:
 
 tests:
   - name: CommonJS bare require call resolves helper factory
-    # Known gap: CommonJS require resolution is not implemented.
+    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -93,7 +93,7 @@ tests:
       - { row: { caller: "buildCompiler", callee: "createIncrementalWebpackCompiler" } }
 
   - name: CommonJS namespace member call resolves helper method
-    # Known gap: tsconfig/webpack path aliases, barrels, export proxies and namespace re-exports are not fully resolved.
+    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
