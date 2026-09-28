@@ -12,7 +12,7 @@ use crate::commands::setup::Target;
 use crate::commands::setup::spec::{self, Agent, TemplateFile};
 
 pub(super) struct Hooks {
-    pub(super) strict: bool,
+    pub(super) graph_first: bool,
 }
 
 impl Installer for Hooks {
@@ -30,7 +30,7 @@ impl Installer for Hooks {
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
         for agent in agents {
-            install_for_agent(*agent, target, self.strict, report)?;
+            install_for_agent(*agent, target, self.graph_first, report)?;
         }
         Ok(())
     }
@@ -60,7 +60,7 @@ impl Installer for Hooks {
 fn install_for_agent(
     agent: Agent,
     target: &Target,
-    strict: bool,
+    graph_first: bool,
     report: &mut Report,
 ) -> Result<()> {
     for merge in &agent.json_merges {
@@ -68,7 +68,7 @@ fn install_for_agent(
         let entries: Vec<Value> = merge
             .entries
             .iter()
-            .map(|entry| substitute_tokens_in_json(entry, strict))
+            .map(|entry| substitute_tokens_in_json(entry, graph_first))
             .collect();
         let mut root = json::read_object(&path)?;
         if !file_mentions(&path, &merge.marker) {
@@ -149,21 +149,21 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
     Ok(())
 }
 
-fn substitute_tokens_in_json(value: &Value, strict: bool) -> Value {
+fn substitute_tokens_in_json(value: &Value, graph_first: bool) -> Value {
     match value {
-        Value::String(s) => Value::String(
-            s.replace("{{orbit}}", spec::launcher())
-                .replace("{{strict}}", if strict { " --strict" } else { "" }),
-        ),
+        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
+            "{{graph_first}}",
+            if graph_first { " --graph-first" } else { "" },
+        )),
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|item| substitute_tokens_in_json(item, strict))
+                .map(|item| substitute_tokens_in_json(item, graph_first))
                 .collect(),
         ),
         Value::Object(map) => Value::Object(
             map.iter()
-                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v, strict)))
+                .map(|(k, v)| (k.clone(), substitute_tokens_in_json(v, graph_first)))
                 .collect(),
         ),
         other => other.clone(),

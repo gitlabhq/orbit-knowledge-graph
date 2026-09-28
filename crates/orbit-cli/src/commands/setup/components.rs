@@ -41,7 +41,7 @@ fn file_mentions(path: &Path, marker: &str) -> bool {
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,
-        Component::Hooks => &hooks::Hooks { strict: false },
+        Component::Hooks => &hooks::Hooks { graph_first: false },
         Component::Skill => &skill::Skill,
         Component::Mcp => &mcp::McpServer,
     }
@@ -78,7 +78,7 @@ pub(super) fn install(selection: &Selection, target: &Target, report: &mut Repor
         report.start_group(component.label());
         let installer: &dyn Installer = match component {
             Component::Hooks => &hooks::Hooks {
-                strict: selection.strict,
+                graph_first: selection.graph_first,
             },
             other => installer_for(*other),
         };

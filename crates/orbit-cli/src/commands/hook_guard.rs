@@ -35,9 +35,9 @@ const SOURCE_EXTS: &[&str] = &[
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
 ];
 
-const STRICT_ENV: &str = "ORBIT_GRAPH_FIRST";
+const GRAPH_FIRST_ENV: &str = "ORBIT_GRAPH_FIRST";
 
-pub(crate) fn run(kind: Kind, strict: bool) {
+pub(crate) fn run(kind: Kind, graph_first: bool) {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -48,47 +48,48 @@ pub(crate) fn run(kind: Kind, strict: bool) {
     if !local_graph_exists() {
         return;
     }
-    let strict = strict_enabled(strict, std::env::var(STRICT_ENV).ok().as_deref())
-        .then(|| {
-            Some(Strict {
-                sessions: session_dir()?,
-                project_dir: std::env::var("CLAUDE_PROJECT_DIR")
-                    .ok()
-                    .filter(|dir| !dir.is_empty()),
+    let graph_first =
+        graph_first_enabled(graph_first, std::env::var(GRAPH_FIRST_ENV).ok().as_deref())
+            .then(|| {
+                Some(GraphFirst {
+                    sessions: session_dir()?,
+                    project_dir: std::env::var("CLAUDE_PROJECT_DIR")
+                        .ok()
+                        .filter(|dir| !dir.is_empty()),
+                })
             })
-        })
-        .flatten();
-    if let Some(response) = respond(kind, &call, strict.as_ref()) {
+            .flatten();
+    if let Some(response) = respond(kind, &call, graph_first.as_ref()) {
         println!("{response}");
     }
 }
 
-struct Strict {
+struct GraphFirst {
     sessions: PathBuf,
     project_dir: Option<String>,
 }
 
-fn respond(kind: Kind, call: &Value, strict: Option<&Strict>) -> Option<Value> {
-    let session = strict.zip(session_id(call));
-    if let Some((strict, id)) = &session
+fn respond(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> Option<Value> {
+    let session = graph_first.zip(session_id(call));
+    if let Some((graph_first, id)) = &session
         && matches!(kind, Kind::Search)
         && invokes_orbit(command_of(call))
     {
-        claim_session(&strict.sessions, id);
+        claim_session(&graph_first.sessions, id);
         return None;
     }
     if !should_nudge(kind, call) {
         return None;
     }
-    if let Some((strict, id)) = &session
-        && should_block(kind, call, strict)
-        && claim_session(&strict.sessions, id)
+    if let Some((graph_first, id)) = &session
+        && should_block(kind, call, graph_first)
+        && claim_session(&graph_first.sessions, id)
     {
         return Some(json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": spec::strict_deny_text(),
+                "permissionDecisionReason": spec::graph_first_deny_text(),
             }
         }));
     }
@@ -100,7 +101,7 @@ fn respond(kind: Kind, call: &Value, strict: Option<&Strict>) -> Option<Value> {
     }))
 }
 
-fn strict_enabled(installed: bool, env: Option<&str>) -> bool {
+fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
     match env
         .map(|value| value.trim().to_ascii_lowercase())
         .as_deref()
@@ -164,7 +165,7 @@ fn invokes_orbit(command: &str) -> bool {
         })
 }
 
-fn should_block(kind: Kind, call: &Value, strict: &Strict) -> bool {
+fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
     let path = |key: &str| tool_input.get(key).and_then(Value::as_str).unwrap_or("");
     match kind {
@@ -173,21 +174,21 @@ fn should_block(kind: Kind, call: &Value, strict: &Strict) -> bool {
             _ => {
                 let command = command_of(call);
                 let is_pattern_tool = command.is_empty() && !path("pattern").is_empty();
-                (is_pattern_tool && in_project(path("path"), call, strict))
+                (is_pattern_tool && in_project(path("path"), call, graph_first))
                     || invokes_search(command, CONTENT_SEARCH_COMMANDS)
                     || reads_source(command)
             }
         },
-        Kind::Read => in_project(path("file_path"), call, strict),
+        Kind::Read => in_project(path("file_path"), call, graph_first),
     }
 }
 
-fn in_project(path: &str, call: &Value, strict: &Strict) -> bool {
+fn in_project(path: &str, call: &Value, graph_first: &GraphFirst) -> bool {
     let path = Path::new(path);
     if path.as_os_str().is_empty() || path.is_relative() {
         return true;
     }
-    strict
+    graph_first
         .project_dir
         .as_deref()
         .or_else(|| call.get("cwd").and_then(Value::as_str))
@@ -369,8 +370,8 @@ mod tests {
         assert!(should_nudge(Kind::Search, &call));
     }
 
-    fn decide(kind: Kind, call: &Value, strict: Option<&Strict>) -> &'static str {
-        match respond(kind, call, strict) {
+    fn decide(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> &'static str {
+        match respond(kind, call, graph_first) {
             None => "none",
             Some(out) if out["hookSpecificOutput"]["permissionDecision"] == "deny" => "deny",
             Some(_) => "nudge",
@@ -378,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn strict_blocks_once_per_session_unless_orbit_ran_first() {
+    fn graph_first_blocks_once_per_session_unless_orbit_ran_first() {
         let dir = tempfile::tempdir().unwrap();
-        let strict = Strict {
+        let graph_first = GraphFirst {
             sessions: dir.path().to_path_buf(),
             project_dir: Some("/repo".to_string()),
         };
@@ -404,7 +405,7 @@ mod tests {
                 "nudge",
             ),
         ] {
-            assert_eq!(decide(kind, &call, Some(&strict)), expected, "{call}");
+            assert_eq!(decide(kind, &call, Some(&graph_first)), expected, "{call}");
         }
         assert_eq!(decide(Kind::Read, &read("f", "/repo/a.rs"), None), "nudge");
         assert_eq!(
@@ -414,15 +415,15 @@ mod tests {
     }
 
     #[test]
-    fn strict_env_overrides_the_installed_flag() {
-        assert!(strict_enabled(false, Some("1")) && !strict_enabled(true, Some("off")));
-        assert!(strict_enabled(true, None) && strict_enabled(true, Some("junk")));
+    fn graph_first_env_overrides_the_installed_flag() {
+        assert!(graph_first_enabled(false, Some("1")) && !graph_first_enabled(true, Some("off")));
+        assert!(graph_first_enabled(true, None) && graph_first_enabled(true, Some("junk")));
     }
 
     #[test]
     fn nudge_text_names_the_launcher_verbs() {
         assert!(nudge_text(Kind::Search).contains("`orbit grep"));
         assert!(nudge_text(Kind::Read).contains("`orbit context"));
-        assert!(spec::strict_deny_text().contains("`orbit grep"));
+        assert!(spec::graph_first_deny_text().contains("`orbit grep"));
     }
 }

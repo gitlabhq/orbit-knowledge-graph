@@ -312,7 +312,7 @@ impl SetupFlags {
         agents: Vec<String>,
         all: bool,
         index: bool,
-        strict: bool,
+        graph_first: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -322,7 +322,7 @@ impl SetupFlags {
             dry_run: self.dry_run,
             verbose: self.verbose,
             index,
-            strict,
+            graph_first,
             components,
         }
     }
@@ -399,7 +399,7 @@ enum Commands {
         kind: commands::hook_guard::Kind,
 
         #[arg(long)]
-        strict: bool,
+        graph_first: bool,
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
@@ -656,10 +656,10 @@ async fn dispatch(
         }
         Commands::HookGuard {
             kind,
-            strict,
+            graph_first,
             mode: _,
         } => {
-            commands::hook_guard::run(kind, strict);
+            commands::hook_guard::run(kind, graph_first);
             Ok(())
         }
         Commands::Query {
@@ -1007,7 +1007,7 @@ mod tests {
             ["orbit", "hook-guard", "search"].as_slice(),
             &["orbit", "hook-guard", "search", "--mode", "remote"],
             &["orbit", "hook-guard", "read", "--mode", "local"],
-            &["orbit", "hook-guard", "read", "--strict"],
+            &["orbit", "hook-guard", "read", "--graph-first"],
         ] {
             assert!(
                 matches!(Cli::parse_from(argv).command, Commands::HookGuard { .. }),
