@@ -15,7 +15,8 @@ use crate::status_query::{
 pub(super) const PROJECT_NODE: &str = "Project";
 const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
-// `{in_scopes}` is an OR of `startsWith` per scope: `arrayExists` cannot use the primary key.
+// {in_scopes} gets one startsWith per scope at runtime. ClickHouse can use the primary key
+// for those, but not for arrayExists.
 const PROJECT_COVERAGE_SQL: &str = r#"
 SELECT scope,
        toInt64(uniqExact(projects.id)) AS total_known,
