@@ -1,3 +1,33 @@
+## [0.131.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.130.0...v0.131.0) (2026-09-28)
+
+### Features
+
+* **billing:** emit billing events via cloud connector token on self-managed ([f8fb1f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f8fb1f93c1ab1237d1429bd9e6f22e2b136689ce)) by Sharmad Nachnolkar
+* **cli:** serve deployed Orbit skills ([bf510a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bf510a5df49f08e6e6f1ae9080c959c52f7b9464)) by Dmitry Gruzd
+* **code-graph-incremental:** export the graph as ontology tables ([9ab69e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9ab69e65c84c06f223b3daa4281891c0e67d775b)) by Michael Usachenko
+* **code-graph-incremental:** linking phase ([5076390](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5076390a5164f317cf5ebb72577494f97841c729)) by Michael Usachenko
+* **code-graph-incremental:** parse phase ([79b34f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79b34f9ae12d9a34691749015e4004e6dd7d3d8e)) by Michael Usachenko
+* **code-graph-incremental:** pipeline runner, artifacts, and graph types ([86eb064](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/86eb064749a384aeb0726d7d2a8a79689b29b792)) by Michael Usachenko
+* **code-graph-incremental:** resolve imports and calls across files ([6e4ff15](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e4ff1561be14fa9d1fad133d7d0de474861f944)) by Michael Usachenko
+* **code-graph-incremental:** rewrite engine and the Python rules ([af47f7f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/af47f7f11c1730fdd359df353bb652618ffe0505)) by Michael Usachenko
+* **indexer:** record first-pass attempts and completion for indexing status ([bf193f8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bf193f88c21d378f4aadf09caddeec8df70848f8)) by Jean-Gabriel Doyon
+* **server:** add GetIndexingStatus and GetItemCounts RPCs ([78600a3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78600a3c89de5dbeb3431e4cdfdb912906ab768c)) by Jean-Gabriel Doyon
+* **server:** serve graph_status from indexing-status and item-count services ([404ef71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/404ef716fa0d0559f2217de153178cada3cac5e5)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **compiler:** keep planning performance-only ([c7fc3cf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c7fc3cffb245ded2b4ea8a6583645bef7cfff9c1)) by Michael Usachenko
+* **migrations:** gate promotion on indexed_at only ([64fdfcc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64fdfcc3ae229f7f8ec89a11fc7a7db690ecfaa8)) by Jean-Gabriel Doyon
+* **setup:** steer agents from bash search to orbit commands ([4a277de](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a277de556a618a3651c4449a4f4ec81435568b6)) by Aaron Algutifan
+
+### Other
+
+* **cargo:** use line-tables-only debuginfo for dev profile ([63b449b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63b449bcba88c1f6620df75113f09e9bd472ff90)) by Dmitry Gruzd
+* **code-graph:** drop the removed legacy stack from the indexing design ([d7c3731](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d7c3731fa5f881f8275177f4fb89e8f085ea18bc)) by ANBUCHELVAN GANESAN CSE
+* **indexer:** delete the NATS KV indexing progress store ([0010501](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00105015f1736a00ab09935a357d4de5452d9f8a)) by Jean-Gabriel Doyon
+* **orbit-perf:** keep the caproni config in-repo and speed up the job ([248691b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/248691b336a5506430cd4e29c140f3a235e4200b)) by Vishal Patel
+* **skills:** guide agents to fix inaccurate Orbit guidance upstream ([b81cdfd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b81cdfddf7c85809454215f75baf70ab7c838419)) by Dmitry Gruzd
+
 ## [0.130.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.129.0...v0.130.0) (2026-09-24)
 
 ### Features
