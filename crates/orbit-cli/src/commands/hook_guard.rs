@@ -71,11 +71,10 @@ struct GraphFirst {
 
 fn respond(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> Option<Value> {
     let session = graph_first.zip(session_id(call));
-    if let Some((graph_first, id)) = &session
-        && matches!(kind, Kind::Search)
-        && invokes_orbit(command_of(call))
-    {
-        claim_session(&graph_first.sessions, id);
+    if runs_orbit(call) {
+        if let Some((graph_first, id)) = &session {
+            claim_session(&graph_first.sessions, id);
+        }
         return None;
     }
     if !should_nudge(kind, call) {
@@ -113,9 +112,7 @@ fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
 }
 
 fn session_dir() -> Option<PathBuf> {
-    workspace::Workspace::default_root()
-        .ok()
-        .map(|root| root.join("hook-sessions"))
+    Some(std::env::temp_dir().join("orbit-hook-sessions"))
 }
 
 fn session_id(call: &Value) -> Option<String> {
@@ -152,12 +149,21 @@ fn command_of(call: &Value) -> &str {
         .unwrap_or("")
 }
 
+fn runs_orbit(call: &Value) -> bool {
+    let tool = call.get("tool_name").and_then(Value::as_str).unwrap_or("");
+    tool.starts_with("mcp__orbit__") || invokes_orbit(command_of(call))
+}
+
 fn invokes_orbit(command: &str) -> bool {
     command
         .split(['|', ';', '&', '\n', '(', ')', '`'])
         .any(|segment| {
-            let mut words = segment.split_whitespace().filter(|t| !t.contains('='));
-            match words.next().map(basename) {
+            let mut words = segment
+                .split_whitespace()
+                .filter(|t| !t.starts_with('-') && !t.contains('='))
+                .map(basename)
+                .skip_while(|word| COMMAND_WRAPPERS.contains(word));
+            match words.next() {
                 Some("orbit") => true,
                 Some("glab") => words.next() == Some("orbit"),
                 _ => false,
@@ -192,7 +198,7 @@ fn in_project(path: &str, call: &Value, graph_first: &GraphFirst) -> bool {
         .project_dir
         .as_deref()
         .or_else(|| call.get("cwd").and_then(Value::as_str))
-        .is_none_or(|root| path.starts_with(root))
+        .is_some_and(|root| path.starts_with(root))
 }
 
 fn local_graph_exists() -> bool {
@@ -390,6 +396,7 @@ mod tests {
         let bash = |id: &str, cmd: &str| json!({"session_id": id, "tool_input": {"command": cmd}});
         let glob =
             json!({"session_id": "c", "tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
+        let mcp = json!({"session_id": "h", "tool_name": "mcp__orbit__run_sql", "tool_input": {}});
         for (kind, call, expected) in [
             (Kind::Read, read("a", "/repo/src/main.rs"), "deny"),
             (Kind::Read, read("a", "/repo/src/main.rs"), "nudge"),
@@ -398,6 +405,10 @@ mod tests {
             (Kind::Search, bash("c", "find . -name '*.rs'"), "nudge"),
             (Kind::Search, bash("d", "glab orbit grep foo"), "none"),
             (Kind::Read, read("d", "/repo/src/main.rs"), "nudge"),
+            (Kind::Search, bash("g", "time orbit grep foo"), "none"),
+            (Kind::Read, read("g", "/repo/src/main.rs"), "nudge"),
+            (Kind::Search, mcp, "none"),
+            (Kind::Read, read("h", "/repo/src/main.rs"), "nudge"),
             (Kind::Read, read("e", "/elsewhere/lib.rs"), "nudge"),
             (
                 Kind::Read,
