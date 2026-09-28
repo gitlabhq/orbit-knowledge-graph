@@ -125,18 +125,13 @@ impl LowerFlavor for ClickHouse {
         extension: Self::Extension,
         inputs: Vec<Plan<Self>>,
         aliases: &HashMap<RelationId, String>,
-        columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
+        _columns: &BTreeMap<ColumnId, (RelationId, PhysicalColumn)>,
     ) -> Result<Query> {
-        let ClickHouseExtension::FusedNeighbors = extension;
-        let queries = inputs
-            .into_iter()
-            .map(|input| lower_plan::<ClickHouse>(bound, input, aliases, columns))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Query {
-            select: union_projection(&queries),
-            from: TableRef::union_all(queries, "neighbors"),
-            ..Default::default()
-        })
+        let ClickHouseExtension::FusedNeighbors { center } = extension;
+        let [scan]: [Plan<ClickHouse>; 1] = inputs
+            .try_into()
+            .map_err(|_| QueryError::Lowering("fused neighbors need one scan".into()))?;
+        lower_fused_neighbors(bound, center, scan, aliases)
     }
 
     fn current_rows(
@@ -402,6 +397,167 @@ fn lower_plan<F: LowerFlavor>(
         Operator::Extension(extension) => {
             F::extension(bound, extension, plan.inputs, aliases, physical_columns)
         }
+    }
+}
+
+fn lower_fused_neighbors(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    center: RelationId,
+    scan: Plan<ClickHouse>,
+    aliases: &HashMap<RelationId, String>,
+) -> Result<Query> {
+    let Operator::Scan(scan) = scan.operator else {
+        return Err(QueryError::Lowering(
+            "fused neighbors need an edge scan".into(),
+        ));
+    };
+    let ClickHouseAccess::EdgeTables(access) = scan.access else {
+        return Err(QueryError::Lowering(
+            "fused neighbors need edge tables".into(),
+        ));
+    };
+    let RelationOrigin::Node { input, .. } = bound.relation(center).origin else {
+        return Err(QueryError::Lowering(
+            "fused neighbors need a center node".into(),
+        ));
+    };
+    let center_input = &bound.input.nodes[input.0];
+    let center_entity = center_input.entity.as_deref().unwrap_or_default();
+    let edge_alias = aliases[&scan.relation].clone();
+    let arm = "_neighbor_arm";
+    let predicate = |kind: &str, id: &str| {
+        let mut predicates = vec![ast::Expr::eq(
+            ast::Expr::col(&edge_alias, kind),
+            ast::Expr::string(center_entity),
+        )];
+        if !center_input.node_ids.is_empty() {
+            predicates.push(edge_ids(&edge_alias, id, &center_input.node_ids));
+        }
+        ast::Expr::conjoin(predicates).unwrap()
+    };
+    let outgoing = predicate(
+        ontology::constants::SOURCE_KIND_COLUMN,
+        ontology::constants::SOURCE_ID_COLUMN,
+    );
+    let incoming = predicate(
+        ontology::constants::TARGET_KIND_COLUMN,
+        ontology::constants::TARGET_ID_COLUMN,
+    );
+    let arm_tuple = |matched: ast::Expr,
+                     outgoing: i64,
+                     neighbor_id: &str,
+                     neighbor_kind: &str,
+                     center_id: &str| {
+        ast::Expr::func(
+            "tuple",
+            vec![
+                matched,
+                ast::Expr::int(outgoing),
+                ast::Expr::col(&edge_alias, neighbor_id),
+                ast::Expr::col(&edge_alias, neighbor_kind),
+                ast::Expr::col(&edge_alias, center_id),
+            ],
+        )
+    };
+    let matched = ast::Expr::func(
+        "arrayFilter",
+        vec![
+            ast::Expr::lambda(
+                arm,
+                ast::Expr::func(
+                    "tupleElement",
+                    vec![ast::Expr::ident(arm), ast::Expr::int(1)],
+                ),
+            ),
+            ast::Expr::func(
+                "array",
+                vec![
+                    arm_tuple(
+                        outgoing.clone(),
+                        1,
+                        ontology::constants::TARGET_ID_COLUMN,
+                        ontology::constants::TARGET_KIND_COLUMN,
+                        ontology::constants::SOURCE_ID_COLUMN,
+                    ),
+                    arm_tuple(
+                        incoming.clone(),
+                        0,
+                        ontology::constants::SOURCE_ID_COLUMN,
+                        ontology::constants::SOURCE_KIND_COLUMN,
+                        ontology::constants::TARGET_ID_COLUMN,
+                    ),
+                ],
+            ),
+        ],
+    );
+    let row = "_neighbor_row";
+    let inner = Query {
+        select: vec![
+            SelectExpr::new(ast::Expr::func("arrayJoin", vec![matched]), row),
+            SelectExpr::col(&edge_alias, ontology::constants::RELATIONSHIP_KIND_COLUMN),
+        ],
+        from: if access.layouts.len() == 1 {
+            TableRef::scan(&access.layouts[0].table.0, &edge_alias)
+        } else {
+            TableRef::union_all(
+                access
+                    .layouts
+                    .iter()
+                    .map(|layout| Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan(&layout.table.0, &edge_alias),
+                        ..Default::default()
+                    })
+                    .collect(),
+                &edge_alias,
+            )
+        },
+        where_clause: Some(ast::Expr::binary(ast::Op::Or, outgoing, incoming)),
+        ..Default::default()
+    };
+    let item = |index| {
+        ast::Expr::func(
+            "tupleElement",
+            vec![ast::Expr::col("neighbors", row), ast::Expr::int(index)],
+        )
+    };
+    Ok(Query {
+        select: vec![
+            SelectExpr::new(item(3), crate::constants::neighbor_id_column()),
+            SelectExpr::new(item(4), crate::constants::neighbor_type_column()),
+            SelectExpr::new(
+                ast::Expr::col(
+                    "neighbors",
+                    ontology::constants::RELATIONSHIP_KIND_COLUMN,
+                ),
+                crate::constants::relationship_type_column(),
+            ),
+            SelectExpr::new(item(2), crate::constants::neighbor_is_outgoing_column()),
+            SelectExpr::new(
+                item(5),
+                crate::constants::redaction_id_column(&center_input.id),
+            ),
+            SelectExpr::new(
+                ast::Expr::string(center_entity),
+                crate::constants::redaction_type_column(&center_input.id),
+            ),
+        ],
+        from: TableRef::subquery(inner, "neighbors"),
+        ..Default::default()
+    })
+}
+
+fn edge_ids(alias: &str, column: &str, ids: &[i64]) -> ast::Expr {
+    match ids {
+        [id] => ast::Expr::eq(ast::Expr::col(alias, column), ast::Expr::int(*id)),
+        ids => ast::Expr::binary(
+            ast::Op::In,
+            ast::Expr::col(alias, column),
+            ast::Expr::param(
+                ast::ChType::Int64.to_array(),
+                serde_json::Value::Array(ids.iter().copied().map(Into::into).collect()),
+            ),
+        ),
     }
 }
 

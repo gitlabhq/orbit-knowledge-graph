@@ -867,7 +867,7 @@ pub struct DuckDbCurrentRows;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClickHouseExtension {
-    FusedNeighbors,
+    FusedNeighbors { center: RelationId },
 }
 
 impl Flavor for ClickHouse {

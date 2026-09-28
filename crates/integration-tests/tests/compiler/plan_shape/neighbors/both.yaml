@@ -6,7 +6,9 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (FusedNeighbors Both (...))
+      - (FusedNeighbors Both (Scan EdgeTables(gl_ci_edge|gl_diff_edge|gl_edge) AS e2))
+    reject:
+      - (Union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))
   duckdb:
     expect:
       - (Union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))

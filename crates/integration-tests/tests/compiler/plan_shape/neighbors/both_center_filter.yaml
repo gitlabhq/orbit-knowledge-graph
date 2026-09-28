@@ -6,5 +6,5 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (FusedNeighbors Both (...))
+      - (Union (Project ... (Join ON e2.source_id = mr.id (...))) (Project ... (Join ON e4.target_id = mr.id (...))))
       - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))

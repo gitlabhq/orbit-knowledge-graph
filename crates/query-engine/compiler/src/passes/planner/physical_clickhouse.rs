@@ -32,16 +32,7 @@ pub fn plan_clickhouse(
         });
     }
     if bound.input.query_type == crate::input::QueryType::Neighbors {
-        let candidate = if bound
-            .input
-            .neighbors
-            .as_ref()
-            .is_some_and(|neighbors| neighbors.direction == crate::input::Direction::Both)
-        {
-            fused_neighbors_candidate(ordinary)
-        } else {
-            ordinary
-        };
+        let candidate = fused_neighbors_candidate(bound, ordinary.clone()).unwrap_or(ordinary);
         return Ok(PlanningResult {
             logical,
             selected: SelectedPlan { candidate },
@@ -82,28 +73,72 @@ pub fn plan_clickhouse(
     })
 }
 
-fn fused_neighbors_candidate(mut candidate: Candidate<ClickHouse>) -> Candidate<ClickHouse> {
+fn fused_neighbors_candidate(
+    bound: &BoundCatalog<query_data_model::ClickHouseDataModel>,
+    mut candidate: Candidate<ClickHouse>,
+) -> Option<Candidate<ClickHouse>> {
+    let neighbors = bound.input.neighbors.as_ref()?;
+    if neighbors.direction != crate::input::Direction::Both {
+        return None;
+    }
+    let center = bound.input.nodes.first()?;
+    if !center.filters.is_empty()
+        || center.id_range.is_some()
+        || bound
+            .model
+            .redaction_id_column_named(center.entity.as_deref()?)
+            .is_some_and(|column| column != DEFAULT_PRIMARY_KEY)
+    {
+        return None;
+    }
     let Operator::Limit(limit) = candidate.plan.operator else {
-        return candidate;
+        return None;
     };
     let [union] = candidate.plan.inputs.as_slice() else {
-        return candidate;
+        return None;
     };
     let Operator::Union = union.operator else {
-        return candidate;
+        return None;
     };
     let [outgoing, incoming] = union.inputs.as_slice() else {
-        return candidate;
+        return None;
     };
+    let outgoing_scan = single_edge_scan(outgoing)?;
+    let incoming_scan = single_edge_scan(incoming)?;
+    let (ClickHouseAccess::EdgeTables(outgoing_access), ClickHouseAccess::EdgeTables(incoming_access)) =
+        (&outgoing_scan.access, &incoming_scan.access)
+    else {
+        return None;
+    };
+    if outgoing_access.layouts != incoming_access.layouts {
+        return None;
+    }
+    let center = bound.node_relation(&center.id)?;
     candidate.plan = Plan::unary(
         Operator::Limit(limit),
         Plan {
-            operator: Operator::Extension(ClickHouseExtension::FusedNeighbors),
-            inputs: vec![outgoing.clone(), incoming.clone()],
+            operator: Operator::Extension(ClickHouseExtension::FusedNeighbors { center }),
+            inputs: vec![Plan::leaf(Operator::Scan(outgoing_scan))],
         },
     );
     candidate.cost = plan_cost(&candidate.plan);
-    candidate
+    Some(candidate)
+}
+
+fn single_edge_scan(plan: &Plan<ClickHouse>) -> Option<PhysicalScan<ClickHouseAccess>> {
+    let mut scan = None;
+    plan.visit(&mut |plan| {
+        if let Operator::Scan(candidate) = &plan.operator
+            && matches!(candidate.access, ClickHouseAccess::EdgeTables(_))
+        {
+            if scan.is_some() {
+                scan = None;
+            } else {
+                scan = Some(candidate.clone());
+            }
+        }
+    });
+    scan
 }
 
 fn deduplicate_edges(
