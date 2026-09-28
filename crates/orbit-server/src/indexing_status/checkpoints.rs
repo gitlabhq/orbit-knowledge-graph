@@ -12,7 +12,7 @@ use crate::active_schema::SchemaSnapshot;
 use crate::status_query::{QueryCache, fetch_status_query_batches, map_column_extraction_error};
 
 const MAX_SDLC_ATTEMPTS: i64 = 5;
-// Two missed hourly sweeps: a run that dies writes nothing after its start write.
+// The hourly sweep retries a dead run, so wait for two sweeps.
 const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
 
 // Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
