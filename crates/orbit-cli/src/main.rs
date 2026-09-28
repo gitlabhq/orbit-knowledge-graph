@@ -374,10 +374,10 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
-        /// Require a graph search first: block the first raw search or source
-        /// read of each Claude Code session and redirect it to Orbit. Later
-        /// calls get the usual nudge. Override at runtime with
-        /// ORBIT_GRAPH_FIRST=1 or 0.
+        /// Make agents start search with Orbit. Claude Code sometimes skips
+        /// Orbit, so this blocks its first search or file read each session
+        /// and points it to the graph. Later calls get the usual nudge.
+        /// Override at runtime with ORBIT_GRAPH_FIRST=1 or 0.
         #[arg(long)]
         graph_first: bool,
 

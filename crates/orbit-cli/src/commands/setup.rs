@@ -133,9 +133,9 @@ fn ask_which_agents(
     if offer_graph_first {
         choices.push(tui::Choice {
             key: GRAPH_FIRST_KEY.to_string(),
-            label: "Require graph search first".to_string(),
-            hint: "Claude Code: blocks the first grep or source read of each session until the \
-                   agent queries Orbit"
+            label: "Make agents start search with Orbit".to_string(),
+            hint: "Claude Code sometimes skips Orbit. This blocks its first search or file read \
+                   each session and points it to the graph."
                 .to_string(),
             section: Some("Options".to_string()),
         });
