@@ -4,8 +4,9 @@ use crate::intern::Lang;
 use crate::sentinel::Killed;
 use crate::tree::{Node, Tree};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, strum::IntoStaticStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SupportLang {
     Bash,
     C,
@@ -56,7 +57,14 @@ impl LangEntry {
 }
 
 #[derive(serde::Deserialize)]
+struct Family {
+    members: Vec<SupportLang>,
+}
+
+#[derive(serde::Deserialize)]
 struct LangConfig {
+    #[serde(default)]
+    families: std::collections::HashMap<String, Family>,
     languages: std::collections::HashMap<SupportLang, LangEntry>,
 }
 
@@ -107,13 +115,22 @@ impl SupportLang {
         Self::from_extension(ext)
     }
 
-    /// The language whose rule file this one shares. TypeScript, TSX, and
-    /// JavaScript differ only in grammar and form one graph.
-    pub fn pipeline(self) -> Self {
-        match self {
-            Self::Tsx | Self::JavaScript => Self::TypeScript,
-            other => other,
-        }
+    /// The family this language indexes with, from `families:` in
+    /// `config/languages.yaml`; a language in none stands alone under its own name.
+    pub fn family(self) -> &'static str {
+        LANG_CONFIG
+            .families
+            .iter()
+            .find(|(_, f)| f.members.contains(&self))
+            .map_or_else(|| self.into(), |(name, _)| name.as_str())
+    }
+
+    /// The family's members in declared order; a standalone language alone.
+    pub fn family_members(self) -> Vec<Self> {
+        LANG_CONFIG
+            .families
+            .get(self.family())
+            .map_or_else(|| vec![self], |f| f.members.clone())
     }
 
     pub fn ts_language(&self) -> tree_sitter::Language {

@@ -85,6 +85,27 @@ pub struct ResolveConfig {
     pub merge_same_named_types: bool,
 }
 
+impl ResolveConfig {
+    pub fn merge(&mut self, other: &Self) {
+        for e in &other.external {
+            if !self.external.contains(e) {
+                self.external.push(e.clone());
+            }
+        }
+        for k in &other.lookup_from {
+            if !self.lookup_from.contains(k) {
+                self.lookup_from.push(*k);
+            }
+        }
+        for f in &other.parse_files {
+            if !self.parse_files.iter().any(|p| p.name == f.name) {
+                self.parse_files.push(f.clone());
+            }
+        }
+        self.merge_same_named_types |= other.merge_same_named_types;
+    }
+}
+
 #[derive(serde::Deserialize, Default)]
 struct ConfigSection {
     #[serde(default)]
