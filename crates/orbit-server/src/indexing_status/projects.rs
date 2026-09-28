@@ -15,8 +15,6 @@ use crate::status_query::{
 pub(super) const PROJECT_NODE: &str = "Project";
 const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
-// {in_scopes} gets one startsWith per scope at runtime. ClickHouse can use the primary key
-// for those, but not for arrayExists.
 const PROJECT_COVERAGE_SQL: &str = r#"
 WITH projects AS (
          SELECT id,
