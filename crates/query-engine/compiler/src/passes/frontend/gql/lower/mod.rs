@@ -209,6 +209,21 @@ impl Lowering {
     }
 
     fn classify(&mut self) -> Result<()> {
+        if self.path.is_none()
+            && self.input.nodes.len() == 2
+            && self.input.relationships.len() == 1
+            && self.input.nodes[0].entity.is_none()
+            && self.input.nodes[1].entity.is_some()
+        {
+            self.input.nodes.swap(0, 1);
+            let edge = &mut self.input.relationships[0];
+            std::mem::swap(&mut edge.from, &mut edge.to);
+            edge.direction = match edge.direction {
+                Direction::Outgoing => Direction::Incoming,
+                Direction::Incoming => Direction::Outgoing,
+                Direction::Both => Direction::Both,
+            };
+        }
         if self.path.is_some() {
             if self.input.relationships.len() != 1
                 || self.input.nodes.iter().any(|n| n.entity.is_none())
