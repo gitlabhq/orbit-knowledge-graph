@@ -30,7 +30,6 @@ use query_data_model::QueryDataModel;
 enum QueryPlan {
     ClickHouse {
         bound: planner::BoundCatalog<query_data_model::ClickHouseDataModel>,
-        candidate: Option<planner::Candidate<planner::ClickHouse>>,
         parity: Box<plan::QueryPlan>,
     },
     DuckDb {
@@ -313,7 +312,6 @@ fn plan_clickhouse(
     ctx.set_input(input);
     ctx.set_query_plan(QueryPlan::ClickHouse {
         bound: planned.bound,
-        candidate: Some(planned.candidate),
         parity: Box::new(parity),
     });
     Ok(())
@@ -337,10 +335,8 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let lowered = match query_plan {
         QueryPlan::ClickHouse {
             bound,
-            candidate,
             parity,
         } => {
-            let candidate = require(candidate, "physical candidate")?;
             let lowered = lower::emit(&parity, &bound.input)?;
             let mut aliases = crate::aliases::AliasManager::default();
             for node in &bound.input.nodes {
@@ -363,11 +359,9 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
                         .collect(),
                     stable_order: lowered.metadata.stable_order,
                 },
-                explain: format!("scans={}", candidate.cost.scans),
             };
             ctx.set_query_plan(QueryPlan::ClickHouse {
                 bound,
-                candidate: None,
                 parity,
             });
             lowered

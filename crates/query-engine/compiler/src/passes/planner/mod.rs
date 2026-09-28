@@ -954,5 +954,4 @@ pub struct LoweredEdge {
 pub struct LoweredPlan {
     pub ast: ast::Node,
     pub metadata: LoweredMetadata,
-    pub explain: String,
 }

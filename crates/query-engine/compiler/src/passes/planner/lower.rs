@@ -601,7 +601,6 @@ fn lowered<M: QueryDataModel, B: Flavor>(
             edges,
             stable_order,
         },
-        explain: format!("scans={}", candidate.cost.scans),
     })
 }
 
