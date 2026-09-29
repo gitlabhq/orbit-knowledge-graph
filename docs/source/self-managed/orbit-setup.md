@@ -37,8 +37,8 @@ Prerequisites:
 - The Owner role for the group you want to index.
 - Administrator access to GitLab.
 
-The commands on this page use GitLab Orbit 0.134.0 and the GitLab Orbit Helm chart 3.0.0. You should
-install the latest versions. To find them, see:
+The commands on this page use GitLab Orbit 0.134.0 and the GitLab Orbit Helm chart 3.0.0. Prefer the
+latest versions. To find them, see:
 
 - [GitLab Orbit releases](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
 - [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases)
