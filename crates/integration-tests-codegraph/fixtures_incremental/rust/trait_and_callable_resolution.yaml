@@ -200,8 +200,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "autoderef method call resolves through Deref target"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_autoderef_method' AND callee.name = 'run'

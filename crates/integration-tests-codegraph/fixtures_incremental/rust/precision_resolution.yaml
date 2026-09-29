@@ -250,8 +250,6 @@ tests:
       - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN [
@@ -299,8 +297,6 @@ tests:
       - { row: { path: external_actions, name: '*' } }
 
   - name: "associated functions stored in fn pointers still resolve"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'

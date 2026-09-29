@@ -78,6 +78,9 @@ stages:
       # Record construction is a call to the struct
       - match: '(struct_expression name: $N body: $B)'
         replace: '(__call (__callee @$N) $B)'
+      # `let f = Service::new;` aliases the associated function
+      - match: '(let_declaration pattern: $N value: (scoped_identifier path: $P name: $M:(identifier "/^[a-z]/")))'
+        replace: '(__binding @$N (__rhs (__member @$M (__object @$P))))'
       # `let s = Service;` constructs a unit struct: type names are CamelCase
       - match: '(let_declaration pattern: $N value: $V:(identifier "/^[A-Z][a-z]/"))'
         replace: '(__binding @$N (__rhs (__call (__callee @$V))))'
@@ -288,6 +291,11 @@ stages:
       - match: '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B)'
         where: '$TY == $TP'
         replace: '(__def (__impl) (__supertype @$T) $B)'
+      # impl Deref for Wrapper { type Target = Service; }: autoderef gives Wrapper Service's methods
+      - match: '(impl_item trait: $T:(type_identifier "Deref") type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
+      - match: '(impl_item trait: $T:(scoped_type_identifier name: (type_identifier "Deref")) type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
       # Generic impl: impl<T> Trait for Wrapper<T>
       - match: '(impl_item trait: $T type: (generic_type type: $TY) body: $B)'
         replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
