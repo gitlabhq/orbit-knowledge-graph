@@ -1,0 +1,10 @@
+description: Aggregations reject cross-node comparisons before removing scope-only anchors
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)
+    WHERE g.id = p.id AND p.id = g.id
+    RETURN count(p) AS n
+
+expect:
+  compile_error: "only supported in traversal"

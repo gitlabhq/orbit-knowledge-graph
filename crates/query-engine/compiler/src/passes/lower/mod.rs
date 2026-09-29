@@ -120,15 +120,25 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     if !input.join_predicates.is_empty()
         && let Node::Query(q) = &mut node
     {
+        let column = |alias: &str, property: &str| {
+            if property == ontology::constants::DEFAULT_PRIMARY_KEY
+                && let Some((table, column)) = plan.node_edge_mappings.get(alias)
+            {
+                (table.to_string(), column.to_string())
+            } else {
+                (alias.to_string(), property.to_string())
+            }
+        };
         for jp in &input.join_predicates {
+            let (lhs_alias, lhs_property) = column(&jp.lhs_node, &jp.lhs_prop);
             let filter = InputFilter {
                 op: Some(jp.op),
-                rhs_column: Some((jp.rhs_node.clone(), jp.rhs_prop.clone())),
+                rhs_column: Some(column(&jp.rhs_node, &jp.rhs_prop)),
                 ..Default::default()
             };
             let pred = shared::filter_to_expr(
-                &jp.lhs_node,
-                &jp.lhs_prop,
+                &lhs_alias,
+                &lhs_property,
                 &crate::passes::plan::BoundFilter {
                     filter,
                     property: None,

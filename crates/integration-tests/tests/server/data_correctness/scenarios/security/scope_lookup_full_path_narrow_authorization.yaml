@@ -1,0 +1,16 @@
+description: Full-path scope lookups preserve narrower authorization
+
+config:
+  security: { paths: ["1/100/1000/", "1/100/200/"] }
+
+query:
+  gql: |
+    MATCH (p:Project {full_path: 'public-group/public-project'})
+    RETURN p.full_path LIMIT 20
+
+expect:
+  node_count: 1
+  nodes:
+    Project:
+      ids: [1000]
+      filters: { full_path: public-group/public-project }

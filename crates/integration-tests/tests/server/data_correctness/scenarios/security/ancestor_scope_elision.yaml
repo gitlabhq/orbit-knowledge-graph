@@ -1,0 +1,14 @@
+description: An elided ancestor outside authorization resolves as missing and counts no rows
+
+config:
+  security: { paths: ["1/100/1000/", "1/100/200/"] }
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)
+    RETURN count(p) AS c LIMIT 20
+
+expect:
+  row_count: 1
+  row_values:
+    - { c: 0 }
