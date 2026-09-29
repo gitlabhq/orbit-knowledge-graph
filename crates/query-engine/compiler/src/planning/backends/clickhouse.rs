@@ -9,6 +9,7 @@ use crate::planning::bind::Source;
 use crate::planning::generic::{Node, Operation, Schema, Values};
 use crate::planning::physical::{self, CurrentRows, Read, Scalar};
 
+#[derive(Clone)]
 pub struct Scan {
     read: Read,
     deletion_column: String,

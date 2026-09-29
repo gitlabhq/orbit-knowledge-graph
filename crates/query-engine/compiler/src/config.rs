@@ -327,7 +327,7 @@ fn plan_remote(
     )
 }
 
-fn plan_query<C: CompilerCtx, S: EmitOperation>(
+fn plan_query<C: CompilerCtx, S: EmitOperation + Clone>(
     ctx: &mut C,
     mut select_source: impl FnMut(
         Source,
@@ -339,8 +339,8 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     use crate::ast::{Expr, OrderExpr, SelectExpr};
     use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
     use crate::input::OrderDirection;
-    use crate::lowering::{Context, lower_with_context, scalar};
-    use crate::planning::{aggregation, graph};
+    use crate::lowering::{Context, lower_program, scalar};
+    use crate::planning::{aggregation, graph, optimize};
 
     let input = require(ctx.input().clone(), "input")?;
     let mut context = Context::default();
@@ -403,7 +403,17 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     let physical = bound
         .root
         .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
-    let fragment = lower_with_context(&physical, &bound.values, &mut context, &scalar::emit)?;
+    let candidates = optimize::join_candidates(physical, bound.values)?;
+    let selected = optimize::select(candidates, |program| {
+        optimize::estimated_work(program, |_| 1)
+    })?
+    .ok_or_else(|| QueryError::Lowering("no valid physical candidates".into()))?;
+    let fragment = lower_program(
+        &selected.program,
+        &selected.values,
+        &mut context,
+        &scalar::emit,
+    )?;
 
     let resolve = |value| {
         fragment

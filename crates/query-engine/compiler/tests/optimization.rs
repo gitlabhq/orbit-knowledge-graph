@@ -5,7 +5,7 @@ use compiler::passes::{codegen, enforce::ResultContext};
 use compiler::planning::generic::{
     Expr, JoinKind, Node, Op, Program, SubplanId, ValueType, Values,
 };
-use compiler::planning::optimize::{join_candidates, select};
+use compiler::planning::optimize::{estimated_work, join_candidates, select};
 use compiler::planning::physical::{CurrentRows, Read, Scalar};
 
 #[test]
@@ -13,6 +13,7 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
     let mut values = Values::default();
     let left = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
     let right = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
+    let third = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
     let read = |table: &str, value| Node {
         op: Op::Read(Read {
             table: table.into(),
@@ -31,16 +32,36 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
         },
         inputs: vec![read("left_rows", left), read("right_rows", right)],
     };
+    let root = Node {
+        op: Op::Filter(Expr::Bool(true)),
+        inputs: vec![Node {
+            op: Op::Join {
+                kind: JoinKind::Inner,
+                condition: Expr::Call {
+                    function: Scalar::Equal,
+                    arguments: vec![Expr::Value(right), Expr::Value(third)],
+                },
+            },
+            inputs: vec![root, read("third_rows", third)],
+        }],
+    };
     let candidates = join_candidates(root, values).unwrap();
-    assert_eq!(candidates.len(), 3);
+    assert_eq!(candidates.len(), 9);
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.program.subplans.len() == 2)
+    );
 
     let connection = duckdb::Connection::open_in_memory().unwrap();
     connection
         .execute_batch(
             "CREATE TABLE left_rows(id BIGINT);
          CREATE TABLE right_rows(id BIGINT);
+         CREATE TABLE third_rows(id BIGINT);
          INSERT INTO left_rows VALUES (1), (1), (2), (NULL);
-         INSERT INTO right_rows VALUES (1), (1), (1), (3), (NULL);",
+         INSERT INTO right_rows VALUES (1), (1), (1), (3), (NULL);
+         INSERT INTO third_rows VALUES (1), (NULL);",
         )
         .unwrap();
 
@@ -52,7 +73,7 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
             &scalar::emit,
         )
         .unwrap()
-        .into_query(&["left_id".into(), "right_id".into()])
+        .into_query(&["left_id".into(), "right_id".into(), "third_id".into()])
         .unwrap();
         let sql = codegen::duckdb::codegen(
             &compiler::Node::Query(Box::new(query)),
@@ -70,7 +91,9 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
         assert_eq!(rows, vec![(1, 1); 6]);
     }
 
-    let selected = select(candidates, |_| 0).unwrap().unwrap();
+    let selected = select(candidates, |program| estimated_work(program, |_| 10))
+        .unwrap()
+        .unwrap();
     assert!(selected.program.subplans.is_empty());
 }
 
