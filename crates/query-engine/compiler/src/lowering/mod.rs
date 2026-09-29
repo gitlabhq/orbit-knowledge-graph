@@ -5,7 +5,9 @@ pub mod scalar;
 
 use crate::ast::{self, Expr, Query, SelectExpr, TableRef};
 use crate::error::{QueryError, Result};
-use crate::planning::generic::{self, Function, JoinKind, Node, Op, Operation, ValueId, Values};
+use crate::planning::generic::{
+    self, Function, JoinKind, Node, Op, Operation, Program, ValueId, Values,
+};
 use crate::planning::physical::{CurrentRows, Read};
 
 impl EmitOperation for Read {
@@ -47,6 +49,42 @@ pub struct SqlFragment {
 pub struct Context {
     next_alias: usize,
     pub source_bindings: HashMap<String, String>,
+    subplans: Vec<(String, Vec<(ValueId, String)>)>,
+}
+
+pub fn lower_program<S: EmitOperation, F: Function, E: EmitOperation>(
+    program: &Program<S, F, E>,
+    values: &Values,
+    context: &mut Context,
+    emit_expression: &impl Fn(&generic::Expr<F>, &Bindings) -> Result<Expr>,
+) -> Result<SqlFragment> {
+    program.output(values)?;
+    if !context.subplans.is_empty() {
+        return Err(QueryError::Lowering(
+            "lowering context already contains a program".into(),
+        ));
+    }
+
+    let mut ctes = Vec::new();
+    for subplan in &program.subplans {
+        let fragment = emit_node(subplan, context, emit_expression)?;
+        let name = context.alias();
+        let exports = fragment
+            .exports
+            .iter()
+            .map(|(value, _)| (*value, context.alias()))
+            .collect::<Vec<_>>();
+        let names = exports
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect::<Vec<_>>();
+        ctes.push(ast::Cte::new(&name, fragment.into_query(&names)?));
+        context.subplans.push((name, exports));
+    }
+
+    let mut result = emit_node(&program.root, context, emit_expression)?;
+    result.query.ctes.splice(0..0, ctes);
+    Ok(result)
 }
 
 impl Context {
@@ -130,6 +168,33 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
 
     match &node.op {
         Op::Read(source) => source.emit(inputs, context),
+        Op::Reference { subplan, exports } => {
+            let alias = context.alias();
+            let (name, columns) = context
+                .subplans
+                .get(subplan.0)
+                .ok_or_else(|| QueryError::Lowering("subplan was not lowered".into()))?;
+            let exports = exports
+                .iter()
+                .map(|(source, target)| {
+                    let (_, column) = columns
+                        .iter()
+                        .find(|(value, _)| value == source)
+                        .ok_or_else(|| {
+                            QueryError::Lowering("subplan export was not lowered".into())
+                        })?;
+                    Ok((*target, Expr::col(&alias, column)))
+                })
+                .collect::<Result<_>>()?;
+
+            Ok(SqlFragment {
+                query: Query {
+                    from: TableRef::scan(name, alias),
+                    ..Default::default()
+                },
+                exports,
+            })
+        }
         Op::Extension(extension) => extension.emit(inputs, context),
         Op::Aggregate { groups, measures } => {
             let input = inputs.pop().expect("verified aggregate arity");

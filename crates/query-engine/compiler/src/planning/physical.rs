@@ -6,6 +6,7 @@ use super::bind::Source;
 use super::generic::{Expr, Function, Node, Op, Operation, Schema, ValueId, ValueType, Values};
 use crate::error::{QueryError, Result};
 
+#[derive(Clone)]
 pub struct Read {
     pub table: String,
     pub columns: Vec<(ValueId, String)>,

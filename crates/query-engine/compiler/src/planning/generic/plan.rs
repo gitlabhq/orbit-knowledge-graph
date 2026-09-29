@@ -6,6 +6,15 @@ use super::{Expr, Function, ValueId, ValueType, Values, require};
 
 pub type Schema = Vec<ValueId>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SubplanId(pub usize);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Program<S, F, E> {
+    pub subplans: Vec<Node<S, F, E>>,
+    pub root: Node<S, F, E>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignment<F> {
     pub output: ValueId,
@@ -57,6 +66,10 @@ pub struct Node<S, F, E> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Op<S, F, E> {
     Read(S),
+    Reference {
+        subplan: SubplanId,
+        exports: Vec<(ValueId, ValueId)>,
+    },
     Filter(Expr<F>),
     Project(Vec<Assignment<F>>),
     Aggregate {
@@ -106,6 +119,7 @@ impl<S, F, E> Node<S, F, E> {
                 return map(source);
             }
             Op::Filter(predicate) => Op::Filter(predicate),
+            Op::Reference { subplan, exports } => Op::Reference { subplan, exports },
             Op::Project(assignments) => Op::Project(assignments),
             Op::Aggregate { groups, measures } => Op::Aggregate { groups, measures },
             Op::Join { kind, condition } => Op::Join { kind, condition },
@@ -129,14 +143,18 @@ impl<S, F, E> Node<S, F, E> {
 
 impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
     pub fn output(&self, values: &Values) -> Result<Schema> {
+        self.output_with(values, &[])
+    }
+
+    pub fn output_with(&self, values: &Values, subplans: &[Schema]) -> Result<Schema> {
         let inputs = self
             .inputs
             .iter()
-            .map(|input| input.output(values))
+            .map(|input| input.output_with(values, subplans))
             .collect::<Result<Vec<_>>>()?;
 
         let arity = match &self.op {
-            Op::Read(_) => 0,
+            Op::Read(_) | Op::Reference { .. } => 0,
             Op::Join { .. } => 2,
             Op::Union { arms, .. } => arms.len(),
             Op::Extension(_) => inputs.len(),
@@ -146,6 +164,23 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
 
         let output = match &self.op {
             Op::Read(source) => source.output(&inputs, values)?,
+            Op::Reference { subplan, exports } => {
+                let schema = subplans.get(subplan.0).ok_or_else(|| {
+                    crate::error::QueryError::PipelineInvariant(
+                        "subplan reference is missing, forward, or cyclic".into(),
+                    )
+                })?;
+
+                for (source, target) in exports {
+                    require(schema.contains(source), "subplan export is unavailable")?;
+                    require(
+                        values.data_type(*source)? == values.data_type(*target)?,
+                        "subplan export type mismatch",
+                    )?;
+                }
+
+                exports.iter().map(|(_, target)| *target).collect()
+            }
             Op::Extension(extension) => extension.output(&inputs, values)?,
             Op::Project(assignments) => {
                 for assignment in assignments {
@@ -242,6 +277,18 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
         }
 
         Ok(output)
+    }
+}
+
+impl<S: Operation, F: Function, E: Operation> Program<S, F, E> {
+    pub fn output(&self, values: &Values) -> Result<Schema> {
+        let mut schemas = Vec::new();
+
+        for subplan in &self.subplans {
+            schemas.push(subplan.output_with(values, &schemas)?);
+        }
+
+        self.root.output_with(values, &schemas)
     }
 }
 
