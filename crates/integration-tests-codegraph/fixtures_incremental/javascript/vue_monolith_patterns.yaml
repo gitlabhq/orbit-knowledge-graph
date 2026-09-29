@@ -362,7 +362,9 @@ tests:
       - { row: { name: "handleError", fqn: "OncallSchedulesWrapper::handleError", type: "Method" } }
 
   - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
+
     skip: true
     queries:
       - query: |

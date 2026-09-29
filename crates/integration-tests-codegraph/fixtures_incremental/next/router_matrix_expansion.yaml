@@ -244,7 +244,9 @@ tests:
       - { row: { fqn: "revalidate", type: "Variable" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -270,7 +272,9 @@ tests:
       - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -299,7 +303,9 @@ tests:
       - { row: { caller: "SlotDefault", callee_file: "src/components/Banner.tsx", callee: "Banner" } }
 
   - name: Next route handlers resolve one local helper edge per method
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -317,7 +323,9 @@ tests:
       - { row: { caller: "OPTIONS", callee: "getItem" } }
 
   - name: Next client and server directives do not block local calls
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -353,7 +361,9 @@ tests:
       - { empty: true }
 
   - name: Next external package calls target imported symbols
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -376,7 +386,9 @@ tests:
       - { empty: true }
 
   - name: Next local route helpers do not emit imported-symbol fallback
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)

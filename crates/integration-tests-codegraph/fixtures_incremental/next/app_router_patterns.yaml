@@ -192,8 +192,6 @@ tests:
       - { empty: true }
 
   - name: Next app router cross-file calls resolve helpers and JSX components
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path IN [
@@ -216,8 +214,6 @@ tests:
       - { row: { caller: "POST", callee_file: "src/lib/health.ts", callee: "getHealth" } }
 
   - name: Next route handler methods share one helper edge per method
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'app/api/health/route.ts'

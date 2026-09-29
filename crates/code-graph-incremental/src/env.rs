@@ -17,11 +17,12 @@ pub struct Env {
     pub members: Vec<SupportLang>,
     pub resolve: FamilyResolve,
     pub limits: Limits,
-    rules: FxHashMap<SupportLang, LangConfig>,
+    rules: FxHashMap<SupportLang, usize>,
+    compiled: Vec<LangConfig>,
 }
 
 /// What the resolver reads for the whole project: the members' resolve
-/// config merged and their stages in member order.
+/// config merged and their stages in member order, one rule file counted once.
 #[derive(Default)]
 pub struct FamilyResolve {
     pub config: ResolveConfig,
@@ -41,16 +42,30 @@ impl Env {
     /// graph restored from a snapshot and ids in the rules agree.
     pub fn with_lang(lang_id: SupportLang, lang: Lang, limits: Limits) -> Result<Self, LoadError> {
         let members = lang_id.family_members();
-        let mut rules = FxHashMap::default();
+        let mut rules: FxHashMap<SupportLang, usize> = FxHashMap::default();
+        let mut compiled: Vec<LangConfig> = Vec::new();
+        let mut sources: Vec<Option<&'static str>> = Vec::new();
         let mut resolve = FamilyResolve::default();
         for &member in &members {
-            let mut config = match treesitter::lang_yaml(member) {
-                Some(yaml) => rules::load_lang(yaml, &lang)?,
-                None => LangConfig::default(),
+            let yaml = treesitter::lang_yaml(member);
+            let shared = sources
+                .iter()
+                .position(|s| s.map(str::as_ptr) == yaml.map(str::as_ptr));
+            let index = match shared {
+                Some(index) => index,
+                None => {
+                    let mut config = match yaml {
+                        Some(yaml) => rules::load_lang(yaml, &lang)?,
+                        None => LangConfig::default(),
+                    };
+                    resolve.config.merge(&config.config.resolve);
+                    resolve.stages.append(&mut config.resolve_stages);
+                    compiled.push(config);
+                    sources.push(yaml);
+                    compiled.len() - 1
+                }
             };
-            resolve.config.merge(&config.config.resolve);
-            resolve.stages.append(&mut config.resolve_stages);
-            rules.insert(member, config);
+            rules.insert(member, index);
         }
         Ok(Self {
             lang,
@@ -59,6 +74,7 @@ impl Env {
             resolve,
             limits,
             rules,
+            compiled,
         })
     }
 
@@ -72,6 +88,6 @@ impl Env {
         let lang = SupportLang::from_path(path)
             .filter(|l| self.in_family(*l))
             .unwrap_or(self.lang_id);
-        &self.rules[&lang]
+        &self.compiled[self.rules[&lang]]
     }
 }

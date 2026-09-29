@@ -184,7 +184,9 @@ tests:
       - { row: { file_path: "src/Plain.jsx", fqn: "PlainJsx", type: "Function" } }
 
   - name: React barrel imports resolve default named namespace and member targets
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
+
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -239,7 +241,9 @@ tests:
       - { row: { caller: "Home", path: "react", name: "default" } }
 
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -296,7 +300,9 @@ tests:
       - { row: { caller: "IconButton", callee_file: "src/components/button.tsx", callee: "Button" } }
 
   - name: JSX fragments children aliases and default imports resolve
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

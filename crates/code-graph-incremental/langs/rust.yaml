@@ -340,12 +340,12 @@ resolve:
   stages:
     - name: crate_roots
       rules:
-        - match: '(__dir (__file "Cargo.toml") $$$REST)'
-          replace: '(__dir (__crate_root) (__file "Cargo.toml") $$$REST)'
-        - match: '(__dir (__file "lib.rs") $$$REST)'
-          replace: '(__dir (__source_root) (__file "lib.rs") $$$REST)'
-        - match: '(__dir (__file "main.rs") $$$REST)'
-          replace: '(__dir (__source_root) (__file "main.rs") $$$REST)'
+        - match: '(__dir (__file "Cargo.toml"))'
+          append: ['(__crate_root)']
+        - match: '(__dir (__file "lib.rs"))'
+          append: ['(__source_root)']
+        - match: '(__dir (__file "main.rs"))'
+          append: ['(__source_root)']
 
 display:
   - name: fqn

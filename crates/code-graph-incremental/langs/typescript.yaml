@@ -303,20 +303,31 @@ resolve:
   stages:
     - name: config
       rules:
+        # tsconfig paths: each entry becomes an alias, first target wins
+        - match: '(__field "paths" (__obj $$$E:__field))'
+          replace: '(__field "paths" (__obj $$$E->path_alias))'
+        # webpack resolve.alias pairs extracted from the config
+        - match: '(__file "webpack.config.js" $$$F:__field)'
+          replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
         - match: '(__file "tsconfig.json" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
-          replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) $$$OUTER)'
+          replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+
+    - name: aliases
+      rules:
+        - match: '(path_alias (__arr $V:__str $$$REST))'
+          replace: '(__alias @$ROOT (__str @$V|strip_prefix("./")))'
 
     - name: packages
       rules:
-        - match: '(__dir (__file "package.json") $$$REST)'
-          replace: '(__dir (__package_root) (__file "package.json") $$$REST)'
+        - match: '(__dir (__file "package.json"))'
+          append: ['(__package_root)']
     - name: index_dirs
       rules:
-        - match: '(__dir (__file "index.ts") $$$REST)'
-          replace: '(__dir (__source_root) (__file "index.ts") $$$REST)'
-        - match: '(__dir (__file "index.js") $$$REST)'
-          replace: '(__dir (__source_root) (__file "index.js") $$$REST)'
+        - match: '(__dir (__file "index.ts"))'
+          append: ['(__source_root)']
+        - match: '(__dir (__file "index.js"))'
+          append: ['(__source_root)']
 
 display:
   - name: fqn

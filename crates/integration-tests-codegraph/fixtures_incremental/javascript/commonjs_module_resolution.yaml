@@ -304,7 +304,9 @@ tests:
       - { row: { caller: "run", callee: "helper" } }
 
   - name: Bare require alias chains keep callable primary export identity
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -350,7 +352,9 @@ tests:
       - { row: { caller: "run", callee: "trimValue" } }
 
   - name: Transpiled CJS default interop resolves namespace default member calls
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

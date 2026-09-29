@@ -216,28 +216,25 @@ impl<'a> ProjectTree<'a> {
         }
     }
 
+    /// Import-path aliases a rule file declared as `(__alias key (__str value))`
+    /// on the project tree, longest key first so `@/lib/*` wins over `@/*`.
     fn collect_aliases(&mut self) {
-        self.aliases = self
+        let mut aliases = self
             .tree
             .root()
             .fold_tree(Vec::new(), |aliases, cursor, _w| {
-                if cursor.kind() != C::ConfigField {
+                if !cursor.is(C::Alias) || cursor.sym() == 0 {
                     return;
                 }
-                let key = cursor.sym();
-                if key == 0 {
-                    return;
-                }
-                if let Some(val) = cursor.children().find(|c| c.is(C::Str)) {
-                    let val_sym = val.sym();
-                    if val_sym != 0 {
-                        aliases.push((
-                            self.lang.syms.resolve(key).to_string(),
-                            self.lang.syms.resolve(val_sym).to_string(),
-                        ));
-                    }
+                if let Some(val) = cursor.children().find(|c| c.is(C::Str) && c.sym() != 0) {
+                    aliases.push((
+                        self.lang.syms.resolve(cursor.sym()).to_string(),
+                        self.lang.syms.resolve(val.sym()).to_string(),
+                    ));
                 }
             });
+        aliases.sort_by_key(|(key, _)| std::cmp::Reverse(key.len()));
+        self.aliases = aliases;
     }
 
     fn collect_prefixes(&mut self) {

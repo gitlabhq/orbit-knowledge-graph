@@ -1317,8 +1317,16 @@ fn resolve_submodule(
     file_index.get(&format!("{dir}{PATH_SEP}{name}"))
 }
 
+/// `@/*` -> `src/*` rewrites a prefix; a key without `*` matches whole path
+/// components only, so `app` never matches `application/x`.
 fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {
     for (key, val) in aliases {
+        if let (Some(prefix), Some(target)) = (key.strip_suffix('*'), val.strip_suffix('*')) {
+            if let Some(rest) = path.strip_prefix(prefix) {
+                return format!("{target}{rest}");
+            }
+            continue;
+        }
         let Some(rest) = path.strip_prefix(key.as_str()) else {
             continue;
         };

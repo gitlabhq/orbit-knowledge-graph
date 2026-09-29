@@ -310,7 +310,9 @@ tests:
       - { row: { file_path: "pages/api/users/[id].ts", fqn: "userHandler", type: "Function" } }
 
   - name: Next pages router dynamic and special files resolve local calls
-    # Known gap: Next.js route conventions and jsconfig aliases are not resolved.
+
+    # Known gap: Next.js route conventions are not fully resolved.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

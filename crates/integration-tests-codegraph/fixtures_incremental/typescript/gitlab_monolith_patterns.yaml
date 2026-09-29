@@ -182,8 +182,6 @@ tests:
       - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "mountVersionCheck" } }
 
   - name: default imported CE entry preserves aliased helper target
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
@@ -193,8 +191,6 @@ tests:
       - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "parseBoolean" } }
 
   - name: aliased import from star barrel preserves identity
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
@@ -205,7 +201,9 @@ tests:
       - { row: { name: "DEFAULT_SCOPE", alias: null, target: "DEFAULT_SCOPE" } }
 
   - name: feature flag barrel import preserves underlying module targets
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
+
     skip: true
     query: |
       MATCH (d:Definition)
@@ -263,7 +261,9 @@ tests:
       - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
 
   - name: project barrel imports preserve explicit, star, and constant targets
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
+
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
@@ -290,8 +290,6 @@ tests:
       - { row: { path: "~/projects/your_work/components", target: "app/assets/javascripts/projects/your_work/components/index.ts" } }
 
   - name: namespace alias barrel calls resolve to concrete component definitions
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'runProjectsNamespace'
@@ -313,7 +311,9 @@ tests:
       - { empty: true }
 
   - name: ee alias helper imports target enterprise utility definitions
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
+
     skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)

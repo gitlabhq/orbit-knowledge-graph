@@ -609,7 +609,9 @@ tests:
       - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
 
   - name: External aliases preserve exact imported symbols
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: Imported-symbol rows for external namespace imports differ from the old pipeline.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -623,7 +625,9 @@ tests:
       - { row: { caller: "inspectExternalAliases", path: "@external/tracking", name: null, alias: "Tracking" } }
 
   - name: Missing members on local namespace imports do not become external calls
-    # Known gap: tsconfig/webpack path aliases, barrels and namespace re-exports are not fully resolved.
+
+    # Known gap: Imported-symbol rows for external namespace imports differ from the old pipeline.
+
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
