@@ -34,36 +34,19 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
             )));
         }
 
-        match &mut node.columns {
-            Some(ColumnSelection::All) => {
-                let columns = model
-                    .entity(entity)
-                    .expect("entity resolved above")
-                    .properties
-                    .iter()
-                    .map(|property| model.graph().property(*property).name.clone())
-                    .collect();
-                node.columns = Some(ColumnSelection::List(columns));
-            }
-            Some(ColumnSelection::List(_)) => {}
-            None => {
-                let columns = if model.default_properties(entity_record.id).is_empty() {
-                    model
-                        .entity(entity)
-                        .expect("entity resolved above")
-                        .properties
-                        .iter()
-                        .map(|property| model.graph().property(*property).name.clone())
-                        .collect()
-                } else {
-                    model
-                        .default_properties(entity_record.id)
-                        .iter()
-                        .map(|property| model.graph().property(*property).name.clone())
-                        .collect()
-                };
-                node.columns = Some(ColumnSelection::List(columns));
-            }
+        if !matches!(node.columns, Some(ColumnSelection::List(_))) {
+            let defaults = model.default_properties(entity_record.id);
+            let properties = if node.columns.is_none() && !defaults.is_empty() {
+                defaults
+            } else {
+                &entity_record.properties
+            };
+            let columns = properties
+                .iter()
+                .filter(|property| model.property_realization(**property).is_some())
+                .map(|property| model.graph().property(*property).name.clone())
+                .collect();
+            node.columns = Some(ColumnSelection::List(columns));
         }
 
         for (column, filters) in &mut node.filters {

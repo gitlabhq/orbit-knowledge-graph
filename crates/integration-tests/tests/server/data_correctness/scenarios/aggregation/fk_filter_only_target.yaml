@@ -1,0 +1,13 @@
+description: FK aggregation filters through the referenced target key without projecting the target
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Public Project'})
+    RETURN count(mr) AS c LIMIT 10
+
+expect:
+  row_count: 1
+  row_values: [{c: 4}]
+  sql_contains: ["_filter_p", "mr.project_id IN"]
+  sql_not_contains: ["gl_edge"]
+  skip_requirements: ["filter:name"]

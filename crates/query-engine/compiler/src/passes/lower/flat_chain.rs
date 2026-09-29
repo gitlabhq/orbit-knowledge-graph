@@ -224,7 +224,13 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     };
                     let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
                     if is_filter_only && filter_only_done.insert(node_alias.clone()) {
-                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                        narrow_in.extend(emit_filter_subquery(
+                            np,
+                            &alias,
+                            edge_col,
+                            DEFAULT_PRIMARY_KEY,
+                            &mut ctes,
+                        )?);
                     }
                 }
             }
@@ -398,7 +404,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         np,
                         edge_alias,
                         edge_col,
-                        false,
+                        DEFAULT_PRIMARY_KEY,
                         narrow_source,
                         node_sort_key,
                     )?;
@@ -419,7 +425,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             np,
                             edge_alias,
                             edge_col,
-                            false,
+                            DEFAULT_PRIMARY_KEY,
                             None,
                             node_sort_key,
                         )?;

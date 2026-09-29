@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
-    DenormalizedProperty, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
+    DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
     PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
@@ -31,7 +31,7 @@ pub struct ClickHouseCatalog {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
     relationships: Vec<Option<String>>,
-    variants: Vec<Option<PropertyId>>,
+    variants: Vec<Option<ForeignKey>>,
     property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
     denormalized: DenormalizedCatalog,
@@ -48,7 +48,7 @@ impl ClickHouseCatalog {
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
-        self.property_facts.get(id.index())?.column.as_deref()
+        QueryBackendCatalog::property_column(self, id)
     }
 
     pub fn table(&self, name: &str) -> Option<&TableLayout> {
@@ -110,14 +110,10 @@ impl QueryBackendCatalog for ClickHouseCatalog {
             .unwrap_or_default()
     }
 
-    fn property_column(&self, property: PropertyId) -> Option<&str> {
-        ClickHouseCatalog::property_column(self, property)
-    }
-
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
         self.property_facts
             .get(property.index())
-            .map(|facts| &facts.realization)
+            .and_then(|facts| facts.realization.as_ref())
     }
 
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity> {
@@ -176,19 +172,11 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     ) -> Option<ForeignKey> {
         let mut foreign_keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            let property = *self.variants.get(variant.index())?.as_ref()?;
-            Some(ForeignKey {
-                holder: graph.property(property).entity,
-                property,
-            })
+            *self.variants.get(variant.index())?
         });
         let first = foreign_keys.next()??;
         foreign_keys
-            .all(|foreign_key| {
-                foreign_key.is_some_and(|foreign_key| {
-                    foreign_key.holder == first.holder && foreign_key.property == first.property
-                })
-            })
+            .all(|foreign_key| foreign_key == Some(first))
             .then_some(first)
     }
 
@@ -240,9 +228,14 @@ impl ClickHouseCatalog {
                         name: format!("{}.{}", node.name, field.name),
                     }
                 })?;
-                if field.column_name().is_some() {
-                    property_facts[property_id.index()].column = Some(field.name.clone());
-                }
+                property_facts[property_id.index()].realization = Some(match &field.source {
+                    ontology::FieldSource::DatabaseColumn(_) => PropertyRealization::Stored {
+                        column: field.name.clone(),
+                    },
+                    ontology::FieldSource::Virtual(source) => {
+                        PropertyRealization::Virtual(source.clone())
+                    }
+                });
                 property_facts[property_id.index()].has_text_index = ontology
                     .text_index_tokenizer(&node.name, &field.name)
                     .is_some();
@@ -254,8 +247,10 @@ impl ClickHouseCatalog {
                 graph.property_id(entity_id, ontology::constants::DEFAULT_PRIMARY_KEY)
             {
                 property_facts[property.index()]
-                    .column
-                    .get_or_insert_with(|| ontology::constants::DEFAULT_PRIMARY_KEY.to_string());
+                    .realization
+                    .get_or_insert_with(|| PropertyRealization::Stored {
+                        column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
+                    });
             }
             entities[entity_id.index()] = Some(EntityLayout {
                 table: node.destination_table.clone(),
@@ -367,9 +362,16 @@ impl ClickHouseCatalog {
                         ))
                     })?;
                 let foreign_key = edge.fk_column.as_deref().and_then(|column| {
-                    graph
-                        .property_id(source, column)
-                        .or_else(|| graph.property_id(target, column))
+                    let (holder, property, referenced) = match graph.property_id(source, column) {
+                        Some(property) => (Endpoint::Source, property, target),
+                        None => (Endpoint::Target, graph.property_id(target, column)?, source),
+                    };
+                    Some(ForeignKey {
+                        holder,
+                        property,
+                        referenced_key: graph
+                            .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
+                    })
                 });
                 variants[variant_id.index()] = foreign_key;
             }

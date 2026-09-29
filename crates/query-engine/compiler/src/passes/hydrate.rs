@@ -326,7 +326,7 @@ fn split_model_columns(
             .and_then(|property| model.property_realization(property.id))
         {
             Some(realization) => match realization {
-                PropertyRealization::Stored => columns.push(col_name.clone()),
+                PropertyRealization::Stored { .. } => columns.push(col_name.clone()),
                 PropertyRealization::Virtual(VirtualSource {
                     service,
                     lookup,
