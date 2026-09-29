@@ -2,8 +2,6 @@ mod session;
 mod shell;
 mod target;
 
-include!("/tmp/orbit-guard-refactor.IbOU0V/differential.rs");
-
 use std::cell::LazyCell;
 use std::io::Read;
 use std::path::{Path, PathBuf};
