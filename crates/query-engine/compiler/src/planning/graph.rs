@@ -191,6 +191,10 @@ pub fn traversal(
             inputs: vec![Node {
                 op: Op::Read(Source::Edge {
                     relationship: index,
+                    endpoints: Some((
+                        model.entity(source.1).expect("bound source entity").id,
+                        model.entity(target.1).expect("bound target entity").id,
+                    )),
                     relationships: kinds,
                     fields,
                 }),

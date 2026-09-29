@@ -36,6 +36,7 @@ pub enum Source {
     },
     Edge {
         relationship: usize,
+        endpoints: Option<(EntityId, EntityId)>,
         relationships: Vec<RelationshipId>,
         fields: Vec<(ValueId, EdgeField)>,
     },
@@ -91,6 +92,7 @@ impl Source {
                 relationship,
                 relationships,
                 fields,
+                ..
             } => SExpression::node(
                 "Edge",
                 [

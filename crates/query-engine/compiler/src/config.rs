@@ -314,6 +314,7 @@ fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataMod
         ctx,
         |source, model, values| select_source(source, model, CurrentRows::Snapshot, values),
         |_, _| None,
+        &[],
     )
 }
 
@@ -324,6 +325,7 @@ fn plan_remote(
         ctx,
         crate::planning::backends::clickhouse::select,
         |entity, model| model.redaction_id_column(entity).map(String::from),
+        &[crate::planning::backends::clickhouse::realize_foreign_key],
     )
 }
 
@@ -335,6 +337,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
         &mut Values,
     ) -> Result<PlanNode<S, Scalar, Infallible>>,
     redaction_property: impl Fn(query_data_model::EntityId, &C::Model) -> Option<String>,
+    source_rules: &[crate::planning::optimize::Rule<S, Scalar, Infallible>],
 ) -> Result<()> {
     use crate::ast::{Expr, OrderExpr, SelectExpr};
     use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
@@ -403,11 +406,9 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
     let physical = bound
         .root
         .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
-    let candidates = optimize::candidates(
-        physical,
-        bound.values,
-        &crate::planning::rules::registered(),
-    )?;
+    let mut rules = source_rules.to_vec();
+    rules.extend(crate::planning::rules::registered());
+    let candidates = optimize::candidates(physical, bound.values, &rules)?;
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)
     })?
