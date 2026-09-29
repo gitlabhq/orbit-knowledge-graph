@@ -1,14 +1,14 @@
 use crate::error::Result;
 
 use super::generic::facts::unique_keys;
-use super::generic::{Expr, JoinKind, Node, Op, Operation, SubplanId};
+use super::generic::{Expr, JoinKind, Node, Op, Operation, Schema, SubplanId};
 use super::optimize::Candidate;
 use super::physical::Scalar;
 
 pub fn projections<S: Operation + Clone, E: Operation + Clone>(
     candidate: &Candidate<S, Scalar, E>,
 ) -> Result<Vec<Candidate<S, Scalar, E>>> {
-    let Op::Project(assignments) = &candidate.program.root.op else {
+    let Op::Project(_) = &candidate.program.root.op else {
         return Ok(vec![]);
     };
     let child = &candidate.program.root.inputs[0];
@@ -37,24 +37,6 @@ pub fn projections<S: Operation + Clone, E: Operation + Clone>(
             }
             rewritten.program.root.inputs = child.inputs.clone();
         }
-        Op::Read(_) => {
-            let mut required = Vec::new();
-            for assignment in assignments {
-                let mut expression = assignment.expression.clone();
-                expression.map_values(&mut |value| {
-                    if !required.contains(value) {
-                        required.push(*value);
-                    }
-                });
-            }
-
-            let Op::Read(source) = &mut rewritten.program.root.inputs[0].op else {
-                unreachable!()
-            };
-            if !source.retain_outputs(&required) {
-                return Ok(vec![]);
-            }
-        }
         _ => return Ok(vec![]),
     }
 
@@ -62,8 +44,109 @@ pub fn projections<S: Operation + Clone, E: Operation + Clone>(
 }
 
 pub fn registered<S: Operation + Clone, E: Operation + Clone>()
--> [super::optimize::Rule<S, Scalar, E>; 3] {
-    [projections, unread_unique_join, sip]
+-> [super::optimize::Rule<S, Scalar, E>; 4] {
+    [projections, prune_columns, unread_unique_join, sip]
+}
+
+pub fn prune_columns<S: Operation + Clone, E: Operation + Clone>(
+    candidate: &Candidate<S, Scalar, E>,
+) -> Result<Vec<Candidate<S, Scalar, E>>> {
+    let output = candidate.program.output(&candidate.values)?;
+    let mut rewritten = candidate.clone();
+
+    if prune(&mut rewritten.program.root, output) {
+        Ok(vec![rewritten])
+    } else {
+        Ok(vec![])
+    }
+}
+
+fn dependencies(expression: &Expr<Scalar>, required: &mut Schema) {
+    let mut expression = expression.clone();
+    expression.map_values(&mut |value| {
+        if !required.contains(value) {
+            required.push(*value);
+        }
+    });
+}
+
+fn prune<S: Operation, E: Operation>(node: &mut Node<S, Scalar, E>, mut required: Schema) -> bool {
+    match &mut node.op {
+        Op::Read(source) => source.retain_outputs(&required),
+        Op::Reference { exports, .. } => {
+            if !exports.iter().any(|(_, value)| required.contains(value)) {
+                return false;
+            }
+            let before = exports.len();
+            exports.retain(|(_, output)| required.contains(output));
+            before != exports.len()
+        }
+        Op::Project(assignments) => {
+            if !assignments
+                .iter()
+                .any(|assignment| required.contains(&assignment.output))
+            {
+                return false;
+            }
+            let before = assignments.len();
+            assignments.retain(|assignment| required.contains(&assignment.output));
+            required.clear();
+            for assignment in assignments.iter() {
+                dependencies(&assignment.expression, &mut required);
+            }
+
+            prune(&mut node.inputs[0], required) | (before != assignments.len())
+        }
+        Op::Filter(predicate) => {
+            dependencies(predicate, &mut required);
+            prune(&mut node.inputs[0], required)
+        }
+        Op::Sort(keys) => {
+            for key in keys {
+                if !required.contains(&key.value) {
+                    required.push(key.value);
+                }
+            }
+            prune(&mut node.inputs[0], required)
+        }
+        Op::Limit(_) => prune(&mut node.inputs[0], required),
+        Op::Join { condition, .. } => {
+            dependencies(condition, &mut required);
+            let left = prune(&mut node.inputs[0], required.clone());
+            prune(&mut node.inputs[1], required) | left
+        }
+        Op::Aggregate { groups, measures } => {
+            required.clear();
+            for group in groups {
+                dependencies(&group.expression, &mut required);
+            }
+            for measure in measures {
+                for expression in measure.argument.iter().chain(measure.filter.iter()) {
+                    dependencies(expression, &mut required);
+                }
+            }
+            prune(&mut node.inputs[0], required)
+        }
+        Op::Union { outputs, arms } => {
+            let positions: Vec<_> = outputs
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| required.contains(value).then_some(index))
+                .collect();
+            if positions.is_empty() {
+                return false;
+            }
+            let mut changed = positions.len() != outputs.len();
+            *outputs = positions.iter().map(|index| outputs[*index]).collect();
+
+            for (arm, input) in arms.iter_mut().zip(&mut node.inputs) {
+                *arm = positions.iter().map(|index| arm[*index]).collect();
+                changed |= prune(input, arm.clone());
+            }
+            changed
+        }
+        Op::Extension(_) => false,
+    }
 }
 
 pub fn unread_unique_join<S: Operation + Clone, E: Operation + Clone>(

@@ -187,7 +187,11 @@ impl Read {
 
 impl Operation for Read {
     fn retain_outputs(&mut self, required: &Schema) -> bool {
-        if required.is_empty() {
+        if !self
+            .columns
+            .iter()
+            .any(|(value, _)| required.contains(value))
+        {
             return false;
         }
 
