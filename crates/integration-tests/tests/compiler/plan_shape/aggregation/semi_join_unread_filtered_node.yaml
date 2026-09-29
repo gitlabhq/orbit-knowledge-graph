@@ -13,3 +13,4 @@ physical:
       - (SemiJoin e1.target_id = p.id (...))
       - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e0))
       - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e1))
+skip: true

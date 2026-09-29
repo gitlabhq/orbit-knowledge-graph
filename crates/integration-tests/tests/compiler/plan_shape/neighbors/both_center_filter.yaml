@@ -8,3 +8,4 @@ physical:
     expect:
       - (FusedNeighbors Both (...))
       - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+skip: true

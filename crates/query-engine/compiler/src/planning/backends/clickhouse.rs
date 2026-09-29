@@ -69,6 +69,25 @@ pub fn select(
     })
 }
 
+impl Scan {
+    pub fn explain(&self) -> crate::planning::explain::SExpression {
+        use crate::planning::explain::SExpression;
+
+        SExpression::node(
+            "CurrentRows",
+            [
+                self.read.explain(),
+                SExpression::node("Deleted", [SExpression::atom(&self.deletion_column)]),
+                SExpression::node("Binding", self.binding.iter().map(SExpression::atom)),
+                SExpression::node(
+                    "Relationship",
+                    self.relationship.iter().map(SExpression::atom),
+                ),
+            ],
+        )
+    }
+}
+
 impl Operation for Scan {
     fn map_values(&mut self, map: &mut impl FnMut(&mut crate::planning::generic::ValueId)) {
         self.read.map_values(map);

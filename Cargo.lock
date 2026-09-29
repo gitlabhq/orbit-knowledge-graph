@@ -1533,6 +1533,7 @@ dependencies = [
  "query-data-model",
  "regex",
  "serde",
+ "serde-saphyr 1.1.0",
  "serde_json",
  "strum 0.28.0",
  "thiserror 2.0.18",

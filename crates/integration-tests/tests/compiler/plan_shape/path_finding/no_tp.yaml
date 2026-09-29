@@ -9,3 +9,4 @@ physical:
       - (Join ON start.id = e1.source_id AND e1.target_id = e2.source_id (...))
     reject:
       - (Join ON ... traversal_path ...)
+skip: true

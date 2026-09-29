@@ -1,0 +1,29 @@
+name: Code relationships retain typed endpoints on both backends
+skip: false
+input:
+  query_type: traversal
+  nodes:
+    - { id: caller, entity: Definition, node_ids: [1], columns: [name] }
+    - { id: callee, entity: Definition, columns: [name] }
+  relationships:
+    - { type: CALLS, from: caller, to: callee }
+  limit: 10
+logical:
+  expect:
+    - (Limit 11 ...)
+    - (Read (Entity Definition caller ...))
+    - (Read (Entity Definition callee ...))
+    - (Read (Edge 0 (Kinds CALLS) ...))
+    - (Join Inner (Equal _ _) ...)
+physical:
+  clickhouse:
+    expect:
+      - (Scan gl_code_edge Final ...)
+      - (CurrentRows (Scan gl_definition Final ...) (Deleted _deleted) (Binding caller) (Relationship))
+      - (CurrentRows (Scan gl_definition Final ...) (Deleted _deleted) (Binding callee) (Relationship))
+  duckdb:
+    expect:
+      - (Scan gl_edge Snapshot ...)
+      - (Scan gl_definition Snapshot ...)
+    reject:
+      - (CurrentRows ...)

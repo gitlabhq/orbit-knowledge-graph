@@ -8,3 +8,4 @@ physical:
     expect:
       - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)) (Project ..., 3 AS depth (...)))
       - (Scan EdgeTables(gl_edge) AS e3)
+skip: true

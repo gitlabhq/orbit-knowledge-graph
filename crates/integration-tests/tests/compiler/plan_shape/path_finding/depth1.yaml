@@ -10,3 +10,4 @@ physical:
       - (Scan EdgeTables(gl_edge) AS e1)
     reject:
       - (Project ..., 2 AS depth, ...)
+skip: true

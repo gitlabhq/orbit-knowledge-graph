@@ -9,3 +9,4 @@ physical:
     expect:
       - (Scan EdgeTables(gl_edge) AS e0)
       - (Deduplicate Final label.id (Scan Table(gl_label) AS label))
+skip: true

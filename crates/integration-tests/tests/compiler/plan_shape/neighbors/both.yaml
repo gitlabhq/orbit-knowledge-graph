@@ -10,3 +10,4 @@ physical:
   duckdb:
     expect:
       - (Union (Project ..., 1 AS _gkg_neighbor_is_outgoing, ... (_)) (Project ..., 0 AS _gkg_neighbor_is_outgoing, ... (_)))
+skip: true

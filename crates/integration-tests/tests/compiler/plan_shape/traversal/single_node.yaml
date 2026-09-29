@@ -2,13 +2,11 @@ name: "Single node traversal scans with FINAL and projects the node columns"
 input: {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"limit":10}
 logical:
   expect:
-    - (Limit 11 (Project mr.id AS mr_id, ..., mr.title AS mr_title, ... (Filter mr.state Eq 'merged' AND mr._deleted = false (NodeScan MergeRequest AS mr))))
+    - (Limit 11 (Project (Outputs ...) (Project (Outputs ...) (Filter (Equal _ (String merged)) (Read (Entity MergeRequest mr (Columns ... (Column _ title) ...)))))))
 physical:
   clickhouse:
     expect:
-      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+      - (CurrentRows (Scan gl_merge_request Final (Columns ... (Column _ title) ...)) (Deleted _deleted) (Binding mr) (Relationship))
   duckdb:
-    expect:
-      - (Scan Table() AS mr)
-    reject:
-      - (Deduplicate ...)
+    error: "entity 'MergeRequest' is not available in this data model"
+skip: false

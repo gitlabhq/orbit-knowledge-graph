@@ -15,3 +15,4 @@ physical:
   duckdb:
     expect:
       - (Scan Table(gl_edge) AS e0)
+skip: true

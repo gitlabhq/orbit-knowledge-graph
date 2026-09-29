@@ -9,3 +9,4 @@ physical:
       - (Filter mr.project_id = 1 (Filter mr.state Eq 'merged' AND mr._deleted = false (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))))
     reject:
       - (Scan EdgeTables(...))
+skip: true

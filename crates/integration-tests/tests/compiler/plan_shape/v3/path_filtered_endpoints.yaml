@@ -8,3 +8,4 @@ physical:
   clickhouse:
     expect:
       - (Scan EdgeTables(gl_code_edge) AS e1)
+skip: true

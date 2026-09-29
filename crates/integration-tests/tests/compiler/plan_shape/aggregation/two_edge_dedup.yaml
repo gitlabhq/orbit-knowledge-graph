@@ -2,17 +2,14 @@ name: "Two edge scans in one chain both read with FINAL"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"label","entity":"Label","filters":{"title":"group::source code"}},{"id":"p","entity":"Project","filters":{"full_path":{"eq":"gitlab-org/gitlab"}}}],"relationships":[{"type":"HAS_LABEL","from":"mr","to":"label"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}],"limit":1}
 logical:
   expect:
-    - (Aggregate COUNT() AS n (_))
-    - (EdgeScan HAS_LABEL mr->label AS e0)
-    - (EdgeScan IN_PROJECT mr->p AS e1)
+    - (Aggregate (Groups) (Measures (Measure _ count (Argument _) (Distinct false) (Filter))) ...)
+    - (Read (Edge 0 (Kinds HAS_LABEL) ...))
+    - (Read (Edge 1 (Kinds IN_PROJECT) ...))
 physical:
   clickhouse:
     expect:
-      - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e0))
-      - (Deduplicate Final (Scan EdgeTables(gl_edge) AS e1))
+      - (CurrentRows (Scan gl_edge Final ...) (Deleted _deleted) (Binding) (Relationship 0))
+      - (CurrentRows (Scan gl_edge Final ...) (Deleted _deleted) (Binding) (Relationship 1))
   duckdb:
-    expect:
-      - (Scan Table(gl_edge) AS e0)
-      - (Scan Table(gl_edge) AS e1)
-    reject:
-      - (Deduplicate ...)
+    error: "entity 'MergeRequest' is not available in this data model"
+skip: false

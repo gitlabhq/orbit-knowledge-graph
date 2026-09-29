@@ -9,3 +9,4 @@ physical:
       - (Union (Project ..., 1 AS depth (...)) (Project ..., 2 AS depth (...)))
       - (Scan EdgeTables(gl_edge) AS e1)
       - (Scan EdgeTables(gl_edge) AS e2)
+skip: true

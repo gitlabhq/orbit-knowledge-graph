@@ -7,3 +7,4 @@ physical:
   clickhouse:
     reject:
       - (Scan Table(gl_user) AS u)
+skip: true

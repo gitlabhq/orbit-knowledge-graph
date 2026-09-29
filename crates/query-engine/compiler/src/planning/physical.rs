@@ -121,6 +121,27 @@ pub fn select_source(
 }
 
 impl Read {
+    pub fn explain(&self) -> super::explain::SExpression {
+        use super::explain::{SExpression, value};
+
+        SExpression::node(
+            "Scan",
+            [
+                SExpression::atom(&self.table),
+                SExpression::atom(match self.current_rows {
+                    CurrentRows::Snapshot => "Snapshot",
+                    CurrentRows::Final => "Final",
+                }),
+                SExpression::node(
+                    "Columns",
+                    self.columns.iter().map(|(id, column)| {
+                        SExpression::node("Column", [value(*id), SExpression::atom(column)])
+                    }),
+                ),
+            ],
+        )
+    }
+
     pub fn select(
         source: Source,
         model: &impl QueryDataModel,

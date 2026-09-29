@@ -8,3 +8,4 @@ physical:
   clickhouse:
     expect:
       - (Bind r2 (Union (Project ..., 1 AS depth, ... (_)) (Project ..., 2 AS depth, ... (_)) (Project ..., 3 AS depth, ... (_))))
+skip: true

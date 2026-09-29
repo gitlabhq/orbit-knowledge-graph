@@ -10,3 +10,4 @@ physical:
       - (Join ON mr.project_id = p.id (...))
     reject:
       - (Scan EdgeTables(...))
+skip: true

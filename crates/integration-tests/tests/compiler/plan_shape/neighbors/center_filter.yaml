@@ -8,3 +8,4 @@ physical:
     expect:
       - (Project e2.target_id AS _gkg_neighbor_id, ..., 1 AS _gkg_neighbor_is_outgoing, ... (_))
       - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+skip: true

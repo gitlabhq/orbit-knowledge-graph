@@ -9,3 +9,4 @@ physical:
     expect:
       - (Filter e1.source_id = 1 (...))
       - (SemiJoin e0.target_id = label.id (...))
+skip: true

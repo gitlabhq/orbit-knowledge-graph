@@ -59,6 +59,63 @@ impl Operation for Source {
     }
 }
 
+impl Source {
+    pub fn explain(&self, model: &impl QueryDataModel) -> super::explain::SExpression {
+        use super::explain::{SExpression, value};
+
+        match self {
+            Self::Entity {
+                binding,
+                entity,
+                properties,
+            } => SExpression::node(
+                "Entity",
+                [
+                    SExpression::atom(&model.graph().entity(*entity).name),
+                    SExpression::atom(binding),
+                    SExpression::node(
+                        "Columns",
+                        properties.iter().map(|(id, property)| {
+                            SExpression::node(
+                                "Column",
+                                [
+                                    value(*id),
+                                    SExpression::atom(&model.graph().property(*property).name),
+                                ],
+                            )
+                        }),
+                    ),
+                ],
+            ),
+            Self::Edge {
+                relationship,
+                relationships,
+                fields,
+            } => SExpression::node(
+                "Edge",
+                [
+                    SExpression::atom(relationship),
+                    SExpression::node(
+                        "Kinds",
+                        relationships
+                            .iter()
+                            .map(|id| SExpression::atom(&model.graph().relationship(*id).name)),
+                    ),
+                    SExpression::node(
+                        "Fields",
+                        fields.iter().map(|(id, field)| {
+                            SExpression::node(
+                                "Field",
+                                [value(*id), SExpression::atom(format!("{field:?}"))],
+                            )
+                        }),
+                    ),
+                ],
+            ),
+        }
+    }
+}
+
 pub struct BoundQuery {
     pub root: Plan,
     pub values: Values,

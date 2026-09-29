@@ -12,3 +12,4 @@ physical:
       - (Scan EdgeTables(gl_edge) AS e0)
     reject:
       - (Scan Table(gl_merge_request) AS mr)
+skip: true

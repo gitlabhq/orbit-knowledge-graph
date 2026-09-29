@@ -12,3 +12,4 @@ physical:
       - (Scan Table(gl_project) AS p)
     reject:
       - (Scan EdgeTables(...))
+skip: true

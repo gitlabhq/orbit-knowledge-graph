@@ -2,6 +2,7 @@ pub mod aggregation;
 pub mod backends;
 pub mod bind;
 pub mod cost;
+pub mod explain;
 pub mod generic;
 pub mod graph;
 pub mod optimize;

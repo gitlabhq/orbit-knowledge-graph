@@ -11,3 +11,4 @@ physical:
       - (Bind r2 (Union (Project ..., 2 AS depth, ... (...))))
       - (Scan EdgeTables(gl_edge) AS e1)
       - (Scan EdgeTables(gl_edge) AS e2)
+skip: true

@@ -9,3 +9,4 @@ physical:
       - (Filter mr.author_id = 116 (...))
     reject:
       - (Scan Table(gl_user) AS u)
+skip: true

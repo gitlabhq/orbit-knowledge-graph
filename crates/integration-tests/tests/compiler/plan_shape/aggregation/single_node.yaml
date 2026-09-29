@@ -2,10 +2,12 @@ name: "Single-node aggregation: one FINAL scan, no joins"
 input: {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"}}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"n"}],"limit":10}
 logical:
   expect:
-    - (Limit 11 (Aggregate ... (Filter mr.state Eq 'merged' AND mr._deleted = false (NodeScan MergeRequest AS mr))))
+    - (Limit 11 (Aggregate (Groups (Assign _ _)) (Measures (Measure _ count (Argument _) (Distinct false) (Filter))) ...))
+    - (Filter (Equal _ (String merged)) (Read (Entity MergeRequest mr ...)))
 physical:
   clickhouse:
     expect:
-      - (Deduplicate Final mr.id (Scan Table(gl_merge_request) AS mr))
+      - (CurrentRows (Scan gl_merge_request Final ...) (Deleted _deleted) (Binding mr) (Relationship))
     reject:
       - (Join ...)
+skip: false

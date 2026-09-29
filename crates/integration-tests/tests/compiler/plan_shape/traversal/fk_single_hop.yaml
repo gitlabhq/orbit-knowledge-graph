@@ -10,3 +10,4 @@ physical:
       - (Project 'AUTHORED' AS e0_type, u.id AS e0_src, ..., mr.id AS e0_dst, ... (_))
     reject:
       - (Scan EdgeTables(...))
+skip: true

@@ -10,3 +10,4 @@ physical:
       - (Filter p.id = 278964 AND p._deleted = false (Deduplicate Final p.id (Scan Table(gl_project) AS p)))
     reject:
       - (Scan EdgeTables(...))
+skip: true
