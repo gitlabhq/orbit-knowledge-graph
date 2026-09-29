@@ -462,7 +462,7 @@ fn string_column<'b>(batch: &'b RecordBatch, name: &str) -> Result<&'b StringArr
 
 fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
     let mut timings: Vec<&FileTiming> = report.files.iter().collect();
-    timings.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
+    timings.sort_by_key(|t| std::cmp::Reverse(t.elapsed));
     timings
         .into_iter()
         .take(count)
