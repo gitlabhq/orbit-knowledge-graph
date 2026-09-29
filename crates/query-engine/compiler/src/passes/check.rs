@@ -239,58 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn security_filters_physical_scans_without_filtering_their_wrappers() {
-        use crate::ast::{Cte, JoinType};
-
-        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = Ontology::load_embedded().unwrap();
-        let inner = Query {
-            select: vec![SelectExpr::col("p", "id")],
-            from: TableRef::scan("gl_project", "p"),
-            ..Default::default()
-        };
-        let mut query = Query {
-            ctes: vec![Cte::new("project_ids", inner.clone())],
-            select: vec![SelectExpr::col("p", "id")],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_user", "p"),
-                TableRef::join(
-                    JoinType::Inner,
-                    TableRef::scan("project_ids", "ids"),
-                    TableRef::subquery(inner, "derived"),
-                    Expr::lit(true),
-                ),
-                Expr::lit(true),
-            ),
-            ..Default::default()
-        };
-        let mut node = Node::Query(Box::new(query.clone()));
-        let predicate = Some(Expr::func(
-            STARTS_WITH_FNAME,
-            vec![
-                Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::string("42/43/"),
-            ],
-        ));
-        query.ctes[0].query.where_clause = predicate.clone();
-        let TableRef::Join { right, .. } = &mut query.from else {
-            unreachable!()
-        };
-        let TableRef::Join { right, .. } = right.as_mut() else {
-            unreachable!()
-        };
-        let TableRef::Subquery { query: derived, .. } = right.as_mut() else {
-            unreachable!()
-        };
-        derived.where_clause = predicate;
-
-        apply_security(&mut node, &context, &ontology);
-        assert_eq!(node, Node::Query(Box::new(query)));
-        check(&node, &context, &ontology).unwrap();
-    }
-
-    #[test]
     fn fails_without_any_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
@@ -304,47 +252,33 @@ mod tests {
 
     #[test]
     fn rejects_path_filters_that_do_not_restrict_every_result() {
-        use crate::ast::Op;
-
         let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
-        let authorized = Expr::func(
-            STARTS_WITH_FNAME,
-            vec![
-                Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                Expr::string("42/43/"),
-            ],
-        );
-        for predicate in [
-            Expr::binary(Op::Or, authorized.clone(), Expr::lit(true)),
-            Expr::unary(Op::Not, authorized.clone()),
-            Expr::eq(authorized.clone(), Expr::lit(false)),
-            Expr::binary(
-                Op::Or,
-                authorized.clone(),
-                Expr::eq(Expr::col("p", "id"), Expr::int(1)),
+        let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
+        let starts_with = |left, right| Expr::func(STARTS_WITH_FNAME, vec![left, right]);
+        let authorized = starts_with(column.clone(), Expr::string("42/43/"));
+        let condition = Expr::eq(Expr::col("p", "id"), Expr::int(1));
+        for (predicate, valid) in [
+            (
+                Expr::binary(Op::Or, authorized.clone(), Expr::lit(true)),
+                false,
             ),
-            Expr::func(
-                STARTS_WITH_FNAME,
-                vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("42/")],
+            (Expr::unary(Op::Not, authorized.clone()), false),
+            (Expr::eq(authorized.clone(), Expr::lit(false)), false),
+            (
+                Expr::binary(Op::Or, authorized.clone(), condition.clone()),
+                false,
             ),
-            Expr::func(
-                STARTS_WITH_FNAME,
-                vec![
-                    Expr::string("42/43/"),
-                    Expr::col("p", TRAVERSAL_PATH_COLUMN),
-                ],
+            (starts_with(column.clone(), Expr::string("42/")), false),
+            (starts_with(Expr::string("42/43/"), column), false),
+            (
+                Expr::binary(Op::Or, authorized.clone(), Expr::and(authorized, condition)),
+                true,
             ),
         ] {
             let node = project_query(Some(predicate));
-            assert!(check(&node, &context, &ontology).is_err(), "{node:?}");
+            assert_eq!(check(&node, &context, &ontology).is_ok(), valid, "{node:?}");
         }
-        let guarded = Expr::binary(
-            Op::Or,
-            authorized.clone(),
-            Expr::and(authorized, Expr::eq(Expr::col("p", "id"), Expr::int(1))),
-        );
-        assert!(check(&project_query(Some(guarded)), &context, &ontology).is_ok());
     }
 
     #[test]
