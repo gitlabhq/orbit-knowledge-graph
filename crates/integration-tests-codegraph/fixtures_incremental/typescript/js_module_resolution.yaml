@@ -596,8 +596,6 @@ tests:
       - { row: { import_type: "NamedImport", name: "missingNamed", has_target: false } }
 
   - name: Missing default and named export calls point at imported symbols
-    # Known gap: Imported-symbol fallback and type-only exclusions differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'unresolved/main.ts'

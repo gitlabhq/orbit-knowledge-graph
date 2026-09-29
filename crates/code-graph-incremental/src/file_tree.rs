@@ -246,6 +246,8 @@ impl<'a> ProjectTree<'a> {
     fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
         let markers = &self.config.lookup_from;
         let source_root_rel = self.lang.syms.intern("source_root_rel");
+        let is_source_root =
+            |n: Cursor| n.is(C::Root) || n.children().any(|c| markers.contains(&c.kind()));
         self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
             if !file.is(C::File) {
                 return;
@@ -258,35 +260,13 @@ impl<'a> ProjectTree<'a> {
                     }
                 }
             }
-            let root = file
-                .ancestors()
-                .find(|d| d.children().any(|c| markers.contains(&c.kind())))
-                .map(|d| self.node_path(d))
-                .unwrap_or_default();
-            let path = self.file_path(file);
-            let rel = path
-                .strip_prefix(root.as_str())
-                .and_then(|r| {
-                    r.strip_prefix(PATH_SEP)
-                        .or(Some(r))
-                        .filter(|_| !root.is_empty())
-                })
-                .unwrap_or(&path);
+            let rel = self.path_below(file, is_source_root);
             tags.push(Tag {
                 key: source_root_rel,
-                val: self.lang.syms.intern(rel),
+                val: self.lang.syms.intern(&rel),
             });
-            out.push((path, tags));
+            out.push((self.node_path(file), tags));
         })
-    }
-
-    fn file_path(&self, file: Cursor) -> String {
-        let dir = self.node_path(file);
-        let name = self.lang.syms.resolve(file.sym());
-        match dir.is_empty() {
-            true => name.to_string(),
-            false => format!("{dir}{PATH_SEP}{name}"),
-        }
     }
 
     fn collect_prefixes(&mut self) {
@@ -313,10 +293,13 @@ impl<'a> ProjectTree<'a> {
     }
 
     fn node_path(&self, cursor: Cursor) -> String {
+        self.path_below(cursor, |n| n.is(C::Root))
+    }
+
+    fn path_below(&self, cursor: Cursor, is_root: impl Fn(Cursor) -> bool) -> String {
         let mut parts: Vec<&str> = std::iter::once(cursor)
             .chain(cursor.ancestors())
-            .take_while(|n| !n.is(C::Root))
-            .filter(|n| n.is(C::Dir) && n.sym() != 0)
+            .take_while(|n| !is_root(*n))
             .map(|n| self.lang.syms.resolve(n.sym()))
             .collect();
         parts.reverse();
