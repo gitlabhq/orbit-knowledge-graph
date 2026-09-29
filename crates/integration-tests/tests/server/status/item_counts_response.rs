@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use integration_testkit::run_subtests_shared;
 use orbit_server::item_counts::{ItemCountService, build_item_counts_response};
-use orbit_server::proto::DomainItemCount;
+use orbit_server::proto::{DomainItemCount, NamespaceItemCounts};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
@@ -16,8 +16,10 @@ async fn item_counts_response() {
 
     run_subtests_shared!(
         &ctx,
+        each_path_gets_an_entry_in_request_order,
         entities_are_grouped_under_their_domains,
         reporter_gets_no_security_domain,
+        path_with_nothing_visible_gets_empty_domains,
     );
 }
 
@@ -25,16 +27,16 @@ async fn respond(
     ctx: &TestContext,
     security_context: &SecurityContext,
     paths: &[&str],
-) -> Vec<DomainItemCount> {
+) -> Vec<NamespaceItemCounts> {
     let schema = pinned_schema();
     let paths: Vec<TraversalPath> = paths
         .iter()
         .map(|path| TraversalPath::new_unchecked(*path))
         .collect();
-    let counts = ItemCountService::new(Arc::new(ctx.create_client()))
+    let scope_counts = ItemCountService::new(Arc::new(ctx.create_client()))
         .count_items(&schema.ontology, security_context, &paths)
         .await;
-    build_item_counts_response(&schema.ontology, &counts).domains
+    build_item_counts_response(&schema.ontology, &scope_counts).counts
 }
 
 fn count_of(domains: &[DomainItemCount], domain: &str, entity: &str) -> i64 {
@@ -49,20 +51,46 @@ fn count_of(domains: &[DomainItemCount], domain: &str, entity: &str) -> i64 {
         .count
 }
 
-async fn entities_are_grouped_under_their_domains(ctx: &TestContext) {
-    let domains = respond(ctx, &admin_context(), &["1/100/", "1/101/"]).await;
+async fn each_path_gets_an_entry_in_request_order(ctx: &TestContext) {
+    let counts = respond(ctx, &admin_context(), &["1/101/", "1/100/"]).await;
 
-    assert_eq!(count_of(&domains, "core", "Group"), 2);
-    assert_eq!(count_of(&domains, "core", "Project"), 3);
-    assert_eq!(count_of(&domains, "code_review", "MergeRequest"), 2);
-    assert_eq!(count_of(&domains, "security", "Vulnerability"), 1);
+    let paths: Vec<&str> = counts.iter().map(|c| c.traversal_path.as_str()).collect();
+    assert_eq!(paths, ["1/101/", "1/100/"]);
+}
+
+async fn entities_are_grouped_under_their_domains(ctx: &TestContext) {
+    let counts = respond(ctx, &admin_context(), &["1/100/", "1/101/"]).await;
+
+    let (public_group, private_group) = (&counts[0].domains, &counts[1].domains);
+    assert_eq!(count_of(public_group, "core", "Group"), 1);
+    assert_eq!(count_of(public_group, "core", "Project"), 2);
+    assert_eq!(count_of(public_group, "code_review", "MergeRequest"), 1);
+    assert_eq!(count_of(public_group, "security", "Vulnerability"), 0);
+    assert_eq!(count_of(private_group, "core", "Project"), 1);
+    assert_eq!(count_of(private_group, "security", "Vulnerability"), 1);
 }
 
 async fn reporter_gets_no_security_domain(ctx: &TestContext) {
     let reporter = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/", 20)]).unwrap();
 
-    let domains = respond(ctx, &reporter, &["1/101/"]).await;
+    let counts = respond(ctx, &reporter, &["1/101/"]).await;
 
+    let domains = &counts[0].domains;
     assert!(domains.iter().all(|d| d.name != "security"));
-    assert_eq!(count_of(&domains, "core", "Project"), 1);
+    assert_eq!(count_of(domains, "core", "Project"), 1);
+}
+
+async fn path_with_nothing_visible_gets_empty_domains(ctx: &TestContext) {
+    let reporter =
+        SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
+
+    let counts = respond(ctx, &reporter, &["1/100/", "1/101/"]).await;
+
+    assert!(!counts[0].domains.is_empty());
+    assert_eq!(counts[1].traversal_path, "1/101/");
+    assert!(
+        counts[1].domains.is_empty(),
+        "domains: {:?}",
+        counts[1].domains
+    );
 }

@@ -71,7 +71,7 @@ client, stub-cached):
    * - ``GetIndexingStatus``
      - Indexing phase per namespace and domain, for 1 to 100 paths
    * - ``GetItemCounts``
-     - Entity counts per domain that the caller can see
+     - Entity counts per namespace and domain that the caller can see, for 1 to 100 paths
 
 Thirteen RPCs in total.  ``gkg-server`` health is served over HTTP as ``GET /live``
 and ``GET /ready``; there is no ``/health`` route.  Metrics are exported via

@@ -42,7 +42,7 @@ impl GraphStatusService {
         info!(%traversal_path, "Graph status fetching");
 
         let scopes = slice::from_ref(traversal_path);
-        let (statuses, counts) = tokio::join!(
+        let (statuses, scope_counts) = tokio::join!(
             self.indexing_status.read_scope_statuses(schema, scopes),
             self.item_counts
                 .count_items(&schema.ontology, security_context, scopes),
@@ -51,6 +51,11 @@ impl GraphStatusService {
             .into_iter()
             .next()
             .ok_or_else(|| Status::internal("indexing status returned no scope"))?;
+        let counts = scope_counts
+            .into_iter()
+            .next()
+            .ok_or_else(|| Status::internal("item counts returned no scope"))?
+            .counts;
 
         info!(
             phase = ?status.phase,

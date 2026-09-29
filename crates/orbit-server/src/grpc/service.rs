@@ -755,13 +755,13 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!(path_count = paths.len(), "Fetching item counts for user");
         let schema = self.active_schema.snapshot()?;
-        let counts = self
+        let scope_counts = self
             .item_counts
             .count_items(&schema.ontology, &security_context, &paths)
             .await;
         Ok(Response::new(build_item_counts_response(
             &schema.ontology,
-            &counts,
+            &scope_counts,
         )))
     }
 }

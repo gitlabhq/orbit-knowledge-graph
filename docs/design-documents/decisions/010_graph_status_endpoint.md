@@ -22,9 +22,9 @@ Two RPCs expose the services directly, for the Rails status pages.
 - `GetIndexingStatus` returns one phase per path and per domain: unknown, not started,
   syncing, ready or error. A project path reports the SDLC phases of its root, and the source
   code domain carries the project coverage under the path.
-- `GetItemCounts` returns entity counts per domain that the caller can see. The counts
-  stay in the ClickHouse query cache for five minutes. `GetGraphStatus` counts use the same
-  cache.
+- `GetItemCounts` returns entity counts per domain that the caller can see, one entry
+  for each path in request order. The counts stay in the ClickHouse query cache for five
+  minutes. `GetGraphStatus` counts use the same cache.
 - Rails owns the display text of each domain. The responses send the domain name only.
 - A plan or project that uses all its attempts, or that stops without a retry, is a gap.
   A path or domain is error when all its parts are settled and at least one is a gap.

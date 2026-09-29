@@ -1,13 +1,24 @@
-use std::collections::HashMap;
-
 use ontology::Ontology;
 
-use crate::proto::{DomainItemCount, EntityItemCount, GetItemCountsResponse};
+use super::ScopeItemCounts;
+use crate::proto::{DomainItemCount, EntityItemCount, GetItemCountsResponse, NamespaceItemCounts};
 
 pub fn build_item_counts_response(
     ontology: &Ontology,
-    counts: &HashMap<String, i64>,
+    scope_counts: &[ScopeItemCounts],
 ) -> GetItemCountsResponse {
+    GetItemCountsResponse {
+        counts: scope_counts
+            .iter()
+            .map(|scope_counts| build_namespace_counts(ontology, scope_counts))
+            .collect(),
+    }
+}
+
+fn build_namespace_counts(
+    ontology: &Ontology,
+    scope_counts: &ScopeItemCounts,
+) -> NamespaceItemCounts {
     let domains = ontology
         .domains()
         .filter_map(|domain| {
@@ -15,7 +26,7 @@ pub fn build_item_counts_response(
                 .node_names
                 .iter()
                 .filter_map(|name| {
-                    let count = *counts.get(name)?;
+                    let count = *scope_counts.counts.get(name)?;
                     Some(EntityItemCount {
                         name: name.clone(),
                         count,
@@ -28,5 +39,8 @@ pub fn build_item_counts_response(
             })
         })
         .collect();
-    GetItemCountsResponse { domains }
+    NamespaceItemCounts {
+        traversal_path: scope_counts.scope.to_string(),
+        domains,
+    }
 }
