@@ -46,6 +46,7 @@ pub struct SqlFragment {
 #[derive(Default)]
 pub struct Context {
     next_alias: usize,
+    pub source_bindings: HashMap<String, String>,
 }
 
 impl Context {

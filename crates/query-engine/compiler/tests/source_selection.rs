@@ -21,6 +21,7 @@ fn multi_table_sources_preserve_duplicates_and_filter_each_route() {
     let id = values.allocate(ValueType::Int64);
     let kind = values.allocate(ValueType::String);
     let source = Source::Edge {
+        relationship: 0,
         relationships: vec![calls, authored],
         fields: vec![
             (id, EdgeField::SourceId),

@@ -1,4 +1,5 @@
 use query_data_model::QueryDataModel;
+use std::collections::HashMap;
 
 use super::{QueryScope, resolved_scope_guard, scope_predicate};
 use crate::ast::visit::{visit_queries_mut, visit_relations};
@@ -10,11 +11,20 @@ pub fn apply(
     scope: &QueryScope,
     model: &(impl QueryDataModel + ?Sized),
 ) -> Result<()> {
+    apply_with_bindings(node, scope, model, &HashMap::new())
+}
+
+pub fn apply_with_bindings(
+    node: &mut Node,
+    scope: &QueryScope,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &HashMap<String, String>,
+) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
     };
     visit_queries_mut(query, &mut |query| {
-        apply_scan_predicates(&query.from, &mut query.where_clause, scope, model);
+        apply_scan_predicates(&query.from, &mut query.where_clause, scope, model, bindings);
         Ok(())
     })?;
     for requirement in &scope.requirements {
@@ -28,6 +38,7 @@ fn apply_scan_predicates(
     target: &mut Option<Expr>,
     scope: &QueryScope,
     model: &(impl QueryDataModel + ?Sized),
+    bindings: &HashMap<String, String>,
 ) {
     visit_relations(table, &mut |relation| {
         if let TableRef::Scan {
@@ -39,7 +50,9 @@ fn apply_scan_predicates(
         {
             let proof = match relationship {
                 Some(index) => scope.relationships.get(*index).and_then(Option::as_ref),
-                None if model.table_path_scopable(table) => scope.nodes.get(alias),
+                None if model.table_path_scopable(table) => {
+                    scope.nodes.get(bindings.get(alias).unwrap_or(alias))
+                }
                 None => None,
             };
             if let Some(proof) = proof {

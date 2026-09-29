@@ -30,10 +30,12 @@ impl From<ontology::DataType> for ValueType {
 
 pub enum Source {
     Entity {
+        binding: String,
         entity: EntityId,
         properties: Vec<(ValueId, PropertyId)>,
     },
     Edge {
+        relationship: usize,
         relationships: Vec<RelationshipId>,
         fields: Vec<(ValueId, EdgeField)>,
     },
@@ -170,6 +172,7 @@ pub(super) fn bind_node(
         .zip(properties.iter().map(|(value, _)| *value))
         .collect();
     let read = Source::Entity {
+        binding: node.id.clone(),
         entity: entity.id,
         properties,
     };

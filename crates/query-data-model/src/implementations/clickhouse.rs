@@ -18,6 +18,12 @@ pub struct TableLayout {
     pub path_scopable: bool,
 }
 
+impl TableLayout {
+    pub fn deletion_column(&self) -> &str {
+        ontology::constants::DELETED_COLUMN
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EntityLayout {
     pub table: String,

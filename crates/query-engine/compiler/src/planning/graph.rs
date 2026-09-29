@@ -81,7 +81,7 @@ pub fn traversal(
     }
 
     let mut edge_plans = Vec::new();
-    for (relationship, names) in input.relationships.iter().zip(edge_outputs) {
+    for (index, (relationship, names)) in input.relationships.iter().zip(edge_outputs).enumerate() {
         if relationship.hops != HopRange::default() || relationship.direction == Direction::Both {
             return Err(QueryError::Validation(
                 "edge binding currently supports directed single hops".into(),
@@ -190,6 +190,7 @@ pub fn traversal(
             op: Op::Filter(predicate),
             inputs: vec![Node {
                 op: Op::Read(Source::Edge {
+                    relationship: index,
                     relationships: kinds,
                     fields,
                 }),

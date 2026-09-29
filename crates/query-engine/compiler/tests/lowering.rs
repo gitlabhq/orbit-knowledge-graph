@@ -26,6 +26,7 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
     let id = model.property("File", "id").unwrap().id;
     let mut values = Values::default();
     let mut source = || Source::Entity {
+        binding: "file".into(),
         entity: model.graph().property(id).entity,
         properties: vec![(
             values.allocate(ValueType::Nullable(Box::new(ValueType::Int64))),

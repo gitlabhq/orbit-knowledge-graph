@@ -29,6 +29,7 @@ pub fn select_source(
     let Source::Edge {
         relationships,
         fields,
+        ..
     } = source
     else {
         return Ok(Node {
@@ -124,7 +125,10 @@ impl Read {
         model: &impl QueryDataModel,
         current_rows: CurrentRows,
     ) -> Result<Self> {
-        let Source::Entity { entity, properties } = source else {
+        let Source::Entity {
+            entity, properties, ..
+        } = source
+        else {
             return Err(QueryError::ReferenceError(
                 "edge sources require plan selection".into(),
             ));

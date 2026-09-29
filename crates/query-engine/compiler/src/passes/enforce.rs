@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Default)]
 pub struct ResultBindings {
+    pub source_bindings: HashMap<String, String>,
     pub node_sources: HashMap<String, (String, String)>,
     pub edges: Vec<EdgeBinding>,
     pub stable_order: Vec<crate::ast::OrderExpr>,

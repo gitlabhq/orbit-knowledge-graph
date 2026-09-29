@@ -28,6 +28,7 @@ fn binding_uses_the_same_semantic_sources_for_both_catalogs() {
             if let compiler::planning::generic::Op::Read(bind::Source::Entity {
                 entity,
                 properties,
+                ..
             }) = &node.op
             {
                 sources.push((

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 mod application;
 mod preparation;
 
-pub use application::apply;
+pub use application::{apply, apply_with_bindings};
 pub use preparation::prepare;
 
 #[derive(Clone, Default)]
