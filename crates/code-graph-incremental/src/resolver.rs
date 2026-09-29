@@ -2,6 +2,7 @@ use either::Either;
 use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
@@ -55,18 +56,19 @@ pub struct ResolveResult {
 
 #[derive(Default)]
 pub struct FileIndex {
-    keys: FxHashMap<String, usize>,
+    /// A file, or a top-level def in one when the key is the def's name.
+    keys: FxHashMap<String, Loc>,
     dirs: FxHashMap<String, Vec<usize>>,
 }
 
 impl FileIndex {
-    fn insert(&mut self, key: String, fi: usize) {
+    fn insert(&mut self, key: String, loc: Loc) {
         let dir = key.rsplit_once(PATH_SEP).map_or("", |(d, _)| d);
-        self.dirs.entry(dir.to_string()).or_default().push(fi);
-        self.keys.insert(key, fi);
+        self.dirs.entry(dir.to_string()).or_default().push(loc.fi);
+        self.keys.entry(key).or_insert(loc);
     }
 
-    fn get(&self, key: &str) -> Option<usize> {
+    fn get(&self, key: &str) -> Option<Loc> {
         self.keys.get(key).copied()
     }
 }
@@ -76,7 +78,31 @@ pub struct ImportReq {
     pub fi: usize,
     pub node: u32,
     pub target_fi: usize,
+    /// Def in the target file the path names (`use crate::dep::X` with an
+    /// inline `mod dep {}`), or 0 for the file itself.
+    pub anchor: u32,
     pub target_path: String,
+}
+
+impl ImportReq {
+    /// What the import can name: the target file's visible names, plus the
+    /// defs directly inside the anchor def when the path named one.
+    fn exports<'a>(&self, trees: &[Tree], visible: &'a VisibleMap) -> Cow<'a, FxHashMap<u32, Loc>> {
+        if self.anchor == 0 {
+            return Cow::Borrowed(&visible[self.target_fi]);
+        }
+        let mut names = visible[self.target_fi].clone();
+        let module = trees[self.target_fi].cursor(self.anchor);
+        for d in module
+            .children()
+            .filter(|d| d.is(C::Def) && !d.has(C::ImplBlock))
+        {
+            if let Some(name) = d.child_sym(C::DefName) {
+                names.insert(name, Loc::new(self.target_fi, d.index()));
+            }
+        }
+        Cow::Owned(names)
+    }
 }
 
 pub struct Resolver {
@@ -167,6 +193,7 @@ impl Resolver {
                     fi: new_fi,
                     node: r.node,
                     target_fi: new_tfi,
+                    anchor: r.anchor,
                     target_path: r.target_path.clone(),
                 })
             })
@@ -488,27 +515,27 @@ fn gather_imports_for(
                     let target_path = apply_aliases(raw_path, aliases);
                     let node_idx = cur.index();
                     let mut direct = resolve_glob(&target_path, file_index, lookup_prefixes);
-                    direct.retain(|&tfi| tfi != fi);
+                    direct.retain(|loc| loc.fi != fi);
                     let candidates = match direct.is_empty() {
                         false => Either::Left(
                             direct
                                 .into_iter()
-                                .map(|tfi| (tfi, target_path.clone(), false)),
+                                .map(|loc| (loc, target_path.clone(), false)),
                         ),
                         true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
                             resolve_glob(&submod, file_index, lookup_prefixes)
                                 .into_iter()
-                                .map(move |sub_fi| (sub_fi, submod.clone(), true))
+                                .map(move |loc| (loc, submod.clone(), true))
                         })),
                     };
-                    for (tfi, path, is_sub) in candidates.filter(|c| c.0 != fi) {
+                    for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
                         if is_sub {
                             edges.push(Edge::new(
                                 fi as u32,
                                 node_idx,
-                                tfi as u32,
+                                loc.fi as u32,
                                 0,
                                 EdgeKind::Imports,
                             ));
@@ -516,7 +543,8 @@ fn gather_imports_for(
                         reqs.push(ImportReq {
                             fi,
                             node: node_idx,
-                            target_fi: tfi,
+                            target_fi: loc.fi,
+                            anchor: loc.node,
                             target_path: path,
                         });
                     }
@@ -562,14 +590,15 @@ fn propagate_reexports(
             }
         };
         for req in reqs {
+            let exports = req.exports(trees, visible);
             for c in trees[req.fi].cursor(req.node).names() {
                 let hint = c.child_sym(C::SsaHint).filter(|&h| h == wildcard_sym);
                 let ns = hint.unwrap_or(c.sym());
                 if ns == wildcard_sym {
-                    for (&ds, &loc) in &visible[req.target_fi] {
+                    for (&ds, &loc) in exports.iter() {
                         export(req.fi, ds, loc);
                     }
-                } else if let Some(&loc) = visible[req.target_fi].get(&ns) {
+                } else if let Some(&loc) = exports.get(&ns) {
                     export(req.fi, c.child_sym(C::Alias).unwrap_or(ns), loc);
                 }
             }
@@ -614,14 +643,19 @@ fn propagate_reexports(
     ambiguous
 }
 
-fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
+fn name_targets(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Vec<Loc> {
+    let tfi = req.target_fi;
+    let exports = req.exports(ctx.trees, ctx.visible);
     let hint = c.child_sym(C::SsaHint).filter(|&h| h == ctx.wildcard_sym);
     let ns = hint.unwrap_or(c.sym());
     if ns == ctx.wildcard_sym {
         return if c.child_sym(C::Alias).is_some() {
-            vec![Loc { fi: tfi, node: 0 }]
+            vec![Loc {
+                fi: tfi,
+                node: req.anchor,
+            }]
         } else {
-            ctx.visible[tfi]
+            exports
                 .iter()
                 .filter(|&(&dn, _)| !ctx.ambiguous.contains(&(tfi, dn)))
                 .map(|(_, &loc)| loc)
@@ -631,8 +665,11 @@ fn name_targets(ctx: &ResolveCtx, tfi: usize, c: Cursor) -> Vec<Loc> {
     if ctx.ambiguous.contains(&(tfi, ns)) {
         return vec![];
     }
-    if let Some(&loc) = ctx.visible[tfi].get(&ns) {
+    if let Some(&loc) = exports.get(&ns) {
         return vec![loc];
+    }
+    if req.anchor != 0 {
+        return vec![];
     }
     let target_path = ctx.lang.syms.resolve(ctx.corpus.jump(tfi as u32, 0).sym());
     resolve_submodule(
@@ -654,7 +691,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     let import_edges: Vec<Edge> = import
         .names()
         .flat_map(|c| {
-            name_targets(ctx, tfi, c)
+            name_targets(ctx, req, c)
                 .into_iter()
                 .filter(move |loc| loc.fi != fi)
                 .map(move |loc| c.edge_to(c.jump(loc.fi as u32, loc.node), EdgeKind::Imports))
@@ -684,9 +721,13 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         {
             continue;
         }
+        let exports = req.exports(ctx.trees, ctx.visible);
         let members = target_files
             .iter()
-            .filter_map(|&t| ctx.visible[t].get(&m.sym()))
+            .filter_map(|&t| match t == tfi {
+                true => exports.get(&m.sym()),
+                false => ctx.visible[t].get(&m.sym()),
+            })
             .unique()
             .map(|loc| ctx.corpus.jump(loc.fi as u32, loc.node))
             .filter(|tgt| tgt.has_tag(ctx.tags.callable))
@@ -1265,18 +1306,19 @@ fn build_file_index(
     for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
         let stem = file_lang.strip_extension(path);
-        idx.insert(path.to_string(), fi);
-        idx.insert(stem.to_string(), fi);
+        let file = Loc::new(fi, 0);
+        idx.insert(path.to_string(), file);
+        idx.insert(stem.to_string(), file);
         for name in index_names {
             if let Some(pkg) = stem
                 .strip_suffix(name.as_str())
                 .and_then(|s| s.strip_suffix(PATH_SEP))
             {
                 if !pkg.is_empty() {
-                    idx.insert(pkg.to_string(), fi);
+                    idx.insert(pkg.to_string(), file);
                 }
             } else if stem == name.as_str() {
-                idx.insert(String::new(), fi);
+                idx.insert(String::new(), file);
             }
         }
         let root = tree.root();
@@ -1284,15 +1326,15 @@ fn build_file_index(
             lang.syms.resolve(s).replace(sep, PATH_SEP) + PATH_SEP
         });
         let defs = root.children().filter(|d| d.is(C::Def));
-        for name in defs.filter_map(|d| d.child_sym(C::DefName)) {
+        for (name, d) in defs.filter_map(|d| Some((d.child_sym(C::DefName)?, d))) {
             let key = format!("{pkg}{}", lang.syms.resolve(name).replace(sep, PATH_SEP));
-            idx.insert(key, fi);
+            idx.insert(key, Loc::new(fi, d.index()));
         }
     }
     idx
 }
 
-fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<usize> {
+fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> {
     let Some(dir) = target
         .strip_suffix(WILDCARD)
         .map(|d| d.trim_end_matches(PATH_SEP))
@@ -1303,8 +1345,8 @@ fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<usize
         .chain(prefixes.iter().map(|p| format!("{p}{PATH_SEP}{dir}")));
     dirs.filter_map(|d| idx.dirs.get(&d))
         .flatten()
-        .copied()
         .unique()
+        .map(|&fi| Loc::new(fi, 0))
         .collect()
 }
 
@@ -1314,7 +1356,7 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
         .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
 }
 
-fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<usize> {
+fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<Loc> {
     let prefixed = prefixes.iter().map(|p| match p.is_empty() {
         true => target.to_string(),
         false => format!("{p}{PATH_SEP}{target}"),
@@ -1338,7 +1380,9 @@ fn resolve_submodule(
         stem.strip_suffix(idx.as_str())
             .and_then(|s| s.strip_suffix(PATH_SEP))
     })?;
-    file_index.get(&format!("{dir}{PATH_SEP}{name}"))
+    file_index
+        .get(&format!("{dir}{PATH_SEP}{name}"))
+        .map(|loc| loc.fi)
 }
 
 /// `@/*` -> `src/*` rewrites a prefix; a key without `*` matches whole path
