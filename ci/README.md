@@ -22,6 +22,9 @@ so they use the same tools outside a mise shell.
 
 ## Commands
 
+The archive parity tests need GNU tar (`tar` on Linux, `gtar` on macOS) and `gzip`.
+Install GNU tar on macOS with `brew install gnu-tar`.
+
 `repository-checks` runs schema, repository, prose, and script tests in one job.
 It also checks version bumps on merge requests. `advisory-checks` runs narration
 and MR-description checks. Both groups report all failures before exiting.
@@ -34,7 +37,7 @@ and MR-description checks. Both groups report all failures before exiting.
 | `mise ci:repository` | Agent guide sync and Rust toolchain metadata |
 | `mise ci:generated` | Generated schemas, DDL, metrics, dashboards, and query docs |
 | `mise ci:versions --base-ref REF` | Pinned, prompt, and skill version bumps against a local Git ref |
-| `mise ci:test` | Tests in `ci/linting/`, `ci/tests/`, and `ci/version_checks_test.py` |
+| `mise ci:test` | All Python tests in `ci/tests/`, using pytest settings in `ci/pyproject.toml` |
 
 For individual checks, use this prefix:
 
@@ -50,15 +53,22 @@ The scripts accept these arguments:
 | `ci/check-repository.py` | `all` or `toolchain`; `toolchain --write` regenerates `rust-toolchain.toml` |
 | `ci/check_generated.py` | `all` or `ddl` |
 | `ci/check_migration_ledger.py` | `--base REF` |
-| `ci/check_vendored.py` | A dependency name or `all`; runs every selected check and reports failures |
-| `ci/check-version-bumps.py` | `all`, `pinned`, `prompts`, or `skills`; `--base-ref REF` selects the comparison base |
-| `ci/check-skill-version-bump.py` | `--ci --staged` checks the staged skill snapshot |
+| `ci/check_vendored.py` | A dependency name or `all`; dispatches through its `CHECKS` registry and reports every failure |
+| `ci/check-version-bumps.py` | `all`, `pinned`, `prompts`, or `skills`; `--base-ref REF` selects the comparison base; `skills --staged` checks the staged snapshot |
 | `ci/dashboards.py` | `--check` compares rendered dashboards; omit it to regenerate |
 | `ci/integration_lanes.py` | `--check` validates the container test partition |
 
-Run `mise lint:prose` with file paths and `mise lint:prose:test` for its tests.
+Run `mise lint:prose` with file paths. Its tests live in `ci/tests/prose_test.py`.
 See the [linting guide](linting/README.md) for `check_narration.py`,
 `check_mr_description.py`, and `prose_lint.py`.
+
+## Pipeline automation
+
+`ci/automation/open_e2e_bump_mr.py` updates e2e pins.
+`ci/automation/sync_doc_principles.py` copies upstream documentation principles.
+Both use `ci/automation/publish.py` to commit changes, push the automation branch,
+and create or refresh an MR. `DRY_RUN=true` updates local files and shows the diff
+without publishing. Run `mise docs:principles:sync` to rehearse the principles sync.
 
 ## Rust contracts
 

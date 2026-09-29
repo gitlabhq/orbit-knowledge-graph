@@ -26,7 +26,7 @@ vendored:
     version: v1.5.5
     vendor_dir: crates/duckdb-client/third_party
     vendor_script: scripts/vendored/duckdb/fts-vendor.sh
-    check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
+    check_script: ci/check_vendored.py
     extensions:
       fts:
         source_revision: 6814ec9a7d5fd63500176507262b0dbf7cea0095
@@ -44,14 +44,14 @@ vendored:
   gitlab_system_note_actions:
     version: ea52f8c3adc370db76545ecd82728710f2609800
     vendor_dir: config/vendored
-    check_script: scripts/vendored/gitlab_system_note_actions/check.sh
+    check_script: ci/check_vendored.py
 
   # Iglu schema version pins. Edit a pin here, then run `mise vendor -- iglu`
   # to fetch the schema JSON from the upstream Iglu registry.
   iglu:
     vendor_dir: config/schemas/iglu
     vendor_script: scripts/vendored/iglu/bump.sh
-    check_script: scripts/vendored/iglu/check.sh
+    check_script: ci/check_vendored.py
     pins:
       orbit_query: 2-2-0
       orbit_common: 1-0-4

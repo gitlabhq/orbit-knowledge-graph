@@ -7,7 +7,7 @@
 # pipeline schedule with SCHEDULE_ONLY=doc-principles-sync; rehearse once with
 # DRY_RUN=true on the schedule.
 doc-principles-sync:
-  extends: .automation-bot
+  extends: .python-automation
   stage: review
   needs: []
   variables:
@@ -17,4 +17,4 @@ doc-principles-sync:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "doc-principles-sync"
   script:
-    - bash ci/automation/sync-doc-principles.sh
+    - uv run ci/automation/sync_doc_principles.py

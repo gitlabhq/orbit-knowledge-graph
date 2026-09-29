@@ -3,7 +3,7 @@ repository-checks:
     - .python-check-template
     - .mr-and-main-rules
   script:
-    - apk add --no-cache jsonnet yq
+    - apk add --no-cache jsonnet tar gzip
     - uv run ci/run_checks.py checks
 
 advisory-checks:

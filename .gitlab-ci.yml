@@ -167,6 +167,16 @@ stages:
     - apk add --no-cache bash git curl jq coreutils
     - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
 
+.python-automation:
+  extends:
+    - .python-check-template
+    - .automation-bot
+  image: !reference [.python-check-template, image]
+  before_script:
+    - !reference [.automation-bot, before_script]
+    - apk add --no-cache glab
+    - uv sync
+
 # "Solo" scheduled pipelines run exactly one job and skip the rest of the CI
 # suite. A schedule opts in by setting SCHEDULE_ONLY=<job-name>: the named job
 # gates on that value, and every shared job/anchor references this guard so it
@@ -247,7 +257,7 @@ vendored-check:
     - .python-check-template
     - .mr-only-rules
   script:
-    - apk add --no-cache curl gzip tar yq
+    - apk add --no-cache curl gzip tar
     - uv run ci/check_vendored.py
 
 rust-hygiene-check:

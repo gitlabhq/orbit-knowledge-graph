@@ -178,7 +178,7 @@ run = ["cargo clean", "rm -rf lib/*/"]
 description = "Clean the crates"
 
 [tasks."lint:fmt"]
-run = "cargo fmt --all -- --check"
+run = "uv run --frozen --project ci ci/run_checks.py fmt"
 description = "Check Rust formatting"
 
 [tasks."lint:code"]
@@ -189,7 +189,7 @@ run = [
 description = "Run clippy lint checks"
 
 [tasks."lint:deps"]
-run = "cargo shear"
+run = "uv run --frozen --project ci ci/run_checks.py deps"
 description = "Check for unused workspace and crate dependencies"
 
 [tasks."lint:code:fix"]
@@ -202,7 +202,7 @@ run = [
 description = "Run clippy lint checks and fix applicable issues"
 
 [tasks."lint:newlines"]
-run = "gitlab-xtasks lint verify-newlines --file-extensions rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs --directory . --exclude-files docs-locale"
+run = "uv run --frozen --project ci ci/run_checks.py newlines"
 description = "Check trailing newline formatting in the codebase"
 
 [tasks."lint:integration-test-lanes"]
@@ -520,7 +520,7 @@ run = "uv run --frozen --project ci python ci/linting/prose_lint.py"
 description = "Lint the prose LLMs read: prompts, skills, agent guides, templates (pass files, --all, or --diff-base <sha>)"
 
 [tasks."lint:prose:test"]
-run = "uv run --frozen --project ci python ci/linting/prose_lint_test.py"
+run = "uv run --frozen --project ci pytest ci/tests/prose_test.py"
 description = "Run the prose linter's unit tests"
 
 [tasks."lint:docs"]
@@ -529,7 +529,7 @@ run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
 
 [tasks."docs:principles:sync"]
-run = "DRY_RUN=true bash ./ci/automation/sync-doc-principles.sh"
+run = "DRY_RUN=true uv run --frozen --project ci ci/automation/sync_doc_principles.py"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
 [tasks."skill:sync:orbit"]

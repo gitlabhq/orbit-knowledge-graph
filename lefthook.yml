@@ -58,7 +58,7 @@ pre-commit:
         - "mise.toml"
         - "rust-toolchain.toml"
     - name: skill-version-bump
-      run: mise exec -- uv run --frozen --project ci python ci/check-skill-version-bump.py --ci --staged
+      run: mise exec -- uv run --frozen --project ci ci/check-version-bumps.py skills --staged
       glob: "skills/**/*"
     - name: prompt-version-bump
       run: mise exec -- uv run --frozen --project ci python ci/check-version-bumps.py prompts

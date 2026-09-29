@@ -2,8 +2,10 @@
 
 Vendored dependencies are upstream artifacts committed to the repository so
 that builds succeed without network access. Each dependency declares its
-pins, artifact location, and vendor/check scripts in a single place:
+pins, artifact location, and scripts in
 `config/versions.yaml` under the `vendored:` section.
+`scripts/vendored/run.sh` regenerates artifacts. `ci/check_vendored.py` checks them
+through its `CHECKS` registry.
 
 ## Lifecycle
 
@@ -53,13 +55,13 @@ else (no)
 endif
 
 |CI|
-:Run **check_script** via\nmise check:vendored;
+:Run **mise check:vendored -- duckdb**;
 
-|check_script|
-:Re-vendor archive into temp dir;
+|ci/check_vendored.py|
+:Read pins and artifact path from versions.yaml;
+:Dispatch to **CHECKS["duckdb"]**;
+:Verify checksum and rebuild archive in temp dir;
 :Byte-compare against committed archive;
-
-|mise check:vendored|
 :Assert versions.yaml was not modified\n(read-only postcondition);
 stop
 @enduml
@@ -73,8 +75,8 @@ Each entry under `vendored:` follows this contract:
 |---|---|---|
 | `version` | No | Primary version pin (tag, SHA, semver). |
 | `vendor_dir` | No | Repository-relative path where vendored artifacts live. |
-| `vendor_script` | No | Script that regenerates artifacts. Must comply with the vendor contract. |
-| `check_script` | No | Script that validates artifacts match pins. Must comply with the check contract. |
+| `vendor_script` | No | Executable shell script under `scripts/vendored/` that regenerates artifacts. |
+| `check_script` | No | Literal `ci/check_vendored.py`; requires an entry in its `CHECKS` registry. |
 | `extensions` | No | Named sub-dependencies with optional `source_revision`, `source_archive_sha256`, and `binaries` (platform to SHA-256 map). |
 | `pins` | No | Flat key-value sub-pins (e.g. Iglu schema name to version). |
 
@@ -86,7 +88,7 @@ vendored:
     version: v1.5.5
     vendor_dir: crates/duckdb-client/third_party
     vendor_script: scripts/vendored/duckdb/fts-vendor.sh
-    check_script: scripts/vendored/duckdb/check-duckdb-fts-sources-sync.sh
+    check_script: ci/check_vendored.py
     extensions:
       fts:
         source_revision: 6814ec9a7d5fd63500176507262b0dbf7cea0095
@@ -97,21 +99,22 @@ vendored:
   gitlab_system_note_actions:
     version: ea52f8c3adc...
     vendor_dir: config/vendored
-    check_script: scripts/vendored/gitlab_system_note_actions/check.sh
+    check_script: ci/check_vendored.py
 
   iglu:
     vendor_dir: config/schemas/iglu
     vendor_script: scripts/vendored/iglu/bump.sh
-    check_script: scripts/vendored/iglu/check.sh
+    check_script: ci/check_vendored.py
     pins:
       orbit_query: 2-2-0
-      orbit_common: 1-0-3
+      orbit_common: 1-0-4
 ```
 
 ## Script contract
 
-A generic runner (`scripts/vendored/run.sh`) parses the YAML entry and
-invokes the script with standardized environment variables.
+`mise vendor -- <name>` calls `scripts/vendored/run.sh vendor <name>`.
+The runner reads the YAML entry and invokes `vendor_script` with these environment
+variables. It accepts only vendor mode.
 
 ### Environment variables
 
@@ -124,33 +127,35 @@ invokes the script with standardized environment variables.
 
 ### vendor_script
 
-- **Input:** Pins from `$VENDOR_VERSIONS_FILE` (via env vars and `yq`).
-- **Output:** Artifacts written to `$VENDOR_DIR`.
-- **Side-effect:** Writes computed checksums back into `$VENDOR_VERSIONS_FILE` via `yq -i`.
-- **Exit:** 0 on success, non-zero on failure.
+The script reads pins from `$VENDOR_VERSIONS_FILE` and writes artifacts to
+`$VENDOR_DIR`. It can write computed checksums back with `yq -i`.
+It exits with 0 on success and non-zero on failure.
 
 ### check_script
 
-- **Input:** Pins from `$VENDOR_VERSIONS_FILE` and artifacts from `$VENDOR_DIR`.
-- **Output:** Human-readable pass/fail to stdout.
-- **Side-effect:** None. Must not modify any files.
-- **Exit:** 0 if artifacts match pins, non-zero on drift.
+`mise check:vendored -- <name>` calls Python directly. The checker reads
+`config/versions.yaml` and passes the entry and artifact path to `CHECKS[name]`.
+It uses temporary files and leaves committed files unchanged.
+It reports every selected failure and exits non-zero on drift or invalid input.
+`mise check:vendored:all` selects entries with `check_script`.
+
+DuckDB checks the archive checksum and byte-compares a rebuilt archive.
+Iglu compares parsed JSON with upstream schemas. System-note actions compares
+the committed list with Rails constants; fetch failures are warnings.
 
 ## Validation layers
 
-1. **Schema validation.** `config/schemas/versions.schema.json` enforces key
-   patterns, hex lengths, path restrictions, script prefix, and structural
-   constraints. Validated in CI (`repository-checks`) and locally
-   (`mise versions:validate`).
+1. **Schema validation.** `config/schemas/versions.schema.json` constrains keys,
+   pins, paths, and the literal `check_script` value. Run `mise versions:validate`;
+   CI runs it in `repository-checks`.
 2. **Compile time.** `orbit_versions::Versions` deserializes with
    `deny_unknown_fields`, catching structural drift.
 3. **Build time.** `crates/duckdb-client/build.rs` asserts Cargo.lock matches
    the version pin, verifies archive checksums, and checks platform coverage.
-4. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
-   exists, YAML parses) and postconditions (vendor_dir non-empty, YAML still
-   valid, check_script did not modify the file).
-5. **CI time.** The `vendored-check` job re-vendors the archive
-   from upstream and byte-compares it against the committed artifact.
+4. **Vendor time.** `scripts/vendored/run.sh` requires an executable script.
+   After it runs, the artifact directory must contain files and the YAML must parse.
+5. **Check time.** The `vendored-check` job runs the Python registry checks.
+   The checker rejects changes to `config/versions.yaml` after each check.
 
 ## Operator workflows
 
@@ -161,7 +166,7 @@ invokes the script with standardized environment variables.
 3. Run `mise vendor -- duckdb`. The script regenerates the archive and writes
    `source_archive_sha256` back.
 4. Update `Cargo.toml` duckdb crate version to match.
-5. Run `cargo build` to verify.
+5. Run `mise check:vendored -- duckdb`, then `mise build` to verify.
 
 ### Add a new DuckDB extension
 
@@ -180,14 +185,16 @@ invokes the script with standardized environment variables.
    (e.g. change `orbit_query: 2-2-0` to `orbit_query: 2-3-0`).
 2. Run `mise vendor -- iglu`. The script fetches the schema JSON for every
    pin from the upstream Iglu registry and writes it to `vendor_dir`.
-3. Run `cargo build` to verify (the `orbit-analytics` build script reads
-   the pins at compile time and validates the schema's `self` block).
+3. Run `mise check:vendored -- iglu`, then `mise build`.
+   The `orbit-analytics` build script validates the schema's `self` block against the pins.
 
 ### Add a new vendored dependency
 
-1. Add an entry under `vendored:` in `config/versions.yaml` with `version`,
-   `vendor_dir`, and optionally `vendor_script` and `check_script`.
-2. The `orbit_versions::VendoredDependency` type deserializes it with no Rust
-   changes needed.
-3. `mise vendor -- <name>` and `mise check:vendored -- <name>` work
-   immediately via the generic runner.
+1. Add an entry under `vendored:` in `config/versions.yaml` with `vendor_dir`
+   and the required pins.
+2. To regenerate artifacts, add an executable `vendor_script` under
+   `scripts/vendored/` that follows the vendor contract.
+3. To check artifacts, set `check_script: ci/check_vendored.py`.
+   Implement the checker in that module and register the dependency name in `CHECKS`.
+4. Add CLI coverage in `ci/tests/vendored_checks_test.py`.
+   Run `mise versions:validate`, the dependency's vendor and check tasks, and `mise ci:test`.

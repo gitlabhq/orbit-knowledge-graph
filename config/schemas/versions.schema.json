@@ -76,10 +76,10 @@
           "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
         },
         "check_script": {
-          "description": "Read-only script that validates artifacts match pins. Must live under scripts/vendored/.",
+          "description": "Read-only checker, invoked with the vendored dependency name.",
           "type": "string",
           "maxLength": 200,
-          "pattern": "^scripts/vendored/[a-z0-9_/-]+\\.sh$"
+          "const": "ci/check_vendored.py"
         },
         "extensions": {
           "description": "Named sub-dependencies (e.g. DuckDB extensions) with source and binary pins.",

@@ -5,19 +5,23 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+HYGIENE = {
+    "deps": ["cargo", "shear"],
+    "fmt": ["cargo", "fmt", "--all", "--", "--check"],
+    "newlines": ["gitlab-xtasks", "lint", "verify-newlines", "--file-extensions",
+                 "rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs", "--directory", ".",
+                 "--exclude-files", "docs-locale"],
+}
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run every check in a CI job and report failures.")
-    parser.add_argument("group", choices=("checks", "advisory", "hygiene", "generated", "tests"))
+    parser.add_argument("group", choices=("checks", "advisory", "hygiene", "generated", "tests", *HYGIENE))
     group = parser.parse_args().group
     python = [sys.executable]
     merge_request = os.environ.get("CI_PIPELINE_SOURCE") == "merge_request_event"
     base = os.environ.get("CI_MERGE_REQUEST_DIFF_BASE_SHA")
-    tests = [
-        python + ["-m", "unittest", "discover", "-s", directory, "-p", "*_test.py"]
-        for directory in ("ci/linting", "ci/tests")
-    ] + [python + ["ci/version_checks_test.py"]]
+    tests = [python + ["-m", "pytest", "ci/tests"]]
 
     if group == "checks":
         commands = [
@@ -33,9 +37,11 @@ def main():
         if merge_request:
             commands.append(python + ["ci/linting/check_mr_description.py"])
     elif group == "hygiene":
-        commands = [["mise", "lint:deps"]]
+        commands = [HYGIENE["deps"]]
         if merge_request:
-            commands += [["mise", "lint:fmt"], ["mise", "lint:newlines"]]
+            commands += [HYGIENE["fmt"], HYGIENE["newlines"]]
+    elif group in HYGIENE:
+        commands = [HYGIENE[group]]
     elif group == "generated":
         commands = [python + ["ci/check_generated.py"]]
         if merge_request:

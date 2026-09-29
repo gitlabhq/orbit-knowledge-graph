@@ -3,7 +3,7 @@
 # pipeline schedule with SCHEDULE_ONLY=e2e-pin-bump; rehearse once with
 # DRY_RUN=true on the schedule.
 e2e-pin-bump:
-  extends: .automation-bot
+  extends: .python-automation
   stage: review
   needs: []
   variables:
@@ -13,7 +13,7 @@ e2e-pin-bump:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-pin-bump"
   before_script:
-    - !reference [.automation-bot, before_script]
-    - apk add --no-cache python3 yq
+    - !reference [.python-automation, before_script]
+    - apk add --no-cache yq
   script:
-    - bash ci/automation/open-e2e-bump-mr.sh
+    - uv run ci/automation/open_e2e_bump_mr.py

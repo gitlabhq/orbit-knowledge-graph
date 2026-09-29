@@ -24,7 +24,13 @@ def git(*args, check=True):
     )
 
 
-def base_ref_for(selection, override):
+def fetch_ref(ref, depth, fetches):
+    if ref not in fetches:
+        fetches[ref] = git("fetch", "origin", ref, f"--depth={depth}", check=False)
+    return fetches[ref]
+
+
+def base_ref_for(selection, override, fetches):
     if override:
         return override
     diff_base = os.environ.get("CI_MERGE_REQUEST_DIFF_BASE_SHA")
@@ -38,18 +44,16 @@ def base_ref_for(selection, override):
 
     target = os.environ.get("CI_MERGE_REQUEST_TARGET_BRANCH_NAME", default_branch)
     if selection == "pinned":
-        git("fetch", "origin", target, "--depth=1")
-    elif diff_base and git(
-        "fetch", "origin", diff_base, "--depth=1", check=False
-    ).returncode == 0:
+        fetch_ref(target, 1, fetches).check_returncode()
+    elif diff_base and fetch_ref(diff_base, 1, fetches).returncode == 0:
         return diff_base
     else:
-        git("fetch", "origin", target, "--depth=50")
+        fetch_ref(target, 50, fetches).check_returncode()
     return f"origin/{target}"
 
 
 def check_pinned(base_ref):
-    if skip_requested("pinned-version-check", base_ref):
+    if skip_requested("pinned-version-check", base_ref, fetch=False):
         print("✅ [skip pinned-version-check] requested — skipping.")
         return 0
     changed_files = git("diff", "--name-only", f"{base_ref}...HEAD").stdout.splitlines()
@@ -95,17 +99,82 @@ def check_prompts(base_ref):
     return status
 
 
+def skill_version(content):
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip("\"'")
+    return None
+
+
+def version_increased(old, new):
+    if old is None:
+        return new is not None
+    if new is None:
+        return False
+    old_numeric = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", old)
+    new_numeric = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", new)
+    if old_numeric:
+        return bool(new_numeric) and (
+            tuple(map(int, new_numeric.groups())) > tuple(map(int, old_numeric.groups()))
+        )
+    return old != new
+
+
 def check_skills(base_ref, staged):
-    args = [
-        sys.executable,
-        str(REPO_ROOT / "ci/check-skill-version-bump.py"),
-        "--ci", "--base-ref", base_ref,
-    ]
-    if staged:
-        args.append("--staged")
-    elif os.environ.get("CI"):
-        args.append("--no-worktree")
-    return subprocess.run(args, cwd=REPO_ROOT).returncode
+    if os.environ.get("SKIP_SKILL_VERSION_BUMP_CHECK") == "1" or (
+        "[skip skill-version-bump-check]" in os.environ.get("CI_MERGE_REQUEST_DESCRIPTION", "")
+    ):
+        print("✅ [skip skill-version-bump-check] — skipping.")
+        return 0
+
+    comparison = ("--cached", base_ref) if staged else (f"{base_ref}...HEAD",)
+    files = set(git("diff", "--name-only", *comparison, "--").stdout.splitlines())
+    if not staged and not os.environ.get("CI"):
+        for command in (
+            ("diff", "--name-only", "--cached", "--"),
+            ("diff", "--name-only", "--"),
+            ("ls-files", "--others", "--exclude-standard"),
+        ):
+            files.update(git(*command).stdout.splitlines())
+    skills = {}
+    for filename in sorted(files):
+        parts = filename.split("/")
+        if parts[0] == "skills" and len(parts) >= 3:
+            skills.setdefault(parts[1], []).append(filename)
+    status = 0
+    for name, changed_files in skills.items():
+        filename = f"skills/{name}/SKILL.md"
+        old = skill_version(git("show", f"{base_ref}:{filename}", check=False).stdout)
+        if staged or os.environ.get("CI"):
+            ref = "" if staged else "HEAD"
+            content = git("show", f"{ref}:{filename}", check=False).stdout
+        else:
+            path = REPO_ROOT / filename
+            content = path.read_text(encoding="utf-8") if path.is_file() else ""
+        new = skill_version(content)
+        if version_increased(old, new):
+            print(f"✅ {name}: version bumped ({old or 'new'} → {new})")
+        else:
+            status = 1
+            if old is None and new is None:
+                reason = "SKILL.md not found or has no top-level 'version:' field"
+            elif old == new:
+                reason = f"version unchanged at {old}"
+            else:
+                reason = f"version went from {old} to {new} (must increase)"
+            print(f"❌ {name}: {reason}")
+            for filename in changed_files:
+                print(f"    - {filename}")
+    if not skills:
+        print("✅ No skill files changed.")
+    if status:
+        print("ERROR: Update the top-level 'version' field in SKILL.md frontmatter.", file=sys.stderr)
+    return status
 
 
 def main():
@@ -124,11 +193,21 @@ def main():
         parser.error("--staged is supported only with the skills selection")
 
     selections = ("pinned", "prompts", "skills") if args.selection == "all" else (args.selection,)
+    fetches = {}
+    bases = {}
+    fallback_first = sorted(selections, key=lambda selection: selection == "pinned")
+    for selection in fallback_first:
+        try:
+            bases[selection] = base_ref_for(selection, args.base_ref, fetches)
+        except (subprocess.CalledProcessError, OSError) as error:
+            bases[selection] = error
     status = 0
     for selection in selections:
         print(f"Checking {selection} versions", flush=True)
         try:
-            base_ref = base_ref_for(selection, args.base_ref)
+            base_ref = bases[selection]
+            if isinstance(base_ref, Exception):
+                raise base_ref
             if selection == "pinned":
                 result = check_pinned(base_ref)
             elif selection == "prompts":
