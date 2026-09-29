@@ -6,22 +6,17 @@ pub fn visit_queries(query: &Query, callback: &mut impl FnMut(&Query) -> Result<
         visit_queries(&cte.query, callback)?;
     }
     visit_table_queries_ref(&query.from, callback)?;
-    for select in &query.select {
-        visit_expr_queries_ref(&select.expr, callback)?;
-    }
-    for expression in query.where_clause.iter().chain(query.having.iter()) {
+    for expression in query
+        .select
+        .iter()
+        .map(|select| &select.expr)
+        .chain(query.where_clause.iter())
+        .chain(query.having.iter())
+        .chain(&query.group_by)
+        .chain(query.order_by.iter().map(|order| &order.expr))
+        .chain(query.limit_by.iter().flat_map(|(_, keys)| keys))
+    {
         visit_expr_queries_ref(expression, callback)?;
-    }
-    for expression in &query.group_by {
-        visit_expr_queries_ref(expression, callback)?;
-    }
-    for order in &query.order_by {
-        visit_expr_queries_ref(&order.expr, callback)?;
-    }
-    if let Some((_, keys)) = &query.limit_by {
-        for key in keys {
-            visit_expr_queries_ref(key, callback)?;
-        }
     }
     for arm in &query.union_all {
         visit_queries(arm, callback)?;
@@ -73,10 +68,10 @@ pub fn visit_expressions<'a>(
         }
         Expr::UnaryOp { expr, .. }
         | Expr::InSubquery { expr, .. }
-        | Expr::InSelect { expr, .. } => {
+        | Expr::InSelect { expr, .. }
+        | Expr::Lambda { body: expr, .. } => {
             visit_expressions(expr, callback)?;
         }
-        Expr::Lambda { body, .. } => visit_expressions(body, callback)?,
         Expr::FuncCall { args, .. } => {
             for argument in args {
                 visit_expressions(argument, callback)?;
@@ -112,22 +107,17 @@ pub fn visit_queries_mut(
         visit_queries_mut(&mut cte.query, callback)?;
     }
     visit_table_queries(&mut query.from, callback)?;
-    for select in &mut query.select {
-        visit_expr_queries(&mut select.expr, callback)?;
-    }
-    for expression in query.where_clause.iter_mut().chain(query.having.iter_mut()) {
+    for expression in query
+        .select
+        .iter_mut()
+        .map(|select| &mut select.expr)
+        .chain(query.where_clause.iter_mut())
+        .chain(query.having.iter_mut())
+        .chain(&mut query.group_by)
+        .chain(query.order_by.iter_mut().map(|order| &mut order.expr))
+        .chain(query.limit_by.iter_mut().flat_map(|(_, keys)| keys))
+    {
         visit_expr_queries(expression, callback)?;
-    }
-    for expression in &mut query.group_by {
-        visit_expr_queries(expression, callback)?;
-    }
-    for order in &mut query.order_by {
-        visit_expr_queries(&mut order.expr, callback)?;
-    }
-    if let Some((_, keys)) = &mut query.limit_by {
-        for key in keys {
-            visit_expr_queries(key, callback)?;
-        }
     }
     for arm in &mut query.union_all {
         visit_queries_mut(arm, callback)?;
@@ -172,10 +162,9 @@ fn visit_expr_queries(
             visit_expr_queries(left, callback)?;
             visit_expr_queries(right, callback)
         }
-        Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
-            visit_expr_queries(expr, callback)
-        }
-        Expr::Lambda { body, .. } => visit_expr_queries(body, callback),
+        Expr::UnaryOp { expr, .. }
+        | Expr::InSubquery { expr, .. }
+        | Expr::Lambda { body: expr, .. } => visit_expr_queries(expr, callback),
         Expr::FuncCall { args, .. } => {
             for argument in args {
                 visit_expr_queries(argument, callback)?;
