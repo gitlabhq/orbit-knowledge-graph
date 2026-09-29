@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use query_data_model::{EdgeField, QueryDataModel};
 
-use super::bind::{BoundQuery, Plan, Source, bind_node, call};
+use super::bind::{BoundQuery, Plan, Source, bind_filter, bind_node, call};
 use super::generic::{Expr, JoinKind, Node, Op, ValueType, Values};
 use super::physical::Scalar;
 use crate::error::{QueryError, Result};
@@ -75,12 +75,9 @@ pub fn traversal(
 
     let mut edge_plans = Vec::new();
     for (relationship, names) in input.relationships.iter().zip(edge_outputs) {
-        if relationship.hops != HopRange::default()
-            || relationship.direction == Direction::Both
-            || !relationship.filters.is_empty()
-        {
+        if relationship.hops != HopRange::default() || relationship.direction == Direction::Both {
             return Err(QueryError::Validation(
-                "edge binding currently supports directed single hops without edge filters".into(),
+                "edge binding currently supports directed single hops".into(),
             ));
         }
 
@@ -152,6 +149,36 @@ pub fn traversal(
             predicate = call(Scalar::And, vec![predicate, kinds]);
         }
 
+        let mut filters: Vec<_> = relationship.filters.iter().collect();
+        filters.sort_unstable_by_key(|(name, _)| *name);
+
+        for (name, filters) in filters {
+            let field = match name.as_str() {
+                "source_id" => EdgeField::SourceId,
+                "target_id" => EdgeField::TargetId,
+                "source_kind" => EdgeField::SourceKind,
+                "target_kind" => EdgeField::TargetKind,
+                "relationship_kind" => EdgeField::RelationshipKind,
+                _ => {
+                    return Err(QueryError::Validation(format!(
+                        "edge property {name} has no semantic binding yet"
+                    )));
+                }
+            };
+            let value = fields
+                .iter()
+                .find(|(_, candidate)| *candidate == field)
+                .unwrap()
+                .0;
+
+            for filter in filters {
+                predicate = call(
+                    Scalar::And,
+                    vec![predicate, bind_filter(value, filter, &values)?],
+                );
+            }
+        }
+
         let edge = Node {
             op: Op::Filter(predicate),
             inputs: vec![Node {
@@ -180,34 +207,31 @@ pub fn traversal(
             .position(|(aliases, _)| aliases.contains(&relationship.from))
             .unwrap();
         let (mut aliases, left) = components.remove(from_index);
-        let mut root = join(left, edge, Expr::Bool(true));
+        let (from, to) = if relationship.direction == Direction::Incoming {
+            ((target, ids[1]), (source, ids[0]))
+        } else {
+            ((source, ids[0]), (target, ids[1]))
+        };
+        let equality =
+            |(node, edge)| call(Scalar::Equal, vec![Expr::Value(node), Expr::Value(edge)]);
+        let already_joined = aliases.contains(&relationship.to);
+        let condition = if already_joined {
+            call(Scalar::And, vec![equality(from), equality(to)])
+        } else {
+            equality(from)
+        };
+        let mut root = join(left, edge, condition);
 
-        if !aliases.contains(&relationship.to) {
+        if !already_joined {
             let to_index = components
                 .iter()
                 .position(|(aliases, _)| aliases.contains(&relationship.to))
                 .unwrap();
             let (right_aliases, right) = components.remove(to_index);
             aliases.extend(right_aliases);
-            root = join(root, right, Expr::Bool(true));
+            root = join(root, right, equality(to));
         }
 
-        root = Node {
-            op: Op::Filter(call(
-                Scalar::And,
-                vec![
-                    call(
-                        Scalar::Equal,
-                        vec![Expr::Value(source), Expr::Value(ids[0])],
-                    ),
-                    call(
-                        Scalar::Equal,
-                        vec![Expr::Value(target), Expr::Value(ids[1])],
-                    ),
-                ],
-            )),
-            inputs: vec![root],
-        };
         output_values.extend(ids);
         components.push((aliases, root));
     }

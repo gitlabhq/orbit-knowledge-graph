@@ -81,3 +81,49 @@ fn shared_endpoint_joins_resolve_each_node_once() {
     assert_eq!(rows, vec![("a".into(), "b".into(), "c".into())]);
     assert_eq!(compiled.base.result_context.edges().len(), 2);
 }
+
+#[test]
+fn incoming_edge_filters_use_stored_endpoints() {
+    let ontology = Arc::new(Ontology::load_embedded().unwrap());
+    let connection = duckdb::Connection::open_in_memory().unwrap();
+    connection.execute_batch(
+        "CREATE TABLE gl_definition(id BIGINT, name VARCHAR);
+         CREATE TABLE gl_edge(source_id BIGINT, target_id BIGINT, source_kind VARCHAR, target_kind VARCHAR, relationship_kind VARCHAR);
+         INSERT INTO gl_definition VALUES (1, 'center'), (2, 'caller'), (3, 'other');
+         INSERT INTO gl_edge VALUES
+             (2, 1, 'Definition', 'Definition', 'CALLS'),
+             (2, 1, 'Definition', 'Definition', 'CALLS'),
+             (3, 1, 'Definition', 'Definition', 'CALLS'),
+             (1, 2, 'Definition', 'Definition', 'CALLS');"
+    ).unwrap();
+
+    for (source_ids, expected_count) in [(vec![2], 2), (vec![1], 0), (vec![2, 99], 2)] {
+        let query = serde_json::json!({
+            "query_type": "traversal",
+            "nodes": [
+                { "id": "a", "entity": "Definition", "node_ids": [1], "columns": ["name"] },
+                { "id": "b", "entity": "Definition", "columns": ["name"] }
+            ],
+            "relationships": [{
+                "type": "CALLS",
+                "from": "a",
+                "to": "b",
+                "direction": "incoming",
+                "filters": {
+                    "source_id": { "in": source_ids },
+                    "target_id": { "eq": 1 }
+                }
+            }]
+        });
+        let compiled = compile_local(&query.to_string(), Frontend::JsonDsl, &ontology).unwrap();
+        let rows = connection
+            .prepare(&compiled.base.render())
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>("b_name"))
+            .unwrap()
+            .collect::<duckdb::Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(rows, vec!["caller"; expected_count]);
+    }
+}
