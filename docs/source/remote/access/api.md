@@ -41,6 +41,9 @@ passed as a Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
+To query from a script or CI/CD job without a personal account, use a
+[service account](../security.md#service-accounts).
+
 ## Billing
 
 During the beta, API calls do not consume GitLab Credits.
