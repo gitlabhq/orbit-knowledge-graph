@@ -80,6 +80,10 @@ static LANG_CONFIG: std::sync::LazyLock<LangConfig> = std::sync::LazyLock::new(|
 pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
     match lang_id {
         SupportLang::Python => Some(include_str!("../langs/python.yaml")),
+        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
+            Some(include_str!("../langs/typescript.yaml"))
+        }
+        SupportLang::Rust => Some(include_str!("../langs/rust.yaml")),
         SupportLang::Go => Some(include_str!("../langs/go.yaml")),
         SupportLang::Php => Some(include_str!("../langs/php.yaml")),
         SupportLang::Java => Some(include_str!("../langs/java.yaml")),
@@ -321,7 +325,7 @@ fn from_tree_sitter(
 }
 
 struct TsCache {
-    lang: Option<SupportLang>,
+    lang: Option<(SupportLang, u64)>,
     kinds: Vec<u16>,
     fields: Vec<u16>,
     parser: tree_sitter::Parser,
@@ -329,7 +333,8 @@ struct TsCache {
 
 impl TsCache {
     fn ensure(&mut self, support_lang: SupportLang, lang: &Lang) {
-        if self.lang == Some(support_lang) {
+        let key = (support_lang, lang.kinds.id());
+        if self.lang == Some(key) {
             return;
         }
         let ts = support_lang.ts_language();
@@ -345,7 +350,7 @@ impl TsCache {
         self.parser
             .set_language(&ts)
             .expect("compiled-in grammar matches the tree-sitter ABI");
-        self.lang = Some(support_lang);
+        self.lang = Some(key);
     }
 }
 
