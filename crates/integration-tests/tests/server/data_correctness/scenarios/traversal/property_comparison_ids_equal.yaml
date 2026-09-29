@@ -1,0 +1,16 @@
+description: Cross-node ID equality executes without undefined node aliases
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)
+    WHERE g.id = p.id
+    RETURN g, p LIMIT 20
+
+expect:
+  node_count: 0
+  total_edge_count: 0
+  nodes:
+    Group: { ids: [] }
+    Project: { ids: [] }
+  edges:
+    CONTAINS: []

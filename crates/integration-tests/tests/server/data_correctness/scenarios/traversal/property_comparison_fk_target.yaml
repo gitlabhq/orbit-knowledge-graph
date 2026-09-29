@@ -1,0 +1,18 @@
+description: A pinned FK target remains available to cross-node property comparisons
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest)
+    WHERE p.id < mr.id AND p.visibility_level = g.visibility_level
+    RETURN g, p, mr LIMIT 20
+
+expect:
+  node_count: 6
+  nodes:
+    Group: { ids: [100] }
+    Project: { ids: [1000] }
+    MergeRequest: { ids: [2000, 2001, 2004, 2005] }
+  edges:
+    CONTAINS: [[100, 1000]]
+    IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
+  referential_integrity: true

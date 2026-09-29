@@ -402,6 +402,11 @@ impl EdgeVariantScope {
     pub fn is_scope_preserving(self) -> bool {
         matches!(self, Self::NamespaceAnchor | Self::SameNamespace)
     }
+
+    #[must_use]
+    pub fn propagates_to_source(self, relationship: &str, source: &str) -> bool {
+        self.is_scope_preserving() && !(relationship == "CONTAINS" && source == "Group")
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -89,7 +89,6 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
             });
         }
     }
-    prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
 
     if let Some(inner_anchor) = inner_anchor {
         let prev_jc = prev_hop.join_prev.as_ref().unwrap();
@@ -101,20 +100,11 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
 
     Some(Query {
         select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
-        from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
+        from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner)
+            .with_relationship(prev_hop.input_index),
         where_clause: Expr::conjoin(prev_preds),
         ..Default::default()
     })
-}
-
-/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
-/// project/group scope, or `None` when the hop carries no resolved prefix.
-/// Emitted alongside the broad authorization filter so ClickHouse can seek the
-/// edge PK to the project's contiguous range instead of the whole org.
-fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
-    hop.scope_proof
-        .as_ref()
-        .map(|scope| crate::scope::scope_predicate(scope, alias))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -198,15 +188,17 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             )?;
 
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
-            inner_preds.extend(edge_scope_predicate(hop, &alias));
 
-            from = Some(limit_by_scan(
-                &hop.edge_table,
-                &alias,
-                vec![SelectExpr::star()],
-                sort_key,
-                inner_preds,
-            ));
+            from = Some(
+                limit_by_scan(
+                    &hop.edge_table,
+                    &alias,
+                    vec![SelectExpr::star()],
+                    sort_key,
+                    inner_preds,
+                )
+                .with_relationship(hop.input_index),
+            );
         } else {
             let mut narrow_in: Vec<Expr> = Vec::new();
             emit_filter_narrowing(
@@ -263,17 +255,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 union
             } else if dedup_edges {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
-                inner.extend(edge_scope_predicate(hop, &alias));
                 if push_narrow_inner {
                     inner.extend(narrow_in);
                 } else {
                     where_parts.extend(narrow_in);
                 }
-                dedup_edge_scan(&hop.edge_table, &alias, inner)
+                dedup_edge_scan(&hop.edge_table, &alias, inner).with_relationship(hop.input_index)
             } else {
                 where_parts.extend(narrow_in);
-                where_parts.extend(edge_scope_predicate(hop, &alias));
-                TableRef::scan(&hop.edge_table, &alias)
+                TableRef::scan(&hop.edge_table, &alias).with_relationship(hop.input_index)
             };
 
             if let Some(prev_from) = from.take() {
@@ -362,7 +352,6 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             &plan.table_columns,
                             false,
                         );
-                        nw.extend(edge_scope_predicate(hop, &narrow_alias));
                         emit_node_ids_on_edge(
                             &mut nw,
                             &narrow_alias,
@@ -386,7 +375,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                 Expr::col(&narrow_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
-                            from: TableRef::scan(&hop.edge_table, &narrow_alias),
+                            from: TableRef::scan(&hop.edge_table, &narrow_alias)
+                                .with_relationship(hop.input_index),
                             where_clause: Expr::conjoin(nw),
                             ..Default::default()
                         };

@@ -42,7 +42,6 @@ pub struct Plan {
     pub table_columns: HashMap<String, HashSet<String>>,
     /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
     pub table_sort_keys: HashMap<String, Vec<String>>,
-    pub scope_requirements: Vec<crate::scope::ScopeProof>,
     pub body: PlanBody,
 }
 
@@ -175,25 +174,22 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
 
 pub fn plan_clickhouse(
     input: &Input,
-    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
 ) -> Result<Plan> {
-    plan(input, scope_proofs, model, hydration_options, true)
+    plan(input, model, hydration_options, true)
 }
 
 pub fn plan_duckdb(
     input: &Input,
-    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
 ) -> Result<Plan> {
-    plan(input, scope_proofs, model, hydration_options, false)
+    plan(input, model, hydration_options, false)
 }
 
 fn plan<M>(
     input: &Input,
-    scope_proofs: &HashMap<String, crate::scope::ScopeProof>,
     model: &M,
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
@@ -203,7 +199,7 @@ where
 {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            Ok(edge_chain::plan(input, scope_proofs, model, use_fk_elision))
+            Ok(edge_chain::plan(input, model, use_fk_elision))
         }
         QueryType::Neighbors => neighbors::plan_neighbors(input, model),
         QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),

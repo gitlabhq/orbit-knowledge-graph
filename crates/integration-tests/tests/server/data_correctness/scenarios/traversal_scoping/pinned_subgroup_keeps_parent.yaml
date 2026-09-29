@@ -1,0 +1,19 @@
+description: A pinned subgroup does not constrain its parent to the subgroup traversal path
+
+query:
+  gql: |
+    MATCH (parent:Group)-[:CONTAINS]->(child:Group {id: 200})
+    WHERE parent.name <> child.name
+    RETURN parent.name, child.name LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    Group:
+      ids: [100, 200]
+      rows:
+        - { id: 100, name: Public Group }
+        - { id: 200, name: Deep Group A }
+  edges:
+    CONTAINS: [[100, 200]]
+  referential_integrity: true

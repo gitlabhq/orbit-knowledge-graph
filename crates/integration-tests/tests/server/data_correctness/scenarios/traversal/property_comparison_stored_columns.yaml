@@ -1,0 +1,16 @@
+description: Cross-node property comparisons read both node tables before hydration
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)
+    WHERE g.visibility_level = p.visibility_level
+    RETURN g, p LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    Group: { ids: [100] }
+    Project: { ids: [1000], absent: [1002] }
+  edges:
+    CONTAINS: [[100, 1000]]
+  referential_integrity: true

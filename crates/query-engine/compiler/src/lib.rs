@@ -1982,6 +1982,73 @@ mod tests {
     }
 
     #[test]
+    fn scope_anchor_aggregation_rejects_join_predicates() {
+        for predicate in ["g.id = p.id", "p.id = g.id"] {
+            let query =
+                format!("MATCH (g:Group {{id: 100}})-[:CONTAINS]->(p:Project) WHERE {predicate}");
+            let error = compile(
+                &format!("{query} RETURN count(p) AS c LIMIT 20"),
+                Frontend::Gql,
+                &ONTOLOGY,
+                &security_ctx(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, QueryError::Validation(ref message)
+                    if message == "cross-node property comparisons are only supported in traversal queries"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_proofs_preserve_deeper_authorization_filters() {
+        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
+            .unwrap()
+            .with_scope_proofs(std::collections::HashMap::from([(
+                "p".into(),
+                ScopeProof::literal("1/2/"),
+            )]));
+        for (query, lookup) in [
+            (
+                "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
+                false,
+            ),
+            ("MATCH (p:Project {id: 100}) RETURN p LIMIT 20", true),
+            (
+                "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
+                true,
+            ),
+        ] {
+            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
+            let sql = compiled.base.render();
+            for path in ["1/2/", "1/2/3/", "1/2/4/"] {
+                assert!(
+                    sql.contains(&format!("startsWith(p.traversal_path, '{path}')")),
+                    "{query}: {sql}"
+                );
+            }
+            if lookup {
+                assert!(sql.contains("argMaxOrNull"), "{query}: {sql}");
+                for path in ["1/2/3/", "1/2/4/"] {
+                    assert!(
+                        sql.contains(&format!("startsWith(_scope.traversal_path, '{path}')")),
+                        "{query}: {sql}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",
