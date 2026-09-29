@@ -182,8 +182,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs' } }
 
   - name: "trait associated UFCS resolves to impl associated function"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_associated_ufcs' AND callee.name = 'construct'
@@ -193,8 +191,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "type alias associated call resolves to underlying impl"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_type_alias_associated' AND callee.name = 'construct'

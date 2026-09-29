@@ -878,7 +878,7 @@ fn chain<'a>(
 ) -> Option<Cursor<'a>> {
     let c = c.reference();
     let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
-        return root(c);
+        return value_type(ctx, root(c)?);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
     let member = method_up(ctx, receiver, m.sym(), c.fi() as usize)
@@ -891,6 +891,11 @@ fn chain<'a>(
 fn value_type<'a>(ctx: &'a ResolveCtx, d: Cursor<'a>) -> Option<Cursor<'a>> {
     if d.has(C::EnumVariant) {
         d.enclosing_def(&[C::Enum])
+    } else if d.has(C::TypeAlias) {
+        match d.child(C::SsaTyped) {
+            Some(aliased) => resolve_chain(ctx, aliased),
+            None => Some(d),
+        }
     } else if d.has(C::FieldDef) || d.has(C::Property) {
         let declared = d.child(C::Binding).and_then(Cursor::typed);
         match declared.or_else(|| d.child(C::SsaReturnType)) {
