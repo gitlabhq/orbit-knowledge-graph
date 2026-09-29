@@ -800,6 +800,21 @@ async fn acquire(
 }
 
 #[cfg(test)]
+impl CodeIndexer {
+    pub(crate) async fn occupy_small_indexing_lanes(&self) -> OwnedSemaphorePermit {
+        let lanes = self
+            .small_indexing_slots
+            .clone()
+            .expect("small indexing lanes are bounded");
+        let free = lanes.available_permits() as u32;
+        lanes
+            .acquire_many_owned(free)
+            .await
+            .expect("lanes are open")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;

@@ -233,25 +233,35 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     for (i, hop) in plan.hops.iter().enumerate() {
         let ea = format!("e{i}");
         let fk = hop.fk.as_ref().unwrap();
-        let from_np = plan.nodes.get(&hop.from_node);
-        let to_np = plan.nodes.get(&hop.to_node);
-        let from_entity = from_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
-        let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
+        let (source, target) = match hop.direction {
+            Direction::Incoming => (&hop.to_node, &hop.from_node),
+            Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
+        };
+        let source_entity = plan
+            .nodes
+            .get(source)
+            .and_then(|node| node.entity.as_deref())
+            .unwrap_or("");
+        let target_entity = plan
+            .nodes
+            .get(target)
+            .and_then(|node| node.entity.as_deref())
+            .unwrap_or("");
         let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
 
-        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == hop.from_node {
+        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == *source {
             (
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                from_entity,
+                source_entity,
                 Expr::col(center_alias, &fk.fk_column),
-                to_entity,
+                target_entity,
             )
         } else {
             (
                 Expr::col(center_alias, &fk.fk_column),
-                from_entity,
+                source_entity,
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                to_entity,
+                target_entity,
             )
         };
 

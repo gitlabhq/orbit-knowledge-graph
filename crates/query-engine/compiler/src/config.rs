@@ -10,7 +10,8 @@ const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
 
-use crate::ast::{Node, Query, TableRef};
+use crate::ast::visit::{visit_queries, visit_relations};
+use crate::ast::{Node, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
@@ -41,7 +42,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub raw: String,
         pub input: Input,
         pub pagination: PaginationContext,
-        pub scope_proofs: std::collections::HashMap<String, crate::scope::ScopeProof>,
+        pub scope_proofs: crate::scope::QueryScope,
         pub hydration_options: HydrationCompileOptions,
         pub query_plan: QueryPlan,
         pub node: Node,
@@ -82,12 +83,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan_clickhouse {
             reads_env: [data_model]
-            reads_state: [scope_proofs, hydration_options]
+            reads_state: [hydration_options]
             mutates: [input, query_plan]
         }
         plan_duckdb {
             reads_env: [data_model]
-            reads_state: [scope_proofs, hydration_options]
+            reads_state: [hydration_options]
             mutates: [input, query_plan]
         }
         lower {
@@ -95,8 +96,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query_plan, node, lowered_metadata]
         }
         scope_requirements {
-            reads_state: [input]
-            mutates: [query_plan, node]
+            reads_env: [data_model]
+            reads_state: [scope_proofs]
+            mutates: [node]
         }
         response_policy {
             reads_env: [data_model]
@@ -150,13 +152,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, security, cursor, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
@@ -268,6 +270,7 @@ where
     let security_ctx = ctx.security_ctx().clone();
     let mut input = require(ctx.take_input(), "input")?;
     let scope_proofs = restrict::restrict(&mut input, ctx.data_model(), &security_ctx)?;
+    let scope_proofs = crate::scope::prepare(&mut input, scope_proofs, ctx.data_model());
     ctx.set_input(input);
     ctx.set_scope_proofs(scope_proofs);
     Ok(())
@@ -287,24 +290,18 @@ fn plan_duckdb(
 
 fn plan_with<C>(
     ctx: &mut C,
-    build: impl FnOnce(
-        &Input,
-        &std::collections::HashMap<String, crate::scope::ScopeProof>,
-        &C::Model,
-        HydrationCompileOptions,
-    ) -> Result<QueryPlan>,
+    build: impl FnOnce(&Input, &C::Model, HydrationCompileOptions) -> Result<QueryPlan>,
 ) -> Result<()>
 where
     C: CompilerCtx,
 {
     let input = require(ctx.take_input(), "input")?;
-    let scope_proofs = ctx.scope_proofs().as_ref().cloned().unwrap_or_default();
     let hydration_options = ctx
         .hydration_options()
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let query_plan = build(&input, &scope_proofs, ctx.data_model(), hydration_options)?;
+    let query_plan = build(&input, ctx.data_model(), hydration_options)?;
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
@@ -321,18 +318,10 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let mut node = require(ctx.take_node(), "node")?;
-    if let Node::Query(query) = &mut node {
-        for requirement in &query_plan.scope_requirements {
-            let guard = crate::scope::resolved_scope_guard(requirement);
-            query.where_clause = Some(match query.where_clause.take() {
-                Some(existing) => crate::ast::Expr::and(existing, guard),
-                None => guard,
-            });
-        }
+    if let Some(scope) = ctx.scope_proofs() {
+        crate::scope::apply(&mut node, scope, ctx.data_model())?;
     }
-    ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
 }
@@ -385,8 +374,6 @@ where
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut node = require(ctx.take_node(), "node")?;
-    let security_ctx =
-        security_ctx.with_scope_proofs(ctx.scope_proofs().as_ref().cloned().unwrap_or_default());
     security::apply_security_context(&mut node, &security_ctx, ctx.data_model())?;
     ctx.set_node(node);
     Ok(())
@@ -434,13 +421,18 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node {
         let derived = &mut config.compiler_derived;
-        derived.enable_materialized_cte = q.ctes.iter().any(|c| c.materialized);
-        derived.optimize_move_to_prewhere_if_final =
-            scans_final(q) || q.ctes.iter().any(|c| scans_final(&c.query));
-        if !q.ctes.is_empty() {
-            derived.use_index_for_in_with_subqueries_max_values =
-                Some(IN_SUBQUERY_INDEX_MAX_VALUES);
-        }
+        visit_queries(q, &mut |query| {
+            derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
+            visit_relations(&query.from, &mut |relation| {
+                derived.optimize_move_to_prewhere_if_final |=
+                    matches!(relation, TableRef::Scan { final_: true, .. });
+            });
+            if !query.ctes.is_empty() {
+                derived.use_index_for_in_with_subqueries_max_values =
+                    Some(IN_SUBQUERY_INDEX_MAX_VALUES);
+            }
+            Ok(())
+        })?;
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
@@ -465,10 +457,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);
     Ok(())
-}
-
-fn scans_final(q: &Query) -> bool {
-    matches!(q.from, TableRef::Scan { final_: true, .. })
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {

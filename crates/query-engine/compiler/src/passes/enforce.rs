@@ -6,6 +6,7 @@
 //! For aggregation queries, only nodes that appear in node group keys can have
 //! their ID columns selected (aggregated nodes don't have individual IDs).
 
+use crate::ast::visit::visit_relations;
 use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
@@ -551,12 +552,14 @@ fn enforce_return_columns(
 }
 
 fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
-    match from {
-        TableRef::Scan { alias, .. }
+    let mut found = false;
+    visit_relations(from, &mut |relation| {
+        if let TableRef::Scan { alias, .. }
         | TableRef::Subquery { alias, .. }
-        | TableRef::Union { alias, .. } => alias == target,
-        TableRef::Join { left, right, .. } => {
-            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
+        | TableRef::Union { alias, .. } = relation
+        {
+            found |= alias == target;
         }
-    }
+    });
+    found
 }

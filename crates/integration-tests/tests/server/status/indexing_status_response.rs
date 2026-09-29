@@ -5,7 +5,7 @@ use orbit_server::indexing_status::{IndexingStatusService, build_indexing_status
 use orbit_server::proto::{IndexingPhase, NamespaceIndexingStatus, ProjectsStatus};
 use orbit_utils::traversal_path::TraversalPath;
 
-use super::fixtures::{pinned_schema, seed_namespaces};
+use super::fixtures::{pinned_schema, seed_namespaces, seed_plans, seed_project_gap};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
@@ -19,6 +19,7 @@ async fn indexing_status_response() {
         not_started_at_every_level_without_checkpoints,
         project_path_gets_its_root_phases_and_its_own_projects,
         organization_path_is_unknown,
+        error_and_project_gaps_reach_the_proto,
     );
 }
 
@@ -63,7 +64,8 @@ async fn ready_at_every_level_when_everything_completed(ctx: &TestContext) {
             "source_code",
             Some(ProjectsStatus {
                 indexed: 1,
-                total_known: 1
+                total_known: 1,
+                gaps: 0
             })
         )]
     );
@@ -110,7 +112,8 @@ async fn project_path_gets_its_root_phases_and_its_own_projects(ctx: &TestContex
             "source_code",
             Some(ProjectsStatus {
                 indexed: 1,
-                total_known: 1
+                total_known: 1,
+                gaps: 0
             })
         )]
     );
@@ -120,7 +123,8 @@ async fn project_path_gets_its_root_phases_and_its_own_projects(ctx: &TestContex
             "source_code",
             Some(ProjectsStatus {
                 indexed: 1,
-                total_known: 2
+                total_known: 2,
+                gaps: 0
             })
         )]
     );
@@ -130,4 +134,25 @@ async fn organization_path_is_unknown(ctx: &TestContext) {
     let status = respond(ctx, &["1/"]).await.remove(0);
 
     assert_eq!(phase_of(status.phase), IndexingPhase::Unknown);
+}
+
+async fn error_and_project_gaps_reach_the_proto(ctx: &TestContext) {
+    let db = ctx.fork("indexing_status_response_gaps").await;
+    seed_plans(&db, 134, &[]).await;
+    seed_project_gap(&db, 134, 1340).await;
+
+    let status = respond(&db, &["2/134/"]).await.remove(0);
+
+    assert_eq!(phase_of(status.phase), IndexingPhase::Error);
+    assert_eq!(
+        projects_by_domain(&status),
+        [(
+            "source_code",
+            Some(ProjectsStatus {
+                indexed: 0,
+                total_known: 1,
+                gaps: 1
+            })
+        )]
+    );
 }

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::scope::{ScopeProof, scope_predicate};
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -549,12 +548,11 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_proof.as_ref(),
             )
         })
         .collect();
 
-    let union = TableRef::union_all(queries, alias);
+    let union = TableRef::union_all(queries, alias).with_relationship(hop.input_index);
 
     // For incoming edges, the from_node is on the target side and the
     // to_node is on the source side (the depth arm already swaps the
@@ -586,11 +584,7 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_proof: Option<&ScopeProof>,
 ) -> Query {
-    let scope_pred =
-        |alias: &str| -> Option<Expr> { scope_proof.map(|s| scope_predicate(s, alias)) };
-
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();
     if let Some(types) = type_filter
@@ -607,7 +601,6 @@ pub(super) fn build_depth_arm(
         where_parts.push(f);
     }
     where_parts.push(deleted_false("e1"));
-    where_parts.extend(scope_pred("e1"));
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
@@ -628,9 +621,6 @@ pub(super) fn build_depth_arm(
             )
         {
             join_on = Expr::and(join_on, tc);
-        }
-        if let Some(sp) = scope_pred(&curr) {
-            join_on = Expr::and(join_on, sp);
         }
         from = TableRef::join(JoinType::Inner, from, right, join_on);
     }

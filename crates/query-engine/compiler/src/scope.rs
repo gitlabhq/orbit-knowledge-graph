@@ -1,5 +1,18 @@
 use std::collections::HashMap;
 
+mod application;
+mod preparation;
+
+pub use application::apply;
+pub use preparation::prepare;
+
+#[derive(Clone, Default)]
+pub struct QueryScope {
+    nodes: HashMap<String, ScopeProof>,
+    relationships: Vec<Option<ScopeProof>>,
+    requirements: Vec<ScopeProof>,
+}
+
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 

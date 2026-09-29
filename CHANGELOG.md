@@ -1,3 +1,22 @@
+## [0.132.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.131.0...v0.132.0) (2026-09-28)
+
+### Features
+
+* **code-graph-incremental:** snapshots and reindex ([384729d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/384729de9c5d88cc5172d9ec41a9f0d373fd1d60)) by Michael Usachenko
+* **gql:** accept the neighbors endpoint on either side and name the ORDER BY limit ([4e83d2f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4e83d2fe6c40073af2c7c5e8fb26672eab1bb23d)) by Aaron Algutifan
+
+### Fixes
+
+* **cli:** guide coding agents to Orbit skill ([8984313](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8984313b36958abd05945d12959ce0f8eb45d3cd)) by Dmitry Gruzd
+* **indexer:** limit code backfill retries for project that always fail ([eb21a2e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb21a2e59f9abdad7049eab9f505ca689fd1c1ea)) by Jean-Gabriel Doyon
+
+### Other
+
+* add tw-docops CODEOWNERS for docs lint config ([5835cda](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5835cdadc74ee66f36884d927d84ad873de0a25c)) by Marcel Amirault
+* **code-graph-incremental:** run the YAML suites through the incremental engine ([e9167a7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e9167a730f4bc17c771fb1317f94bfe695dfb7c0)) by Michael Usachenko
+* document draft MR CI skipping ([4d953c9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4d953c97a27c3c7bfabd5f30bd056eb383fb6e03)) by Dmitry Gruzd
+* **querying:** begin separation of data model and ontology ([b7bce6f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7bce6fbe37f2055d30ccf2f549a123306da698b)) by Michael Usachenko
+
 ## [0.131.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.130.0...v0.131.0) (2026-09-28)
 
 ### Features

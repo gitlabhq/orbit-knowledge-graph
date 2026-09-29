@@ -23,6 +23,29 @@ fn compile_to_ast_works() {
 }
 
 #[test]
+fn incoming_self_relationship_keeps_the_foreign_key_on_its_source() {
+    let ontology = crate::compiler::setup::embedded_ontology();
+    let compiled = compile_pair(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
+                {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
+            ],
+            "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}],
+            "limit": 10
+        }"#,
+        "MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10",
+        &ontology,
+        &test_ctx(),
+    ).unwrap();
+    let sql = compiled.base.render();
+    assert!(sql.contains("canceled.auto_canceled_by_id"), "{sql}");
+    assert!(!sql.contains("canceling.auto_canceled_by_id"), "{sql}");
+    assert!(!sql.contains("FROM gl_edge"), "{sql}");
+}
+
+#[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
     let json = r#"{
@@ -1078,6 +1101,55 @@ fn orbit_query_rejects_neighbors_center_all_properties() {
     let json = r#"{"query_type":"neighbors","nodes":[{"id":"center","entity":"User","node_ids":[1],"columns":["username","state"]}],"neighbors":{"direction":"both"}}"#;
     let query = "MATCH (center:User {id: 1})--(n) RETURN center.username, center.state, n";
     compile_pair(json, query, &embedded_ontology(), &test_ctx()).unwrap();
+}
+
+#[test]
+fn orbit_query_neighbors_accepts_the_endpoint_on_either_side() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    for (direction, rel_types, endpoint_first, center_first) in [
+        (
+            "incoming",
+            r#""rel_types":["AUTHORED"],"#,
+            "MATCH (n)-[:AUTHORED]->(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})<-[:AUTHORED]-(n) RETURN center, n",
+        ),
+        (
+            "outgoing",
+            "",
+            "MATCH (n)<--(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n",
+        ),
+        (
+            "both",
+            "",
+            "MATCH (n)--(center:WorkItem {id: 1}) RETURN center, n",
+            "MATCH (center:WorkItem {id: 1})--(n) RETURN center, n",
+        ),
+    ] {
+        let json = format!(
+            r#"{{"query_type":"neighbors","nodes":[{{"id":"center","entity":"WorkItem","node_ids":[1]}}],"neighbors":{{{rel_types}"direction":"{direction}"}}}}"#
+        );
+        for query in [endpoint_first, center_first] {
+            compile_pair(&json, query, &ontology, &ctx)
+                .unwrap_or_else(|error| panic!("{query}: {error}"));
+        }
+    }
+}
+
+#[test]
+fn orbit_query_rejects_more_than_one_sort_key() {
+    for query in [
+        "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at DESC, mr.iid DESC",
+        "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.updated_at,mr.iid LIMIT 5",
+    ] {
+        let error =
+            compile(query, Frontend::Gql, &embedded_ontology(), &test_ctx()).expect_err(query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains("ORDER BY accepts one sort key")),
+            "{query}: {error}"
+        );
+    }
 }
 
 #[test]

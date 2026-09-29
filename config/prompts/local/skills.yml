@@ -1,10 +1,13 @@
 name: skills
-version: 1.5.0
-short: Read instance-matched agent skill files with `skills get`
+version: 1.6.0
+short: Discover and read instance-matched agent skill files with `glab orbit skills get`
 description: >-
-  Read instance-matched agent skill files with `skills get`.
+  Discover and read instance-matched agent skill files with `glab orbit skills get`.
+
+
+  Coding agents should start with `glab orbit skills get orbit` and follow the returned guidance.
 
 
   With no argument, lists skills from the selected GitLab instance, or from the embedded local tree when offline.
-  Use `skills get orbit` with an optional path relative to the composed skill root.
+  Use `glab orbit skills get orbit` with an optional path relative to the composed skill root.
   The path defaults to `SKILL.md`.

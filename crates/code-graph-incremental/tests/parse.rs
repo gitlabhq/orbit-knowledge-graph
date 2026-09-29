@@ -84,7 +84,7 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
 }
 
 #[test]
-fn only_this_pipelines_files_are_parsed() {
+fn only_this_familys_files_are_parsed() {
     let repo = tempfile::tempdir().unwrap();
     write_all(
         repo.path(),
@@ -138,4 +138,45 @@ fn strip(entries: Vec<FileInventoryEntry>) -> Vec<(String, u64, String, Option<S
             )
         })
         .collect()
+}
+
+#[test]
+fn a_family_parses_each_member_with_its_own_grammar() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[
+            ("User.java", b"public class User { }\n"),
+            ("Service.kt", b"class Service(val user: User)\n"),
+            ("main.py", b"x = 1\n"),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Kotlin, Limits::UNLIMITED).unwrap();
+    assert_eq!(
+        env.members,
+        [SupportLang::Java, SupportLang::Kotlin, SupportLang::Scala]
+    );
+
+    let parsed = parse_repo(&env, repo.path());
+
+    let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
+    labels.sort();
+    assert_eq!(labels, ["Service.kt", "User.java"]);
+    for Parsed(tree) in &parsed.items {
+        assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
+    }
+}
+
+#[test]
+fn languages_in_one_family_share_a_qualified_name_separator() {
+    for (lang, _) in all_languages() {
+        for member in lang.family_members() {
+            assert_eq!(
+                member.fqn_separator(),
+                lang.fqn_separator(),
+                "{member:?} and {lang:?} are both {:?}",
+                lang.family()
+            );
+        }
+    }
 }

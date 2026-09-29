@@ -8,13 +8,13 @@
 
 use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::visit::visit_queries;
+use crate::ast::{Expr, Node, Op, Query};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
 #[cfg(test)]
 use ontology::Ontology;
-use orbit_utils::traversal_path::TraversalPath;
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
@@ -24,12 +24,7 @@ pub fn check_ast(
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     match node {
-        Node::Query(q) => {
-            for cte in &q.ctes {
-                check_query(&cte.query, ctx, model)?;
-            }
-            check_query(q, ctx, model)
-        }
+        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -48,80 +43,9 @@ fn check_query(
         }
     }
 
-    // Recurse into UNION ALL arms (defense-in-depth: currently only
-    // recursive CTE arms which scan CTE names, not gl_* tables).
-    for arm in &q.union_all {
-        check_query(arm, ctx, model)?;
-    }
-
-    if let Some(where_clause) = q.where_clause.as_ref() {
-        check_subqueries_in_expr(where_clause, ctx, model)?;
-    }
-
-    check_derived_tables_in_from(&q.from, ctx, model)
+    Ok(())
 }
 
-fn check_subqueries_in_expr(
-    expr: &Expr,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => check_query(query, ctx, model),
-        Expr::BinaryOp { left, right, .. } => {
-            check_subqueries_in_expr(left, ctx, model)?;
-            check_subqueries_in_expr(right, ctx, model)
-        }
-        Expr::UnaryOp { expr, .. }
-        | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx, model),
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                check_subqueries_in_expr(arg, ctx, model)?;
-            }
-            Ok(())
-        }
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::Star => Ok(()),
-    }
-}
-
-fn check_derived_tables_in_from(
-    table_ref: &TableRef,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match table_ref {
-        TableRef::Subquery { query, .. } => check_query(query, ctx, model),
-        TableRef::Union { queries, .. } => {
-            for arm in queries {
-                check_query(arm, ctx, model)?;
-            }
-            Ok(())
-        }
-        TableRef::Join { left, right, .. } => {
-            check_derived_tables_in_from(left, ctx, model)?;
-            check_derived_tables_in_from(right, ctx, model)
-        }
-        TableRef::Scan { .. } => Ok(()),
-    }
-}
-
-/// Checks whether `expr` scopes `alias` to the user's eligible paths.
-/// Returns true when either (a) the expression is, or AND-contains, a
-/// matching `startsWith(alias.traversal_path, path)` call, or (b) the
-/// expression is a `Bool(false)` AND-conjunct — which forces zero rows and
-/// therefore trivially scopes every alias.
-///
-/// `Bool(false)` is only accepted when reached via AND descent from the
-/// top. A `Bool(false)` that lands inside a comparison (`col = false`) or
-/// under an OR (`X OR Bool(false)`) does NOT short-circuit the clause:
-/// other rows are still reachable, so we must keep requiring an actual
-/// `startsWith` on the alias. Matching it unconditionally would let any
-/// query containing a `= false` filter bypass this defense-in-depth check.
 fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
@@ -131,53 +55,40 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
             ..
         } => true,
         Expr::BinaryOp {
-            op: crate::ast::Op::And,
+            op: Op::And,
             left,
             right,
         } => {
             has_valid_path_filter(Some(left), alias, ctx)
                 || has_valid_path_filter(Some(right), alias, ctx)
         }
-        _ => has_matching_starts_with(expr, alias, ctx),
-    }
-}
-
-/// Recursive walker used once we've left an AND-chain context. It looks
-/// only for a matching `startsWith(alias.traversal_path, path)` call and
-/// never treats a bare `Bool(false)` as a satisfying filter, so a
-/// `col = false` comparison or an OR-ed `Bool(false)` does not spoof a
-/// scoping check.
-fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> bool {
-    match expr {
+        Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } => {
+            has_valid_path_filter(Some(left), alias, ctx)
+                && has_valid_path_filter(Some(right), alias, ctx)
+        }
         Expr::FuncCall { name, args } if name == STARTS_WITH_FNAME => {
-            let has_column = args.iter().any(|a| {
-                matches!(a, Expr::Column { table, column }
-                    if table == alias && column == TRAVERSAL_PATH_COLUMN)
-            });
-            if !has_column {
+            let [Expr::Column { table, column }, path] = args.as_slice() else {
+                return false;
+            };
+            if table != alias || column != TRAVERSAL_PATH_COLUMN {
                 return false;
             }
-            // Accept a path that is a prefix of (broad/LCP) or a descendant of
-            // (tight scope prefix) an authorized path; both stay within scope.
-            args.iter().any(|a| match a {
+            match path {
                 Expr::Literal(Value::String(path))
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => {
-                    let candidate = TraversalPath::new_unchecked(path.as_str());
-                    ctx.traversal_paths
-                        .iter()
-                        .any(|tp| tp.path.overlaps(&candidate))
-                }
+                } => ctx
+                    .traversal_paths
+                    .iter()
+                    .any(|tp| path.starts_with(tp.path.as_str())),
                 _ => false,
-            })
+            }
         }
-        Expr::BinaryOp { left, right, .. } => {
-            has_matching_starts_with(left, alias, ctx)
-                || has_matching_starts_with(right, alias, ctx)
-        }
-        Expr::UnaryOp { expr: inner, .. } => has_matching_starts_with(inner, alias, ctx),
         _ => false,
     }
 }
@@ -219,6 +130,115 @@ mod tests {
     }
 
     #[test]
+    fn security_injection_and_check_cover_nested_query_positions() {
+        use crate::ast::{Cte, JoinType, OrderExpr};
+
+        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ontology = Ontology::new().with_nodes(["Project"]);
+        for position in [
+            "select",
+            "where",
+            "having",
+            "group",
+            "order",
+            "limit_by",
+            "join",
+            "in_operand",
+            "lambda",
+            "nested_cte",
+            "union",
+            "derived",
+            "table_union",
+        ] {
+            let inner = Query {
+                select: vec![SelectExpr::col("protected", "id")],
+                from: TableRef::scan("gl_project", "protected"),
+                ..Default::default()
+            };
+            let scalar = Expr::Scalar(Box::new(inner.clone()));
+            let mut query = Query {
+                select: vec![SelectExpr::new(Expr::int(1), "result")],
+                from: TableRef::scan("constant_source", "outer"),
+                ..Default::default()
+            };
+            match position {
+                "select" => query.select = vec![SelectExpr::new(scalar, "result")],
+                "where" => query.where_clause = Some(Expr::eq(scalar, Expr::int(1))),
+                "having" => query.having = Some(Expr::eq(scalar, Expr::int(1))),
+                "group" => query.group_by.push(scalar),
+                "order" => query.order_by.push(OrderExpr::asc(scalar)),
+                "limit_by" => query.limit_by = Some((1, vec![scalar])),
+                "join" => {
+                    query.from = TableRef::join(
+                        JoinType::Inner,
+                        query.from,
+                        TableRef::scan("constant_source", "other"),
+                        Expr::eq(scalar, Expr::int(1)),
+                    )
+                }
+                "in_operand" => {
+                    query.where_clause = Some(Expr::InSelect {
+                        expr: Box::new(scalar),
+                        query: Box::new(Query {
+                            from: TableRef::scan("constant_source", "lookup"),
+                            ..Default::default()
+                        }),
+                    })
+                }
+                "lambda" => {
+                    query.select = vec![SelectExpr::new(
+                        Expr::func("arrayMap", vec![Expr::lambda("x", scalar)]),
+                        "result",
+                    )]
+                }
+                "nested_cte" => query.ctes.push(Cte::new(
+                    "outer_cte",
+                    Query {
+                        ctes: vec![Cte::new("inner_cte", inner)],
+                        from: TableRef::scan("inner_cte", "nested"),
+                        ..Default::default()
+                    },
+                )),
+                "union" => query.union_all.push(inner),
+                "derived" => query.from = TableRef::subquery(inner, "derived"),
+                "table_union" => query.from = TableRef::union_all(vec![inner], "arms"),
+                _ => unreachable!(),
+            }
+            let outer_predicate = query.where_clause.clone();
+            let mut node = Node::Query(Box::new(query));
+            assert!(check(&node, &context, &ontology).is_err(), "{position}");
+            apply_security(&mut node, &context, &ontology);
+            check(&node, &context, &ontology).unwrap_or_else(|error| panic!("{position}: {error}"));
+            let Node::Query(query) = &node else {
+                unreachable!()
+            };
+            if outer_predicate.is_none() {
+                assert!(query.where_clause.is_none(), "{position}");
+            }
+            let mut protected_scans = 0;
+            visit_queries(query, &mut |query| {
+                if matches!(&query.from, TableRef::Scan { alias, .. } if alias == "protected") {
+                    protected_scans += 1;
+                    assert_eq!(
+                        query.where_clause,
+                        Some(Expr::func(
+                            "startsWith",
+                            vec![
+                                Expr::col("protected", "traversal_path"),
+                                Expr::string("42/43/")
+                            ],
+                        )),
+                        "{position}"
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(protected_scans, 1, "{position}");
+        }
+    }
+
+    #[test]
     fn fails_without_any_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
@@ -228,6 +248,37 @@ mod tests {
             err.to_string()
                 .contains("missing valid traversal_path filter")
         );
+    }
+
+    #[test]
+    fn rejects_path_filters_that_do_not_restrict_every_result() {
+        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ontology = Ontology::new().with_nodes(["Project"]);
+        let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
+        let starts_with = |left, right| Expr::func(STARTS_WITH_FNAME, vec![left, right]);
+        let authorized = starts_with(column.clone(), Expr::string("42/43/"));
+        let condition = Expr::eq(Expr::col("p", "id"), Expr::int(1));
+        for (predicate, valid) in [
+            (
+                Expr::binary(Op::Or, authorized.clone(), Expr::lit(true)),
+                false,
+            ),
+            (Expr::unary(Op::Not, authorized.clone()), false),
+            (Expr::eq(authorized.clone(), Expr::lit(false)), false),
+            (
+                Expr::binary(Op::Or, authorized.clone(), condition.clone()),
+                false,
+            ),
+            (starts_with(column.clone(), Expr::string("42/")), false),
+            (starts_with(Expr::string("42/43/"), column), false),
+            (
+                Expr::binary(Op::Or, authorized.clone(), Expr::and(authorized, condition)),
+                true,
+            ),
+        ] {
+            let node = project_query(Some(predicate));
+            assert_eq!(check(&node, &context, &ontology).is_ok(), valid, "{node:?}");
+        }
     }
 
     #[test]

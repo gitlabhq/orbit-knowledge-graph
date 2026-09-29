@@ -11,7 +11,7 @@ use code_graph::v2::{
 };
 use duckdb_client::DuckDbClient;
 
-use super::validator::{load_suite, report, run_suite, write_fixtures};
+use super::validator::{load_suite, report, run_suite, write_suite_files};
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
@@ -40,45 +40,6 @@ fn on_batch_for(client: &Arc<Mutex<DuckDbClient>>) -> Arc<OnBatch> {
     )
 }
 
-fn workspace_root() -> std::path::PathBuf {
-    let output = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
-        .output()
-        .expect("Failed to run cargo metadata");
-    let meta: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("Failed to parse cargo metadata");
-    std::path::PathBuf::from(meta["workspace_root"].as_str().unwrap())
-}
-
-fn copy_dir_recursive(
-    src_dir: &std::path::Path,
-    dst_dir: &std::path::Path,
-    inventory: &mut Vec<FileInventoryEntry>,
-) {
-    for entry in walkdir::WalkDir::new(src_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let rel = entry.path().strip_prefix(src_dir).unwrap();
-        let dst = dst_dir.join(rel);
-        if entry.file_type().is_dir() {
-            std::fs::create_dir_all(&dst).ok();
-        } else {
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::copy(entry.path(), &dst)
-                .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
-            inventory.push(FileInventoryEntry {
-                path: rel.to_string_lossy().to_string(),
-                size: entry.metadata().map_or(0, |metadata| metadata.len()),
-                decision: Decision::Parse,
-                label: Default::default(),
-            });
-        }
-    }
-}
-
 pub fn run_yaml_suite(yaml: &str) {
     let Some(suite) = load_suite(yaml) else {
         return;
@@ -90,24 +51,15 @@ pub fn run_yaml_suite(yaml: &str) {
     );
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
-    let mut file_inventory = Vec::new();
-
-    if let Some(dir) = &suite.fixture_dir {
-        let root = workspace_root();
-        let src = root.join(dir);
-        assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
-        copy_dir_recursive(&src, tmp.path(), &mut file_inventory);
-    }
-
-    write_fixtures(&suite.fixtures, tmp.path());
-    for fixture in &suite.fixtures {
-        file_inventory.push(FileInventoryEntry {
-            path: fixture.path.clone(),
-            size: fixture.content.len() as u64,
+    let file_inventory: Vec<FileInventoryEntry> = write_suite_files(&suite, tmp.path())
+        .into_iter()
+        .map(|(path, size)| FileInventoryEntry {
+            path,
+            size,
             decision: Decision::Parse,
             label: Default::default(),
-        });
-    }
+        })
+        .collect();
 
     let root = tmp.path().to_string_lossy().to_string();
 

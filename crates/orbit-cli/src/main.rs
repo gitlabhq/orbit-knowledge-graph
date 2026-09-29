@@ -24,9 +24,15 @@ use tracing::{Level, debug};
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
+const CLI_AGENT_HELP: &str = "Coding agents: load the instance-matched usage guidance first with \
+`glab orbit skills get orbit`, then follow the returned skill.";
+
 #[derive(Parser)]
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
-#[command(about = "Orbit - query the local code graph or the remote Orbit API")]
+#[command(
+    about = "Orbit - query the local code graph or the remote Orbit API",
+    after_help = CLI_AGENT_HELP
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -724,12 +730,31 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{CLI_AGENT_HELP, Cli, Commands, IndexArgs, SchemaArgs};
     use clap::{CommandFactory, Parser};
 
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn help_directs_coding_agents_to_the_orbit_skill() {
+        // Assert on the agent-facing sentences, not the bare command: `skills get orbit`
+        // also appears in ordinary usage text, so a deleted pointer would otherwise pass.
+        let short_help = Cli::command().render_help().to_string();
+        assert!(short_help.contains(CLI_AGENT_HELP));
+
+        let long_help = Cli::command().render_long_help().to_string();
+        assert!(long_help.contains(CLI_AGENT_HELP));
+
+        let mut command = Cli::command();
+        let skills = command
+            .find_subcommand_mut("skills")
+            .expect("skills subcommand exists")
+            .render_long_help()
+            .to_string();
+        assert!(skills.contains("Coding agents should start with `glab orbit skills get orbit`"));
     }
 
     #[test]

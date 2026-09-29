@@ -7,6 +7,7 @@ mod response;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
@@ -20,6 +21,7 @@ pub use self::response::build_indexing_status_response;
 
 use self::checkpoints::PlanCheckpoints;
 use self::phase::combine_phases;
+use self::projects::PROJECT_NODE;
 use crate::active_schema::SchemaSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +70,7 @@ impl IndexingStatusService {
             .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
             .ok();
 
+        let now = Utc::now();
         let plans: Vec<PipelineDescriptor> = schema
             .ontology
             .pipeline_descriptors()
@@ -84,6 +87,7 @@ impl IndexingStatusService {
                     scope,
                     checkpoints.as_ref(),
                     coverage.as_ref(),
+                    now,
                 )
             })
             .collect()
@@ -96,17 +100,31 @@ fn build_scope_status(
     scope: &TraversalPath,
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
+    now: DateTime<Utc>,
 ) -> ScopeStatus {
     let root = scope.top_level_namespace_id();
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
-        .map(|plan| (plan, get_root_plan_phase(checkpoints, root, &plan.name)))
+        .map(|plan| {
+            (
+                plan,
+                get_root_plan_phase(checkpoints, root, &plan.name, now),
+            )
+        })
         .collect();
 
+    // The Project plan writes the project list, so the code total is final only once it settles.
+    let project_list_phase = combine_phases(
+        plan_phases
+            .iter()
+            .filter(|(plan, _)| plan.entity == PROJECT_NODE)
+            .map(|(_, phase)| *phase),
+    )
+    .unwrap_or(Phase::Unknown);
     let projects =
         coverage.map(|by_scope| by_scope.get(scope.as_str()).copied().unwrap_or_default());
     let code_phase = match projects {
-        Some(projects) => projects.get_code_phase(),
+        Some(projects) => projects.get_code_phase(project_list_phase),
         None => Some(Phase::Unknown),
     };
 
@@ -129,13 +147,14 @@ fn get_root_plan_phase(
     checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
     root: Option<i64>,
     plan: &str,
+    now: DateTime<Utc>,
 ) -> Phase {
     let (Some(by_root), Some(root)) = (checkpoints, root) else {
         return Phase::Unknown;
     };
+    let no_checkpoints = PlanCheckpoints::default();
     by_root
         .get(&root)
-        .map_or(Phase::NotStarted, |root_checkpoints| {
-            root_checkpoints.get_plan_phase(plan)
-        })
+        .unwrap_or(&no_checkpoints)
+        .get_plan_phase(plan, now)
 }

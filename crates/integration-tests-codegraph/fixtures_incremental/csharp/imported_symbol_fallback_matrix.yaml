@@ -1,0 +1,101 @@
+name: "C#: imported-symbol fallback matrix"
+fixtures:
+  - path: JsonRunner.cs
+    content: |
+      using Newtonsoft.Json;
+
+      namespace App
+      {
+          public class JsonRunner
+          {
+              public string Serialize(object value)
+              {
+                  return JsonConvert.SerializeObject(value);
+              }
+          }
+      }
+
+  - path: StaticRunner.cs
+    content: |
+      using static External.Tools.Helpers;
+
+      namespace App
+      {
+          public class StaticRunner
+          {
+              public void Track()
+              {
+                  EmitMetric();
+              }
+          }
+      }
+
+  - path: AliasRunner.cs
+    content: |
+      using Json = Newtonsoft.Json.JsonConvert;
+
+      namespace App
+      {
+          public class AliasRunner
+          {
+              public string Serialize(object value)
+              {
+                  return Json.SerializeObject(value);
+              }
+          }
+      }
+
+  - path: ConsoleRunner.cs
+    content: |
+      using System;
+
+      namespace App
+      {
+          public class ConsoleRunner
+          {
+              public void Log()
+              {
+                  Console.WriteLine("debug");
+              }
+          }
+      }
+
+tests:
+  # corrected: a wildcard import binds an unbound receiver; its imported name is *
+  - name: "namespace using directives target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'App.JsonRunner.Serialize'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "App.JsonRunner.Serialize", path: "Newtonsoft.Json", name: "*", import_type: "WildcardImport" } }
+
+  # corrected: a static using imports the members of the type (C# spec 14.6.4), so the symbol is the member wildcard
+  - name: "static using directives target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'App.StaticRunner.Track'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "App.StaticRunner.Track", path: "External.Tools.Helpers", name: "*", import_type: "StaticImport" } }
+
+  - name: "alias using directives target aliased imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'App.AliasRunner.Serialize'
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: "JsonConvert", alias: "Json", import_type: "AliasedImport" } }
+
+  # corrected: using System is a wildcard import, so Console binds to it like LocalDate under import java.time.*
+  - name: "console logging calls do not target ambient namespace imports"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'App.ConsoleRunner.Log'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "System" } }

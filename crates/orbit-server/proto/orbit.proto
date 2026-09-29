@@ -521,6 +521,7 @@ message StructuredGraphStatus {
 message ProjectsStatus {
   int64 indexed = 1;
   int64 total_known = 2;
+  int64 gaps = 3;  // projects that used all attempts without an index
 }
 
 // Entity counts for a single domain (e.g. "ci", "core", "plan").
@@ -545,6 +546,7 @@ enum IndexingPhase {
   INDEXING_PHASE_NOT_STARTED = 1;
   INDEXING_PHASE_SYNCING = 2;
   INDEXING_PHASE_READY = 3;
+  INDEXING_PHASE_ERROR = 4;  // indexing is done, but some data failed to index
 }
 
 message GetIndexingStatusRequest {

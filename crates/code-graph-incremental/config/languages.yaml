@@ -1,3 +1,14 @@
+# Languages that resolve against each other index together: one run over
+# the family, each file parsed and rewritten by its own language, one graph.
+# Members share a qualified-name separator.
+families:
+  c_family:
+    members: [c, cpp]
+  jvm:
+    members: [java, kotlin, scala]
+  js_ts:
+    members: [javascript, typescript, tsx]
+
 languages:
   bash:
     extensions: [sh, bash, zsh]

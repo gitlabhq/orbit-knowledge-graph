@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::scope::ScopeProof;
 use ontology::constants::*;
 
 use crate::input::*;
@@ -12,6 +11,7 @@ use super::{
 use query_data_model::QueryDataModel;
 
 pub struct Hop {
+    pub input_index: usize,
     pub rel_types: Vec<String>,
     pub relationships: Vec<query_data_model::RelationshipId>,
     pub edge_table: String,
@@ -27,8 +27,6 @@ pub struct Hop {
     pub filters: Vec<(String, BoundFilter)>,
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
-    /// Logical proof that this hop can use the anchored traversal scope.
-    pub scope_proof: Option<ScopeProof>,
     /// Whether this hop keeps both endpoints in the same namespace (intrinsic
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
@@ -202,22 +200,17 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan<M>(
-    input: &Input,
-    scope_proofs: &HashMap<String, ScopeProof>,
-    model: &M,
-    use_fk_elision: bool,
-) -> Plan
+pub fn plan<M>(input: &Input, model: &M, use_fk_elision: bool) -> Plan
 where
     M: QueryDataModel + ?Sized,
 {
-    let hops = build_hops(input, scope_proofs, model);
+    let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
 
-    let (mut hops, elided_fks, scope_requirements) = if use_fk_elision {
-        elide_hops(hops, &mut nodes, input)
+    let (mut hops, elided_fks) = if use_fk_elision {
+        elide_hops(hops, &mut nodes)
     } else {
-        (hops, Vec::new(), Vec::new())
+        (hops, Vec::new())
     };
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
@@ -301,7 +294,6 @@ where
         hops,
         strategy,
         node_edge_mappings,
-        scope_requirements,
         denormalized,
         table_columns,
         table_sort_keys,
@@ -309,7 +301,7 @@ where
     }
 }
 
-fn build_hops<M>(input: &Input, scope_proofs: &HashMap<String, ScopeProof>, model: &M) -> Vec<Hop>
+fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>
 where
     M: QueryDataModel + ?Sized,
 {
@@ -321,7 +313,8 @@ where
     input
         .relationships
         .iter()
-        .map(|rel| {
+        .enumerate()
+        .map(|(input_index, rel)| {
             let edge_table = model.relationship_table_for_query(&rel.types).to_string();
             let from_entity = input
                 .nodes
@@ -335,21 +328,22 @@ where
                 .and_then(|node| node.entity.as_deref());
             let fk = from_entity
                 .zip(to_entity)
-                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
+                .and_then(|(from, to)| match rel.direction {
+                    Direction::Outgoing => model.foreign_key(&rel.types, from, to),
+                    Direction::Incoming => model.foreign_key(&rel.types, to, from),
+                    Direction::Both => None,
+                })
                 .and_then(|foreign_key| {
-                    let holder = &model.graph().entity(foreign_key.holder).name;
                     let fk_column = model.property_column(foreign_key.property)?.to_string();
-                    let fk_node = if from_entity == Some(holder.as_str()) {
-                        rel.from.clone()
-                    } else if to_entity == Some(holder.as_str()) {
-                        rel.to.clone()
+                    let holder_is_from = matches!(
+                        (rel.direction, foreign_key.holder),
+                        (Direction::Outgoing, query_data_model::Endpoint::Source)
+                            | (Direction::Incoming, query_data_model::Endpoint::Target)
+                    );
+                    let (fk_node, target_node) = if holder_is_from {
+                        (rel.from.clone(), rel.to.clone())
                     } else {
-                        return None;
-                    };
-                    let target_node = if fk_node == rel.from {
-                        rel.to.clone()
-                    } else {
-                        rel.from.clone()
+                        (rel.to.clone(), rel.from.clone())
                     };
                     Some(HopFk {
                         fk_node,
@@ -368,26 +362,13 @@ where
                             .variant_scope(kind, to_entity, from_entity)
                             .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                 });
-            let from_proof = scope_proofs.get(&rel.from);
-            let to_proof = scope_proofs.get(&rel.to);
-            let scope_proof = if from_proof == to_proof {
-                from_proof.cloned()
-            } else {
-                rel.types.iter().find_map(|kind| {
-                    match model.variant_scope(kind, from_entity, to_entity) {
-                        Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
-                        Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
-                        _ => None,
-                    }
-                    .cloned()
-                })
-            };
             let filters = crate::passes::shared::ordered_filters(
                 &rel.filters,
                 crate::passes::shared::FilterOwner::Table(&edge_table),
                 model,
             );
             Hop {
+                input_index,
                 rel_types: rel.types.clone(),
                 relationships: rel
                     .types
@@ -404,7 +385,6 @@ where
                 scope_preserving,
                 filters,
                 join_prev: None,
-                scope_proof,
                 cascade_anchor: false,
             }
         })
@@ -422,79 +402,14 @@ where
         .collect()
 }
 
-/// Whether `alias` exists only to pin scope: path-scopable, only a `full_path`/`id`
-/// filter, no group-by/agg/order/display role, and touched by exactly one hop.
-fn is_pure_scope_anchor(
-    alias: &str,
-    nodes: &HashMap<String, NodePlan>,
-    input: &Input,
-    hop_count: &HashMap<String, usize>,
-) -> bool {
-    let Some(np) = nodes.get(alias) else {
-        return false;
-    };
-    if !np.has_traversal_path || hop_count.get(alias).copied().unwrap_or(0) != 1 {
-        return false;
-    }
-    let Some(input_node) = input.nodes.iter().find(|n| n.id == alias) else {
-        return false;
-    };
-    if !crate::scope::is_scope_only(input_node) {
-        return false;
-    }
-
-    let in_group_by = input.aggregation.group_by.iter().any(|g| g.node() == alias);
-    let is_agg_target = input
-        .aggregation
-        .metrics
-        .iter()
-        .any(|m| m.expr.node() == alias);
-    let is_order_target = input.order_by.as_ref().is_some_and(|ob| ob.node == alias);
-
-    !in_group_by && !is_agg_target && !is_order_target
-}
-
-/// Elide hops the node-join path answers without an edge scan, keeping
-/// `input.relationships` in sync:
-///   - an FK hop whose far end is pinned: push the FK as a node-level filter;
-///   - the sole non-FK hop, when it is a scope-implied container (aggregations
-///     only): drop it and its orphaned anchor, since the resolved
-///     `traversal_path` prefix already encodes the containment and every
-///     survivor is then FK-lowerable by `detect_fk`.
 #[allow(clippy::type_complexity)]
 fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
-    input: &Input,
-) -> (Vec<Hop>, Vec<(String, String, String)>, Vec<ScopeProof>) {
+) -> (Vec<Hop>, Vec<(String, String, String)>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();
-    let mut scope_requirements = Vec::new();
-
-    let mut hop_count: HashMap<String, usize> = HashMap::new();
-    for hop in &hops {
-        *hop_count.entry(hop.from_node.clone()).or_insert(0) += 1;
-        *hop_count.entry(hop.to_node.clone()).or_insert(0) += 1;
-    }
-    let sole_non_fk = input.query_type == QueryType::Aggregation
-        && hops.iter().filter(|h| h.fk.is_none()).count() == 1;
-
     for hop in hops {
-        if sole_non_fk
-            && hop.fk.is_none()
-            && hop.scope_preserving
-            && hop.scope_proof.is_some()
-            && hop.filters.is_empty()
-            && let Some(anchor) = [hop.from_node.as_str(), hop.to_node.as_str()]
-                .into_iter()
-                .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
-                .map(str::to_string)
-        {
-            scope_requirements.extend(hop.scope_proof.clone());
-            nodes.remove(&anchor);
-            continue;
-        }
-
         // Only elide if at least one non-FK hop would remain — otherwise
         // the emit loop has no edges to populate node_edge_col from.
         let would_be_last = keep_hops.is_empty();
@@ -567,7 +482,7 @@ fn elide_hops(
         }
     }
 
-    (keep_hops, elided_fks, scope_requirements)
+    (keep_hops, elided_fks)
 }
 
 /// Star first (covers single-hop FK), then chain. Chain applies to aggregations
@@ -948,7 +863,7 @@ mod tests {
             }),
             filters: Vec::new(),
             join_prev: None,
-            scope_proof: None,
+            input_index: 0,
             scope_preserving,
             cascade_anchor: false,
         }
