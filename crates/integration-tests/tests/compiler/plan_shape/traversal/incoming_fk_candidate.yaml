@@ -1,0 +1,35 @@
+name: Incoming self-edge has an FK candidate that retains both endpoints
+skip: false
+input:
+  query_type: traversal
+  nodes:
+    - id: canceling
+      entity: Pipeline
+      columns: [id]
+      filters: { status: success }
+    - id: canceled
+      entity: Pipeline
+      columns: [id]
+      filters: { status: canceled }
+  relationships:
+    - { type: AUTO_CANCELED_BY, from: canceling, to: canceled, direction: incoming }
+  limit: 10
+logical:
+  expect:
+    - (Read (Edge 0 (Kinds AUTO_CANCELED_BY) ...))
+    - (Read (Entity Pipeline canceling ...))
+    - (Read (Entity Pipeline canceled ...))
+physical:
+  clickhouse:
+    expect:
+      - (CurrentRows (Scan gl_pipeline Final ...) (Deleted _deleted) (Binding canceling) (Relationship))
+      - (CurrentRows (Scan gl_pipeline Final ...) (Deleted _deleted) (Binding canceled) (Relationship))
+    candidates:
+      - expect:
+          - (CurrentRows (Scan gl_pipeline Final (Columns ... (Column _ auto_canceled_by_id) ...)) (Deleted _deleted) (Binding) (Relationship 0))
+          - (CurrentRows (Scan gl_pipeline Final ...) (Deleted _deleted) (Binding canceling) (Relationship))
+          - (CurrentRows (Scan gl_pipeline Final ...) (Deleted _deleted) (Binding canceled) (Relationship))
+        reject:
+          - (Scan gl_ci_edge ...)
+  duckdb:
+    error: "entity 'Pipeline' is not available in this data model"

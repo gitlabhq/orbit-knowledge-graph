@@ -38,6 +38,15 @@ struct Assertions {
     error: Option<String>,
     expect: Vec<String>,
     reject: Vec<String>,
+    candidates: Vec<CandidateAssertions>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CandidateAssertions {
+    expect: Vec<String>,
+    #[serde(default)]
+    reject: Vec<String>,
 }
 
 impl Assertions {
@@ -114,12 +123,60 @@ fn physical<S: EmitOperation + Clone + PartialEq>(
     bound: BoundQuery,
     mut source: impl FnMut(Source, &mut Values) -> Result<Node<S, Scalar, Infallible>>,
     describe: impl Fn(&S) -> SExpression,
+    source_rules: &[optimize::Rule<S, Scalar, Infallible>],
+    assertions: &Assertions,
 ) -> Result<SExpression> {
     let mut values = bound.values;
     let root = bound
         .root
         .expand_sources(&mut |read| source(read, &mut values))?;
-    let candidates = optimize::candidates(root, values, &rules::registered())?;
+    let mut registered = source_rules.to_vec();
+    registered.extend(rules::registered());
+    let candidates = optimize::candidates(root, values, &registered)?;
+
+    for expected in &assertions.candidates {
+        assert!(
+            !expected.expect.is_empty(),
+            "candidate requires a positive assertion"
+        );
+        let positive = expected
+            .expect
+            .iter()
+            .map(|text| pattern::parse(text).unwrap())
+            .collect::<Vec<_>>();
+        let negative = expected
+            .reject
+            .iter()
+            .map(|text| pattern::parse(text).unwrap())
+            .collect::<Vec<_>>();
+        let matching = candidates
+            .iter()
+            .find(|candidate| {
+                let tree =
+                    explain::program(&candidate.program, &describe, &|never| match *never {});
+                positive
+                    .iter()
+                    .all(|pattern| pattern::contains(&tree, pattern))
+                    && negative
+                        .iter()
+                        .all(|pattern| !pattern::contains(&tree, pattern))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "no single candidate satisfies {:?} and rejects {:?}",
+                    expected.expect, expected.reject
+                )
+            });
+
+        lower_program(
+            &matching.program,
+            &matching.values,
+            &mut Context::default(),
+            &scalar::emit,
+        )?
+        .into_query(&bound.outputs)?;
+    }
+
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)
     })?
@@ -205,6 +262,8 @@ fn yaml_plan_shapes() {
                             bind(input, &remote).unwrap(),
                             |source, values| clickhouse::select(source, &remote, values),
                             clickhouse::Scan::explain,
+                            &[clickhouse::realize_foreign_key],
+                            &assertions,
                         )
                         .unwrap()
                     }
@@ -214,6 +273,8 @@ fn yaml_plan_shapes() {
                             physical::select_source(source, &local, CurrentRows::Snapshot, values)
                         },
                         Read::explain,
+                        &[],
+                        &assertions,
                     )
                     .unwrap(),
                     _ => panic!("unknown backend {backend}"),

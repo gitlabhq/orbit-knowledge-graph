@@ -19,6 +19,11 @@ Patterns match structured S-expressions anywhere in the tree:
 - Quoted atoms use JSON string escaping.
 - `expect` requires a match; `reject` forbids one.
 
+A physical block can also contain `candidates`, a list of `expect`/`reject` sets.
+Each set must match one complete candidate, which the runner also lowers.
+The block's top-level assertions still check the selected plan. This distinguishes
+an available rewrite from an optimization that production costing selects.
+
 For example, `(Join Inner (Equal _ _) ... )` requires an inner equality join.
 `(Scan gl_edge Snapshot ...)` requires that physical table and read mode.
 
