@@ -53,6 +53,7 @@ impl<S, F, E> Node<S, F, E> {
         for input in &mut self.inputs {
             input.visit_mut(callback);
         }
+
         callback(self);
     }
 }
@@ -64,6 +65,7 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
             .iter()
             .map(|input| input.output(values))
             .collect::<Result<Vec<_>>>()?;
+
         let arity = match &self.op {
             Op::Read(_) => 0,
             Op::Join { .. } => 2,
@@ -72,6 +74,7 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
             _ => 1,
         };
         require(inputs.len() == arity, "invalid plan input count")?;
+
         let output = match &self.op {
             Op::Read(source) => source.output(&inputs, values)?,
             Op::Extension(extension) => extension.output(&inputs, values)?,
@@ -83,6 +86,7 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
                         "projection output type mismatch",
                     )?;
                 }
+
                 assignments
                     .iter()
                     .map(|assignment| assignment.output)
@@ -96,6 +100,7 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
                 let available: Schema = inputs.iter().flatten().copied().collect();
                 require_unique(&available)?;
                 require_boolean(condition.data_type(&available, values)?)?;
+
                 match kind {
                     JoinKind::Inner => available,
                     JoinKind::Semi | JoinKind::Anti => inputs[0].clone(),
@@ -113,6 +118,7 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
                         )?;
                     }
                 }
+
                 outputs.clone()
             }
             Op::Sort(keys) => {
@@ -124,10 +130,12 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
             }
             Op::Limit(_) => inputs[0].clone(),
         };
+
         require_unique(&output)?;
         for value in &output {
             values.data_type(*value)?;
         }
+
         Ok(output)
     }
 }

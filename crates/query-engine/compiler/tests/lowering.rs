@@ -16,6 +16,7 @@ fn catalog_reads_bind_independent_values_and_emit_both_dialects() {
     let ontology = std::sync::Arc::new(compiler::Ontology::load_embedded().unwrap());
     let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
     let local = DuckDbDataModel::derive(ontology).unwrap();
+
     check_catalog(&remote, CurrentRows::Final, true);
     check_catalog(&local, CurrentRows::Snapshot, false);
 }
@@ -27,6 +28,7 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
     let value = source.columns[0].0;
     let other = Read::bind(model, &[id], CurrentRows::Snapshot, &mut values).unwrap();
     assert_ne!(value, other.columns[0].0);
+
     let plan: Plan = Node {
         op: Op::Filter(Expr::Call {
             function: Scalar::Equal,
@@ -42,6 +44,7 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
         .into_query(&["id".into()])
         .unwrap();
     let node = ast::Node::Query(Box::new(query));
+
     if remote {
         let (sql, parameters) = compiler::emit_simple_query(&node).unwrap();
         assert!(sql.contains(" FINAL"), "{sql}");
@@ -51,9 +54,11 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
         let connection = duckdb::Connection::open_in_memory().unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE gl_file(id BIGINT); INSERT INTO gl_file VALUES (1), (2), (3);",
+                "CREATE TABLE gl_file(id BIGINT);
+                 INSERT INTO gl_file VALUES (1), (2), (3);",
             )
             .unwrap();
+
         let ids = connection
             .prepare(&query.render())
             .unwrap()
@@ -61,6 +66,7 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
             .unwrap()
             .collect::<duckdb::Result<Vec<_>>>()
             .unwrap();
+
         assert_eq!(ids, vec![2]);
     }
 }
@@ -90,9 +96,11 @@ fn execute<E: EmitOperation>(plan: &Node<Read, Scalar, E>, values: &Values) -> V
     let connection = duckdb::Connection::open_in_memory().unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE items(id BIGINT); INSERT INTO items VALUES (3), (1), (1), (2), (NULL);",
+            "CREATE TABLE items(id BIGINT);
+             INSERT INTO items VALUES (3), (1), (1), (2), (NULL);",
         )
         .unwrap();
+
     connection
         .prepare(&query.render())
         .unwrap()
@@ -111,6 +119,7 @@ impl Operation for TakeOne {
                 "TakeOne requires one input".into(),
             ));
         };
+
         Ok(input.clone())
     }
 }
@@ -127,6 +136,7 @@ impl EmitOperation for TakeOne {
 fn nested_extension_consumes_its_child_and_exports_to_its_parent() {
     let mut values = Values::default();
     let id = values.allocate(ValueType::Int64);
+
     let plan: Node<Read, Scalar, TakeOne> = Node {
         op: Op::Project(vec![Assignment {
             output: id,
@@ -144,6 +154,7 @@ fn nested_extension_consumes_its_child_and_exports_to_its_parent() {
             }],
         }],
     };
+
     assert_eq!(execute(&plan, &values).len(), 1);
 }
 
@@ -152,6 +163,7 @@ fn sort_survives_projection_and_limit_boundaries() {
     let mut values = Values::default();
     let (source, id) = read(&mut values);
     let output = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
+
     let plan = Node {
         op: Op::Limit(3),
         inputs: vec![Node {
@@ -169,6 +181,7 @@ fn sort_survives_projection_and_limit_boundaries() {
             }],
         }],
     };
+
     assert_eq!(execute(&plan, &values), vec![None, Some(3), Some(2)]);
 }
 
@@ -177,6 +190,7 @@ fn membership_preserves_left_duplicates_without_multiplying_them() {
     let mut values = Values::default();
     let (left, left_id) = read(&mut values);
     let (right, right_id) = read(&mut values);
+
     let plan = Node {
         op: Op::Join {
             kind: JoinKind::Semi,
@@ -187,8 +201,10 @@ fn membership_preserves_left_duplicates_without_multiplying_them() {
         },
         inputs: vec![left, right],
     };
+
     let mut rows = execute(&plan, &values);
     rows.sort();
+
     assert_eq!(rows, vec![Some(1), Some(1), Some(2), Some(3)]);
 }
 
@@ -199,6 +215,7 @@ fn union_exports_remain_visible_after_projection() {
     let (right, right_id) = read(&mut values);
     let output = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
     let result = values.allocate(ValueType::Nullable(Box::new(ValueType::Int64)));
+
     let plan = Node {
         op: Op::Project(vec![Assignment {
             output: result,

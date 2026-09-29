@@ -73,6 +73,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [data_model]
             mutates: [input]
         }
+        plan_local {
+            reads_env: [data_model]
+            reads_state: [input]
+            mutates: [node, lowered_metadata, result_ctx]
+        }
         restrict {
             reads_env: [data_model, security_ctx]
             mutates: [input, scope_proofs]
@@ -88,11 +93,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [node]
         }
         enforce {
-            reads_env: [data_model]
-            reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
-        }
-        enforce_local {
             reads_env: [data_model]
             reads_state: [input]
             mutates: [node, lowered_metadata, result_ctx]
@@ -151,13 +151,13 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, enforce_local, cursor, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan_local, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, enforce_local, cursor, duckdb_codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_local, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -291,19 +291,73 @@ where
     Ok(())
 }
 
-fn enforce_local<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
-{
-    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
-    let mut node = require(ctx.take_node(), "node")?;
+fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>) -> Result<()> {
+    use crate::ast::{Expr, OrderExpr, SelectExpr};
+    use crate::constants::{redaction_id_column, redaction_type_column};
+    use crate::input::OrderDirection;
+    use crate::lowering::{Context, lower_with_context, scalar};
+    use crate::planning::bind;
+
     let input = require(ctx.input().clone(), "input")?;
-    let result_context =
-        enforce::enforce_local_return(&mut node, &input, &metadata, ctx.data_model())?;
-    ctx.set_node(node);
-    ctx.set_lowered_metadata(metadata);
-    ctx.set_result_ctx(result_context);
+    let [node] = input.nodes.as_slice() else {
+        return Err(QueryError::Validation(
+            "local planner requires one node".into(),
+        ));
+    };
+
+    let entity = node
+        .entity
+        .as_deref()
+        .ok_or_else(|| QueryError::ReferenceError("node requires an entity".into()))?;
+
+    let mut context = Context::default();
+    let mut required = vec![(node.id_property.clone(), redaction_id_column(&node.id))];
+    if let Some(order) = &input.order_by {
+        required.push((order.property.clone(), context.alias()));
+    }
+
+    let bound = bind::local_traversal(&input, ctx.data_model(), &required)?;
+    let fragment = lower_with_context(&bound.root, &bound.values, &mut context, &scalar::emit)?;
+
+    let resolve = |value| {
+        fragment
+            .exports
+            .iter()
+            .find(|(id, _)| *id == value)
+            .map(|(_, expression)| expression.clone())
+            .ok_or_else(|| QueryError::Lowering("required result value was not exported".into()))
+    };
+    let identity = resolve(bound.required[0])?;
+    let order = input
+        .order_by
+        .as_ref()
+        .map(|order| {
+            Ok::<_, QueryError>(OrderExpr {
+                expr: resolve(bound.required[1])?,
+                desc: order.direction == OrderDirection::Desc,
+            })
+        })
+        .transpose()?;
+
+    let mut query = fragment.into_query(&bound.outputs)?;
+    if input.order_by.is_some() {
+        query.select.pop();
+    }
+    query.order_by = order.into_iter().collect();
+    query.select.push(SelectExpr::new(
+        Expr::string(entity),
+        redaction_type_column(&node.id),
+    ));
+
+    let mut result = ResultContext::new().with_query_type(input.query_type);
+    result.add_node(&node.id, entity);
+
+    ctx.set_node(Node::Query(Box::new(query)));
+    ctx.set_lowered_metadata(ResultBindings {
+        stable_order: vec![OrderExpr::asc(identity)],
+        ..Default::default()
+    });
+    ctx.set_result_ctx(result);
     Ok(())
 }
 

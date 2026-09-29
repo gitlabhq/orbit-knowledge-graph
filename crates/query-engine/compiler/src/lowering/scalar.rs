@@ -21,10 +21,28 @@ pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
                 .iter()
                 .map(|arg| emit(arg, bindings))
                 .collect::<Result<Vec<_>>>()?;
+
             match (function, arguments.as_slice()) {
                 (Scalar::Equal, [left, right]) => SqlExpr::eq(left.clone(), right.clone()),
+                (Scalar::NotEqual, [left, right]) => {
+                    SqlExpr::binary(Op::Ne, left.clone(), right.clone())
+                }
+                (Scalar::Greater, [left, right]) => {
+                    SqlExpr::binary(Op::Gt, left.clone(), right.clone())
+                }
+                (Scalar::GreaterEqual, [left, right]) => {
+                    SqlExpr::binary(Op::Ge, left.clone(), right.clone())
+                }
+                (Scalar::Less, [left, right]) => {
+                    SqlExpr::binary(Op::Lt, left.clone(), right.clone())
+                }
+                (Scalar::LessEqual, [left, right]) => {
+                    SqlExpr::binary(Op::Le, left.clone(), right.clone())
+                }
                 (Scalar::And, [left, right]) => SqlExpr::and(left.clone(), right.clone()),
+                (Scalar::Or, [left, right]) => SqlExpr::binary(Op::Or, left.clone(), right.clone()),
                 (Scalar::IsNull, [value]) => SqlExpr::unary(Op::IsNull, value.clone()),
+                (Scalar::IsNotNull, [value]) => SqlExpr::unary(Op::IsNotNull, value.clone()),
                 _ => return Err(QueryError::Lowering("invalid scalar arguments".into())),
             }
         }

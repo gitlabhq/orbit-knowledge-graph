@@ -26,6 +26,7 @@ impl Values {
     pub fn allocate(&mut self, data_type: ValueType) -> ValueId {
         let id = ValueId(self.0.len());
         self.0.push(data_type);
+
         id
     }
 
@@ -70,6 +71,7 @@ impl<F> Expr<F> {
             Self::Cast { value, .. } => value.visit_mut(callback),
             _ => {}
         }
+
         callback(self);
     }
 }
@@ -104,6 +106,7 @@ impl<F: Function> Expr<F> {
                     .iter()
                     .map(|argument| argument.data_type(available, values))
                     .collect::<Result<Vec<_>>>()?;
+
                 function.return_type(&types)?
             }
             Self::Cast { value, data_type } => {

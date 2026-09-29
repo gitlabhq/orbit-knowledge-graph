@@ -32,6 +32,7 @@ impl Read {
         let table = model
             .entity_table(name)
             .ok_or_else(|| QueryError::ReferenceError(format!("entity {name} is unavailable")))?;
+
         let columns = properties
             .iter()
             .map(|id| {
@@ -41,12 +42,14 @@ impl Read {
                         "read properties must belong to one entity".into(),
                     ));
                 }
+
                 let column = model.property_column(*id).ok_or_else(|| {
                     QueryError::ReferenceError(format!(
                         "property {name}.{} is not stored",
                         property.name
                     ))
                 })?;
+
                 let data_type = match property.data_type {
                     DataType::Bool => ValueType::Bool,
                     DataType::Int => ValueType::Int64,
@@ -59,6 +62,7 @@ impl Read {
                 Ok((value, column.to_string()))
             })
             .collect::<Result<_>>()?;
+
         Ok(Self {
             table: table.to_string(),
             columns,
@@ -74,6 +78,7 @@ impl Operation for Read {
                 "read cannot have inputs".into(),
             ));
         }
+
         Ok(self.columns.iter().map(|(value, _)| *value).collect())
     }
 }
@@ -87,8 +92,15 @@ impl Operation for Infallible {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Scalar {
     Equal,
+    NotEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
     And,
+    Or,
     IsNull,
+    IsNotNull,
 }
 
 impl Function for Scalar {
@@ -97,21 +109,32 @@ impl Function for Scalar {
             ValueType::Nullable(inner) => inner.as_ref().clone(),
             other => other.clone(),
         };
+
         let valid = match (self, arguments) {
-            (Self::Equal, [left, right]) => base(left) == base(right),
-            (Self::And, [left, right]) => {
+            (
+                Self::Equal
+                | Self::NotEqual
+                | Self::Greater
+                | Self::GreaterEqual
+                | Self::Less
+                | Self::LessEqual,
+                [left, right],
+            ) => base(left) == base(right),
+            (Self::And | Self::Or, [left, right]) => {
                 base(left) == ValueType::Bool && base(right) == ValueType::Bool
             }
-            (Self::IsNull, [_]) => true,
+            (Self::IsNull | Self::IsNotNull, [_]) => true,
             _ => false,
         };
+
         if !valid {
             return Err(QueryError::PipelineInvariant(
                 "invalid scalar argument types".into(),
             ));
         }
+
         Ok(
-            if *self != Self::IsNull
+            if !matches!(self, Self::IsNull | Self::IsNotNull)
                 && arguments
                     .iter()
                     .any(|t| matches!(t, ValueType::Nullable(_)))

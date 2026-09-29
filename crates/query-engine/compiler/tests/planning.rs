@@ -36,6 +36,7 @@ fn self_join_requires_distinct_values_and_semi_join_exports_only_the_left() {
     let mut values = Values::default();
     let left = values.allocate(ValueType::Int64);
     let right = values.allocate(ValueType::Int64);
+
     let mut plan = Node {
         op: Op::Join {
             kind: JoinKind::Semi,
@@ -46,7 +47,9 @@ fn self_join_requires_distinct_values_and_semi_join_exports_only_the_left() {
         },
         inputs: vec![read(vec![left]), read(vec![right])],
     };
+
     assert_eq!(plan.output(&values).unwrap(), vec![left]);
+
     plan.inputs[1] = read(vec![left]);
     assert!(plan.output(&values).is_err());
 }
@@ -58,6 +61,7 @@ fn union_maps_branch_values_and_rejects_wrong_types() {
     let right = values.allocate(ValueType::Int64);
     let output = values.allocate(ValueType::Int64);
     let wrong = values.allocate(ValueType::String);
+
     let mut plan = Node {
         op: Op::Union {
             outputs: vec![output],
@@ -66,6 +70,7 @@ fn union_maps_branch_values_and_rejects_wrong_types() {
         inputs: vec![read(vec![left]), read(vec![right])],
     };
     assert_eq!(plan.output(&values).unwrap(), vec![output]);
+
     plan.op = Op::Union {
         outputs: vec![wrong],
         arms: vec![vec![left], vec![right]],
@@ -79,6 +84,7 @@ fn projection_sees_extension_outputs_but_not_hidden_child_values() {
     let hidden = values.allocate(ValueType::Int64);
     let exported = values.allocate(ValueType::Int64);
     let result = values.allocate(ValueType::Int64);
+
     let mut plan = Node {
         op: Op::Project(vec![Assignment {
             output: result,
@@ -90,6 +96,7 @@ fn projection_sees_extension_outputs_but_not_hidden_child_values() {
         }],
     };
     assert_eq!(plan.output(&values).unwrap(), vec![result]);
+
     plan.op = Op::Project(vec![Assignment {
         output: result,
         expression: Expr::Value(hidden),

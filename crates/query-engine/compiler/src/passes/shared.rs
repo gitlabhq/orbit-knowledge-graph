@@ -3,6 +3,7 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
+
 #[derive(Clone)]
 pub struct BoundFilter {
     pub filter: InputFilter,

@@ -15,6 +15,7 @@ impl EmitOperation for Read {
             CurrentRows::Snapshot => TableRef::scan(&self.table, &alias),
             CurrentRows::Final => TableRef::scan_final(&self.table, &alias),
         };
+
         Ok(SqlFragment {
             query: Query {
                 from,
@@ -51,6 +52,7 @@ impl Context {
     pub fn alias(&mut self) -> String {
         let alias = format!("_q{}", self.next_alias);
         self.next_alias += 1;
+
         alias
     }
 
@@ -60,6 +62,7 @@ impl Context {
     ) -> (TableRef, Bindings, Vec<ast::OrderExpr>) {
         let alias = self.alias();
         let mut bindings = Bindings::new();
+
         fragment.query.select = fragment
             .exports
             .into_iter()
@@ -85,6 +88,7 @@ impl Context {
                 }
             })
             .collect();
+
         (TableRef::subquery(fragment.query, alias), bindings, order)
     }
 }
@@ -98,8 +102,18 @@ pub fn lower<S: EmitOperation, F: Function, E: EmitOperation>(
     values: &Values,
     emit_expression: &impl Fn(&generic::Expr<F>, &Bindings) -> Result<Expr>,
 ) -> Result<SqlFragment> {
+    lower_with_context(plan, values, &mut Context::default(), emit_expression)
+}
+
+pub fn lower_with_context<S: EmitOperation, F: Function, E: EmitOperation>(
+    plan: &Node<S, F, E>,
+    values: &Values,
+    context: &mut Context,
+    emit_expression: &impl Fn(&generic::Expr<F>, &Bindings) -> Result<Expr>,
+) -> Result<SqlFragment> {
     plan.output(values)?;
-    emit_node(plan, &mut Context::default(), emit_expression)
+
+    emit_node(plan, context, emit_expression)
 }
 
 fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
@@ -112,6 +126,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
         .iter()
         .map(|input| emit_node(input, context, emit_expression))
         .collect::<Result<Vec<_>>>()?;
+
     match &node.op {
         Op::Read(source) => source.emit(inputs, context),
         Op::Extension(extension) => extension.emit(inputs, context),
@@ -136,6 +151,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+
             let alias = context.alias();
             let query = Query {
                 from: TableRef::union_all(queries, &alias),
@@ -155,10 +171,12 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
             let left = inputs.pop().expect("verified join arity");
             let left_values: Vec<_> = left.exports.iter().map(|(value, _)| *value).collect();
             let right_values: Vec<_> = right.exports.iter().map(|(value, _)| *value).collect();
+
             let (left, mut bindings, _) = context.relation(left);
             let (right, right_bindings, _) = context.relation(right);
             bindings.extend(right_bindings);
             let condition = emit_expression(condition, &bindings)?;
+
             let (query, output) = match kind {
                 JoinKind::Inner => (
                     Query {
@@ -181,6 +199,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                             "membership lowering requires an equality key".into(),
                         ));
                     };
+
                     if !left_values
                         .iter()
                         .any(|value| bindings.get(value) == Some(key.as_ref()))
@@ -192,6 +211,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                             "membership keys must belong to their respective inputs".into(),
                         ));
                     }
+
                     let membership = Expr::InSelect {
                         expr: key.clone(),
                         query: Box::new(Query {
@@ -206,6 +226,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                             "anti join requires null-aware existence lowering".into(),
                         ));
                     }
+
                     (
                         Query {
                             from: left,
@@ -219,10 +240,12 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                     )
                 }
             };
+
             let exports = output
                 .into_iter()
                 .map(|value| Ok((value, resolve(&bindings, value)?)))
                 .collect::<Result<_>>()?;
+
             Ok(SqlFragment { query, exports })
         }
         op => {
@@ -234,6 +257,7 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                 order_by,
                 ..Default::default()
             };
+
             let exports = if let Op::Project(assignments) = op {
                 assignments
                     .iter()
@@ -266,11 +290,13 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
                     }
                     _ => unreachable!("handled non-unary operation"),
                 }
+
                 output
                     .into_iter()
                     .map(|value| Ok((value, resolve(&bindings, value)?)))
                     .collect::<Result<Vec<_>>>()?
             };
+
             Ok(SqlFragment { query, exports })
         }
     }
@@ -289,12 +315,14 @@ impl SqlFragment {
                 "result name count does not match plan output".into(),
             ));
         }
+
         self.query.select = self
             .exports
             .into_iter()
             .zip(names)
             .map(|((_, expression), name)| SelectExpr::new(expression, name))
             .collect();
+
         Ok(self.query)
     }
 }
