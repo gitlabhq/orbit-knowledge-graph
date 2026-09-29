@@ -100,8 +100,6 @@ tests:
       - { row: { fqn: 'inventory::Packet::Tuple::1', type: 'Field' } }
 
   - name: "trait associated items are retained on the trait definition"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'

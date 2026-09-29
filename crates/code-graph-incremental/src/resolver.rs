@@ -860,15 +860,25 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     chain(ctx, c, &|r| {
-        enclosing_alias(r).or_else(|| visible_type(ctx, r.fi(), r.sym()))
+        enclosing_alias(ctx, r).or_else(|| visible_type(ctx, r.fi(), r.sym()))
     })
 }
 
-/// `Self` in `impl Service { fn new() -> Self }` names the enclosing def.
-fn enclosing_alias(r: Cursor) -> Option<Cursor> {
-    r.ancestors()
-        .filter(|a| a.is(C::Def))
-        .find(|d| d.children_of(C::Alias).any(|a| a.sym() == r.sym()))
+/// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
+/// `T` in `fn f<T: Pinger>(t: T)` is the type parameter bound in it.
+fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>> {
+    let sym = r.sym();
+    r.ancestors().filter(|a| a.is(C::Def)).find_map(|d| {
+        if d.children_of(C::Alias).any(|a| a.sym() == sym) {
+            return Some(d);
+        }
+        let bound = d
+            .children()
+            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+            .find_map(|c| c.child(C::SsaTyped))
+            .filter(|bound| bound.sym() != sym)?;
+        resolve_chain(ctx, bound)
+    })
 }
 
 fn chain<'a>(

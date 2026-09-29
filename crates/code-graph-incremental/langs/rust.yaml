@@ -99,6 +99,12 @@ stages:
       - match: '(call_expression function: $F arguments: $A)'
         replace: '(__call (__callee @$F) $A)'
 
+  - name: type-params
+    rules:
+      # `T: Pinger` binds T to its first bound
+      - match: '(type_parameter name: $T bounds: (trait_bounds **/$B:type_identifier))'
+        replace: '(__binding @$T (__ssa_typed @$B))'
+
   - name: imports
     rules:
       # mod foo;  (a declaration, the body lives in another file)
@@ -200,6 +206,10 @@ stages:
         replace: '(__def (__defname @$N) (__constant))'
       - match: '(static_item name: $N)'
         replace: '(__def (__defname @$N) (__static_constant))'
+      - match: '(macro_definition name: $N)'
+        replace: '(__def (__defname @$N) (__macro))'
+      - match: '(associated_type name: $N)'
+        replace: '(__def (__defname @$N) (__type_alias))'
       - match: '(type_item name: $N type: $T)'
         replace: '(__def (__defname @$N) (__type_alias) (__ssa_typed @$T))'
       - match: '(type_item name: $N)'
@@ -239,11 +249,11 @@ stages:
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$P)'
 
       # Functions — self variant first, then generic
-      - match: '(function_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+      - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$TP $$$P $B)'
         tag: { flavor: self_method }
-      - match: '(function_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
+      - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$TP $$$P $B)'
 
       # Fields: named ones by name, tuple ones by position
       - match: '(field_declaration name: $N)'
@@ -414,6 +424,8 @@ display:
         tag: { def_type: Static }
       - match: '(__def (__lambda))'
         tag: { def_type: Lambda }
+      - match: '(__def (__macro))'
+        tag: { def_type: Macro }
       - match: '(__def (__field_def))'
         tag: { def_type: Field }
       - match: '(__def (__property))'

@@ -89,8 +89,6 @@ fixtures:
 
 tests:
   - name: "root inventory definitions are captured"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
