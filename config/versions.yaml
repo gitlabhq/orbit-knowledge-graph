@@ -16,6 +16,9 @@ raw_output_format: 5.0.3
 # Response envelope of the GOON formatter.
 goon_output_format: 4.0.3
 
+# Response envelope of the GQL table formatter.
+gql_output_format: 1.0.0
+
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed
 # checksums back into this file via `yq -i`. Run `mise vendor <name>`.

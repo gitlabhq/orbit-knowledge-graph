@@ -1,0 +1,8 @@
+---
+source: crates/query-engine/formatters/tests/gql_snapshots.rs
+expression: run(&r)
+---
+// query_type: path_finding, rows: 2, gql_version: 1.0.0
+| path |
+| (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 10})-[:IN_PROJECT]->(:Project {id: 100, name: "GitLab"}) |
+| (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 11}) |

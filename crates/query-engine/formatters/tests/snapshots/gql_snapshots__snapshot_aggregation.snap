@@ -1,0 +1,10 @@
+---
+source: crates/query-engine/formatters/tests/gql_snapshots.rs
+expression: run(&r)
+---
+// query_type: aggregation, rows: 2, gql_version: 1.0.0
+// group_by: p = (p:Project), bucket = v.severity
+// aggregations: latest = max(v.updated_at)
+| p | bucket | latest |
+| (:Project {id: 9, name: "gitlab"}) | "high" | 1.5 |
+| (:Project {id: 9}) | null | 3 |

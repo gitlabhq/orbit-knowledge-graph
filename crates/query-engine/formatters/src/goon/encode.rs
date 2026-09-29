@@ -1,32 +1,14 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use orbit_utils::strings::{
-    ascii_alphanumeric_table, bytes_are_allowed, char_count_if_exceeds, quote_escaped,
-    truncate_chars,
-};
+use orbit_utils::strings::{ascii_alphanumeric_table, bytes_are_allowed, quote_escaped};
 use semver::Version;
 use serde_json::{Map, Value};
 
-use super::super::graph::{
-    ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor,
-};
+use crate::graph::{ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
+use crate::text::{dedup_and_sort_edges, ordered_pairs, truncate, truncated_len};
 
-const LONG_TEXT_LIMIT: usize = 200;
-const HARD_VALUE_LIMIT: usize = 1000;
-
-const LONG_TEXT_KEYS: &[&str] = &["body", "description", "name", "note", "title"];
 const BARE_TOKEN_BYTES: [bool; 256] = ascii_alphanumeric_table(b"_-:./@+");
-
-fn column_priority(key: &str) -> u8 {
-    match key {
-        "iid" | "username" | "name" | "full_path" | "path" | "uuid" => 0,
-        "state" | "status" | "visibility_level" => 1,
-        "created_at" | "updated_at" | "merged_at" | "closed_at" => 3,
-        "title" | "description" | "body" | "note" => 4,
-        _ => 2,
-    }
-}
 
 pub fn encode(response: &GraphResponse, format_version: &Version) -> String {
     let mut out = String::with_capacity(estimate_capacity(response));
@@ -203,7 +185,7 @@ fn write_node_row(out: &mut String, node: &GraphNode) {
         if formatted.is_empty() {
             continue;
         }
-        let original_len = string_len_for_breadcrumb(val, key);
+        let original_len = truncated_len(val, key);
         let _ = write!(out, " {key}={formatted}");
         if let Some(len) = original_len {
             let _ = write!(out, " {key}_len={len}");
@@ -364,39 +346,6 @@ fn group_node_refs<'a>(
     groups
 }
 
-fn dedup_and_sort_edges(edges: &[GraphEdge]) -> Vec<&GraphEdge> {
-    let mut sorted: Vec<&GraphEdge> = edges.iter().collect();
-    sorted.sort_by(|a, b| {
-        a.path_id
-            .unwrap_or(usize::MAX)
-            .cmp(&b.path_id.unwrap_or(usize::MAX))
-            .then(
-                a.step
-                    .unwrap_or(usize::MAX)
-                    .cmp(&b.step.unwrap_or(usize::MAX)),
-            )
-            .then(a.edge_type.cmp(&b.edge_type))
-            .then(a.from.cmp(&b.from))
-            .then(a.from_id.cmp(&b.from_id))
-            .then(a.to.cmp(&b.to))
-            .then(a.to_id.cmp(&b.to_id))
-            .then(a.depth.cmp(&b.depth))
-    });
-    let mut seen = std::collections::HashSet::new();
-    sorted.retain(|e| {
-        seen.insert((
-            e.edge_type.clone(),
-            e.from.clone(),
-            e.from_id,
-            e.to.clone(),
-            e.to_id,
-            e.path_id,
-            e.step,
-        ))
-    });
-    sorted
-}
-
 fn group_edges_by_type<'a>(edges: &'a [&'a GraphEdge]) -> Vec<(&'a str, &'a [&'a GraphEdge])> {
     let mut groups: Vec<(&str, &[&GraphEdge])> = Vec::new();
     let mut start = 0;
@@ -408,16 +357,6 @@ fn group_edges_by_type<'a>(edges: &'a [&'a GraphEdge]) -> Vec<(&'a str, &'a [&'a
         }
     }
     groups
-}
-
-fn ordered_pairs(props: &Map<String, Value>) -> Vec<(&str, &Value)> {
-    let mut pairs: Vec<(&str, &Value)> = props.iter().map(|(k, v)| (k.as_str(), v)).collect();
-    pairs.sort_by(|a, b| {
-        column_priority(a.0)
-            .cmp(&column_priority(b.0))
-            .then(a.0.cmp(b.0))
-    });
-    pairs
 }
 
 fn format_value(value: &Value, key: &str) -> String {
@@ -445,25 +384,6 @@ fn format_string(raw: &str, key: &str) -> String {
         return truncated.into_owned();
     }
     quote_escaped(&truncated)
-}
-
-fn truncate<'a>(raw: &'a str, key: &str) -> std::borrow::Cow<'a, str> {
-    let limit = if LONG_TEXT_KEYS.contains(&key) {
-        LONG_TEXT_LIMIT
-    } else {
-        HARD_VALUE_LIMIT
-    };
-    truncate_chars(raw, limit, "...")
-}
-
-fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
-    let Value::String(s) = value else { return None };
-    let limit = if LONG_TEXT_KEYS.contains(&key) {
-        LONG_TEXT_LIMIT
-    } else {
-        HARD_VALUE_LIMIT
-    };
-    char_count_if_exceeds(s, limit)
 }
 
 fn is_bare_token(s: &str) -> bool {

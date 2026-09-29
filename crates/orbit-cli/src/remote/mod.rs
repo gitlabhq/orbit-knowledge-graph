@@ -22,6 +22,7 @@ pub(crate) use tools::run_tools;
 pub(crate) enum ResponseFormat {
     Llm,
     Raw,
+    Gql,
 }
 
 impl ResponseFormat {
@@ -29,6 +30,7 @@ impl ResponseFormat {
         match self {
             ResponseFormat::Llm => "llm",
             ResponseFormat::Raw => "raw",
+            ResponseFormat::Gql => "gql",
         }
     }
 }
