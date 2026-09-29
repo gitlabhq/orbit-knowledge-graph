@@ -12,6 +12,28 @@ pub struct Assignment<F> {
     pub expression: Expr<F>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum AggregateFunction {
+    Count,
+    Sum,
+    #[strum(serialize = "avg")]
+    Average,
+    #[strum(serialize = "min")]
+    Minimum,
+    #[strum(serialize = "max")]
+    Maximum,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Measure<F> {
+    pub output: ValueId,
+    pub function: AggregateFunction,
+    pub argument: Option<Expr<F>>,
+    pub distinct: bool,
+    pub filter: Option<Expr<F>>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JoinKind {
     Inner,
@@ -37,8 +59,18 @@ pub enum Op<S, F, E> {
     Read(S),
     Filter(Expr<F>),
     Project(Vec<Assignment<F>>),
-    Join { kind: JoinKind, condition: Expr<F> },
-    Union { outputs: Schema, arms: Vec<Schema> },
+    Aggregate {
+        groups: Vec<Assignment<F>>,
+        measures: Vec<Measure<F>>,
+    },
+    Join {
+        kind: JoinKind,
+        condition: Expr<F>,
+    },
+    Union {
+        outputs: Schema,
+        arms: Vec<Schema>,
+    },
     Sort(Vec<SortKey>),
     Limit(u32),
     Extension(E),
@@ -75,6 +107,7 @@ impl<S, F, E> Node<S, F, E> {
             }
             Op::Filter(predicate) => Op::Filter(predicate),
             Op::Project(assignments) => Op::Project(assignments),
+            Op::Aggregate { groups, measures } => Op::Aggregate { groups, measures },
             Op::Join { kind, condition } => Op::Join { kind, condition },
             Op::Union { outputs, arms } => Op::Union { outputs, arms },
             Op::Sort(keys) => Op::Sort(keys),
@@ -132,6 +165,42 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
                 require_boolean(predicate.data_type(&inputs[0], values)?)?;
                 inputs[0].clone()
             }
+            Op::Aggregate { groups, measures } => {
+                let input = &inputs[0];
+                let mut output = Vec::new();
+
+                for group in groups {
+                    require(
+                        &group.expression.data_type(input, values)?
+                            == values.data_type(group.output)?,
+                        "group output type mismatch",
+                    )?;
+                    output.push(group.output);
+                }
+
+                for measure in measures {
+                    if let Some(filter) = &measure.filter {
+                        require_boolean(filter.data_type(input, values)?)?;
+                    }
+
+                    let argument = measure
+                        .argument
+                        .as_ref()
+                        .map(|arg| arg.data_type(input, values))
+                        .transpose()?;
+                    let expected = measure
+                        .function
+                        .return_type(argument.as_ref(), measure.distinct)?;
+                    require(
+                        &expected == values.data_type(measure.output)?,
+                        "aggregate output type mismatch",
+                    )?;
+                    output.push(measure.output);
+                }
+
+                require(!output.is_empty(), "aggregate requires an output")?;
+                output
+            }
             Op::Join { kind, condition } => {
                 let available: Schema = inputs.iter().flatten().copied().collect();
                 require_unique(&available)?;
@@ -173,6 +242,51 @@ impl<S: Operation, F: Function, E: Operation> Node<S, F, E> {
         }
 
         Ok(output)
+    }
+}
+
+impl AggregateFunction {
+    pub fn return_type(self, argument: Option<&ValueType>, distinct: bool) -> Result<ValueType> {
+        require(
+            !distinct || argument.is_some(),
+            "distinct aggregate requires an argument",
+        )?;
+        if self == Self::Count {
+            return Ok(ValueType::UInt64);
+        }
+
+        let argument = argument.ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("aggregate requires an argument".into())
+        })?;
+        let base = match argument {
+            ValueType::Nullable(inner) => inner.as_ref(),
+            other => other,
+        };
+
+        if matches!(self, Self::Sum | Self::Average) {
+            require(
+                matches!(
+                    base,
+                    ValueType::Int64 | ValueType::UInt64 | ValueType::Float64
+                ),
+                "numeric aggregate requires a number",
+            )?;
+        } else {
+            require(
+                !matches!(
+                    base,
+                    ValueType::List(_) | ValueType::Record(_) | ValueType::Nullable(_)
+                ),
+                "aggregate requires a scalar",
+            )?;
+        }
+
+        let result = if self == Self::Average {
+            ValueType::Float64
+        } else {
+            base.clone()
+        };
+        Ok(ValueType::Nullable(Box::new(result)))
     }
 }
 

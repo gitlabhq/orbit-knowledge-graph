@@ -130,6 +130,45 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
     match &node.op {
         Op::Read(source) => source.emit(inputs, context),
         Op::Extension(extension) => extension.emit(inputs, context),
+        Op::Aggregate { groups, measures } => {
+            let input = inputs.pop().expect("verified aggregate arity");
+            let (from, bindings, _) = context.relation(input);
+            let mut query = Query {
+                from,
+                ..Default::default()
+            };
+            let mut exports = Vec::new();
+
+            for group in groups {
+                let expression = emit_expression(&group.expression, &bindings)?;
+                query.group_by.push(expression.clone());
+                exports.push((group.output, expression));
+            }
+
+            for measure in measures {
+                let argument = measure
+                    .argument
+                    .as_ref()
+                    .map(|arg| emit_expression(arg, &bindings).map(Box::new))
+                    .transpose()?;
+                let filter = measure
+                    .filter
+                    .as_ref()
+                    .map(|filter| emit_expression(filter, &bindings).map(Box::new))
+                    .transpose()?;
+                exports.push((
+                    measure.output,
+                    Expr::Aggregate {
+                        name: measure.function.to_string(),
+                        argument,
+                        distinct: measure.distinct,
+                        filter,
+                    },
+                ));
+            }
+
+            Ok(SqlFragment { query, exports })
+        }
         Op::Union { outputs, arms } => {
             let columns: Vec<_> = outputs.iter().map(|_| context.alias()).collect();
             let queries = inputs

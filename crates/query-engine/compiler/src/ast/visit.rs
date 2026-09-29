@@ -62,6 +62,13 @@ pub fn visit_expressions<'a>(
     callback: &mut impl FnMut(&'a Expr) -> Result<()>,
 ) -> Result<()> {
     match expression {
+        Expr::Aggregate {
+            argument, filter, ..
+        } => {
+            for expression in argument.iter().chain(filter.iter()) {
+                visit_expressions(expression, callback)?;
+            }
+        }
         Expr::BinaryOp { left, right, .. } => {
             visit_expressions(left, callback)?;
             visit_expressions(right, callback)?;
@@ -153,6 +160,14 @@ fn visit_expr_queries(
     callback: &mut impl FnMut(&mut Query) -> Result<()>,
 ) -> Result<()> {
     match expression {
+        Expr::Aggregate {
+            argument, filter, ..
+        } => {
+            for expression in argument.iter_mut().chain(filter.iter_mut()) {
+                visit_expr_queries(expression, callback)?;
+            }
+            Ok(())
+        }
         Expr::InSelect { expr, query } => {
             visit_expr_queries(expr, callback)?;
             visit_queries_mut(query, callback)

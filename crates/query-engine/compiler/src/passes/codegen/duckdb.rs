@@ -189,6 +189,23 @@ impl Context {
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(name, args),
+            Expr::Aggregate {
+                name,
+                argument,
+                distinct,
+                filter,
+            } => {
+                let argument = argument
+                    .as_ref()
+                    .map(|arg| self.emit_expr(arg))
+                    .unwrap_or_else(|| "*".into());
+                let distinct = if *distinct { "DISTINCT " } else { "" };
+                let mut sql = format!("{name}({distinct}{argument})");
+                if let Some(filter) = filter {
+                    sql.push_str(&format!(" FILTER (WHERE {})", self.emit_expr(filter)));
+                }
+                sql
+            }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);
                 format!("{param} -> {body}")

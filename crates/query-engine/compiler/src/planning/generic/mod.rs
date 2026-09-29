@@ -2,7 +2,9 @@ mod expression;
 mod plan;
 
 pub use expression::{Expr, Function, ValueId, ValueType, Values};
-pub use plan::{Assignment, JoinKind, Node, Op, Operation, Schema, SortKey};
+pub use plan::{
+    AggregateFunction, Assignment, JoinKind, Measure, Node, Op, Operation, Schema, SortKey,
+};
 
 use crate::error::{QueryError, Result};
 

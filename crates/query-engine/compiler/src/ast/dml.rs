@@ -28,6 +28,12 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    Aggregate {
+        name: String,
+        argument: Option<Box<Expr>>,
+        distinct: bool,
+        filter: Option<Box<Expr>>,
+    },
     Lambda {
         param: String,
         body: Box<Expr>,

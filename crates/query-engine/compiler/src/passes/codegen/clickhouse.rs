@@ -207,6 +207,27 @@ impl Context {
             Expr::Identifier(name) => name.clone(),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
+            Expr::Aggregate {
+                name,
+                argument,
+                distinct,
+                filter,
+            } => {
+                let mut function = name.clone();
+                if *distinct {
+                    function.push_str("Distinct");
+                }
+                if name != "count" {
+                    function.push_str("OrNull");
+                }
+                let mut arguments: Vec<_> =
+                    argument.iter().map(|arg| self.emit_expr(arg)).collect();
+                if let Some(filter) = filter {
+                    function.push_str("If");
+                    arguments.push(self.emit_expr(filter));
+                }
+                format!("{function}({})", arguments.join(", "))
+            }
             Expr::FuncCall { name, args } => {
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
