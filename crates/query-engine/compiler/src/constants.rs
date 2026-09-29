@@ -24,6 +24,7 @@ macro_rules! internal_col {
 
 internal_col!(path_column, "path");
 internal_col!(edge_kinds_column, "edge_kinds");
+internal_col!(path_authorizations_column, "path_authorizations");
 internal_col!(neighbor_id_column, "neighbor_id");
 internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");

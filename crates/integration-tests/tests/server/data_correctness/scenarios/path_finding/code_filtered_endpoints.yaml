@@ -17,6 +17,14 @@ query:
 expect:
   referential_integrity: true
   path_count: 1
+  nodes:
+    Definition:
+      filters:
+        name: { in: [compile, helper, run_query] }
+      rows:
+        - { id: 12000, name: compile }
+        - { id: 12001, name: helper }
+        - { id: 12002, name: run_query }
   path_edges:
     - [{ from: Definition, from_id: 12000, type: CALLS, to: Definition, to_id: 12001 },
        { type: CALLS, to: Definition, to_id: 12002 }]

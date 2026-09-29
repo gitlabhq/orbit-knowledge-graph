@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::{
-    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
+    edge_kinds_column, neighbor_id_column, neighbor_type_column, path_authorizations_column,
+    path_column,
 };
 use compiler::internal_column_prefix;
 use compiler::{QueryType, RedactionNode, ResultContext};
@@ -43,6 +44,7 @@ pub struct QueryResultRow {
     columns: HashMap<String, ColumnValue>,
     /// Nodes discovered dynamically at query time that need redaction checks (e.g nodes where their entity type is not known ahead of time).
     dynamic_nodes: Vec<NodeRef>,
+    path_authorizations: Option<Vec<NodeRef>>,
     /// Relationship kinds for each hop in a path finding query.
     /// `edge_kinds[i]` is the relationship that connects `dynamic_nodes[i]` to `dynamic_nodes[i+1]`.
     /// Empty for non-path-finding queries.
@@ -59,6 +61,7 @@ impl QueryResultRow {
         Self {
             columns,
             dynamic_nodes,
+            path_authorizations: None,
             edge_kinds,
             authorized: true,
         }
@@ -225,7 +228,20 @@ impl QueryResult {
                     Vec::new()
                 };
 
-                rows.push(QueryResultRow::new(columns, dynamic_nodes, edge_kinds));
+                let mut row = QueryResultRow::new(columns, dynamic_nodes, edge_kinds);
+                if is_path_finding && batch.column_by_name(path_authorizations_column()).is_some() {
+                    row.path_authorizations = Some(
+                        ArrowUtils::get_i64_string_pairs(
+                            batch,
+                            path_authorizations_column(),
+                            row_idx,
+                        )
+                        .into_iter()
+                        .map(|(id, kind)| NodeRef::new(id, kind))
+                        .collect(),
+                    );
+                }
+                rows.push(row);
             }
         }
 
@@ -285,21 +301,17 @@ impl QueryResult {
                     .insert(node_ref.id);
             }
 
-            for node_ref in &row.dynamic_nodes {
+            for (index, node_ref) in row.dynamic_nodes.iter().enumerate() {
+                let mut node_ref = node_ref.clone();
+                if !resolve_dynamic_auth_id(row, index, &mut node_ref, &self.ctx) {
+                    continue;
+                }
                 let Some(auth) = self.ctx.get_entity_auth(&node_ref.entity_type) else {
                     continue;
                 };
-                let auth_id = if let Some(ref owner) = auth.owner_entity {
-                    let Some(id) = find_owner_id(row, owner, &self.ctx) else {
-                        continue;
-                    };
-                    id
-                } else {
-                    node_ref.id
-                };
                 ids.entry((auth.resource_type.as_str(), auth.ability.as_str()))
                     .or_default()
-                    .insert(auth_id);
+                    .insert(node_ref.id);
             }
         }
 
@@ -337,9 +349,9 @@ impl QueryResult {
             }
 
             if row.authorized {
-                for node_ref in &row.dynamic_nodes {
+                for (index, node_ref) in row.dynamic_nodes.iter().enumerate() {
                     let mut node_ref = node_ref.clone();
-                    if !resolve_dynamic_auth_id(row, &mut node_ref, &self.ctx)
+                    if !resolve_dynamic_auth_id(row, index, &mut node_ref, &self.ctx)
                         || !is_authorized(&node_ref, authorizations, &self.ctx)
                     {
                         row.set_unauthorized();
@@ -390,9 +402,23 @@ fn is_authorized(
 
 fn resolve_dynamic_auth_id(
     row: &QueryResultRow,
+    index: usize,
     node_ref: &mut NodeRef,
     ctx: &ResultContext,
 ) -> bool {
+    if let Some(identities) = &row.path_authorizations {
+        if identities.len() != row.dynamic_nodes.len() {
+            return false;
+        }
+        let Some(identity) = identities
+            .get(index)
+            .filter(|identity| identity.entity_type == node_ref.entity_type)
+        else {
+            return false;
+        };
+        node_ref.id = identity.id;
+        return true;
+    }
     let Some(auth_config) = ctx.get_entity_auth(&node_ref.entity_type) else {
         return true;
     };

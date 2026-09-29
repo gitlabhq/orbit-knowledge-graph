@@ -115,16 +115,20 @@ fn path_security_filters_every_hop_before_selecting_shortest_paths() {
     let sql = compiled.base.render();
     let sql = sql.split(" SETTINGS ").next().unwrap();
     let result = clickhouse::execute(&format!(
-        "CREATE TABLE gl_definition(id Int64, name String, traversal_path String, _version UInt64, _deleted Bool)
+        "CREATE TABLE gl_definition(id Int64, name String, project_id Int64 DEFAULT 100, traversal_path String, _version UInt64, _deleted Bool)
          ENGINE = ReplacingMergeTree(_version) ORDER BY (traversal_path, id);
-         INSERT INTO gl_definition VALUES (1, 'start', '1/100/', 1, false), (4, 'end', '1/100/', 1, false), (6, 'end', '1/100/', 1, false);
+         CREATE TABLE gl_file AS gl_definition;
+         CREATE TABLE gl_imported_symbol AS gl_definition;
+         INSERT INTO gl_definition (id, name, traversal_path, _version, _deleted) VALUES
+             (1, 'start', '1/100/', 1, false), (2, 'middle', '1/100/', 1, false),
+             (3, 'middle', '1/100/', 1, false), (4, 'end', '1/100/', 1, false), (6, 'end', '1/100/', 1, false);
          CREATE TABLE edges(source_id Int64, target_id Int64, source_kind String, target_kind String, relationship_kind String) ENGINE = Memory;
          INSERT INTO edges VALUES {EDGES};
          CREATE TABLE gl_code_edge(source_id Int64, target_id Int64, source_kind String, target_kind String,
-             relationship_kind String, traversal_path String, _version UInt64, _deleted Bool)
+              relationship_kind String, project_id Int64 DEFAULT 100, traversal_path String, _version UInt64, _deleted Bool)
          ENGINE = ReplacingMergeTree(_version) ORDER BY (traversal_path, source_id, target_id, source_kind, target_kind, relationship_kind);
-         INSERT INTO gl_code_edge SELECT *, '1/100/', 1, false FROM edges;
-         INSERT INTO gl_code_edge VALUES (1, 4, 'Definition', 'Definition', 'CALLS', '1/200/', 1, false);
+         INSERT INTO gl_code_edge (source_id, target_id, source_kind, target_kind, relationship_kind, traversal_path, _version, _deleted) SELECT *, '1/100/', 1, false FROM edges;
+         INSERT INTO gl_code_edge (source_id, target_id, source_kind, target_kind, relationship_kind, traversal_path, _version, _deleted) VALUES (1, 4, 'Definition', 'Definition', 'CALLS', '1/200/', 1, false);
          SELECT depth, length(_gkg_path), length(_gkg_edge_kinds) FROM ({sql}) ORDER BY depth FORMAT TSV;"
     ));
     assert_eq!(result.trim(), "2\t3\t2\n2\t3\t2\n3\t4\t3\n3\t4\t3");

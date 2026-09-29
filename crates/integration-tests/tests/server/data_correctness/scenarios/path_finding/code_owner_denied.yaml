@@ -1,0 +1,23 @@
+description: A code-only path is denied when its owning project is not authorized
+
+config:
+  redaction:
+    allow:
+      project: [1001]
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "Definition", "node_ids": [12000]},
+        {"id": "end", "entity": "Definition", "node_ids": [12002]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["CALLS"]}
+    }
+  gql: |
+    MATCH p = ANY SHORTEST (start:Definition {id: 12000})-[:CALLS*1..3]->(`end`:Definition {id: 12002}) RETURN p
+
+expect:
+  path_count: 0
