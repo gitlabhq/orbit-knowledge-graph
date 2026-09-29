@@ -56,7 +56,8 @@ fn collect_scope_counts(
     entities: &[VisibleEntity],
     counts_by_scope: &HashMap<String, HashMap<String, i64>>,
 ) -> ScopeItemCounts {
-    let found = counts_by_scope.get(scope.as_str());
+    let no_counts = HashMap::new();
+    let scope_counts = counts_by_scope.get(scope.as_str()).unwrap_or(&no_counts);
     let counts = entities
         .iter()
         .filter(|entity| {
@@ -66,13 +67,11 @@ fn collect_scope_counts(
                 .any(|visible| visible == scope.as_str())
         })
         .map(|entity| {
-            let count = found
-                .and_then(|counts| counts.get(&entity.name))
-                .copied()
-                .unwrap_or(0);
+            let count = scope_counts.get(&entity.name).copied().unwrap_or(0);
             (entity.name.clone(), count)
         })
         .collect();
+
     ScopeItemCounts {
         scope: scope.clone(),
         counts,
