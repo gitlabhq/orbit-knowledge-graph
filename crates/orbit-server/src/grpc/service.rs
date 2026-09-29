@@ -212,8 +212,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        // DWS agents pay a model turn for every discovery call, so give them
-        // the command catalog up front.
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
         let tools = ToolRegistry::tools_with_catalog(
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
