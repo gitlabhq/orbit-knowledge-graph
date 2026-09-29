@@ -77,6 +77,9 @@ stages:
       # Record construction is a call to the struct
       - match: '(struct_expression name: $N body: $B)'
         replace: '(__call (__callee @$N) $B)'
+      # `let s = Service;` constructs a unit struct: type names are CamelCase
+      - match: '(let_declaration pattern: $N value: $V:(identifier "/^[A-Z][a-z]/"))'
+        replace: '(__binding @$N (__rhs (__call (__callee @$V))))'
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
@@ -224,18 +227,18 @@ stages:
         replace: '(__binding @$N)'
 
       # Trait method signatures (no body) — self variant first
-      - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding))'
-        replace: '(__def (__defname @$N) (__method) $$$P)'
+      - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$P)'
         tag: { flavor: self_method }
-      - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding))'
-        replace: '(__def (__defname @$N) (__function) $$$P)'
+      - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$P)'
 
       # Functions — self variant first, then generic
-      - match: '(function_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__method) $$$ANN $$$P $B)'
+      - match: '(function_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
         tag: { flavor: self_method }
-      - match: '(function_item name: $N parameters: (parameters $$$P:__binding) body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__function) $$$ANN $$$P $B)'
+      - match: '(function_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$P $B)'
 
       # Fields: named ones by name, tuple ones by position
       - match: '(field_declaration name: $N)'
@@ -317,7 +320,7 @@ stages:
       - match: '(__def (__enum_variant))'
         tag: { callable: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { callable: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'

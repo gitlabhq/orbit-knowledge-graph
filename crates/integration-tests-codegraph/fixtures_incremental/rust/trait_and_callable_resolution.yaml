@@ -108,8 +108,6 @@ fixtures:
 
 tests:
   - name: "trait method call resolves to impl method"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'run'
@@ -139,8 +137,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Function' } }
 
   - name: "tuple struct constructor resolves to struct definition"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_tuple_struct' AND callee.name = 'Wrapper'

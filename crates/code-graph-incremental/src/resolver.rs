@@ -859,7 +859,16 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 }
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
-    chain(ctx, c, &|r| visible_type(ctx, r.fi(), r.sym()))
+    chain(ctx, c, &|r| {
+        enclosing_alias(r).or_else(|| visible_type(ctx, r.fi(), r.sym()))
+    })
+}
+
+/// `Self` in `impl Service { fn new() -> Self }` names the enclosing def.
+fn enclosing_alias(r: Cursor) -> Option<Cursor> {
+    r.ancestors()
+        .filter(|a| a.is(C::Def))
+        .find(|d| d.children_of(C::Alias).any(|a| a.sym() == r.sym()))
 }
 
 fn chain<'a>(

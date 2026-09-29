@@ -76,8 +76,6 @@ tests:
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Function" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'run'

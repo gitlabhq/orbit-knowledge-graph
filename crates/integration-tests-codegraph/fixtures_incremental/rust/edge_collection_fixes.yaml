@@ -51,8 +51,6 @@ tests:
       - { row: { fqn: 'Counter::add_assign' } }
 
   - name: "record expression construction creates edge to the struct"
-    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'construct_foo' AND callee.name = 'Foo'

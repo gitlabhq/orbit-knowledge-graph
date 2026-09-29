@@ -73,8 +73,6 @@ tests:
       - { row: { fqn: 'outer::helper', type: 'Function' } }
 
   - name: "local tuple struct constructors resolve to the local struct"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.name = 'outer' AND callee.name = 'Local'
