@@ -14,6 +14,9 @@ pub struct WalkResult {
     /// Per file: the tags rules put on it and on its ancestor directories,
     /// nearest first, plus `source_root_rel`, its path below the nearest source root.
     pub file_tags: Vec<(String, Vec<Tag>)>,
+    /// Every key a file tag can carry, so a reused tree can drop the ones
+    /// that no longer apply before this run's are set.
+    pub tag_keys: Vec<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -72,11 +75,13 @@ impl<'a> ProjectTree<'a> {
             prefixes: vec![],
             aliases: vec![],
         };
+        let tag_keys = pt.tag_keys();
         if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
                 prefixes: vec![],
                 aliases: vec![],
                 file_tags: vec![],
+                tag_keys,
             };
         }
         pt.build_dir_tree();
@@ -88,7 +93,24 @@ impl<'a> ProjectTree<'a> {
             prefixes: pt.prefixes,
             aliases: pt.aliases,
             file_tags,
+            tag_keys,
         }
+    }
+
+    fn tag_keys(&self) -> Vec<u32> {
+        let rules = self.stages.iter().flat_map(|stage| match stage {
+            ResolveStage::Rules(rules) => rules.as_slice(),
+            ResolveStage::Climb { .. } => &[],
+        });
+        let entries = rules.flat_map(|rule| match &rule.out {
+            pattern::Out::Tag(entries, _) => entries.as_slice(),
+            pattern::Out::Replace(_, Some(entries), _) => entries.as_slice(),
+            _ => &[],
+        });
+        entries
+            .map(|entry| entry.key)
+            .chain(std::iter::once(self.lang.syms.intern("source_root_rel")))
+            .collect()
     }
 
     fn build_dir_tree(&mut self) {

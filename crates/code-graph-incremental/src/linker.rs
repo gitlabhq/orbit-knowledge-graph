@@ -97,11 +97,20 @@ impl<'t> Fold<'t> {
     }
 
     /// Imports spelled inline in a call or a supertype path (`crate::a::f()`,
-    /// `impl zoo::T for X`) bind in the enclosing scope before the node itself.
+    /// `impl zoo::T for X`) bind in the enclosing scope before the node itself;
+    /// the walk into the node then skips them.
     fn handle_inline_imports(&mut self, c: Cursor<'t>) {
         for import in c.children().filter(|i| i.is(C::Import)) {
             self.handle_import(import);
         }
+    }
+
+    fn push_children_except_imports(c: Cursor, stack: &mut Vec<WorkItem>) {
+        stack.extend(
+            c.children_rev()
+                .filter(|ch| !ch.is(C::Import))
+                .map(|ch| WorkItem::Visit(ch.index())),
+        );
     }
 
     fn walk_children(&mut self, c: Cursor) {
@@ -120,11 +129,9 @@ impl<'t> Fold<'t> {
         } else if k == C::Call {
             self.handle_inline_imports(c);
             self.handle_call(c);
-            stack.extend(
-                c.children_rev()
-                    .filter(|ch| !ch.is(C::Import))
-                    .map(|ch| WorkItem::Visit(ch.index())),
-            );
+            Self::push_children_except_imports(c, stack);
+        } else if k == C::SuperType {
+            Self::push_children_except_imports(c, stack);
         } else if k == C::Member {
             let is_callee = c.parent().is_some_and(|p| p.kind() == C::Callee);
             if !is_callee {

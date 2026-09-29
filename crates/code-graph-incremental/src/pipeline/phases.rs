@@ -448,6 +448,9 @@ impl Phase<DirtyGraph> for Resolve {
             .iter()
             .filter_map(|(path, tags)| Some((*tree_by_path.get(path.as_str())?, tags.as_slice())))
             .collect();
+        for tree in &mut state.trees {
+            tree.clear_tags(0, &walk.tag_keys);
+        }
         for (i, tags) in file_tags {
             for tag in tags {
                 state.trees[i].set_tag(0, tag.key, tag.val);
