@@ -110,32 +110,21 @@ see [create a fine-grained personal access token](https://docs.gitlab.com/auth/t
 ## Service accounts
 
 Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) to query GitLab Orbit from a script, a CI/CD job, or an AI agent.
-The account authenticates to the [REST API](access/api.md) with a personal access token.
-Like a person, the account sees only data from the groups where it is a member.
+To see data from a group, a service account must be either:
 
-A new service account has no access to the graph.
-The account gets scope from these memberships:
+- A direct member of the group.
+- A member of the group that is shared with the target group.
 
-- Direct membership of a group with the Reporter role or higher.
-  The membership also covers all subgroups and projects in that group.
-- Membership of a group that is shared with another group.
-  The account gets the lower of its own role and the role in the group link.
-
-These memberships do not add to the scope:
-
-- Membership of a project only.
-- Membership with the Guest or Planner role.
-- An expired membership.
-- Membership of a group outside the top-level groups where GitLab Orbit is on.
-
-The role of the account controls which data it can query, as described in
-[roles required to query GitLab Orbit](#roles-required-to-query-gitlab-orbit).
+Membership to a project, or of a group outside the top-level groups where
+GitLab Orbit is turned on, does not grant access to GitLab Orbit.
 
 > [!warning]
-> Do not give a query bot administrator or auditor access.
-> GitLab Orbit does not limit the scope of these accounts, so a leaked token exposes every group where GitLab Orbit is on.
+> Do not give a service account administrator or auditor access.
+> A leaked token can expose every group where GitLab Orbit is turned on.
 
-### Set up a service account for GitLab Orbit
+### Set up a service account
+
+Set up a service account so a tool can query GitLab Orbit without a personal account.
 
 Prerequisites:
 
@@ -143,15 +132,10 @@ Prerequisites:
 
 To set up a service account:
 
-1. [Create a group service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account).
-   A project service account can only join its own project, so it cannot get scope.
-   A group service account can only join its own group and the subgroups and projects in that group, so create one for each top-level group.
-1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) for the account.
-   Select only the `read_api` scope.
-   Fine-grained personal access tokens are not supported.
-1. [Add the account to each group](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project) that the tool must query.
-   Select the Reporter role, or the Security Manager role if the tool must read security data.
-   Add the account to the lowest subgroup that contains the data.
+1. [Create a group service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) in each top-level group the tool must query.
+1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) for the service account with the scope set to `read_api`. Fine-grained personal access tokens are not supported.
+1. [Add the service account](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project) to the lowest subgroup with queryable data.
+   - Select the **Security Manager** role if the tool must read security data.
 
 ### Verify the scope of a service account
 
@@ -159,7 +143,7 @@ Verify the scope after you set up the account, and each time you change its memb
 
 To verify the scope:
 
-1. Put this query in a file named `request.json`:
+1. Add the following [JSON query](queries/query-language.md) in a file called `request.json`:
 
    ```json orbit-query
    {
@@ -188,4 +172,3 @@ To verify the scope:
    ```
 
 1. Check that the `full_path` values match only the groups that you added the account to.
-   If other groups appear, check that the account is not an administrator or auditor.

@@ -61,14 +61,15 @@ The `read_api` scope alone is not sufficient for the MCP transport.
 To resolve this issue, create a token with the `mcp_orbit` scope, or authenticate again to grant
 the additional scope.
 
-## Error: `403 Forbidden - No Orbit enabled namespaces available`
+## Error: `403 Forbidden` for a service account
 
 A query from a service account might fail with `403 Forbidden - No Orbit enabled namespaces available`.
 
-This issue occurs when the service account has no membership that gives it scope.
+This issue occurs when the account does not have the Reporter role or higher in a group where
+GitLab Orbit is turned on.
 
-To resolve this issue, add the account to a group where GitLab Orbit is on.
-Select the Reporter role or higher.
+To resolve this issue, add the account to a group where GitLab Orbit is turned on,
+with the Reporter role or higher.
 For more information, see [service accounts](security.md#service-accounts).
 
 ## Error: `403 Forbidden` with no message
