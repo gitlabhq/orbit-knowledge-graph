@@ -261,7 +261,7 @@ stages:
         replace: '(__def (__defname @$N) (__enum_variant))'
       - match: '(enum_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
-      - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier) body: $B)'
+      - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier|scoped_type_identifier) body: $B)'
         replace: '(__def (__defname @$N) (__trait) $$$SUPERS=>__supertype $B)'
       - match: '(trait_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__trait) $B)'
@@ -278,6 +278,13 @@ stages:
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
       - match: '(impl_item type: $T body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
+
+  - name: scoped-supertypes
+    rules:
+      # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
+      # a path in supertype position is a scoped import of its last segment
+      - match: '(__supertype "/::/")'
+        replace: '(__supertype @$ROOT|split_last("::") (__import (__source @$ROOT|regex_replace("::[^:]*$","")) (__source_path @$ROOT|regex_replace("::[^:]*$","")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$ROOT|split_last("::"))))'
 
   - name: tuple-fields
     rules:
@@ -342,6 +349,12 @@ resolve:
       rules:
         - match: '(__dir (__file "Cargo.toml"))'
           append: ['(__crate_root)']
+        # A package manifest below the root names its crate; `shared_lib::x` then
+        # looks in that crate's src. The root manifest's crate stays unprefixed.
+        - match: '(__dir (__file "Cargo.toml" (__obj (__field "package" (__obj $$$B (__field "name" $N:__str))))))'
+          tag: { crate: '@$N|replace("-","_")' }
+        - match: '(__dir (__file "Cargo.toml" (__obj (__field "package" (__obj $$$B (__field "name" $N:__str))))))'
+          append: ['(__alias @$N|replace("-","_") (__str @$ROOT|tree_path("/")|regex_replace("$","/src")|regex_replace("^/","")))']
         - match: '(__dir (__file "lib.rs"))'
           append: ['(__source_root)']
         - match: '(__dir (__file "main.rs"))'
@@ -355,7 +368,10 @@ display:
           entity: File
           file_path: '@$M'
           language: '@$M|split_last(".")|map("rs:rust")'
-          fqn: '@$M|tag("mod_self")|regex_replace("^src(/|$)","")|replace("/","::")'
+          module_path: '@$M|tag("source_root_rel")|regex_replace("\.rs$","")|regex_replace("(^|/)(mod|lib|main)$","")|replace("/","::")'
+      - match: '$M:__source_file'
+        tag:
+          fqn: '@$M|concat("::", "tag:crate", "tag:module_path")'
 
       - match: '(__def)'
         tag:

@@ -52,8 +52,6 @@ fixtures:
 
 tests:
   - name: "workspace call graph distinguishes local and dependent helpers"
-    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.file_path = 'crates/app/src/main.rs'
@@ -66,8 +64,6 @@ tests:
       - { row: { file: 'crates/shared/src/util.rs', fqn: 'shared_lib::util::helper' } }
 
   - name: "shared workspace member keeps crate-qualified FQN"
-    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
-    skip: true
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'crates/shared/src/util.rs' AND d.name = 'helper'
@@ -77,8 +73,6 @@ tests:
       - { row: { fqn: 'shared_lib::util::helper' } }
 
   - name: "workspace member local calls still resolve within their crate"
-    # Known gap: Crate-qualified FQNs and path dependencies from Cargo manifests are not resolved yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_shared' AND callee.name = 'helper'

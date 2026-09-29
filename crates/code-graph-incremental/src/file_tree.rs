@@ -6,11 +6,14 @@ use crate::intern::Lang;
 use crate::pattern;
 use crate::pipeline::SourceFile;
 use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
-use crate::tree::{Cursor, Node, Step, Tree};
+use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {
     pub prefixes: Vec<String>,
     pub aliases: Vec<(String, String)>,
+    /// Per file: the tags rules put on it and on its ancestor directories,
+    /// nearest first, plus `source_root_rel`, its path below the nearest source root.
+    pub file_tags: Vec<(String, Vec<Tag>)>,
 }
 
 pub struct ProjectTree<'a> {
@@ -73,15 +76,18 @@ impl<'a> ProjectTree<'a> {
             return WalkResult {
                 prefixes: vec![],
                 aliases: vec![],
+                file_tags: vec![],
             };
         }
         pt.build_dir_tree();
         pt.run_stages();
         pt.collect_aliases();
         pt.collect_prefixes();
+        let file_tags = pt.collect_file_tags();
         WalkResult {
             prefixes: pt.prefixes,
             aliases: pt.aliases,
+            file_tags,
         }
     }
 
@@ -235,6 +241,52 @@ impl<'a> ProjectTree<'a> {
             });
         aliases.sort_by_key(|(key, _)| std::cmp::Reverse(key.len()));
         self.aliases = aliases;
+    }
+
+    fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
+        let markers = &self.config.lookup_from;
+        let source_root_rel = self.lang.syms.intern("source_root_rel");
+        self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
+            if !file.is(C::File) {
+                return;
+            }
+            let mut tags: Vec<Tag> = Vec::new();
+            for node in std::iter::once(file).chain(file.ancestors()) {
+                for tag in self.tree.tags.get(&node.index()).into_iter().flatten() {
+                    if !tags.iter().any(|t| t.key == tag.key) {
+                        tags.push(*tag);
+                    }
+                }
+            }
+            let root = file
+                .ancestors()
+                .find(|d| d.children().any(|c| markers.contains(&c.kind())))
+                .map(|d| self.node_path(d))
+                .unwrap_or_default();
+            let path = self.file_path(file);
+            let rel = path
+                .strip_prefix(root.as_str())
+                .and_then(|r| {
+                    r.strip_prefix(PATH_SEP)
+                        .or(Some(r))
+                        .filter(|_| !root.is_empty())
+                })
+                .unwrap_or(&path);
+            tags.push(Tag {
+                key: source_root_rel,
+                val: self.lang.syms.intern(rel),
+            });
+            out.push((path, tags));
+        })
+    }
+
+    fn file_path(&self, file: Cursor) -> String {
+        let dir = self.node_path(file);
+        let name = self.lang.syms.resolve(file.sym());
+        match dir.is_empty() {
+            true => name.to_string(),
+            false => format!("{dir}{PATH_SEP}{name}"),
+        }
     }
 
     fn collect_prefixes(&mut self) {

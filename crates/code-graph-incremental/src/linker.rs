@@ -95,6 +95,14 @@ impl<'t> Fold<'t> {
         stack.extend(c.children_rev().map(|ch| WorkItem::Visit(ch.index())));
     }
 
+    /// Imports spelled inline in a call or a supertype path (`crate::a::f()`,
+    /// `impl zoo::T for X`) bind in the enclosing scope before the node itself.
+    fn handle_inline_imports(&mut self, c: Cursor<'t>) {
+        for import in c.children().filter(|i| i.is(C::Import)) {
+            self.handle_import(import);
+        }
+    }
+
     fn walk_children(&mut self, c: Cursor) {
         let mut stack = Vec::new();
         Self::push_children(c, &mut stack);
@@ -109,9 +117,7 @@ impl<'t> Fold<'t> {
         } else if c.is(C::Def) {
             self.handle_def(c, stack);
         } else if k == C::Call {
-            for import in c.children().filter(|i| i.is(C::Import)) {
-                self.handle_import(import);
-            }
+            self.handle_inline_imports(c);
             self.handle_call(c);
             stack.extend(
                 c.children_rev()
@@ -227,6 +233,9 @@ impl<'t> Fold<'t> {
             Some(i) => i,
             None => self.register_def(idx),
         };
+        for supertype in c.children_of(C::SuperType) {
+            self.handle_inline_imports(supertype);
+        }
         let supers = c
             .children()
             .filter(|s| s.is(C::SuperType))
