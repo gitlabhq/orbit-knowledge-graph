@@ -1,34 +1,37 @@
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 
-use super::generic::{Expr, JoinKind, Node, Op, Operation, Program, SubplanId, Values};
-use super::physical::Scalar;
+use super::generic::{Function, Node, Op, Operation, Program, Values};
 
 #[derive(Clone)]
-pub struct Candidate<S, E> {
-    pub program: Program<S, Scalar, E>,
+pub struct Candidate<S, F, E> {
+    pub program: Program<S, F, E>,
     pub values: Values,
 }
 
-pub fn join_candidates<S: Operation + Clone, E: Operation + Clone>(
-    root: Node<S, Scalar, E>,
+pub type Rule<S, F, E> = fn(&Candidate<S, F, E>) -> Result<Vec<Candidate<S, F, E>>>;
+
+pub fn candidates<S: Operation + Clone, F: Function + Clone, E: Operation + Clone>(
+    root: Node<S, F, E>,
     values: Values,
-) -> Result<Vec<Candidate<S, E>>> {
+    rules: &[Rule<S, F, E>],
+) -> Result<Vec<Candidate<S, F, E>>> {
     root.output(&values)?;
-    enumerate(root, values, Vec::new())
+    enumerate(root, values, Vec::new(), rules)
 }
 
-fn enumerate<S: Operation + Clone, E: Operation + Clone>(
-    root: Node<S, Scalar, E>,
+fn enumerate<S: Operation + Clone, F: Function + Clone, E: Operation + Clone>(
+    root: Node<S, F, E>,
     values: Values,
-    subplans: Vec<Node<S, Scalar, E>>,
-) -> Result<Vec<Candidate<S, E>>> {
+    subplans: Vec<Node<S, F, E>>,
+    rules: &[Rule<S, F, E>],
+) -> Result<Vec<Candidate<S, F, E>>> {
     let mut combinations = vec![(Vec::new(), values, subplans)];
 
     for input in root.inputs {
         let mut next = Vec::new();
 
         for (inputs, values, subplans) in combinations {
-            for candidate in enumerate(input.clone(), values, subplans)? {
+            for candidate in enumerate(input.clone(), values, subplans, rules)? {
                 let mut inputs = inputs.clone();
                 inputs.push(candidate.program.root);
                 next.push((inputs, candidate.values, candidate.program.subplans));
@@ -40,113 +43,55 @@ fn enumerate<S: Operation + Clone, E: Operation + Clone>(
 
     let mut result = Vec::new();
     for (inputs, values, subplans) in combinations {
-        result.extend(alternatives(
-            Node {
-                op: root.op.clone(),
-                inputs,
-            },
+        let root = Node {
+            op: root.op.clone(),
+            inputs,
+        };
+        let original = Candidate {
+            program: Program { subplans, root },
             values,
-            subplans,
-        )?);
+        };
+        let expected = original.program.output(&original.values)?;
+        let types = expected
+            .iter()
+            .map(|value| original.values.data_type(*value).cloned())
+            .collect::<Result<Vec<_>>>()?;
+        let mut alternatives = vec![original];
+
+        for rule in rules {
+            let mut additions = Vec::new();
+
+            for candidate in &alternatives {
+                for rewritten in rule(candidate)? {
+                    let output = rewritten.program.output(&rewritten.values)?;
+                    let output_types = output
+                        .iter()
+                        .map(|value| rewritten.values.data_type(*value).cloned())
+                        .collect::<Result<Vec<_>>>()?;
+
+                    if output != expected || output_types != types {
+                        return Err(QueryError::PipelineInvariant(
+                            "optimization changed the output contract".into(),
+                        ));
+                    }
+
+                    additions.push(rewritten);
+                }
+            }
+
+            alternatives.extend(additions);
+        }
+
+        result.extend(alternatives);
     }
 
     Ok(result)
 }
 
-fn alternatives<S: Operation + Clone, E: Operation + Clone>(
-    root: Node<S, Scalar, E>,
-    values: Values,
-    subplans: Vec<Node<S, Scalar, E>>,
-) -> Result<Vec<Candidate<S, E>>> {
-    let mut candidates = Vec::new();
-    let mut schemas = Vec::new();
-
-    for subplan in &subplans {
-        schemas.push(subplan.output_with(&values, &schemas)?);
-    }
-
-    if let Op::Join {
-        kind: JoinKind::Inner,
-        condition:
-            Expr::Call {
-                function: Scalar::Equal,
-                arguments,
-            },
-    } = &root.op
-        && let [Expr::Value(first), Expr::Value(second)] = arguments.as_slice()
-    {
-        let left = root.inputs[0].output_with(&values, &schemas)?;
-        let right = root.inputs[1].output_with(&values, &schemas)?;
-        let keys = if left.contains(first) && right.contains(second) {
-            Some([*first, *second])
-        } else if left.contains(second) && right.contains(first) {
-            Some([*second, *first])
-        } else {
-            None
-        };
-
-        if let Some(keys) = keys {
-            for producer in 0..2 {
-                let consumer = 1 - producer;
-                let schema = root.inputs[producer].output_with(&values, &schemas)?;
-                let mut candidate_values = values.clone();
-                let key = candidate_values.allocate(values.data_type(keys[producer])?.clone());
-                let reference = |exports| Node {
-                    op: Op::Reference {
-                        subplan: SubplanId(subplans.len()),
-                        exports,
-                    },
-                    inputs: vec![],
-                };
-                let mut inputs = root.inputs.clone();
-                inputs[producer] =
-                    reference(schema.into_iter().map(|value| (value, value)).collect());
-                inputs[consumer] = Node {
-                    op: Op::Join {
-                        kind: JoinKind::Semi,
-                        condition: Expr::Call {
-                            function: Scalar::Equal,
-                            arguments: vec![Expr::Value(keys[consumer]), Expr::Value(key)],
-                        },
-                    },
-                    inputs: vec![
-                        inputs[consumer].clone(),
-                        reference(vec![(keys[producer], key)]),
-                    ],
-                };
-
-                let mut definitions = subplans.clone();
-                definitions.push(root.inputs[producer].clone());
-                let program = Program {
-                    subplans: definitions,
-                    root: Node {
-                        op: root.op.clone(),
-                        inputs,
-                    },
-                };
-                program.output(&candidate_values)?;
-                candidates.push(Candidate {
-                    program,
-                    values: candidate_values,
-                });
-            }
-        }
-    }
-
-    candidates.insert(
-        0,
-        Candidate {
-            program: Program { subplans, root },
-            values,
-        },
-    );
-    Ok(candidates)
-}
-
-pub fn select<S: Operation, E: Operation, Cost: Ord>(
-    candidates: Vec<Candidate<S, E>>,
-    mut cost: impl FnMut(&Program<S, Scalar, E>) -> Cost,
-) -> Result<Option<Candidate<S, E>>> {
+pub fn select<S: Operation, F: Function, E: Operation, Cost: Ord>(
+    candidates: Vec<Candidate<S, F, E>>,
+    mut cost: impl FnMut(&Program<S, F, E>) -> Cost,
+) -> Result<Option<Candidate<S, F, E>>> {
     let mut best = None;
 
     for candidate in candidates {
@@ -161,12 +106,12 @@ pub fn select<S: Operation, E: Operation, Cost: Ord>(
     Ok(best.map(|(candidate, _)| candidate))
 }
 
-pub fn estimated_work<S, E>(
-    program: &Program<S, Scalar, E>,
+pub fn estimated_work<S, F, E>(
+    program: &Program<S, F, E>,
     source_work: impl Fn(&S) -> u64,
 ) -> (u64, usize) {
-    fn work<S, E>(
-        node: &Node<S, Scalar, E>,
+    fn work<S, F, E>(
+        node: &Node<S, F, E>,
         subplans: &[u64],
         source_work: &impl Fn(&S) -> u64,
     ) -> u64 {

@@ -403,7 +403,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone>(
     let physical = bound
         .root
         .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
-    let candidates = optimize::join_candidates(physical, bound.values)?;
+    let candidates = optimize::candidates(physical, bound.values, &[crate::planning::rules::sip])?;
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)
     })?

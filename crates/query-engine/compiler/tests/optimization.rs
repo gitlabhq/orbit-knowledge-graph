@@ -5,8 +5,9 @@ use compiler::passes::{codegen, enforce::ResultContext};
 use compiler::planning::generic::{
     Expr, JoinKind, Node, Op, Program, SubplanId, ValueType, Values,
 };
-use compiler::planning::optimize::{estimated_work, join_candidates, select};
+use compiler::planning::optimize::{Candidate, candidates, estimated_work, select};
 use compiler::planning::physical::{CurrentRows, Read, Scalar};
+use compiler::planning::rules;
 
 #[test]
 fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
@@ -45,7 +46,11 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
             inputs: vec![root, read("third_rows", third)],
         }],
     };
-    let candidates = join_candidates(root, values).unwrap();
+    assert_eq!(
+        candidates(root.clone(), values.clone(), &[]).unwrap().len(),
+        1
+    );
+    let candidates = candidates(root, values, &[rules::sip]).unwrap();
     assert_eq!(candidates.len(), 9);
     assert!(
         candidates
@@ -95,6 +100,34 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
         .unwrap()
         .unwrap();
     assert!(selected.program.subplans.is_empty());
+}
+
+#[test]
+fn registered_rules_cannot_change_the_output_contract() {
+    fn drops_output(
+        candidate: &Candidate<Read, Scalar, Infallible>,
+    ) -> compiler::Result<Vec<Candidate<Read, Scalar, Infallible>>> {
+        let mut rewritten = candidate.clone();
+        rewritten.program.root = Node {
+            op: Op::Project(vec![]),
+            inputs: vec![rewritten.program.root],
+        };
+
+        Ok(vec![rewritten])
+    }
+
+    let mut values = Values::default();
+    let id = values.allocate(ValueType::Int64);
+    let root = Node {
+        op: Op::Read(Read {
+            table: "items".into(),
+            columns: vec![(id, "id".into())],
+            current_rows: CurrentRows::Snapshot,
+        }),
+        inputs: vec![],
+    };
+
+    assert!(candidates(root, values, &[drops_output]).is_err());
 }
 
 #[test]
