@@ -89,6 +89,19 @@ impl Scan {
 }
 
 impl Operation for Scan {
+    fn retain_outputs(&mut self, required: &Schema) -> bool {
+        let changed = self.read.retain_outputs(required);
+        if self
+            .unique_key
+            .as_ref()
+            .is_some_and(|key| key.iter().any(|value| !required.contains(value)))
+        {
+            self.unique_key = None;
+        }
+
+        changed
+    }
+
     fn map_values(&mut self, map: &mut impl FnMut(&mut crate::planning::generic::ValueId)) {
         self.read.map_values(map);
         for value in self.unique_key.iter_mut().flatten() {

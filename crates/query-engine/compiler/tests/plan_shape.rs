@@ -119,7 +119,7 @@ fn physical<S: EmitOperation + Clone + PartialEq>(
     let root = bound
         .root
         .expand_sources(&mut |read| source(read, &mut values))?;
-    let candidates = optimize::candidates(root, values, &[rules::unread_unique_join, rules::sip])?;
+    let candidates = optimize::candidates(root, values, &rules::registered())?;
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)
     })?

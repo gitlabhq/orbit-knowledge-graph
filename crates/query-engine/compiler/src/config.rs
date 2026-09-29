@@ -406,10 +406,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
     let candidates = optimize::candidates(
         physical,
         bound.values,
-        &[
-            crate::planning::rules::unread_unique_join,
-            crate::planning::rules::sip,
-        ],
+        &crate::planning::rules::registered(),
     )?;
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)

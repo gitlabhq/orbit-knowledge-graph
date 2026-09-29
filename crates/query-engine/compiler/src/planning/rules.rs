@@ -5,6 +5,67 @@ use super::generic::{Expr, JoinKind, Node, Op, Operation, SubplanId};
 use super::optimize::Candidate;
 use super::physical::Scalar;
 
+pub fn projections<S: Operation + Clone, E: Operation + Clone>(
+    candidate: &Candidate<S, Scalar, E>,
+) -> Result<Vec<Candidate<S, Scalar, E>>> {
+    let Op::Project(assignments) = &candidate.program.root.op else {
+        return Ok(vec![]);
+    };
+    let child = &candidate.program.root.inputs[0];
+    let mut rewritten = candidate.clone();
+
+    match &child.op {
+        Op::Project(inner)
+            if inner
+                .iter()
+                .all(|assignment| matches!(assignment.expression, Expr::Value(_))) =>
+        {
+            let Op::Project(outputs) = &mut rewritten.program.root.op else {
+                unreachable!()
+            };
+            for output in outputs {
+                output.expression.map_values(&mut |value| {
+                    let assignment = inner
+                        .iter()
+                        .find(|assignment| assignment.output == *value)
+                        .expect("verified projection input");
+                    let Expr::Value(source) = assignment.expression else {
+                        unreachable!()
+                    };
+                    *value = source;
+                });
+            }
+            rewritten.program.root.inputs = child.inputs.clone();
+        }
+        Op::Read(_) => {
+            let mut required = Vec::new();
+            for assignment in assignments {
+                let mut expression = assignment.expression.clone();
+                expression.map_values(&mut |value| {
+                    if !required.contains(value) {
+                        required.push(*value);
+                    }
+                });
+            }
+
+            let Op::Read(source) = &mut rewritten.program.root.inputs[0].op else {
+                unreachable!()
+            };
+            if !source.retain_outputs(&required) {
+                return Ok(vec![]);
+            }
+        }
+        _ => return Ok(vec![]),
+    }
+
+    Ok(vec![rewritten])
+}
+
+pub fn registered<S: Operation + Clone, E: Operation + Clone>()
+-> [super::optimize::Rule<S, Scalar, E>; 3] {
+    [projections, unread_unique_join, sip]
+}
+
 pub fn unread_unique_join<S: Operation + Clone, E: Operation + Clone>(
     candidate: &Candidate<S, Scalar, E>,
 ) -> Result<Vec<Candidate<S, Scalar, E>>> {

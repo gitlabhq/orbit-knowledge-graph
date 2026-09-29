@@ -7,6 +7,8 @@ physical:
   clickhouse:
     expect:
       - (CurrentRows (Scan gl_merge_request Final (Columns ... (Column _ title) ...)) (Deleted _deleted) (Binding mr) (Relationship))
+    reject:
+      - (Project _ (Project ...))
   duckdb:
     error: "entity 'MergeRequest' is not available in this data model"
 skip: false

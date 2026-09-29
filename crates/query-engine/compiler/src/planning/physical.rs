@@ -186,6 +186,16 @@ impl Read {
 }
 
 impl Operation for Read {
+    fn retain_outputs(&mut self, required: &Schema) -> bool {
+        if required.is_empty() {
+            return false;
+        }
+
+        let before = self.columns.len();
+        self.columns.retain(|(value, _)| required.contains(value));
+        self.columns.len() != before
+    }
+
     fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
         self.columns.iter_mut().for_each(|(value, _)| map(value));
     }

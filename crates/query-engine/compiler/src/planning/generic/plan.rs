@@ -93,6 +93,10 @@ pub trait Operation {
     fn output(&self, inputs: &[Schema], values: &Values) -> Result<Schema>;
     fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId));
 
+    fn retain_outputs(&mut self, _required: &Schema) -> bool {
+        false
+    }
+
     fn unique_keys(&self) -> Vec<Schema> {
         Vec::new()
     }
