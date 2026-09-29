@@ -14,8 +14,8 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
-/// The candidate-id prefilter runs these before `FINAL`, so it may over-select
-/// stale rows; the outer latest-row scan re-applies them after `FINAL`.
+/// The candidate-id prefilter runs these before dedup, so it may over-select
+/// stale rows; the target scan re-applies them after latest-row dedup.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
@@ -28,6 +28,25 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
         predicates.push(id_range_predicate(alias, range));
     }
     predicates.push(deleted_false(alias));
+    predicates
+}
+
+fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<Expr> {
+    let in_sort_key = |column: &str| sort_key.iter().any(|key| key == column);
+    let mut predicates: Vec<Expr> = np
+        .filters
+        .iter()
+        .filter(|(prop, filter)| in_sort_key(prop) && filter.filter.rhs_column.is_none())
+        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+        .collect();
+    if in_sort_key(DEFAULT_PRIMARY_KEY) {
+        if !np.node_ids.is_empty() {
+            predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+        }
+        if let Some(ref range) = np.id_range {
+            predicates.push(id_range_predicate(alias, range));
+        }
+    }
     predicates
 }
 
@@ -77,7 +96,9 @@ pub(super) fn emit_node_join_with_narrowing(
             alias,
             vec![SelectExpr::star()],
             sort_key,
-            vec![predicate],
+            std::iter::once(predicate)
+                .chain(sort_key_predicates(alias, np, sort_key))
+                .collect(),
         ),
         None => TableRef::scan_final(table, alias),
     };

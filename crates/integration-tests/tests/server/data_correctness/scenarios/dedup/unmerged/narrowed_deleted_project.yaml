@@ -1,4 +1,4 @@
-description: A narrowed Project join does not resurrect a version before its tombstone
+description: A narrowed Project join does not resurrect a version before its tombstone; the MR id range keeps the flat-chain narrowing path
 config:
   unmerged_seed: true
   extra_seed:
@@ -24,6 +24,6 @@ query:
     MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
     WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
 expect:
-  sql_contains: ["_narrow_p", "LIMIT 1 BY p.traversal_path, p.id"]
+  sql_contains: ["_narrow_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)"]
   skip_requirements: ["node_ids", "filter:title"]
   row_count: 0

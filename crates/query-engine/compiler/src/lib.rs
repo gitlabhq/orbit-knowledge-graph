@@ -1849,6 +1849,19 @@ mod tests {
     }
 
     #[test]
+    fn narrowed_join_keeps_sort_key_filters_before_dedup() {
+        let sql = compile_sql(
+            r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
+        );
+        assert!(
+            sql.contains(
+                "p.id IN (SELECT id FROM _candidate_p) AND startsWith(p.traversal_path, '1/100/'))) ORDER BY"
+            ) && sql.contains("LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (startsWith(p.traversal_path, '1/100/') AND (p._deleted = false))"),
+            "sort-key filters must prune before dedup and recheck after it, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
         let query = r#"{
             "query_type": "aggregation",

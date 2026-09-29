@@ -114,11 +114,11 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 | Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
 | Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
 | FK candidate CTEs | Non-`FINAL` ID or FK prefilter plus a latest-row recheck | Candidates can include stale matches. The target scan selects the latest version before rechecking filters. |
-| Edge narrowing CTEs | Non-`FINAL` `SELECT DISTINCT edge_id` frontier | Narrows joined node scans while avoiding duplicate-heavy `IN` sets from fan-out edges |
+| Edge narrowing CTEs | Non-`FINAL` edge-endpoint ID frontier | Narrows joined node scans to IDs the edges reach |
 | Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Broad node joins | Node table scan with `FINAL` | Resolves latest rows before applying node filters. |
-| Narrowed node joins | Candidate-ID filter before `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`; node filters outside | Retains narrow reads while excluding stale matches and deleted targets after deduplication. |
+| Main query node scans and broad node joins | Node table scan with `FINAL` | Keeps traversal, FK center, aggregation, and single-node lookup semantics consistent |
+| Narrowed node joins | Candidate-ID and sort-key filters before `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`; other node filters and `_deleted = false` outside | Sort-key values are the same for every version of a row, so those filters keep primary-key pruning. Mutable filters and deleted checks run after deduplication. |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
 
 Filter placement rules for node `FINAL` scans:
