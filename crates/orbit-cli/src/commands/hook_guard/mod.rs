@@ -1,16 +1,10 @@
-//! Hidden `orbit hook-guard`: the agent hook installed by `orbit setup`. It reads a Claude
-//! Code-shaped hook call from stdin; Codex sends that shape natively, and the OpenCode and Pi
-//! adapters translate to it. In an indexed repository it nudges the agent toward the graph once
-//! per search pattern per session and when it rereads unchanged source. Graph-first mode blocks
-//! the first search or source read of a session that has not used Orbit. The `session` kind
-//! returns session-start context for agents whose hooks cannot block. Fails open: on any error
-//! it prints nothing.
-
 mod session;
 mod shell;
 mod target;
 
-use std::cell::OnceCell;
+include!("/tmp/orbit-guard-refactor.IbOU0V/differential.rs");
+
+use std::cell::LazyCell;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -19,7 +13,7 @@ use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use self::session::{GRAPH_MARKER, Session, marker};
-use self::target::Target;
+use self::target::Inspection;
 use crate::commands::setup::spec;
 use crate::{telemetry, workspace};
 
@@ -47,11 +41,6 @@ impl Event {
     }
 }
 
-enum Decision {
-    Deny,
-    Nudge(&'static str),
-}
-
 pub(crate) fn run(
     kind: Kind,
     graph_first: bool,
@@ -77,7 +66,13 @@ pub(crate) fn run(
             std::env::var(GRAPH_FIRST_ENV).ok().as_deref(),
         ),
     };
-    let (response, event) = respond(kind, &call, &context, &Local);
+    let (response, event) = respond(
+        kind,
+        &call,
+        &context,
+        || workspace::git_toplevel(&context.cwd).ok(),
+        |root| manifest_index(root).unwrap_or(Index::Unknown),
+    );
     if let Some(response) = response {
         println!("{response}");
     }
@@ -97,23 +92,6 @@ enum Index {
     Indexed,
     Missing,
     Unknown,
-}
-
-trait Probe {
-    fn root(&self, cwd: &Path) -> Option<PathBuf>;
-    fn index(&self, root: &Path) -> Index;
-}
-
-struct Local;
-
-impl Probe for Local {
-    fn root(&self, cwd: &Path) -> Option<PathBuf> {
-        workspace::git_toplevel(cwd).ok()
-    }
-
-    fn index(&self, root: &Path) -> Index {
-        manifest_index(root).unwrap_or(Index::Unknown)
-    }
 }
 
 fn manifest_index(root: &Path) -> anyhow::Result<Index> {
@@ -138,73 +116,64 @@ fn respond(
     kind: Kind,
     call: &Value,
     context: &Context,
-    probe: &impl Probe,
+    root: impl FnOnce() -> Option<PathBuf>,
+    index: impl FnOnce(&Path) -> Index,
 ) -> (Option<Value>, Option<Event>) {
-    if let Kind::Session = kind {
-        let text = session_start(context, probe);
-        return (text.map(|text| with_context("SessionStart", text)), None);
-    }
+    let inspection = Inspection::new(kind, call);
+    let session = context.session.as_ref();
     let mut event = None;
-    if target::runs_orbit(call)
-        && let Some(session) = &context.session
+    if !matches!(kind, Kind::Session)
+        && inspection.orbit
+        && let Some(session) = session
     {
         if session.claim(GRAPH_MARKER) && context.graph_first {
             event = Some(Event::OrbitUsed);
         }
-        for term in target::orbit_grep_terms(call) {
+        for term in &inspection.terms {
             session.claim(&marker(&format!("s:{term}")));
         }
     }
-    match decide(kind, call, context, probe) {
-        Some(Decision::Deny) => (
-            Some(json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": spec::graph_first_deny_text(),
-                }
-            })),
-            Some(Event::Deny),
-        ),
-        Some(Decision::Nudge(text)) => (Some(with_context("PreToolUse", text)), event),
-        None => (None, event),
-    }
-}
-
-fn session_start(context: &Context, probe: &impl Probe) -> Option<&'static str> {
-    let root = probe.root(&context.cwd)?;
-    (probe.index(&root) == Index::Indexed).then(|| spec::session_start_text(context.graph_first))
-}
-
-fn decide(kind: Kind, call: &Value, context: &Context, probe: &impl Probe) -> Option<Decision> {
-    let candidates = target::candidates(kind, call);
-    if candidates.is_empty() {
-        return None;
-    }
-    let root = probe.root(&context.cwd)?;
-    let target = target::first_target(candidates, &context.cwd, &root)?;
-    let cached = OnceCell::new();
-    let index = || *cached.get_or_init(|| probe.index(&root));
-    let session = context.session.as_ref();
-    if context.graph_first
-        && let Some(session) = session
-        && !session.has(GRAPH_MARKER)
-        && index() == Index::Indexed
-        && session.claim(GRAPH_MARKER)
-    {
-        return Some(Decision::Deny);
-    }
-    let (nudge, text) = match &target {
-        Target::Search(key) => (
-            session.is_none_or(|session| session.claim(&marker(key))),
-            spec::search_nudge_text(),
-        ),
-        Target::Read { key, stamp } => (
-            session.is_some_and(|s| s.swap(&marker(key), stamp).as_deref() == Some(stamp)),
-            spec::read_nudge_text(),
-        ),
-    };
-    (nudge && index() != Index::Missing).then_some(Decision::Nudge(text))
+    let response = (|| {
+        if inspection.is_empty() && !matches!(kind, Kind::Session) {
+            return None;
+        }
+        let root = root()?;
+        let index = LazyCell::new(|| index(&root));
+        if matches!(kind, Kind::Session) {
+            return (*index == Index::Indexed).then(|| {
+                with_context(
+                    "SessionStart",
+                    spec::session_start_text(context.graph_first),
+                )
+            });
+        }
+        let target = inspection.target(&context.cwd, &root)?;
+        if context.graph_first
+            && let Some(session) = session
+            && !session.has(GRAPH_MARKER)
+            && *index == Index::Indexed
+            && session.claim(GRAPH_MARKER)
+        {
+            event = Some(Event::Deny);
+            return Some(json!({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": spec::graph_first_deny_text(),
+            }}));
+        }
+        let key = marker(&target.key);
+        let (nudge, text) = match target.stamp {
+            Some(stamp) => (
+                session.is_some_and(|s| s.swap(&key, &stamp).as_ref() == Some(&stamp)),
+                spec::read_nudge_text(),
+            ),
+            None => (
+                session.is_none_or(|s| s.claim(&key)),
+                spec::search_nudge_text(),
+            ),
+        };
+        (nudge && *index != Index::Missing).then(|| with_context("PreToolUse", text))
+    })();
+    (response, event)
 }
 
 fn with_context(event: &str, text: &str) -> Value {
@@ -237,18 +206,6 @@ fn call_cwd(call: &Value) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    struct Fixed(PathBuf, Index);
-
-    impl Probe for Fixed {
-        fn root(&self, cwd: &Path) -> Option<PathBuf> {
-            cwd.starts_with(&self.0).then(|| self.0.clone())
-        }
-
-        fn index(&self, _: &Path) -> Index {
-            self.1
-        }
-    }
-
     fn call(spec: &str) -> (Kind, Value) {
         let (tool, rest) = spec.split_once(' ').unwrap_or((spec, ""));
         let (kind, tool, input) = match tool {
@@ -277,7 +234,7 @@ mod tests {
                 graph_first: id.starts_with('!'),
             };
             let (kind, call) = call(spec);
-            let (out, event) = respond(kind, &call, &context, &Fixed(root.clone(), index));
+            let (out, event) = respond(kind, &call, &context, || Some(root.clone()), |_| index);
             let decision = out.map_or("none", |out| match &out["hookSpecificOutput"] {
                 out if out["permissionDecision"] == "deny" => "deny",
                 out if out["additionalContext"] == spec::read_nudge_text() => "read",

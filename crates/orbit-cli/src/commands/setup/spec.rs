@@ -295,7 +295,7 @@ impl AgentSpec {
         let templated = self
             .template_files
             .iter()
-            .any(|file| read_embedded_text(&file.template).contains("{{graph_first}}"));
+            .any(|file| file.source().contains("{{graph_first}}"));
         merged || templated
     }
 }
@@ -303,9 +303,15 @@ impl AgentSpec {
 const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
+    fn source(&self) -> String {
+        read_embedded_text(&self.template)
+            .replace("{{hook_client}}", &read_embedded_text("hook_client.js"))
+    }
+
     pub(super) fn render(&self, graph_first: bool) -> String {
         let flag = if graph_first { GRAPH_FIRST_FLAG } else { "" };
-        let body = read_embedded_text(&self.template)
+        let body = self
+            .source()
             .replace("{{graph_first}}", flag)
             .replace("{{mcp_server}}", &TEXTS.mcp_server.name);
         let body = substitute_launcher(&body, launcher());
