@@ -789,6 +789,17 @@ mod tests {
     }
 
     #[test]
+    fn gql_formats_pipeline_property_groups() {
+        let output = make_property_grouped_aggregation_output();
+        let (value, version, name) = crate::GqlFormatter.format_stamped(&output);
+        assert_eq!(name, FormatName::Gql);
+        assert_eq!(version, crate::GQL_OUTPUT_FORMAT_VERSION.to_string());
+        let text = value.as_str().unwrap();
+        assert!(text.contains("// group_by: v_severity = v.severity\n"));
+        assert!(text.contains("| \"critical\" | 2 |\n"));
+    }
+
+    #[test]
     fn format_name_is_raw() {
         assert_eq!(GraphFormatter.format_name(), FormatName::Raw);
     }

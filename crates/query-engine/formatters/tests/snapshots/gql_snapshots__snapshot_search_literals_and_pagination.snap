@@ -2,6 +2,6 @@
 source: crates/query-engine/formatters/tests/gql_snapshots.rs
 expression: run(&r)
 ---
-// query_type: search, rows: 1, has_more: true, truncated: true, next_cursor: "abc", gql_version: 1.0.0
-| node |
-| (:Issue {id: 1, state: "true", confidential: false, score: 2.0, weight: 3, description: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...", description_len: 250, title: "say \"hi\"\nnow"}) |
+// query_type: traversal, rows: 1, has_more: true, truncated: true, next_cursor: "abc", gql_version: 1.0.0
+| path |
+| (:WorkItem {id: 1, state: "true", confidential: false, score: 2.0, weight: 3, description: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...", description_len: 250, title: "say \"hi\"\nnow \u007C later"}) |

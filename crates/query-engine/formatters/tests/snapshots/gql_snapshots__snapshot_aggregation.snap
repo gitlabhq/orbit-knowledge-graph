@@ -6,5 +6,5 @@ expression: run(&r)
 // group_by: p = (p:Project), bucket = v.severity
 // aggregations: latest = max(v.updated_at)
 | p | bucket | latest |
-| (:Project {id: 9, name: "gitlab"}) | "high" | 1.5 |
+| (:Project {id: 9, name: "gitlab \u007C orbit"}) | "high" | 1.5 |
 | (:Project {id: 9}) | null | 3 |

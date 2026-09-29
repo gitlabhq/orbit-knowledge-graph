@@ -14,7 +14,7 @@ query_dsl: 12.1.9
 raw_output_format: 5.0.3
 
 # Response envelope of the GOON formatter.
-goon_output_format: 4.0.3
+goon_output_format: 4.0.4
 
 # Response envelope of the GQL table formatter.
 gql_output_format: 1.0.0

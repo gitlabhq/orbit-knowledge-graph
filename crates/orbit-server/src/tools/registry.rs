@@ -68,10 +68,15 @@ pub(super) mod params {
             Frontend::JsonDsl => json!({"type": "object", "description": "JSON Query DSL object."}),
             Frontend::Gql => json!({"type": "string", "description": "Read-only GQL query text."}),
         };
+        let mut query_format = format();
+        query_format["enum"] = json!(["llm", "raw", "gql"]);
+        query_format["description"] = json!(
+            "Output format. 'llm' (default) returns compact text. 'raw' returns structured JSON. 'gql' returns a graph pattern table; requires GitLab support."
+        );
         json!({
             "type": "object",
             "required": ["query"],
-            "properties": {"query": query, "format": format()},
+            "properties": {"query": query, "format": query_format},
             "additionalProperties": false
         })
     }
@@ -369,6 +374,20 @@ mod tests {
                 .map(|v| v.as_str().unwrap())
                 .collect();
             assert_eq!(values, vec!["llm", "raw"]);
+        }
+    }
+
+    #[test]
+    fn only_query_commands_advertise_gql_format() {
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            for command in CommandRegistry::commands_for(frontend) {
+                let expected = if command.name == "query_graph" {
+                    json!(["llm", "raw", "gql"])
+                } else {
+                    json!(["llm", "raw"])
+                };
+                assert_eq!(command.parameters["properties"]["format"]["enum"], expected);
+            }
         }
     }
 

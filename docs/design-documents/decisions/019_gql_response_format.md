@@ -24,14 +24,17 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints results as a pipe table of p
 | (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 43, iid: 102}) |
 ```
 
-- Search results use a `node` column. Traversal and neighbors use `path`, with one relationship per row and then any unlinked nodes. Path finding prints one chain per path. Aggregations use their own columns and add `// group_by:` and `// aggregations:` lines.
+- Graph results use a `path` column, even when the result is empty or contains only nodes. Traversal and neighbors print one relationship per row, then any unlinked nodes. Path finding prints one chain per path. Aggregations use their own columns and add `// group_by:` and `// aggregations:` lines.
 - A node prints its properties once. Later rows show only `(:Label {id: N})`.
-- Values are openCypher literals. Property order, truncation, and edge ordering come from GOON through the shared `formatters/src/text.rs`.
+- Multi-hop results use `-[*N]->`. The stored edge type describes one hop, not every hop. Edges at different depths remain distinct.
+- Scalar values use openCypher literals. Strings escape pipes as `\u007C` so table cells stay distinct. Property order, truncation, and edge ordering use the shared `formatters/src/text.rs`.
 
-`GqlFormatter` builds on the same `GraphResponse` as GOON, and only `ExecuteQuery` honors the new value. GKG renders it rather than Rails, so results still stream through Workhorse and MCP `query_graph` gets the format too.
+`GqlFormatter` builds on the same `GraphResponse` as GOON. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
 
 ## Consequences
 
-- Rails and Workhorse must accept `gql` before REST and MCP callers can use it.
-- Relationship rows repeat endpoint IDs, so traversal output can be larger than GOON's. The evals harness decides whether `gql` replaces GOON.
-- If it does, `llm` points at `GqlFormatter` and `goon/` is deleted.
+- REST and MCP support require a separate GitLab change. Rails must accept `gql` on query endpoints and preserve it in `CommandInterceptor#orbit_command_format`. The `query_graph` schema advertises it; other commands stay on `raw` and `llm`.
+- Deploy the GKG release containing this change before enabling GQL responses in GitLab. Older servers return raw JSON for enum value 2. Workhorse must inspect the returned content, not just the requested format, and handle a mismatch as an error or explicit fallback. Otherwise it can return an empty success response.
+- Query analytics need the selected response format, not just another version pin. Add that field in a separate Iglu schema change before measuring adoption through telemetry.
+- GOON 4.0.4 preserves edges that differ only in depth. Other GOON output stays unchanged.
+- Relationship rows repeat endpoint IDs, so traversal output can be larger than GOON's. Compare the formats in the evals harness before changing the default. Retiring GOON also requires updates to dispatch, consumers, tests, and format discovery; it is not just a directory deletion.

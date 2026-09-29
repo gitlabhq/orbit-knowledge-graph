@@ -1,0 +1,8 @@
+---
+source: crates/query-engine/formatters/tests/gql_snapshots.rs
+expression: run(&r)
+---
+// query_type: neighbors, rows: 2, gql_version: 1.0.0
+| path |
+| (:User {id: 1, username: "alice"})-[:AUTHORED]->(:MergeRequest {id: 10}) |
+| (:Group {id: 2})-[:CONTAINS]->(:User {id: 1}) |

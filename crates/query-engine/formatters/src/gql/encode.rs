@@ -58,8 +58,7 @@ impl Encoder<'_> {
                 Some(&node.properties),
             )]);
         }
-        let column = if edges.is_empty() { "node" } else { "path" };
-        (vec![column.into()], rows)
+        (vec!["path".into()], rows)
     }
 
     fn path_rows(&mut self, response: &GraphResponse) -> Rows {
@@ -96,8 +95,14 @@ impl Encoder<'_> {
     fn chain(&mut self, steps: &[&GraphEdge]) -> String {
         let mut out = self.node_ref(&steps[0].from, steps[0].from_id);
         for step in steps {
-            let depth = step.depth.map(|d| format!("*{d}")).unwrap_or_default();
-            let _ = write!(out, "-[:{}{depth}]->", step.edge_type);
+            match step.depth {
+                Some(depth) => {
+                    let _ = write!(out, "-[*{depth}]->");
+                }
+                None => {
+                    let _ = write!(out, "-[:{}]->", step.edge_type);
+                }
+            }
             out += &self.node_ref(&step.to, step.to_id);
         }
         out
@@ -151,6 +156,7 @@ fn literal(value: &Value, key: &str) -> String {
         Value::Array(_) | Value::Object(_) => quote_escaped(&value.to_string()),
         other => other.to_string(),
     }
+    .replace('|', "\\u007C")
 }
 
 fn write_metadata(out: &mut String, response: &GraphResponse, version: &Version, rows: usize) {
@@ -168,15 +174,14 @@ fn write_metadata(out: &mut String, response: &GraphResponse, version: &Version,
     }
     let _ = writeln!(out, ", gql_version: {version}");
 
-    let groups = response
-        .group_columns
-        .iter()
-        .flatten()
-        .map(|g| match (&g.entity, &g.property) {
-            (Some(entity), _) => format!("{} = ({}:{entity})", g.name, g.node),
-            (None, Some(property)) => format!("{} = {}.{property}", g.name, g.node),
-            (None, None) => format!("{} = {}", g.name, g.node),
-        });
+    let groups = response.group_columns.iter().flatten().map(|g| {
+        match (g.kind.as_str(), &g.entity, &g.property) {
+            ("node", Some(entity), _) => format!("{} = ({}:{entity})", g.name, g.node),
+            ("node", None, _) => format!("{} = ({})", g.name, g.node),
+            (_, _, Some(property)) => format!("{} = {}.{property}", g.name, g.node),
+            _ => format!("{} = {}", g.name, g.node),
+        }
+    });
     let metrics = response
         .columns
         .iter()

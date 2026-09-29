@@ -75,6 +75,40 @@ fn snapshot_traversal() {
 }
 
 #[test]
+fn depth_and_table_cell_regressions() {
+    let mut r = traversal();
+    let mut direct = r.edges.last().unwrap().clone();
+    direct.depth = Some(1);
+    r.edges.push(direct);
+    let out = run(&r);
+    assert!(out.contains("-[*2]->"));
+    assert!(out.contains("-[*1]->"));
+    assert!(!out.contains("MEMBER_OF*"));
+    let goon = formatters::goon_encode(&r, &Version::new(1, 0, 0));
+    assert!(goon.contains("depth=1"));
+    assert!(goon.contains("depth=2"));
+
+    let mut r = response("traversal", vec![], vec![]);
+    assert_eq!(run(&r).lines().nth(1), Some("| path |"));
+    r.nodes.push(node("WorkItem", 1, json!({"title": "a | b"})));
+    assert_eq!(run(&r).lines().nth(1), Some("| path |"));
+    assert!(run(&r).contains(r#"title: "a \u007C b""#));
+}
+
+#[test]
+fn snapshot_neighbors() {
+    let r = response(
+        "neighbors",
+        vec![node("User", 1, json!({"username": "alice"}))],
+        vec![
+            edge("AUTHORED", ("User", 1), ("MergeRequest", 10)),
+            edge("CONTAINS", ("Group", 2), ("User", 1)),
+        ],
+    );
+    insta::assert_snapshot!(run(&r));
+}
+
+#[test]
 fn output_is_independent_of_input_order() {
     let mut reversed = traversal();
     reversed.nodes.reverse();
@@ -85,16 +119,16 @@ fn output_is_independent_of_input_order() {
 #[test]
 fn snapshot_search_literals_and_pagination() {
     let mut r = response(
-        "search",
+        "traversal",
         vec![node(
-            "Issue",
+            "WorkItem",
             1,
             json!({
                 "confidential": false,
                 "weight": 3,
                 "score": 2.0,
                 "state": "true",
-                "title": "say \"hi\"\nnow",
+                "title": "say \"hi\"\nnow | later",
                 "description": "x".repeat(250),
                 "milestone": null,
                 "labels": "",
@@ -145,7 +179,7 @@ fn snapshot_aggregation() {
             kind: "property".into(),
             node: "v".into(),
             property: Some("severity".into()),
-            entity: None,
+            entity: Some("Vulnerability".into()),
         },
     ]);
     r.columns = Some(vec![ColumnDescriptor {
@@ -154,7 +188,7 @@ fn snapshot_aggregation() {
         target: "v".into(),
         property: Some("updated_at".into()),
     }]);
-    let project = json!({"type": "Project", "id": "9", "properties": {"name": "gitlab"}});
+    let project = json!({"type": "Project", "id": "9", "properties": {"name": "gitlab | orbit"}});
     r.rows = Some(vec![
         props(json!({"p": project, "bucket": "high", "latest": 1.5})),
         props(json!({"p": project, "bucket": null, "latest": 3})),

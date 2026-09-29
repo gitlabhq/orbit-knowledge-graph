@@ -78,6 +78,7 @@ pub(crate) fn dedup_and_sort_edges(edges: &[GraphEdge]) -> Vec<&GraphEdge> {
             e.to_id,
             e.path_id,
             e.step,
+            e.depth,
         ))
     });
     sorted
