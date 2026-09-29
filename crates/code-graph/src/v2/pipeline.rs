@@ -30,10 +30,13 @@ pub type FileInput = String;
 pub struct FamilyFileInput {
     pub language: Language,
     pub path: FileInput,
+    /// Whether the content passes already ran on this file; if not, its
+    /// parser runs them on the bytes it reads.
+    pub checked: bool,
 }
 
 fn group_parseable_inventory(
-    inventory: &[FileInventoryEntry],
+    inventory: &[File],
     max_files: usize,
 ) -> (
     FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
@@ -62,6 +65,7 @@ fn group_parseable_inventory(
             .push(FamilyFileInput {
                 language: lang,
                 path: entry.path.clone(),
+                checked: entry.checked,
             });
     }
 
@@ -70,7 +74,7 @@ fn group_parseable_inventory(
 
 fn build_file_inventory_graph(
     root: &Path,
-    inventory: &[FileInventoryEntry],
+    inventory: &[File],
     parsed_file_languages: &FxHashMap<String, Language>,
     reasons: &FxHashMap<&str, FileReason>,
 ) -> CodeGraph {
@@ -577,6 +581,9 @@ pub struct PipelineConfig {
     /// Called once per successfully-parsed file with its per-phase CPU time, so
     /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
+    /// The passes that decided the inventory; a parser runs their content
+    /// stage on files the source left unchecked, on the bytes it reads anyway.
+    pub passes: Arc<dyn Pass>,
 }
 
 /// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
@@ -597,11 +604,12 @@ impl Default for PipelineConfig {
             emit_file_inventory_graph: false,
             progress: Arc::new(SilentProgress),
             on_phase_cpu: None,
+            passes: Arc::new(()),
         }
     }
 }
 
-pub use orbit_utils::fs_walk::{Decision, FileInventory, FileInventoryEntry};
+pub use orbit_utils::files::{Decision, File, Inventory, Pass};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -726,7 +734,7 @@ pub struct Pipeline;
 impl Pipeline {
     pub fn run(
         root: &Path,
-        file_inventory: Arc<FileInventory>,
+        file_inventory: Arc<Inventory>,
         config: PipelineConfig,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
@@ -744,7 +752,7 @@ impl Pipeline {
     /// Blocks until all languages finish processing.
     pub fn run_with_tracer(
         root: &Path,
-        file_inventory: Arc<FileInventory>,
+        file_inventory: Arc<Inventory>,
         mut config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
@@ -1104,6 +1112,7 @@ where
             .map(|path| FamilyFileInput {
                 language,
                 path: path.clone(),
+                checked: true,
             })
             .collect();
 
@@ -1247,6 +1256,18 @@ impl FamilyPipeline {
                         }));
                     }
                 };
+                if !f.checked {
+                    let mut file = File::new(f.path.clone(), source.len() as u64);
+                    orbit_utils::files::check(&ctx.config.passes, &mut file, &source);
+                    if let Some(reason) = file.label.skip {
+                        progress.files_advanced(ProgressPhase::Parse, 1);
+                        return Some(ParseOutcome::Skip(SkippedFile {
+                            path: f.path.clone(),
+                            kind: FileSkip::Filter(reason),
+                            detail: String::new(),
+                        }));
+                    }
+                }
 
                 breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
@@ -1848,11 +1869,13 @@ mod tests {
 
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -1879,11 +1902,13 @@ mod tests {
 
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "openapi_v3.yaml".into(),
                 size: YAML_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -1909,11 +1934,13 @@ mod tests {
 
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "main.py".into(),
                 size: source.len() as u64,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
@@ -1950,18 +1977,22 @@ mod tests {
         let calls_cb = calls.clone();
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![
-                FileInventoryEntry {
+            Arc::new(Inventory::new(vec![
+                File {
                     path: "a.py".into(),
                     size: 22,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
-                FileInventoryEntry {
+                File {
                     path: "b.py".into(),
                     size: 22,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
             ])),
             PipelineConfig {
@@ -1991,11 +2022,13 @@ mod tests {
 
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2028,11 +2061,13 @@ mod tests {
 
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2058,36 +2093,46 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/main.py"), "def hello(): pass\n").unwrap();
 
-        let inventory = FileInventory::new(vec![
-            FileInventoryEntry {
+        let inventory = Inventory::new(vec![
+            File {
                 path: "src/main.py".into(),
                 size: 17,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             },
-            FileInventoryEntry {
+            File {
                 path: "README.md".into(),
                 size: 12,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             },
-            FileInventoryEntry {
+            File {
                 path: "config/app.toml".into(),
                 size: 9,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             },
-            FileInventoryEntry {
+            File {
                 path: "assets/logo.png".into(),
                 size: 128,
                 decision: Decision::ListOnly,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             },
-            FileInventoryEntry {
+            File {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
                 decision: Decision::ListOnly,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             },
         ]);
 
@@ -2139,11 +2184,13 @@ mod tests {
         let capture = Arc::new(TestCapture::new());
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            Arc::new(Inventory::new(vec![File {
                 path: "listed.py".into(),
                 size: 19,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             }])),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2311,30 +2358,38 @@ namespace MyApp {
         let capture = Arc::new(TestCapture::new());
         let result = Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![
-                FileInventoryEntry {
+            Arc::new(Inventory::new(vec![
+                File {
                     path: "app.py".into(),
                     size: 0,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
-                FileInventoryEntry {
+                File {
                     path: "Service.java".into(),
                     size: 0,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
-                FileInventoryEntry {
+                File {
                     path: "App.kt".into(),
                     size: 0,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
-                FileInventoryEntry {
+                File {
                     path: "Controller.cs".into(),
                     size: 0,
                     decision: Decision::Parse,
                     label: Default::default(),
+                    symlink: false,
+                    checked: true,
                 },
             ])),
             PipelineConfig::default(),
@@ -2465,18 +2520,20 @@ namespace MyApp {
         }
         let inventory = sources
             .iter()
-            .map(|(name, content)| FileInventoryEntry {
+            .map(|(name, content)| File {
                 path: name.to_string(),
                 size: content.len() as u64,
                 decision: Decision::Parse,
                 label: Default::default(),
+                symlink: false,
+                checked: true,
             })
             .collect();
         let progress = Arc::new(RecordingProgress::default());
 
         Pipeline::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(inventory)),
+            Arc::new(Inventory::new(inventory)),
             PipelineConfig {
                 progress: progress.clone(),
                 ..Default::default()

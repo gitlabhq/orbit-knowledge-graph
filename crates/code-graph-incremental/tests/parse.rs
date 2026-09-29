@@ -4,7 +4,7 @@ use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Wo
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
 use code_graph_incremental::{Context, Env, Limits, Pipeline, inventory};
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use orbit_utils::files::{Decision, File};
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     for (path, content) in files {
@@ -118,15 +118,16 @@ fn classify_agrees_with_walk() {
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
     let walked = inventory::walk(repo.path()).unwrap().into_inner();
-    let paths = walked.iter().map(|e| e.path.clone());
-    let mut classified = inventory::classify(repo.path(), paths);
-    classified.sort_by(|a, b| a.path.cmp(&b.path));
+    let paths = walked.iter().map(|e| e.path.clone()).collect();
+    let classified = inventory::classify(repo.path(), paths)
+        .unwrap()
+        .into_inner();
 
     assert_eq!(walked.len(), files.len() + 1);
     assert_eq!(strip(walked), strip(classified));
 }
 
-fn strip(entries: Vec<FileInventoryEntry>) -> Vec<(String, u64, String, Option<String>)> {
+fn strip(entries: Vec<File>) -> Vec<(String, u64, String, Option<String>)> {
     entries
         .into_iter()
         .map(|e| {

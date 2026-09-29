@@ -576,22 +576,23 @@ fn index_repo(
     git: &workspace::GitInfo,
     db_path: &std::path::Path,
     ontology: &Ontology,
-    pipeline_config: code_graph::v2::PipelineConfig,
+    mut pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(
+    let filter = std::sync::Arc::new(code_graph::v2::config::CodeFilter::new(
         Some(MAX_INDEXED_FILE_BYTES),
         None,
         code_graph::v2::config::detect_language_from_path,
-    );
+    ));
     let file_inventory = std::sync::Arc::new(
-        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
+        orbit_utils::files::disk::discover(&git.repo_path, &filter)
             .context("failed to walk repository files")?,
     );
+    pipeline_config.passes = filter;
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;

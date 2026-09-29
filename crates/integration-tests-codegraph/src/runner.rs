@@ -6,8 +6,8 @@ use anyhow::Context;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, Decision, FileInventory, FileInventoryEntry, GraphStatsCounters, OnBatch, Pipeline,
-    PipelineConfig, PipelineContext,
+    BatchTx, Decision, File, GraphStatsCounters, Inventory, OnBatch, Pipeline, PipelineConfig,
+    PipelineContext,
 };
 use duckdb_client::DuckDbClient;
 
@@ -51,13 +51,15 @@ pub fn run_yaml_suite(yaml: &str) {
     );
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
-    let file_inventory: Vec<FileInventoryEntry> = write_suite_files(&suite, tmp.path())
+    let file_inventory: Vec<File> = write_suite_files(&suite, tmp.path())
         .into_iter()
-        .map(|(path, size)| FileInventoryEntry {
+        .map(|(path, size)| File {
             path,
             size,
             decision: Decision::Parse,
             label: Default::default(),
+            symlink: false,
+            checked: true,
         })
         .collect();
 
@@ -94,8 +96,7 @@ pub fn run_yaml_suite(yaml: &str) {
         None | Some("generic") => {
             let config = PipelineConfig::default();
             let on_batch = on_batch_for(&client);
-            let inventory: Arc<FileInventory> =
-                Arc::new(FileInventory::new(file_inventory.clone()));
+            let inventory: Arc<Inventory> = Arc::new(Inventory::new(file_inventory.clone()));
             let result = if let Some(pool) = &pool {
                 let c = converter.clone();
                 let ob = on_batch.clone();

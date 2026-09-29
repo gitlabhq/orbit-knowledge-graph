@@ -1,48 +1,140 @@
-//! Tar.gz extraction as a [`FileStreamHooks`] source: untar, safety-check each
-//! path, hand the entry to the hooks, and write the bytes of the files they
-//! load ([`Decision::Parse`] or [`Decision::Load`]). No filtering of its own.
+//! A Gitaly tar.gz. Inflating is one sequential stream, so that thread only
+//! reads: it checks each path, applies the header passes, and sends the bytes
+//! of every file that needs them ahead through a bounded channel. Workers run
+//! the content passes on those bytes, write the files that load to `target`,
+//! and hand back the settled `File`.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 use flate2::read::GzDecoder;
+use rayon::prelude::*;
 use tracing::warn;
 
-use crate::fs_walk::{
-    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
-};
+use super::{Decision, File, Inventory, Need, Pass, SourceError, check};
 
-/// Extract a gzipped tar from `reader` into `target_dir`, running every regular
-/// file through `hooks`. Loaded files are written to disk; every non-dropped
-/// file (and symlink) is returned in the inventory.
-pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
+/// How many files' bytes may wait for a worker; with the per-file size cap
+/// this bounds the bytes in flight.
+const LOOKAHEAD: usize = 64;
+
+pub fn extract<R: Read>(
     reader: R,
     target_dir: &Path,
-    hooks: &mut H,
-) -> Result<FileInventory, StreamError> {
+    passes: &impl Pass,
+) -> Result<Inventory, SourceError> {
     std::fs::create_dir_all(target_dir)?;
+    let target = target_dir.canonicalize()?;
+    let (sender, receiver) = sync_channel::<Pending>(LOOKAHEAD);
 
-    let mut archive = tar::Archive::new(GzDecoder::new(reader));
-    let target_canonical = target_dir.canonicalize()?;
+    let (inflated, settled) = std::thread::scope(|scope| {
+        let workers = scope.spawn(|| settle(receiver, &target, passes));
+        let inflated = inflate(reader, &target, passes, &sender);
+        drop(sender);
+        (inflated, workers.join().expect("tar workers panicked"))
+    });
+    // A failure on either side closes the channel and ends the other; the
+    // side that failed on its own has the error worth reporting.
+    let (mut files, symlinks) = match (inflated, settled) {
+        (Err(inflate_error), Err(_)) => return Err(inflate_error),
+        (inflated, settled) => {
+            let Inflated {
+                mut files,
+                symlinks,
+            } = inflated?;
+            files.extend(settled?);
+            (files, symlinks)
+        }
+    };
 
-    // The first entry sets the Gitaly archive root (`<slug>-<ref>/`); all others
-    // must share it.
+    for (link_path, link_target) in symlinks {
+        crate::fs::safe_create_dir_all(&link_path, &target).map_err(std::io::Error::other)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&link_target, &link_path)?;
+    }
+    let removed = crate::fs::validate_symlinks(&target).map_err(std::io::Error::other)?;
+    if !removed.is_empty() {
+        let removed: std::collections::HashSet<String> = removed
+            .iter()
+            .map(|r| r.relative_path.to_string_lossy().into_owned())
+            .collect();
+        files.retain(|file| !removed.contains(&file.path));
+    }
+    Ok(Inventory::new(files))
+}
+
+/// A file whose bytes came off the stream, waiting for a worker.
+struct Pending {
+    file: File,
+    dest: PathBuf,
+    bytes: Vec<u8>,
+}
+
+fn settle(
+    receiver: Receiver<Pending>,
+    target: &Path,
+    passes: &impl Pass,
+) -> Result<Vec<File>, SourceError> {
+    receiver
+        .into_iter()
+        .par_bridge()
+        .map(|pending| pending.settle(target, passes))
+        .filter_map(Result::transpose)
+        .collect()
+}
+
+impl Pending {
+    fn settle(self, target: &Path, passes: &impl Pass) -> Result<Option<File>, SourceError> {
+        let Pending {
+            mut file,
+            dest,
+            bytes,
+        } = self;
+        check(passes, &mut file, &bytes);
+        match file.decision {
+            Decision::Drop => Ok(None),
+            Decision::ListOnly => Ok(Some(file)),
+            Decision::Parse | Decision::Load => {
+                let written = crate::fs::resolve_dest_within(target, &dest)
+                    .and_then(std::fs::File::create)
+                    .and_then(|mut out| out.write_all(&bytes));
+                match written {
+                    Ok(()) => Ok(Some(file)),
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        Err(SourceError::Io(e))
+                    }
+                    Err(e) => {
+                        warn!(entry = %file.path, error = %e, "skipping archive entry that could not be written");
+                        Ok(None)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What the inflating thread settled itself, and the symlinks to create once
+/// every regular file exists so none can redirect a write outside `target`.
+#[derive(Default)]
+struct Inflated {
+    files: Vec<File>,
+    symlinks: Vec<(PathBuf, PathBuf)>,
+}
+
+fn inflate<R: Read>(
+    reader: R,
+    target: &Path,
+    passes: &impl Pass,
+    workers: &SyncSender<Pending>,
+) -> Result<Inflated, SourceError> {
+    let mut archive = ::tar::Archive::new(GzDecoder::new(reader));
     let mut archive_root: Option<OsString> = None;
-
-    // Symlinks are deferred until all regular files and directories exist, so no
-    // symlink is on disk during the main loop to redirect a create_dir_all or
-    // dest.exists() outside the target.
-    let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut inventory = Vec::new();
-    let mut content = Vec::new();
-
-    // False + a truncation-shaped error on the first `next()` means the body
-    // ended before any tar header could be read (empty/truncated repo).
+    let mut inflated = Inflated::default();
     let mut any_entry_seen = false;
     let entries = archive
         .entries()
-        .map_err(|e| StreamError::Io(std::io::Error::other(e)))?;
+        .map_err(|e| SourceError::Io(std::io::Error::other(e)))?;
 
     for entry in entries {
         let mut entry = match entry {
@@ -52,18 +144,16 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             }
             Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 warn!(error = %e, "archive stream truncated before first entry; treating as empty");
-                return Err(StreamError::Empty);
+                return Err(SourceError::Empty);
             }
-            Err(e) => return Err(StreamError::Io(e)),
+            Err(e) => return Err(SourceError::Io(e)),
         };
 
         let entry_type = entry.header().entry_type();
-        // PAX metadata entries are not real files; XGlobalHeader would otherwise
-        // be mistaken for the archive root.
-        if entry_type == tar::EntryType::XGlobalHeader || entry_type == tar::EntryType::XHeader {
+        if entry_type == ::tar::EntryType::XGlobalHeader || entry_type == ::tar::EntryType::XHeader
+        {
             continue;
         }
-
         let entry_path = entry.path().map_err(std::io::Error::other)?;
         let entry_path_str = entry_path.to_string_lossy();
         if entry_path_str == "/" || entry_path_str == "." || entry_path_str.is_empty() {
@@ -81,117 +171,65 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
         if !crate::fs::is_safe_relative_path(&relative_path) {
-            return Err(StreamError::Io(std::io::Error::other(format!(
+            return Err(SourceError::Io(std::io::Error::other(format!(
                 "path traversal detected: {}",
                 relative_path.display()
             ))));
         }
-        let dest = target_canonical.join(&relative_path);
+        let dest = target.join(&relative_path);
+        let path = relative_path.to_string_lossy().into_owned();
 
-        if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
-            // A symlink is never a parse candidate — we'd be parsing the link, not
-            // source — so the hooks settle it (and record why); we keep only the
-            // within-root deferral, which is the source's security mechanism.
-            let mut meta = FileInventoryEntry {
-                path: relative_path.to_string_lossy().into_owned(),
-                size: entry.size(),
-                decision: Decision::ListOnly,
-                label: Default::default(),
-            };
-            let (decision, label) = hooks.on_non_regular(&meta);
-            meta.decision = decision;
-            meta.label = label;
-            if meta.decision != Decision::Drop {
+        if entry_type == ::tar::EntryType::Symlink || entry_type == ::tar::EntryType::Link {
+            let mut file = File::symlink(path, entry.size());
+            passes.header(&mut file)?;
+            if file.decision != Decision::Drop {
                 let link_target = entry
                     .link_name()
                     .map_err(std::io::Error::other)?
                     .map(|cow| cow.into_owned())
                     .unwrap_or_default();
-                deferred_symlinks.push((dest, link_target));
-                inventory.push(meta);
+                inflated.symlinks.push((dest, link_target));
+                inflated.files.push(file);
             }
             continue;
         }
-
-        if entry_type == tar::EntryType::Regular {
-            let mut meta = FileInventoryEntry {
-                path: relative_path.to_string_lossy().into_owned(),
-                size: entry.size(),
-                decision: Decision::Parse,
-                label: Default::default(),
-            };
-            let (decision, label) = step(hooks, &meta, &mut content, |buf| {
-                entry.read_to_end(buf).map(|_| ())
-            })?;
-            meta.decision = decision;
-            meta.label = label;
-            match meta.decision {
-                Decision::Drop => continue,
-                Decision::ListOnly => inventory.push(meta),
-                // Both loaded states materialize the bytes; only the parse axis
-                // differs, which the pipeline acts on, not the extractor.
-                Decision::Parse | Decision::Load => {
-                    // A containment escape (PermissionDenied from resolve_dest_within)
-                    // is fatal; any other error — a path the filesystem rejects such
-                    // as an over-long file or directory component — skips the entry.
-                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
-                        .and_then(std::fs::File::create)
-                        .and_then(|mut file| file.write_all(&content));
-                    match written {
-                        Ok(()) => inventory.push(meta),
-                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                            return Err(StreamError::Io(e));
-                        }
-                        Err(e) => {
-                            warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
-                            continue;
-                        }
-                    }
+        if entry_type == ::tar::EntryType::Regular {
+            let mut file = File::new(path, entry.size());
+            let need = passes.header(&mut file)?;
+            if need == Need::Nothing && !file.loads() {
+                if file.decision != Decision::Drop {
+                    inflated.files.push(file);
                 }
+                continue;
+            }
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            if workers.send(Pending { file, dest, bytes }).is_err() {
+                return Ok(inflated);
             }
             continue;
         }
-
-        let unpacked = crate::fs::resolve_dest_within(&target_canonical, &dest)
+        let unpacked = crate::fs::resolve_dest_within(target, &dest)
             .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
         match unpacked {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Err(StreamError::Io(e));
+                return Err(SourceError::Io(e));
             }
             Err(e) => {
                 warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
-                continue;
             }
         }
     }
-
-    for (link_path, target) in deferred_symlinks {
-        crate::fs::safe_create_dir_all(&link_path, &target_canonical)
-            .map_err(std::io::Error::other)?;
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link_path)?;
-    }
-
-    let removed_symlinks =
-        crate::fs::validate_symlinks(&target_canonical).map_err(std::io::Error::other)?;
-    if !removed_symlinks.is_empty() {
-        let removed: std::collections::HashSet<String> = removed_symlinks
-            .iter()
-            .map(|r| r.relative_path.to_string_lossy().into_owned())
-            .collect();
-        inventory.retain(|entry| !removed.contains(&entry.path));
-    }
-
-    Ok(FileInventory::new(inventory))
+    Ok(inflated)
 }
 
-/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
-/// root; later entries must share it. Returns an empty path for the root entry.
+/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records
+/// the root; later entries must share it.
 fn strip_archive_root(
     path: &Path,
     detected_root: &mut Option<OsString>,
-) -> Result<PathBuf, StreamError> {
+) -> Result<PathBuf, SourceError> {
     let mut components = path.components();
     let first = match components.next() {
         Some(c) => c.as_os_str().to_os_string(),
@@ -200,7 +238,7 @@ fn strip_archive_root(
     match detected_root {
         None => *detected_root = Some(first),
         Some(expected) if first != *expected => {
-            return Err(StreamError::Io(std::io::Error::other(format!(
+            return Err(SourceError::Io(std::io::Error::other(format!(
                 "archive entry '{}' is not under the expected root directory '{}'",
                 path.display(),
                 expected.to_string_lossy()
@@ -214,26 +252,26 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs_walk::FileLabel;
+    use crate::files::CapExceeded;
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
     struct ParseAll;
-    impl FileStreamHooks for ParseAll {}
+    impl Pass for ParseAll {}
 
     /// Drops files by extension (header) and by a NUL in content; mirrors the
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
-    impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some((Decision::ListOnly, FileLabel::default()))
+    impl Pass for TestFilter {
+        fn header(&self, f: &mut File) -> Result<Need, CapExceeded> {
+            if Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png") {
+                f.decision = Decision::ListOnly;
+            }
+            Ok(Need::Nothing)
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
+        fn content(&self, f: &mut File, content: &[u8]) {
             if content.contains(&0) {
-                (Decision::ListOnly, FileLabel::default())
-            } else {
-                (Decision::Parse, FileLabel::default())
+                f.decision = Decision::ListOnly;
             }
         }
     }
@@ -270,7 +308,7 @@ mod tests {
         enc.finish().unwrap()
     }
 
-    fn paths(inv: &[FileInventoryEntry]) -> Vec<&str> {
+    fn paths(inv: &[File]) -> Vec<&str> {
         inv.iter().map(|e| e.path.as_str()).collect()
     }
 
@@ -281,7 +319,7 @@ mod tests {
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -324,7 +362,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -338,7 +376,7 @@ mod tests {
             Entry::File("root-a/file1.rs", b"a"),
             Entry::File("root-b/file2.rs", b"b"),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["file1.rs"]);
         assert!(dir.path().join("file1.rs").exists());
     }
@@ -351,7 +389,7 @@ mod tests {
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File(&format!("project-main/{long_name}.rs"), b"unwritable"),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["src/main.rs"]);
         assert!(dir.path().join("src/main.rs").exists());
     }
@@ -364,7 +402,7 @@ mod tests {
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File(&format!("project-main/{long_dir}/f.rs"), b"unwritable"),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["src/main.rs"]);
         assert!(dir.path().join("src/main.rs").exists());
     }
@@ -388,7 +426,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
+        let err = extract(&data[..], dir.path(), &ParseAll).unwrap_err();
         assert!(err.to_string().contains("path traversal"), "got: {err}");
     }
 
@@ -400,7 +438,7 @@ mod tests {
             Entry::File("root/legit.txt", b"hello"),
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
             "hello"
@@ -416,7 +454,7 @@ mod tests {
             Entry::File("root/legit.txt", b"hello"),
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["legit.txt"]);
     }
 
@@ -427,7 +465,7 @@ mod tests {
             Entry::File("root/src/lib.rs", b"real content"),
             Entry::Symlink("root/bin/run", "../src/lib.rs"),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("bin/run")).unwrap(),
             "real content"
@@ -438,14 +476,14 @@ mod tests {
     fn empty_and_truncated_bodies_are_classified_empty() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            extract_tar_gz(&[][..], dir.path(), &mut ParseAll),
-            Err(StreamError::Empty)
+            extract(&[][..], dir.path(), &ParseAll),
+            Err(SourceError::Empty)
         ));
         let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
         let truncated = &full[..full.len() / 2];
         assert!(matches!(
-            extract_tar_gz(truncated, dir.path(), &mut ParseAll),
-            Err(StreamError::Empty)
+            extract(truncated, dir.path(), &ParseAll),
+            Err(SourceError::Empty)
         ));
     }
 
@@ -457,7 +495,7 @@ mod tests {
             Entry::File("project-main/assets/logo.png", b"\x89PNGdata"),
             Entry::File("project-main/model/weights.onnx", b"\x00\x01\x02blob"),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut TestFilter).unwrap();
+        let inv = extract(&data[..], dir.path(), &TestFilter).unwrap();
 
         assert_eq!(
             paths(&inv),
@@ -494,16 +532,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
-        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        extract(&data[..], dir.path(), &ParseAll).unwrap();
         assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
     }
 
     /// Skips files above a byte limit, so the test can observe which size the
     /// guard was handed.
     struct MaxSize(u64);
-    impl FileStreamHooks for MaxSize {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default()))
+    impl Pass for MaxSize {
+        fn header(&self, f: &mut File) -> Result<Need, CapExceeded> {
+            if f.size > self.0 {
+                f.decision = Decision::ListOnly;
+            }
+            Ok(Need::Nothing)
         }
     }
 
@@ -533,7 +574,7 @@ mod tests {
         enc.write_all(&tb.into_inner().unwrap()).unwrap();
         let data = enc.finish().unwrap();
 
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut MaxSize(64)).unwrap();
+        let inv = extract(&data[..], dir.path(), &MaxSize(64)).unwrap();
 
         assert_eq!(paths(&inv), vec!["big.txt"]);
         assert_eq!(inv[0].size, 4096);

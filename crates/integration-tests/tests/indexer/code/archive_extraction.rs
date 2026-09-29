@@ -5,10 +5,10 @@ use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
-use code_graph::v2::{FileInventory, GraphConverter, Pipeline, PipelineConfig, SinkError};
+use code_graph::v2::{GraphConverter, Inventory, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use orbit_utils::archive::extract_tar_gz;
+use orbit_utils::files::tar;
 
 use std::io::Write;
 
@@ -56,7 +56,7 @@ impl GraphConverter for CapturingConverter {
     }
 }
 
-async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) -> FileInventory {
+async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) -> Inventory {
     use axum::Router;
     use axum::body::Body;
     use axum::http::header;
@@ -96,9 +96,9 @@ async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) -> F
     let target = target.to_path_buf();
     let handle = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || {
-        let mut filter = CodeFilter::new(None, None, detect_language_from_path);
+        let filter = CodeFilter::new(None, None, detect_language_from_path);
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
-        extract_tar_gz(bridge, &target, &mut filter).unwrap()
+        tar::extract(bridge, &target, &filter).unwrap()
     })
     .await
     .unwrap();
@@ -106,7 +106,7 @@ async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) -> F
     result
 }
 
-async fn run_pipeline(root: &Path, file_inventory: FileInventory) -> CapturedPipelineRun {
+async fn run_pipeline(root: &Path, file_inventory: Inventory) -> CapturedPipelineRun {
     let capturer = Arc::new(CapturingConverter {
         graphs: Mutex::new(Vec::new()),
     });

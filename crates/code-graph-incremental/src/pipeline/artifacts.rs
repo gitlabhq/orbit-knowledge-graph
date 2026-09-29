@@ -3,9 +3,11 @@
 
 use std::path::PathBuf;
 
+use std::sync::{Arc, Mutex};
+
 use crate::inventory::FileReason;
 use arrow::record_batch::RecordBatch;
-use orbit_utils::fs_walk::FileInventoryEntry;
+use orbit_utils::files::File;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{SourceFile, State};
@@ -15,12 +17,12 @@ use crate::tree::{Edge, Tree};
 /// workers take them.
 pub struct Sources {
     pub root: PathBuf,
-    pub entries: Vec<FileInventoryEntry>,
+    pub entries: Vec<File>,
 }
 
 /// Files changed since the graph was built, already classified.
 pub struct Changes {
-    pub changed: Vec<FileInventoryEntry>,
+    pub changed: Vec<File>,
     pub removed: Vec<String>,
 }
 
@@ -49,6 +51,8 @@ pub struct Listed {
     pub(super) manifests: Vec<SourceFile>,
     pub(super) files: Vec<(String, u64, FileReason)>,
     pub(super) candidates: FxHashMap<String, u64>,
+    /// Candidates the content passes turned down when a worker read them.
+    pub(super) rejected: Arc<Mutex<Vec<(String, u64, FileReason)>>>,
 }
 
 /// The tree-sitter tree, source attached.

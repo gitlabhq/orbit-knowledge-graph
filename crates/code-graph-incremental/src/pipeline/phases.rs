@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use orbit_utils::files::{Decision, File, disk};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -52,7 +52,7 @@ fn workset(
     env: &Env,
     state: State,
     root: PathBuf,
-    entries: Vec<FileInventoryEntry>,
+    entries: Vec<File>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let manifest_names = &env.resolve.config.parse_files;
@@ -62,39 +62,47 @@ fn workset(
     };
     let mut listed = Listed::default();
     let mut candidates = Vec::new();
-    for entry in entries {
-        let FileInventoryEntry {
-            path,
-            size,
-            decision,
-            label,
-        } = entry;
-        let manifest = decision != Decision::ListOnly && is_manifest(&path);
-        let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        if decision == Decision::Parse && in_family && !manifest {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
+    for file in entries {
+        let manifest = file.decision != Decision::ListOnly && is_manifest(&file.path);
+        let in_family = SupportLang::from_path(&file.path).is_some_and(|l| env.in_family(l));
+        if file.decision == Decision::Parse && in_family && !manifest {
+            listed.candidates.insert(file.path.clone(), file.size);
+            candidates.push(file);
             continue;
         }
         let content = manifest
-            .then(|| std::fs::read_to_string(root.join(&path)).ok())
+            .then(|| std::fs::read_to_string(root.join(&file.path)).ok())
             .flatten();
-        let reason = match (decision, label.skip) {
+        let reason = match (file.decision, file.label.skip) {
             (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
             _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
             _ => FileReason::None,
         };
         if let Some(content) = content {
             listed.manifests.push(SourceFile {
-                path: path.clone(),
+                path: file.path.clone(),
                 content,
             });
         }
-        listed.files.push((path, size, reason));
+        listed.files.push((file.path, file.size, reason));
     }
-    let items = candidates.into_iter().filter_map(move |path| {
-        let content = std::fs::read_to_string(root.join(&path)).ok()?;
-        Some(SourceFile { path, content })
+    // A candidate is read once, here, by the worker that parses it; the
+    // content passes run on those bytes and may still turn the file down.
+    let passes = crate::inventory::code_filter();
+    let rejected = listed.rejected.clone();
+    let items = candidates.into_iter().filter_map(move |mut file| {
+        let bytes = disk::load(&root, &mut file, &passes).ok()?;
+        let Some(bytes) = bytes else {
+            let reason = file.label.skip.map_or(FileReason::None, FileReason::Filter);
+            let mut rejected = rejected.lock().unwrap_or_else(|e| e.into_inner());
+            rejected.push((file.path, file.size, reason));
+            return None;
+        };
+        let content = String::from_utf8(bytes).ok()?;
+        Some(SourceFile {
+            path: file.path,
+            content,
+        })
     });
     Workset {
         state,
@@ -372,9 +380,15 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         }
         let Listed {
             manifests,
-            files,
+            mut files,
             mut candidates,
+            rejected,
         } = listed;
+        let rejected = std::mem::take(&mut *rejected.lock().unwrap_or_else(|e| e.into_inner()));
+        for (path, _, _) in &rejected {
+            candidates.remove(path);
+        }
+        files.extend(rejected);
         for manifest in manifests {
             state.configs.retain(|c| c.path != manifest.path);
             state.configs.push(manifest);

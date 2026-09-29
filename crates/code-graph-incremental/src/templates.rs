@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use orbit_utils::fs_walk::FileInventoryEntry;
+use orbit_utils::files::File;
 
 use crate::error::Error;
 use crate::pipeline::{
@@ -20,7 +20,7 @@ pub fn index<'e, S>(
     inventory: S,
 ) -> Result<Pipeline<'e, Resolved>, Error>
 where
-    S: IntoIterator<Item = FileInventoryEntry>,
+    S: IntoIterator<Item = File>,
 {
     let sources = Sources {
         root: root.to_path_buf(),

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::fs_walk::{CapExceeded, Counter};
+use orbit_utils::files::{CapExceeded, Counter};
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
@@ -185,8 +185,8 @@ impl ReadOntologyFile for OntologyArchive {
 }
 
 fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {
-    let mut source_bytes = Counter::new("ontology source bytes", Some(MAX_SOURCE_BYTES));
-    let mut file_count = Counter::new("ontology files", Some(MAX_FILES));
+    let source_bytes = Counter::new("ontology source bytes", Some(MAX_SOURCE_BYTES));
+    let file_count = Counter::new("ontology files", Some(MAX_FILES));
     let mut sources = BTreeMap::new();
 
     let mut archive = tar::Archive::new(GzDecoder::new(bytes));

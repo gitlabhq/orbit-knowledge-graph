@@ -4,8 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use futures::StreamExt;
-use orbit_utils::archive::extract_tar_gz;
-use orbit_utils::fs_walk::{FileInventory, StreamError};
+use orbit_utils::files::{Inventory, SourceError, tar};
 
 use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -36,7 +35,7 @@ pub enum RepositoryCacheError {
 #[derive(Debug)]
 pub struct CachedRepository {
     dir: TempDir,
-    pub file_inventory: Arc<FileInventory>,
+    pub file_inventory: Arc<Inventory>,
 }
 
 impl CachedRepository {
@@ -103,7 +102,7 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
-        let mut filter = CodeFilter::new(
+        let filter = CodeFilter::new(
             to_cap(self.max_file_size),
             to_cap(self.max_total_bytes),
             detect_language_from_path,
@@ -114,7 +113,7 @@ impl RepositoryCache for LocalRepositoryCache {
         // directory whose cleanup already ran.
         let extracted = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            let result = extract_tar_gz(bridge, dir.path(), &mut filter).map(|inv| (inv, filter));
+            let result = tar::extract(bridge, dir.path(), &filter).map(|inv| (inv, filter));
             (dir, result)
         })
         .await
@@ -124,9 +123,9 @@ impl RepositoryCache for LocalRepositoryCache {
             (dir, Ok(ok)) => (dir, ok),
             (_dir, Err(e)) => {
                 return Err(match e {
-                    StreamError::Empty => RepositoryCacheError::EmptyArchive,
-                    StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
-                    StreamError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
+                    SourceError::Empty => RepositoryCacheError::EmptyArchive,
+                    SourceError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
+                    SourceError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
                 });
             }
         };
@@ -474,7 +473,8 @@ mod tests {
         );
         assert_eq!(
             path.file_inventory
-                .find("data/train.csv")
+                .iter()
+                .find(|entry| entry.path == "data/train.csv")
                 .unwrap()
                 .label
                 .skip,

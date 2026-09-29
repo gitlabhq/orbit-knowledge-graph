@@ -17,11 +17,10 @@ pub use error::{
     SkippedFile,
 };
 pub use pipeline::{
-    BatchTx, CancellationToken, Decision, FamilyFileCount, FamilyFileInput, FamilyPipeline,
-    FileInput, FileInventory, FileInventoryEntry, FileTimingEntry, GenericPipeline,
-    GraphStatsCounters, LanguageContext, LanguagePipeline, LanguageTimings, PhaseCpuObserver,
-    PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult, ProgressObserver,
-    ProgressPhase, SilentProgress,
+    BatchTx, CancellationToken, Decision, FamilyFileCount, FamilyFileInput, FamilyPipeline, File,
+    FileInput, FileTimingEntry, GenericPipeline, GraphStatsCounters, Inventory, LanguageContext,
+    LanguagePipeline, LanguageTimings, PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig,
+    PipelineContext, PipelineResult, ProgressObserver, ProgressPhase, SilentProgress,
 };
 pub use registry::{dispatch_by_tag, dispatch_family, dispatch_language};
 pub use sink::{GraphConverter, OnBatch, SinkError};
