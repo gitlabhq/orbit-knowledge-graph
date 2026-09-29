@@ -127,15 +127,26 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        crate::scenario::seed::apply_seed(
-            &forked,
-            &cfg.extra_seed,
-            &Default::default(),
-            &columns,
-            name,
-        )
-        .await;
-        forked.optimize_all().await;
+        let mut settings = Default::default();
+        if cfg.unmerged_seed {
+            for table in cfg.extra_seed.keys() {
+                let table = crate::scenario::seed::prefix_graph_table(table);
+                assert!(
+                    columns.contains_key(&table),
+                    "{name}: unknown table '{table}'"
+                );
+                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
+            }
+            settings = std::collections::BTreeMap::from([(
+                "optimize_on_insert".to_string(),
+                serde_json::json!(0),
+            )]);
+        }
+        crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+            .await;
+        if !cfg.unmerged_seed {
+            forked.optimize_all().await;
+        }
         forked
     } else {
         ctx.clone()

@@ -1969,6 +1969,27 @@ mod tests {
                 "n",
                 "'CONTAINS'|'HAS_NOTE'",
             ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "p.created_at",
+                "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
+                "d.state",
+                "d",
+                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "mr",
+                "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
+            ),
         ];
         for (nodes, rels, group, agg, expect) in cases {
             let sql = compile_sql_scoped(nodes, rels, group, agg);
@@ -2044,6 +2065,59 @@ mod tests {
                         "{query}: {sql}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
+        let cases = [
+            (
+                "Group",
+                "Project",
+                r#""from":"a","to":"x""#,
+                "countSubstrings(x.traversal_path, '/') >=",
+            ),
+            (
+                "Group",
+                "Group",
+                r#""from":"a","to":"x","hops":[2,3]"#,
+                "countSubstrings(x.traversal_path, '/') <=",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x""#,
+                "(x.traversal_path = (SELECT",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x","direction":"incoming""#,
+                "gl_edge",
+            ),
+            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+        ];
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (anchor, far, rel, expect) in cases {
+            let query = format!(
+                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
+            );
+            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+                .unwrap()
+                .base
+                .render();
+            assert!(
+                sql.contains(expect),
+                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
+            );
+            if expect != "gl_edge" {
+                assert!(
+                    !sql.contains("gl_edge"),
+                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
+                );
             }
         }
     }

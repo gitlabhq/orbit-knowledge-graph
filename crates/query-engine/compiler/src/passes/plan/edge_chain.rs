@@ -201,7 +201,12 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan<M>(input: &Input, model: &M, use_fk_elision: bool) -> Plan
+pub fn plan<M>(
+    input: &Input,
+    model: &M,
+    use_fk_elision: bool,
+    table_scans: &HashSet<String>,
+) -> Plan
 where
     M: QueryDataModel + ?Sized,
 {
@@ -221,7 +226,13 @@ where
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
-            node_plan.hydration = determine_hydration(node_plan, input, &hops, &denormalized);
+            node_plan.hydration = determine_hydration(
+                node_plan,
+                input,
+                &hops,
+                &denormalized,
+                table_scans.contains(&node_plan.alias),
+            );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
         }
@@ -614,6 +625,7 @@ fn determine_hydration(
     input: &Input,
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+    requires_table_scan: bool,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -656,10 +668,12 @@ fn determine_hydration(
         .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
 
     if has_uncovered_filter {
-        return HydrationStrategy::FilterOnly;
+        HydrationStrategy::FilterOnly
+    } else if requires_table_scan {
+        HydrationStrategy::Join
+    } else {
+        HydrationStrategy::Skip
     }
-
-    HydrationStrategy::Skip
 }
 
 // Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag

@@ -1,0 +1,33 @@
+description: Incoming containment does not count the project's outgoing branches
+
+config:
+  extra_seed:
+    gl_project:
+      - { id: 7000, name: p700, full_path: "g700/p700", visibility_level: public, traversal_path: "1/700/7000/" }
+    gl_branch:
+      - { id: 7700, project_id: 7000, name: main, traversal_path: "1/700/7000/" }
+    gl_edge:
+      - { source_id: 7000, source_kind: Project, relationship_kind: CONTAINS, target_id: 7700, target_kind: Branch, traversal_path: "1/700/7000/" }
+  redaction:
+    allow:
+      project: [7000]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "p", "entity": "Project", "node_ids": [7000]},
+        {"id": "b", "entity": "Branch"}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "p", "to": "b", "direction": "incoming"}],
+      "aggregations": [{"count": "b", "as": "c"}],
+      "limit": 10
+    }
+
+expect:
+  sql_contains: ["gl_edge"]
+  skip_requirements: ["node_ids"]
+  row_count: 1
+  row_values:
+    - { c: 0 }

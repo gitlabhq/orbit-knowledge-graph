@@ -23,6 +23,8 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
+    pub unmerged_seed: bool,
+    #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,

@@ -83,12 +83,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan_clickhouse {
             reads_env: [data_model]
-            reads_state: [hydration_options]
+            reads_state: [scope_proofs, hydration_options]
             mutates: [input, query_plan]
         }
         plan_duckdb {
             reads_env: [data_model]
-            reads_state: [hydration_options]
+            reads_state: [scope_proofs, hydration_options]
             mutates: [input, query_plan]
         }
         lower {
@@ -289,7 +289,12 @@ fn plan_duckdb(
 
 fn plan_with<C>(
     ctx: &mut C,
-    build: impl FnOnce(&Input, &C::Model, HydrationCompileOptions) -> Result<QueryPlan>,
+    build: impl FnOnce(
+        &Input,
+        &C::Model,
+        HydrationCompileOptions,
+        &std::collections::HashSet<String>,
+    ) -> Result<QueryPlan>,
 ) -> Result<()>
 where
     C: CompilerCtx,
@@ -300,7 +305,12 @@ where
         .as_ref()
         .copied()
         .unwrap_or_default();
-    let query_plan = build(&input, ctx.data_model(), hydration_options)?;
+    let no_table_scans = std::collections::HashSet::new();
+    let table_scans = ctx
+        .scope_proofs()
+        .as_ref()
+        .map_or(&no_table_scans, crate::scope::QueryScope::table_scans);
+    let query_plan = build(&input, ctx.data_model(), hydration_options, table_scans)?;
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
