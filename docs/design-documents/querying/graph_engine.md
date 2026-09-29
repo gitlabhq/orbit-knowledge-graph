@@ -166,15 +166,16 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
-- The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
+- ID lookups use an aggregate over all matching versions. Full-path lookups use `FINAL` before filtering the mutable path, so an old name cannot resolve a renamed anchor.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- When scope preparation removes a container anchor, scope application adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- Containment elision preserves the requested direction and constrains the target's traversal-path depth. The compiler retains the target's table scan even when the query does not return its properties.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
 **Where it lands**
 
-- Scope preparation runs after restriction. It stores node and relationship proofs in pipeline state and removes eligible scope-only containers before planning.
+- Scope preparation runs after restriction. It removes a scope-only container only when the target's scope and hop depth exactly replace the relationship. It stores the bounded target proof in scope state and gives planning only the target alias that needs a table scan.
 - Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
 - Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
 - Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
@@ -183,7 +184,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
 - Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
-- Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. A project's path cannot constrain its ancestor group or that group's membership edges.
+- Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. This follows the stored edge direction, including incoming query selectors. A project's path cannot constrain its ancestor group or that group's membership edges.
 - Other scope-preserving variants propagate prefixes in both directions. A two-pass taint walk resolves the exact variant and refuses aliases reachable through a cross-namespace edge.
 - Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).
 

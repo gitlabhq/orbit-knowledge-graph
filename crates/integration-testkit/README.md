@@ -305,6 +305,7 @@ Each YAML file contains one `QueryScenario` document.
 | Field | Type | Description |
 |---|---|---|
 | `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
+| `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 

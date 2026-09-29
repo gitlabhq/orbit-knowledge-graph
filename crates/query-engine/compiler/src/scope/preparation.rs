@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use query_data_model::QueryDataModel;
 
 use super::{QueryScope, ScopeProof, is_scope_only};
-use crate::input::{Input, InputNode, InputRelationship, QueryType};
+use crate::input::{Direction, Input, InputNode, InputRelationship, QueryType};
 
 pub fn prepare(
     input: &mut Input,
@@ -18,6 +18,7 @@ pub fn prepare(
             .collect(),
         nodes: proofs,
         requirements: Vec::new(),
+        table_scans: Default::default(),
     };
     if input.query_type != QueryType::Aggregation {
         return scope;
@@ -53,21 +54,74 @@ pub fn prepare(
     if !scope_preserving || !relationship.filters.is_empty() {
         return scope;
     }
-    let Some(anchor) = [&relationship.from, &relationship.to]
+    let Some((anchor, target, target_proof)) = [&relationship.from, &relationship.to]
         .into_iter()
         .filter_map(|alias| input.nodes.iter().find(|node| node.id == *alias))
-        .find(|node| scope_only_container(input, node, model))
-        .map(|node| node.id.clone())
+        .filter(|node| scope_only_container(input, node, model))
+        .find_map(|node| {
+            container_target_scope(input, relationship, node, &scope.nodes, model)
+                .map(|(target, proof)| (node.id.clone(), target, proof))
+        })
     else {
         return scope;
     };
 
     let index = *index;
+    let target = input.nodes[target].id.clone();
+    scope.table_scans.insert(target.clone());
+    scope.nodes.insert(target, target_proof);
     scope.requirements.push(proof);
     scope.relationships.remove(index);
     input.relationships.remove(index);
     input.nodes.retain(|node| node.id != anchor);
     scope
+}
+
+fn container_target_scope(
+    input: &Input,
+    relationship: &InputRelationship,
+    anchor: &InputNode,
+    proofs: &HashMap<String, ScopeProof>,
+    model: &(impl QueryDataModel + ?Sized),
+) -> Option<(usize, ScopeProof)> {
+    let target = if relationship.from == anchor.id {
+        &relationship.to
+    } else {
+        &relationship.from
+    };
+    let (index, target) = input
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| node.id == *target)?;
+    let proof = proofs.get(&anchor.id)?;
+    if !proof.is_single_source()
+        || proofs.get(&target.id) != Some(proof)
+        || !model.entity_has_traversal_path(target.entity.as_deref()?)
+    {
+        return None;
+    }
+    let owns_path_segment = |node: &InputNode| {
+        node.entity.as_deref().is_some_and(|entity| {
+            model
+                .traversal_path_lookup(entity, ontology::TraversalPathKind::FullPath)
+                .is_some()
+        })
+    };
+    let source = match relationship.direction {
+        Direction::Outgoing => &relationship.from,
+        Direction::Incoming => &relationship.to,
+        Direction::Both => return None,
+    };
+    if !owns_path_segment(anchor) || *source != anchor.id {
+        return None;
+    }
+    let (min, max) = if owns_path_segment(target) {
+        (relationship.hops.min, relationship.hops.max)
+    } else {
+        (relationship.hops.max == 1).then_some((0, 0))?
+    };
+    Some((index, proof.clone().with_depth(min, max)))
 }
 
 fn scope_only_container(
@@ -99,6 +153,10 @@ fn scope_only_container(
             .order_by
             .as_ref()
             .is_some_and(|order| order.node == node.id)
+        && !input
+            .join_predicates
+            .iter()
+            .any(|predicate| predicate.lhs_node == node.id || predicate.rhs_node == node.id)
 }
 
 fn relationship_proof(
