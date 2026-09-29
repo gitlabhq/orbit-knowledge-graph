@@ -855,12 +855,23 @@ mod tests {
             ".opencode/plugins/orbit.js",
             ".pi/extensions/orbit.ts",
         ];
-        for graph_first in [true, false] {
+        for (graph_first, changed) in [(true, true), (true, false), (false, true), (false, false)] {
             let options = Options {
                 graph_first,
                 ..options_for(&["claude", "codex", "duo", "opencode", "pi"])
             };
-            install(options, project(dir.path()), &bare_machine()).unwrap();
+            let selection = Selection::from_setup_options(&options, &[]).unwrap();
+            let mut report = Report::default();
+            components::install(&selection, &project(dir.path()), &mut report).unwrap();
+            let expected = if changed {
+                vec![
+                    "Codex: trust the orbit hook in /hooks",
+                    "GitLab Duo: start it with --enable-project-hooks",
+                ]
+            } else {
+                vec![]
+            };
+            assert_eq!(report.next_steps, expected);
             for file in files {
                 let contents = std::fs::read_to_string(dir.path().join(file)).unwrap();
                 assert!(contents.contains("hook-guard"), "{file}: {contents}");

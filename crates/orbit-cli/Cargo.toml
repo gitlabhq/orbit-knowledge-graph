@@ -31,6 +31,7 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
+jsonc-parser = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
@@ -39,9 +40,9 @@ rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
-jsonc-parser = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
+tempfile = { workspace = true }
 toml_edit = { workspace = true }
 uuid = { workspace = true }
 
@@ -54,4 +55,3 @@ orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 [dev-dependencies]
 jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
-tempfile = { workspace = true }

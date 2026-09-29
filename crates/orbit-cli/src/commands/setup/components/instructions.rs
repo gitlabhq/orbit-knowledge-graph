@@ -80,7 +80,7 @@ fn upsert_block_in_file(path: &Path, label: &str, report: &mut Report) -> Result
         }
         Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
     };
-    write_unless_unchanged(path, label, &updated, action, report)
+    write_unless_unchanged(path, label, &updated, action, report).map(|_| ())
 }
 
 fn strip_block_from_file(

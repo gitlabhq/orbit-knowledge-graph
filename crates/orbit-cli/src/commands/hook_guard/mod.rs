@@ -1,3 +1,4 @@
+mod index;
 mod session;
 mod shell;
 mod target;
@@ -10,6 +11,7 @@ use std::time::SystemTime;
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
+use self::index::Index;
 use self::session::{GRAPH_MARKER, Session, marker};
 use self::target::Inspection;
 use crate::commands::setup::spec;
@@ -69,7 +71,7 @@ pub(crate) fn run(
         &call,
         &context,
         || workspace::git_toplevel(&context.cwd).ok(),
-        |root| manifest_index(root).unwrap_or(Index::Unknown),
+        |root| index::for_repo(root).unwrap_or(Index::Unknown),
     );
     if let Some(response) = response {
         println!("{response}");
@@ -83,31 +85,6 @@ struct Context {
     cwd: PathBuf,
     session: Option<Session>,
     graph_first: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Index {
-    Indexed,
-    Missing,
-    Unknown,
-}
-
-fn manifest_index(root: &Path) -> anyhow::Result<Index> {
-    let parent = workspace::git_info(root)?.parent_repo_path;
-    let db = workspace::resolve_db_path(None)?;
-    let client = duckdb_client::DuckDbClient::open_read_only(&db)?;
-    let rows = client.query_arrow_json(
-        "SELECT COUNT(*) AS n FROM _orbit_manifest \
-         WHERE CAST(status AS VARCHAR) = 'indexed' AND (repo_path = ?1 OR parent_repo_path = ?2)",
-        &[
-            root.to_string_lossy().into(),
-            parent.to_string_lossy().into(),
-        ],
-    )?;
-    Ok(match duckdb_client::scalar_i64(&rows) {
-        0 => Index::Missing,
-        _ => Index::Indexed,
-    })
 }
 
 fn respond(

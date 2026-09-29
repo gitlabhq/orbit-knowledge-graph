@@ -161,6 +161,11 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 
 Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension from a pinned source archive; development builds load the pinned extension artifact at runtime. Regenerate the source archive with `mise vendor -- duckdb`.
 
+Agent hook guards cache each repository's index status beside the local database.
+Guards reuse the result across hook processes for the same repository and worktree
+parent. Changes to database or write-ahead log size or modification time invalidate
+the result. Failed lookups never enter the cache or block tool calls.
+
 Local `grep` binds each complete OR alternative to DuckDB FTS `match_bm25` with
 `conjunctive := true` across definition names, FQNs/paths, and indexed source.
 Query preparation uses the index's FTS tokenizer and removes only empty tokens
