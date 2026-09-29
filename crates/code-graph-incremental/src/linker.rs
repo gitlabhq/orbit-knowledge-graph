@@ -3,14 +3,14 @@ use std::cell::RefCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::canonical::Canonical as C;
-use crate::constants::WILDCARD;
+use crate::constants::{PATH_SEP, WILDCARD};
 use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
+use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, members_by_level};
 
 #[derive(Clone)]
 enum Linked {
@@ -48,6 +48,7 @@ struct Fold<'t> {
     wildcards: Vec<u32>,
     tags: ReservedTags,
     config: &'t LinkConfig,
+    syms: &'t crate::intern::Interner,
     run: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
@@ -193,6 +194,11 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_import(&mut self, c: Cursor<'t>) {
+        if self.config.inline_modules
+            && let Some(module) = self.inline_module(c)
+        {
+            return self.import_from_def(c, module);
+        }
         for n in c.names() {
             let sym = n.sym();
             let local = n
@@ -222,6 +228,50 @@ impl<'t> Fold<'t> {
                 }
             }
         }
+    }
+
+    /// The def an import path names when every segment is a def in this file:
+    /// `use crate::dep::Service` with `mod dep {}` above it.
+    fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
+        let path = self.syms.resolve(import.child_sym(C::SourcePath)?);
+        let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
+        let first = self.syms.lookup(segments.next()?);
+        let mut module = self.lookup(first).into_iter().find_map(|r| match r {
+            Linked::Def(d) => Some(self.tree.cursor(d)),
+            _ => None,
+        })?;
+        for segment in segments {
+            module = find_method_in(module, self.syms.lookup(segment))?;
+        }
+        Some(module)
+    }
+
+    fn import_from_def(&mut self, import: Cursor<'t>, module: Cursor<'t>) {
+        for n in import.names() {
+            let local = n.child_sym(C::Alias).unwrap_or(n.sym());
+            let targets: Vec<Cursor<'t>> = match n.sym() == self.wildcard {
+                true => module.children().filter(|d| d.is(C::Def)).collect(),
+                false => find_method_in(module, n.sym()).into_iter().collect(),
+            };
+            for target in targets {
+                let name = target.child_sym(C::DefName).unwrap_or(local);
+                let def_idx = self.def_index(target.index());
+                self.ssa
+                    .write_variable(name, self.cur, Value::LocalDef(def_idx));
+            }
+        }
+    }
+
+    fn def_index(&mut self, node: u32) -> u32 {
+        if let Some(&idx) = self.predeclared.get(&node) {
+            return idx;
+        }
+        if let Some(idx) = self.defs.iter().position(|&d| d == node) {
+            return idx as u32;
+        }
+        let idx = self.register_def(node);
+        self.predeclared.insert(node, idx);
+        idx
     }
 
     fn handle_def(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
@@ -268,8 +318,7 @@ impl<'t> Fold<'t> {
     fn predeclare(&mut self, scope: Cursor<'t>) {
         for d in scope.children().filter(|d| d.is(C::Def)) {
             if let Some(name) = d.child_sym(C::DefName) {
-                let def_idx = self.register_def(d.index());
-                self.predeclared.insert(d.index(), def_idx);
+                let def_idx = self.def_index(d.index());
                 self.declare(d, name, def_idx);
             }
         }
@@ -723,6 +772,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         wildcards: Vec::new(),
         tags: ReservedTags::new(lang),
         config,
+        syms: &lang.syms,
         run,
         file,
         killed: None,

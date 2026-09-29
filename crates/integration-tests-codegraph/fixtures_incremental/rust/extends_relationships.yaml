@@ -200,8 +200,6 @@ tests:
   # Cross-module resolution
   # ─────────────────────────────────────────────────────────────────
   - name: "9. Cross-module supertrait Bark -> traits::Audible resolves through module path"
-    # Known gap: a relative path in supertype position (`io::Reader` with `io` an inline mod or a `use`d module) needs member lookup on modules; only `crate::`/`super::`/extern-crate paths resolve.
-    skip: true
     queries:
       - query: |
           MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)
@@ -212,8 +210,6 @@ tests:
           - { row: { parent: "traits::Audible" } }
 
   - name: "10. Cross-module impl File implements io::Reader"
-    # Known gap: a relative path in supertype position (`io::Reader` with `io` an inline mod or a `use`d module) needs member lookup on modules; only `crate::`/`super::`/extern-crate paths resolve.
-    skip: true
     queries:
       - query: |
           MATCH (child:Definition)-[e:EXTENDS]->(parent:Definition)

@@ -312,8 +312,6 @@ tests:
       - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'Function' } }
 
   - name: "generic trait-bound method calls resolve to the trait method"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'generic_trait_bound' AND callee.name = 'trait_ping'
@@ -323,8 +321,6 @@ tests:
       - { row: { fqn: 'dep::Pinger::trait_ping', type: 'Method' } }
 
   - name: "generic trait-bound default calls resolve to the trait default method"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'trait_default_dispatch' AND callee.name = 'defaulted'
@@ -343,8 +339,6 @@ tests:
       - { row: { fqn: 'dep::helper', type: 'Function' } }
 
   - name: "inherent methods still resolve on concrete receivers"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'inherent_call' AND callee.name = 'inherent_ping'

@@ -4,6 +4,7 @@
 
 config:
   link:
+    inline_modules: true
     builtins: [
       println, print, eprintln, eprint, format, write, writeln, vec, panic, assert, assert_eq,
       assert_ne, debug_assert, todo, unimplemented, unreachable, matches, dbg, include_str,
