@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use integration_testkit::{load_ontology, run_subtests_shared, t};
-use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
+use orbit_server::item_counts::ItemCountService;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
@@ -17,9 +17,6 @@ async fn item_counts() {
     run_subtests_shared!(
         &ctx,
         counts_entities_under_a_scope,
-        each_scope_gets_its_own_counts_in_request_order,
-        project_scope_counts_apart_from_its_group,
-        visibility_is_decided_for_each_scope,
         scope_outside_the_callers_paths_counts_nothing,
         deleted_rows_are_excluded,
         duplicate_versions_count_once,
@@ -30,11 +27,11 @@ async fn item_counts() {
     );
 }
 
-async fn count_each(
+async fn count(
     ctx: &TestContext,
     security_context: &SecurityContext,
     scopes: &[&str],
-) -> Vec<ScopeItemCounts> {
+) -> HashMap<String, i64> {
     let scopes: Vec<TraversalPath> = scopes
         .iter()
         .map(|s| TraversalPath::new_unchecked(*s))
@@ -42,17 +39,6 @@ async fn count_each(
     ItemCountService::new(Arc::new(ctx.create_client()))
         .count_items(&load_ontology(), security_context, &scopes)
         .await
-}
-
-async fn count(
-    ctx: &TestContext,
-    security_context: &SecurityContext,
-    scope: &str,
-) -> HashMap<String, i64> {
-    count_each(ctx, security_context, &[scope])
-        .await
-        .remove(0)
-        .counts
 }
 
 fn role_on(paths: &[(&str, u32)]) -> SecurityContext {
@@ -64,59 +50,21 @@ fn role_on(paths: &[(&str, u32)]) -> SecurityContext {
 }
 
 async fn counts_entities_under_a_scope(ctx: &TestContext) {
-    let root = count(ctx, &admin_context(), "1/").await;
+    let root = count(ctx, &admin_context(), &["1/"]).await;
     assert_eq!(root["Project"], 5);
     assert_eq!(root["Group"], 2);
     assert_eq!(root["MergeRequest"], 2);
 
-    let group = count(ctx, &admin_context(), "1/100/").await;
+    let group = count(ctx, &admin_context(), &["1/100/"]).await;
     assert_eq!(group["Project"], 2);
     assert_eq!(group["Group"], 1);
     assert_eq!(group["MergeRequest"], 1);
-}
-
-async fn each_scope_gets_its_own_counts_in_request_order(ctx: &TestContext) {
-    let scope_counts = count_each(ctx, &admin_context(), &["1/101/", "1/100/"]).await;
-
-    let scopes: Vec<&str> = scope_counts.iter().map(|s| s.scope.as_str()).collect();
-    assert_eq!(scopes, ["1/101/", "1/100/"]);
-    assert_eq!(scope_counts[0].counts["Project"], 1);
-    assert_eq!(scope_counts[0].counts["MergeRequest"], 1);
-    assert_eq!(scope_counts[1].counts["Project"], 2);
-    assert_eq!(scope_counts[1].counts["MergeRequest"], 1);
-}
-
-async fn project_scope_counts_apart_from_its_group(ctx: &TestContext) {
-    let scope_counts = count_each(ctx, &admin_context(), &["1/100/", "1/100/1000/"]).await;
-
-    let (group, project) = (&scope_counts[0].counts, &scope_counts[1].counts);
-    assert_eq!(group["Project"], 2);
-    assert_eq!(group["Group"], 1);
-    assert_eq!(group["MergeRequest"], 1);
-    assert_eq!(project["Project"], 1);
-    assert_eq!(project["Group"], 0);
-    assert_eq!(project["MergeRequest"], 1);
-}
-
-async fn visibility_is_decided_for_each_scope(ctx: &TestContext) {
-    let security_context = role_on(&[("1/100/", 20), ("1/101/", 25)]);
-
-    let scope_counts = count_each(ctx, &security_context, &["1/100/", "1/101/"]).await;
-
-    assert!(!scope_counts[0].counts.contains_key("Vulnerability"));
-    assert_eq!(scope_counts[1].counts["Vulnerability"], 1);
 }
 
 async fn scope_outside_the_callers_paths_counts_nothing(ctx: &TestContext) {
-    let scope_counts = count_each(ctx, &role_on(&[("1/100/", 50)]), &["1/101/"]).await;
+    let counts = count(ctx, &role_on(&[("1/100/", 50)]), &["1/101/"]).await;
 
-    assert_eq!(scope_counts.len(), 1);
-    assert_eq!(scope_counts[0].scope.as_str(), "1/101/");
-    assert!(
-        scope_counts[0].counts.is_empty(),
-        "counts: {:?}",
-        scope_counts[0].counts
-    );
+    assert!(counts.is_empty(), "counts: {counts:?}");
 }
 
 async fn deleted_rows_are_excluded(ctx: &TestContext) {
@@ -130,7 +78,7 @@ async fn deleted_rows_are_excluded(ctx: &TestContext) {
     .await;
     db.optimize_all().await;
 
-    let counts = count(&db, &admin_context(), "1/900/").await;
+    let counts = count(&db, &admin_context(), &["1/900/"]).await;
 
     assert_eq!(counts["Group"], 1);
 }
@@ -147,20 +95,20 @@ async fn duplicate_versions_count_once(ctx: &TestContext) {
     .await;
     db.optimize_all().await;
 
-    let counts = count(&db, &admin_context(), "1/100/1000/").await;
+    let counts = count(&db, &admin_context(), &["1/100/1000/"]).await;
 
     assert_eq!(counts["Definition"], 2);
 }
 
 async fn reporter_gets_no_vulnerability_count(ctx: &TestContext) {
-    let counts = count(ctx, &role_on(&[("1/", 20)]), "1/").await;
+    let counts = count(ctx, &role_on(&[("1/", 20)]), &["1/"]).await;
 
     assert!(!counts.contains_key("Vulnerability"));
     assert_eq!(counts["Project"], 5);
 }
 
 async fn security_manager_gets_vulnerability_count(ctx: &TestContext) {
-    let counts = count(ctx, &role_on(&[("1/", 25)]), "1/").await;
+    let counts = count(ctx, &role_on(&[("1/", 25)]), &["1/"]).await;
 
     assert_eq!(counts["Vulnerability"], 1);
 }
@@ -168,7 +116,7 @@ async fn security_manager_gets_vulnerability_count(ctx: &TestContext) {
 async fn role_on_another_path_does_not_expose_the_entity(ctx: &TestContext) {
     let security_context = role_on(&[("1/100/", 25), ("1/101/", 20)]);
 
-    let counts = count(ctx, &security_context, "1/101/").await;
+    let counts = count(ctx, &security_context, &["1/101/"]).await;
 
     assert!(!counts.contains_key("Vulnerability"));
     assert_eq!(counts["MergeRequest"], 1);
@@ -179,7 +127,7 @@ async fn missing_table_degrades_to_zero(ctx: &TestContext) {
     db.execute(&format!("DROP TABLE {}", t("gl_merge_request")))
         .await;
 
-    let counts = count(&db, &admin_context(), "1/100/").await;
+    let counts = count(&db, &admin_context(), &["1/100/"]).await;
 
     assert_eq!(counts["MergeRequest"], 0);
     assert_eq!(counts["Project"], 0);

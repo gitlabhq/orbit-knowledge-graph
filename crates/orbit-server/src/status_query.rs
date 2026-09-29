@@ -5,9 +5,6 @@ use serde::Serialize;
 use tonic::Status;
 use tracing::debug;
 
-pub(crate) const TRAVERSAL_PATH_PREFIXES: &str = "arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, depth), '/'), '/'), \
-     range(1, length(splitByChar('/', traversal_path))))";
-
 #[derive(Clone, Copy)]
 pub(crate) enum QueryCache {
     Use { ttl_secs: u32 },

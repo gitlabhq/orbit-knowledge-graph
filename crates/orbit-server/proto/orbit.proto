@@ -570,22 +570,15 @@ message DomainIndexingStatus {
 }
 
 // ---------------------------------------------------------------------------
-// GetItemCounts — unary, entity counts per path and domain
+// GetItemCounts — unary, entity counts per domain
 // ---------------------------------------------------------------------------
 
 message GetItemCountsRequest {
-  repeated string traversal_paths = 1;  // 1 to 100 group or project paths
+  string traversal_path = 1;  // one group or project path (e.g. "1/2/")
 }
 
 message GetItemCountsResponse {
-  reserved 1;
-  reserved "domains";
-  repeated NamespaceItemCounts counts = 2;  // request order, one entry for each requested path
-}
-
-message NamespaceItemCounts {
-  string traversal_path = 1;
-  repeated DomainItemCount domains = 2;  // only domains with an entity the caller can see in this path
+  repeated DomainItemCount domains = 1;  // only domains with an entity the caller can see
 }
 
 message DomainItemCount {

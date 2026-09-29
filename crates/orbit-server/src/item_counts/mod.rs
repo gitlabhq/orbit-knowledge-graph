@@ -12,15 +12,9 @@ use query_engine::compiler::SecurityContext;
 use tracing::warn;
 
 pub use self::response::build_item_counts_response;
-use self::visibility::VisibleEntity;
 
 pub struct ItemCountService {
     client: Arc<ArrowClickHouseClient>,
-}
-
-pub struct ScopeItemCounts {
-    pub scope: TraversalPath,
-    pub counts: HashMap<String, i64>,
 }
 
 impl ItemCountService {
@@ -33,47 +27,22 @@ impl ItemCountService {
         ontology: &Ontology,
         security_context: &SecurityContext,
         scopes: &[TraversalPath],
-    ) -> Vec<ScopeItemCounts> {
+    ) -> HashMap<String, i64> {
         let entities = visibility::get_visible_entities(ontology, security_context, scopes);
-        let counts_by_scope = if entities.is_empty() {
-            HashMap::new()
-        } else {
-            counts::count_visible_entities(&self.client, &entities)
-                .await
-                .inspect_err(|error| warn!(%error, "Item counts could not be read"))
-                .unwrap_or_default()
-        };
+        if entities.is_empty() {
+            return HashMap::new();
+        }
 
-        scopes
-            .iter()
-            .map(|scope| collect_scope_counts(scope, &entities, &counts_by_scope))
+        let counts = counts::count_visible_entities(&self.client, &entities)
+            .await
+            .inspect_err(|error| warn!(%error, "Item counts could not be read"))
+            .unwrap_or_default();
+        entities
+            .into_iter()
+            .map(|entity| {
+                let count = counts.get(&entity.name).copied().unwrap_or(0);
+                (entity.name, count)
+            })
             .collect()
-    }
-}
-
-fn collect_scope_counts(
-    scope: &TraversalPath,
-    entities: &[VisibleEntity],
-    counts_by_scope: &HashMap<String, HashMap<String, i64>>,
-) -> ScopeItemCounts {
-    let no_counts = HashMap::new();
-    let scope_counts = counts_by_scope.get(scope.as_str()).unwrap_or(&no_counts);
-    let counts = entities
-        .iter()
-        .filter(|entity| {
-            entity
-                .scopes
-                .iter()
-                .any(|visible| visible == scope.as_str())
-        })
-        .map(|entity| {
-            let count = scope_counts.get(&entity.name).copied().unwrap_or(0);
-            (entity.name.clone(), count)
-        })
-        .collect();
-
-    ScopeItemCounts {
-        scope: scope.clone(),
-        counts,
     }
 }

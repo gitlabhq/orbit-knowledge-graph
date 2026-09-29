@@ -8,8 +8,8 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::status_query::{
-    QueryCache, TRAVERSAL_PATH_PREFIXES, bind_prefix_parameters, build_prefix_match_condition,
-    fetch_status_query_batches, map_column_extraction_error,
+    QueryCache, bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    map_column_extraction_error,
 };
 
 pub(super) const PROJECT_NODE: &str = "Project";
@@ -18,7 +18,8 @@ const CODE_CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 const PROJECT_COVERAGE_SQL: &str = r#"
 WITH projects AS (
          SELECT id,
-                {path_prefixes} AS path_prefixes
+                arrayMap(depth -> concat(arrayStringConcat(arraySlice(splitByChar('/', traversal_path), 1, depth), '/'), '/'),
+                         range(1, length(splitByChar('/', traversal_path)))) AS path_prefixes
          FROM {project_table:Identifier} FINAL
          WHERE _deleted = 0
            AND {in_scopes}),
@@ -75,9 +76,7 @@ pub async fn read_project_coverage(
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
     let (project_table, code_checkpoint_table) = find_coverage_tables(ontology)?;
     let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
-    let sql = PROJECT_COVERAGE_SQL
-        .replace("{path_prefixes}", TRAVERSAL_PATH_PREFIXES)
-        .replace("{in_scopes}", &in_scopes);
+    let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
     let batches = fetch_status_query_batches(
         client,
