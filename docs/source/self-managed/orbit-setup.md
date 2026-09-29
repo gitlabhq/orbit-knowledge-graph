@@ -37,14 +37,11 @@ Prerequisites:
 - The Owner role for the group you want to index.
 - Administrator access to GitLab.
 
-The commands on this page use placeholders for the versions. You should install the latest versions:
+The commands on this page use GitLab Orbit 0.134.0 and the GitLab Orbit Helm chart 3.0.0. You should
+install the latest versions. To find them, see:
 
-- For `<orbit_version>`, use the latest tag from the
-  [GitLab Orbit releases](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases).
-- For `<chart_version>`, use the latest tag from the
-  [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
-
-Remove the leading `v` from the tag. For example, use `1.2.3` for the tag `v1.2.3`.
+- [GitLab Orbit releases](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
+- [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases)
 
 Set up GitLab Orbit in this order:
 
@@ -74,7 +71,7 @@ To create the database and the identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:<orbit_version> \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -202,7 +199,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
 
    ```yaml
    image:
-     tag: "<orbit_version>"
+     tag: "0.134.0"
 
    secrets:
      perKey:
@@ -255,7 +252,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    ```shell
    helm upgrade --install gkg \
      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
-     --version <chart_version> \
+     --version 3.0.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
