@@ -25,11 +25,14 @@ fn binding_uses_the_same_semantic_sources_for_both_catalogs() {
         let mut sources = Vec::new();
 
         bound.root.visit_mut(&mut |node| {
-            if let compiler::planning::generic::Op::Read(source) = &node.op {
+            if let compiler::planning::generic::Op::Read(bind::Source::Entity {
+                entity,
+                properties,
+            }) = &node.op
+            {
                 sources.push((
-                    model.graph().entity(source.entity).name.clone(),
-                    source
-                        .properties
+                    model.graph().entity(*entity).name.clone(),
+                    properties
                         .iter()
                         .map(|(_, id)| model.graph().property(*id).name.clone())
                         .collect(),

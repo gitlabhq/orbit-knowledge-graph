@@ -92,6 +92,12 @@ impl QueryBackendCatalog for DuckDbCatalog {
         vec![self.edge_table().to_string()]
     }
 
+    fn edge_field_column(&self, table: &str, field: crate::EdgeField) -> Option<&str> {
+        (table == self.edge_table())
+            .then(|| super::edge_field_column(&self.edge_columns, field))
+            .flatten()
+    }
+
     fn foreign_key(
         &self,
         _graph: &GraphCatalog,

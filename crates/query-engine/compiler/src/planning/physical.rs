@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use query_data_model::QueryDataModel;
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 use super::bind::Source;
 use super::generic::{Function, Operation, Schema, ValueId, ValueType, Values};
@@ -24,15 +24,19 @@ impl Read {
         model: &impl QueryDataModel,
         current_rows: CurrentRows,
     ) -> Result<Self> {
-        let entity = &model.graph().entity(source.entity).name;
+        let Source::Entity { entity, properties } = source else {
+            return Self::select_edge(source, model, current_rows);
+        };
+
+        let entity_id = entity;
+        let entity = &model.graph().entity(entity_id).name;
         let table = model
             .entity_table(entity)
             .ok_or_else(|| QueryError::ReferenceError(format!("entity {entity} is unavailable")))?;
-        let columns = source
-            .properties
+        let columns = properties
             .into_iter()
             .map(|(value, property)| {
-                if model.graph().property(property).entity != source.entity {
+                if model.graph().property(property).entity != entity_id {
                     return Err(QueryError::ReferenceError(
                         "read properties must belong to one entity".into(),
                     ));
@@ -47,6 +51,45 @@ impl Read {
 
         Ok(Self {
             table: table.to_string(),
+            columns,
+            current_rows,
+        })
+    }
+
+    fn select_edge(
+        source: Source,
+        model: &impl QueryDataModel,
+        current_rows: CurrentRows,
+    ) -> Result<Self> {
+        let Source::Edge {
+            relationships,
+            fields,
+        } = source
+        else {
+            unreachable!()
+        };
+        let tables = model.query_backend().edge_tables(&relationships);
+        let [table] = tables.as_slice() else {
+            return Err(QueryError::Lowering(
+                "multi-table edges require union source selection".into(),
+            ));
+        };
+
+        let columns = fields
+            .into_iter()
+            .map(|(value, field)| {
+                let column = model
+                    .query_backend()
+                    .edge_field_column(table, field)
+                    .ok_or_else(|| {
+                        QueryError::ReferenceError(format!("edge field {field:?} is unavailable"))
+                    })?;
+                Ok((value, column.to_string()))
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(Self {
+            table: table.clone(),
             columns,
             current_rows,
         })

@@ -87,6 +87,10 @@ impl ClickHouseCatalog {
 }
 
 impl QueryBackendCatalog for ClickHouseCatalog {
+    fn edge_field_column(&self, table: &str, field: crate::EdgeField) -> Option<&str> {
+        super::edge_field_column(&self.table(table)?.columns, field)
+    }
+
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
         Self::from_ontology(ontology, graph)
     }

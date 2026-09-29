@@ -117,6 +117,15 @@ impl DenormalizedCatalog {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EdgeField {
+    SourceId,
+    TargetId,
+    SourceKind,
+    TargetKind,
+    RelationshipKind,
+}
+
 pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError>;
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
@@ -138,6 +147,7 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
+    fn edge_field_column(&self, table: &str, field: EdgeField) -> Option<&str>;
     fn foreign_key(
         &self,
         graph: &GraphCatalog,

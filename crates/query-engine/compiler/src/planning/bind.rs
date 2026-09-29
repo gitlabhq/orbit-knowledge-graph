@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use query_data_model::{EntityId, PropertyId, QueryDataModel};
+use query_data_model::{EdgeField, EntityId, PropertyId, QueryDataModel, RelationshipId};
 use serde_json::Value;
 
 use super::generic::{
@@ -28,14 +28,23 @@ impl From<ontology::DataType> for ValueType {
     }
 }
 
-pub struct Source {
-    pub entity: EntityId,
-    pub properties: Vec<(ValueId, PropertyId)>,
+pub enum Source {
+    Entity {
+        entity: EntityId,
+        properties: Vec<(ValueId, PropertyId)>,
+    },
+    Edge {
+        relationships: Vec<RelationshipId>,
+        fields: Vec<(ValueId, EdgeField)>,
+    },
 }
 
 impl Operation for Source {
     fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
-        Ok(self.properties.iter().map(|(value, _)| *value).collect())
+        Ok(match self {
+            Self::Entity { properties, .. } => properties.iter().map(|(value, _)| *value).collect(),
+            Self::Edge { fields, .. } => fields.iter().map(|(value, _)| *value).collect(),
+        })
     }
 }
 
@@ -51,6 +60,16 @@ pub fn traversal(
     model: &impl QueryDataModel,
     required: &[(String, String)],
     limit: Option<u32>,
+) -> Result<BoundQuery> {
+    bind_node(input, model, required, limit, Values::default())
+}
+
+pub(super) fn bind_node(
+    input: &Input,
+    model: &impl QueryDataModel,
+    required: &[(String, String)],
+    limit: Option<u32>,
+    mut values: Values,
 ) -> Result<BoundQuery> {
     if !input.is_search() || !input.join_predicates.is_empty() {
         return Err(QueryError::Validation(
@@ -135,7 +154,6 @@ pub fn traversal(
     }
 
     let properties: Vec<_> = needed.values().copied().collect();
-    let mut values = Values::default();
     let properties = properties
         .into_iter()
         .map(|property| {
@@ -146,15 +164,15 @@ pub fn traversal(
             )
         })
         .collect::<Vec<_>>();
-    let read = Source {
-        entity: entity.id,
-        properties,
-    };
     let bindings: BTreeMap<_, _> = needed
         .keys()
         .copied()
-        .zip(read.properties.iter().map(|(value, _)| *value))
+        .zip(properties.iter().map(|(value, _)| *value))
         .collect();
+    let read = Source::Entity {
+        entity: entity.id,
+        properties,
+    };
 
     let mut predicates = Vec::new();
     for (name, value) in &bindings {

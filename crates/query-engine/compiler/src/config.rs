@@ -309,27 +309,31 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     use crate::constants::{redaction_id_column, redaction_type_column};
     use crate::input::OrderDirection;
     use crate::lowering::{Context, lower_with_context, scalar};
-    use crate::planning::bind;
+    use crate::planning::graph;
 
     let input = require(ctx.input().clone(), "input")?;
-    let [node] = input.nodes.as_slice() else {
-        return Err(QueryError::Validation(
-            "traversal planner requires one node".into(),
-        ));
-    };
-
-    let entity = node
-        .entity
-        .as_deref()
-        .ok_or_else(|| QueryError::ReferenceError("node requires an entity".into()))?;
-
     let mut context = Context::default();
-    let mut required = vec![(node.id_property.clone(), redaction_id_column(&node.id))];
+    let mut required: Vec<_> = input
+        .nodes
+        .iter()
+        .map(|node| {
+            (
+                node.id.clone(),
+                node.id_property.clone(),
+                redaction_id_column(&node.id),
+            )
+        })
+        .collect();
     if let Some(order) = &input.order_by {
-        required.push((order.property.clone(), context.alias()));
+        required.push((order.node.clone(), order.property.clone(), context.alias()));
     }
 
-    let bound = bind::traversal(&input, ctx.data_model(), &required, None)?;
+    let edge_outputs: Vec<[String; 5]> = input
+        .relationships
+        .iter()
+        .map(|_| std::array::from_fn(|_| context.alias()))
+        .collect();
+    let bound = graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?;
     let physical = bound
         .root
         .map_sources(&mut |source| select_source(source, ctx.data_model()))?;
@@ -343,34 +347,70 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
             .map(|(_, expression)| expression.clone())
             .ok_or_else(|| QueryError::Lowering("required result value was not exported".into()))
     };
-    let identity = resolve(bound.required[0])?;
+    let identities = input
+        .nodes
+        .iter()
+        .zip(&bound.required)
+        .filter(|(node, _)| {
+            !input
+                .order_by
+                .as_ref()
+                .is_some_and(|order| order.node == node.id && order.property == node.id_property)
+        })
+        .map(|(_, value)| resolve(*value).map(OrderExpr::asc))
+        .collect::<Result<Vec<_>>>()?;
     let order = input
         .order_by
         .as_ref()
         .map(|order| {
             Ok::<_, QueryError>(OrderExpr {
-                expr: resolve(bound.required[1])?,
+                expr: resolve(bound.required[input.nodes.len()])?,
                 desc: order.direction == OrderDirection::Desc,
             })
         })
         .transpose()?;
 
     let mut query = fragment.into_query(&bound.outputs)?;
-    if input.order_by.is_some() {
-        query.select.pop();
+    if let Some((_, _, hidden)) = required.last().filter(|_| input.order_by.is_some()) {
+        query
+            .select
+            .retain(|select| select.alias.as_ref() != Some(hidden));
     }
     query.order_by = order.into_iter().collect();
-    query.select.push(SelectExpr::new(
-        Expr::string(entity),
-        redaction_type_column(&node.id),
-    ));
 
     let mut result = ResultContext::new().with_query_type(input.query_type);
-    result.add_node(&node.id, entity);
+    for node in &input.nodes {
+        let entity = node
+            .entity
+            .as_deref()
+            .ok_or_else(|| QueryError::ReferenceError("node requires an entity".into()))?;
+        query.select.push(SelectExpr::new(
+            Expr::string(entity),
+            redaction_type_column(&node.id),
+        ));
+        result.add_node(&node.id, entity);
+    }
+
+    for (relationship, [source, target, source_kind, target_kind, kind]) in
+        input.relationships.iter().zip(edge_outputs)
+    {
+        result.add_edge(enforce::EdgeMeta {
+            column_prefix: String::new(),
+            path_column: None,
+            rel_types: relationship.types.clone(),
+            from_alias: relationship.from.clone(),
+            to_alias: relationship.to.clone(),
+            type_column: kind,
+            src_column: source,
+            dst_column: target,
+            src_type_column: source_kind,
+            dst_type_column: target_kind,
+        });
+    }
 
     ctx.set_node(Node::Query(Box::new(query)));
     ctx.set_lowered_metadata(ResultBindings {
-        stable_order: vec![OrderExpr::asc(identity)],
+        stable_order: identities,
         ..Default::default()
     });
     ctx.set_result_ctx(result);
