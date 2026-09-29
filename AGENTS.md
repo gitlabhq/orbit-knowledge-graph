@@ -21,9 +21,9 @@ Use mise for all tasks.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title to skip unnecessary merge request pipelines while iterating. When
-ready for CI, remove `[skip ci]` and push a commit. Editing the title or
-triggering a pipeline is not enough: merged results pipelines keep the old title
-until the next push.
+ready for CI, remove `[skip ci]` and push a commit. Editing the title alone
+starts no pipeline, and a manually triggered one can still be skipped. The merge
+ref keeps the old title until it is regenerated, which a push guarantees.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
