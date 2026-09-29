@@ -69,6 +69,19 @@ pub trait Function {
 }
 
 impl<F> Expr<F> {
+    pub fn visit_values(&self, callback: &mut impl FnMut(ValueId)) {
+        match self {
+            Self::Value(value) => callback(*value),
+            Self::Call { arguments, .. } => {
+                for argument in arguments {
+                    argument.visit_values(callback);
+                }
+            }
+            Self::Cast { value, .. } => value.visit_values(callback),
+            _ => {}
+        }
+    }
+
     pub fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
         self.visit_mut(&mut |expression| {
             if let Self::Value(value) = expression {

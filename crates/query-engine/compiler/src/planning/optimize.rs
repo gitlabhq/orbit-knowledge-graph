@@ -2,7 +2,7 @@ use crate::error::{QueryError, Result};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use super::generic::{Function, Node, Op, Operation, Program, Values};
+use super::generic::{Function, Node, Op, Operation, Program, Schema, Values};
 
 #[derive(Clone, PartialEq)]
 pub struct Candidate<S, F, E> {
@@ -93,6 +93,10 @@ fn enumerate<
 
         while next < alternatives.len() {
             let candidate = alternatives[next].clone();
+            let mut schemas = Vec::with_capacity(candidate.program.subplans.len());
+            for subplan in &candidate.program.subplans {
+                schemas.push(subplan.output_with(&candidate.values, &schemas)?);
+            }
             let mut locations = Vec::new();
             for (owner, root) in candidate
                 .program
@@ -104,7 +108,20 @@ fn enumerate<
                 collect_locations(root, owner, &mut Vec::new(), &mut locations);
             }
 
+            let mut local = Candidate {
+                program: Program {
+                    subplans: Vec::new(),
+                    root: candidate.program.root.clone(),
+                },
+                values: candidate.values.clone(),
+            };
             for (owner, path) in locations {
+                while local.program.subplans.len() < owner {
+                    local
+                        .program
+                        .subplans
+                        .push(candidate.program.subplans[local.program.subplans.len()].clone());
+                }
                 let root = if owner == candidate.program.subplans.len() {
                     &candidate.program.root
                 } else {
@@ -114,17 +131,26 @@ fn enumerate<
                     .iter()
                     .fold(root, |node, index| &node.inputs[*index])
                     .clone();
-                let local = Candidate {
-                    program: Program {
-                        subplans: candidate.program.subplans[..owner].to_vec(),
-                        root,
-                    },
-                    values: candidate.values.clone(),
-                };
+                local.program.root = root;
+                let mut local_output = None;
 
                 for rule in *rules {
-                    for rewritten in rule(&local)? {
-                        validate_rewrite(&local, &rewritten)?;
+                    let rewrites = rule(&local)?;
+                    for rewritten in rewrites {
+                        if local_output.is_none() {
+                            local_output = Some(
+                                local
+                                    .program
+                                    .root
+                                    .output_with(&local.values, &schemas[..owner])?,
+                            );
+                        }
+                        validate_rewrite(
+                            &local,
+                            &rewritten,
+                            &schemas[..owner],
+                            local_output.as_ref().unwrap(),
+                        )?;
                         let mut expanded = replace(&candidate, owner, &path, rewritten);
                         normalize(&mut expanded)?;
                         if expanded.program.output(&expanded.values)? != output {
@@ -132,7 +158,7 @@ fn enumerate<
                                 "normalization changed output contract".into(),
                             ));
                         }
-                        expanded.canonicalize(preserved_values)?;
+                        expanded.canonicalize_values(preserved_values)?;
 
                         let bucket = seen.entry(fingerprint(&expanded.program)).or_default();
                         if !bucket.iter().any(|index| alternatives[*index] == expanded) {
@@ -190,13 +216,19 @@ fn fingerprint<S, F, E>(program: &Program<S, F, E>) -> u64 {
 
 impl<S: Operation + Clone, F: Function + Clone, E: Operation + Clone> Candidate<S, F, E> {
     pub fn canonicalize(&mut self, preserved_values: usize) -> Result<()> {
+        self.program.output(&self.values)?;
+        self.canonicalize_values(preserved_values)?;
+        self.program.output(&self.values)?;
+        Ok(())
+    }
+
+    fn canonicalize_values(&mut self, preserved_values: usize) -> Result<()> {
         if preserved_values > self.values.len() {
             return Err(QueryError::PipelineInvariant(
                 "canonicalization exceeds the value catalog".into(),
             ));
         }
 
-        self.program.output(&self.values)?;
         let mut order = Vec::new();
         let mut visited = vec![false; self.program.subplans.len()];
 
@@ -261,7 +293,6 @@ impl<S: Operation + Clone, F: Function + Clone, E: Operation + Clone> Candidate<
         }
 
         self.values = values;
-        self.program.output(&self.values)?;
         Ok(())
     }
 }
@@ -284,6 +315,8 @@ fn collect_locations<S, F, E>(
 fn validate_rewrite<S: Operation + PartialEq, F: Function + PartialEq, E: Operation + PartialEq>(
     original: &Candidate<S, F, E>,
     rewritten: &Candidate<S, F, E>,
+    schemas: &[Schema],
+    output: &Schema,
 ) -> Result<()> {
     if !rewritten.values.extends(&original.values)
         || !rewritten
@@ -296,7 +329,16 @@ fn validate_rewrite<S: Operation + PartialEq, F: Function + PartialEq, E: Operat
         ));
     }
 
-    if original.program.output(&original.values)? != rewritten.program.output(&rewritten.values)? {
+    let mut schemas = schemas.to_vec();
+    for subplan in &rewritten.program.subplans[original.program.subplans.len()..] {
+        schemas.push(subplan.output_with(&rewritten.values, &schemas)?);
+    }
+    if *output
+        != rewritten
+            .program
+            .root
+            .output_with(&rewritten.values, &schemas)?
+    {
         return Err(QueryError::PipelineInvariant(
             "optimization changed the output contract".into(),
         ));

@@ -94,10 +94,9 @@ pub fn prune_columns<S: Operation + Clone, E: Operation + Clone>(
 }
 
 fn dependencies(expression: &Expr<Scalar>, required: &mut Schema) {
-    let mut expression = expression.clone();
-    expression.map_values(&mut |value| {
-        if !required.contains(value) {
-            required.push(*value);
+    expression.visit_values(&mut |value| {
+        if !required.contains(&value) {
+            required.push(value);
         }
     });
 }

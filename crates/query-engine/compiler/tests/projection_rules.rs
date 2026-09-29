@@ -5,7 +5,7 @@ use compiler::passes::{codegen, enforce::ResultContext};
 use compiler::planning::generic::{
     AggregateFunction, Assignment, Expr, Measure, Node, Op, SortKey, ValueType, Values,
 };
-use compiler::planning::optimize::{candidates, estimated_work, select};
+use compiler::planning::optimize::{candidates, estimated_work, normalized_candidates, select};
 use compiler::planning::physical::{CurrentRows, Read, Scalar};
 use compiler::planning::rules;
 
@@ -43,8 +43,16 @@ fn composed_projections_keep_output_order_duplicates_and_required_identity() {
             }],
         }],
     };
+    let normalized =
+        normalized_candidates(plan.clone(), values.clone(), &[], rules::normalize).unwrap();
     let alternatives =
         candidates(plan, values, &[rules::projections, rules::prune_columns]).unwrap();
+    assert_eq!(normalized.len(), 1);
+    for candidate in &alternatives {
+        let mut candidate = candidate.clone();
+        rules::normalize(&mut candidate).unwrap();
+        assert!(candidate == normalized[0]);
+    }
     let selected = select(alternatives.clone(), |program| {
         estimated_work(program, |source| source.columns.len() as u64)
     })

@@ -300,7 +300,7 @@ fn references_reject_cycles_missing_exports_and_type_mismatches() {
 
 #[test]
 fn bounded_chain_candidate_growth_is_explicit() {
-    for joins in 1..=3 {
+    for joins in 1..=5 {
         let mut values = Values::default();
         let mut read = || {
             let value = values.allocate(ValueType::Int64);
