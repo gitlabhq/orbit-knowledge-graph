@@ -11,18 +11,25 @@ pub fn projections<S: Operation + Clone, E: Operation + Clone>(
     let Op::Project(_) = &candidate.program.root.op else {
         return Ok(vec![]);
     };
-    let child = &candidate.program.root.inputs[0];
     let mut rewritten = candidate.clone();
+    if compose_projection(&mut rewritten.program.root) {
+        Ok(vec![rewritten])
+    } else {
+        Ok(vec![])
+    }
+}
 
+fn compose_projection<S: Clone, E: Clone>(node: &mut Node<S, Scalar, E>) -> bool {
+    let Op::Project(outputs) = &mut node.op else {
+        return false;
+    };
+    let child = &mut node.inputs[0];
     match &child.op {
         Op::Project(inner)
             if inner
                 .iter()
                 .all(|assignment| matches!(assignment.expression, Expr::Value(_))) =>
         {
-            let Op::Project(outputs) = &mut rewritten.program.root.op else {
-                unreachable!()
-            };
             for output in outputs {
                 output.expression.map_values(&mut |value| {
                     let assignment = inner
@@ -35,17 +42,42 @@ pub fn projections<S: Operation + Clone, E: Operation + Clone>(
                     *value = source;
                 });
             }
-            rewritten.program.root.inputs = child.inputs.clone();
+            node.inputs = std::mem::take(&mut child.inputs);
         }
-        _ => return Ok(vec![]),
+        _ => return false,
     }
 
-    Ok(vec![rewritten])
+    true
 }
 
 pub fn registered<S: Operation + Clone, E: Operation + Clone>()
--> [super::optimize::Rule<S, Scalar, E>; 4] {
-    [projections, prune_columns, unread_unique_join, sip]
+-> [super::optimize::Rule<S, Scalar, E>; 2] {
+    [unread_unique_join, sip]
+}
+
+pub fn normalize<S: Operation + Clone, E: Operation + Clone>(
+    candidate: &mut Candidate<S, Scalar, E>,
+) -> Result<()> {
+    let mut schemas = Vec::new();
+    for root in candidate
+        .program
+        .subplans
+        .iter_mut()
+        .chain(std::iter::once(&mut candidate.program.root))
+    {
+        let output = root.output_with(&candidate.values, &schemas)?;
+        loop {
+            let mut changed = prune(root, output.clone());
+            root.visit_mut(&mut |node| {
+                changed |= compose_projection(node);
+            });
+            if !changed {
+                break;
+            }
+        }
+        schemas.push(output);
+    }
+    Ok(())
 }
 
 pub fn prune_columns<S: Operation + Clone, E: Operation + Clone>(

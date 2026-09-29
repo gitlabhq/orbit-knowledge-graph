@@ -415,7 +415,12 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
         .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
     let mut rules = source_rules.to_vec();
     rules.extend(crate::planning::rules::registered());
-    let candidates = optimize::candidates(physical, bound.values, &rules)?;
+    let candidates = optimize::normalized_candidates(
+        physical,
+        bound.values,
+        &rules,
+        crate::planning::rules::normalize,
+    )?;
     let selected = optimize::select(candidates, |program| {
         optimize::estimated_work(program, |_| 1)
     })?

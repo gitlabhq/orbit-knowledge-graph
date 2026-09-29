@@ -132,7 +132,7 @@ fn physical<S: EmitOperation + Clone + PartialEq>(
         .expand_sources(&mut |read| source(read, &mut values))?;
     let mut registered = source_rules.to_vec();
     registered.extend(rules::registered());
-    let candidates = optimize::candidates(root, values, &registered)?;
+    let candidates = optimize::normalized_candidates(root, values, &registered, rules::normalize)?;
 
     for expected in &assertions.candidates {
         assert!(

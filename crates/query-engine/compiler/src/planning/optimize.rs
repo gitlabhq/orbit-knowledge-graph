@@ -1,5 +1,6 @@
 use crate::error::{QueryError, Result};
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::generic::{Function, Node, Op, Operation, Program, Values};
 
@@ -38,9 +39,54 @@ pub fn stages<
     initial: Candidate<S, F, E>,
     stages: &[&[Rule<S, F, E>]],
 ) -> Result<Vec<Candidate<S, F, E>>> {
-    initial.program.output(&initial.values)?;
+    enumerate(initial, stages, &mut |_| Ok(()))
+}
+
+pub fn normalized_candidates<
+    S: Operation + Clone + PartialEq,
+    F: Function + Clone + PartialEq,
+    E: Operation + Clone + PartialEq,
+>(
+    root: Node<S, F, E>,
+    values: Values,
+    rules: &[Rule<S, F, E>],
+    mut normalize: impl FnMut(&mut Candidate<S, F, E>) -> Result<()>,
+) -> Result<Vec<Candidate<S, F, E>>> {
+    enumerate(
+        Candidate {
+            program: Program {
+                subplans: vec![],
+                root,
+            },
+            values,
+        },
+        &[rules],
+        &mut normalize,
+    )
+}
+
+fn enumerate<
+    S: Operation + Clone + PartialEq,
+    F: Function + Clone + PartialEq,
+    E: Operation + Clone + PartialEq,
+>(
+    mut initial: Candidate<S, F, E>,
+    stages: &[&[Rule<S, F, E>]],
+    normalize: &mut impl FnMut(&mut Candidate<S, F, E>) -> Result<()>,
+) -> Result<Vec<Candidate<S, F, E>>> {
+    let output = initial.program.output(&initial.values)?;
+    normalize(&mut initial)?;
+    if initial.program.output(&initial.values)? != output {
+        return Err(QueryError::PipelineInvariant(
+            "normalization changed output contract".into(),
+        ));
+    }
     let preserved_values = initial.values.len();
     let mut alternatives = vec![initial];
+    let mut seen = HashMap::<u64, Vec<usize>>::new();
+    seen.entry(fingerprint(&alternatives[0].program))
+        .or_default()
+        .push(0);
 
     for rules in stages {
         let mut next = 0;
@@ -80,10 +126,17 @@ pub fn stages<
                     for rewritten in rule(&local)? {
                         validate_rewrite(&local, &rewritten)?;
                         let mut expanded = replace(&candidate, owner, &path, rewritten);
-                        expanded.program.output(&expanded.values)?;
+                        normalize(&mut expanded)?;
+                        if expanded.program.output(&expanded.values)? != output {
+                            return Err(QueryError::PipelineInvariant(
+                                "normalization changed output contract".into(),
+                            ));
+                        }
                         expanded.canonicalize(preserved_values)?;
 
-                        if !alternatives.contains(&expanded) {
+                        let bucket = seen.entry(fingerprint(&expanded.program)).or_default();
+                        if !bucket.iter().any(|index| alternatives[*index] == expanded) {
+                            bucket.push(alternatives.len());
                             alternatives.push(expanded);
                         }
                     }
@@ -95,6 +148,44 @@ pub fn stages<
     }
 
     Ok(alternatives)
+}
+
+fn fingerprint<S, F, E>(program: &Program<S, F, E>) -> u64 {
+    fn node<S, F, E>(root: &Node<S, F, E>, state: &mut DefaultHasher) {
+        std::mem::discriminant(&root.op).hash(state);
+        root.inputs.len().hash(state);
+        match &root.op {
+            Op::Reference { subplan, exports } => {
+                subplan.hash(state);
+                exports.hash(state);
+            }
+            Op::Project(assignments) => {
+                assignments.len().hash(state);
+                for assignment in assignments {
+                    assignment.output.hash(state);
+                }
+            }
+            Op::Union { outputs, arms } => {
+                outputs.hash(state);
+                arms.hash(state);
+            }
+            Op::Join { kind, .. } => std::mem::discriminant(kind).hash(state),
+            _ => {}
+        }
+        for input in &root.inputs {
+            node(input, state);
+        }
+    }
+    let mut state = DefaultHasher::new();
+    program.subplans.len().hash(&mut state);
+    for root in program
+        .subplans
+        .iter()
+        .chain(std::iter::once(&program.root))
+    {
+        node(root, &mut state);
+    }
+    state.finish()
 }
 
 impl<S: Operation + Clone, F: Function + Clone, E: Operation + Clone> Candidate<S, F, E> {
