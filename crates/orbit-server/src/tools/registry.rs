@@ -34,6 +34,14 @@ pub(super) fn command_summaries(frontend: Frontend) -> Vec<(&'static str, &'stat
     commands
 }
 
+fn render_prompt(key: &str, context: minijinja::Value) -> String {
+    let mut environment = minijinja::Environment::new();
+    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    environment
+        .render_str(prompt(key).description(), context)
+        .expect("template placeholders are validated against the prompt file at build time")
+}
+
 pub(super) fn list_commands_description(frontend: Frontend) -> String {
     let commands = command_summaries(frontend)
         .iter()
@@ -41,30 +49,45 @@ pub(super) fn list_commands_description(frontend: Frontend) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let mut environment = minijinja::Environment::new();
-    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    environment
-        .render_str(
-            prompt("list_commands").description(),
-            minijinja::context! { commands },
-        )
-        .expect("template placeholders are validated against the prompt file at build time")
+    render_prompt(
+        "list_commands",
+        minijinja::context! { commands, catalog => "" },
+    )
+}
+
+/// Catalog entry shape shared by the TOON `list_commands` response and the
+/// inlined description. The input schema is named `input_schema` so it is not
+/// confused with `invoke_command`'s own `parameters` argument.
+#[derive(Serialize)]
+pub(super) struct CommandCatalogEntry {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+}
+
+impl From<&ToolDefinition> for CommandCatalogEntry {
+    fn from(command: &ToolDefinition) -> Self {
+        Self {
+            name: command.name.clone(),
+            description: command.description.clone(),
+            input_schema: command.parameters.clone(),
+        }
+    }
 }
 
 /// Description for callers that cannot afford a discovery turn: the full
-/// command catalog (name, description, input schema) is inlined as compact JSON.
+/// command catalog is inlined as compact JSON.
 pub(super) fn inline_list_commands_description(frontend: Frontend) -> String {
-    let catalog = serde_json::to_string(&CommandRegistry::commands_for(frontend))
-        .expect("command definitions serialize to JSON");
+    let entries: Vec<CommandCatalogEntry> = CommandRegistry::commands_for(frontend)
+        .iter()
+        .map(CommandCatalogEntry::from)
+        .collect();
+    let catalog = serde_json::to_string(&entries).expect("command definitions serialize to JSON");
 
-    let mut environment = minijinja::Environment::new();
-    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
-    environment
-        .render_str(
-            prompt("list_commands_inline").description(),
-            minijinja::context! { catalog },
-        )
-        .expect("template placeholders are validated against the prompt file at build time")
+    render_prompt(
+        "list_commands",
+        minijinja::context! { commands => "", catalog },
+    )
 }
 
 pub(super) mod params {
@@ -186,7 +209,7 @@ impl ToolRegistry {
                 "properties": {
                     "command_name": {
                         "type": "string",
-                        "description": "Command name returned by list_commands."
+                        "description": "Command name from the Orbit command catalog."
                     },
                     "parameters": params::command_parameters()
                 },
@@ -405,7 +428,7 @@ mod tests {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             let description = inline_description(frontend);
             for command in CommandRegistry::commands_for(frontend) {
-                let entry = serde_json::to_string(&command).unwrap();
+                let entry = serde_json::to_string(&CommandCatalogEntry::from(&command)).unwrap();
                 assert!(
                     description.contains(&entry),
                     "{frontend:?} missing catalog entry for {}",
@@ -413,6 +436,7 @@ mod tests {
                 );
             }
             assert!(!description.contains("Call this before invoke_command"));
+            assert!(!description.contains("\"parameters\":"));
         }
     }
 
