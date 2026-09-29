@@ -6,11 +6,17 @@ use crate::intern::Lang;
 use crate::pattern;
 use crate::pipeline::SourceFile;
 use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
-use crate::tree::{Cursor, Node, Step, Tree};
+use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {
     pub prefixes: Vec<String>,
     pub aliases: Vec<(String, String)>,
+    /// Per file: the tags rules put on it and on its ancestor directories,
+    /// nearest first, plus `source_root_rel`, its path below the nearest source root.
+    pub file_tags: Vec<(String, Vec<Tag>)>,
+    /// Every key a file tag can carry, so a reused tree can drop the ones
+    /// that no longer apply before this run's are set.
+    pub tag_keys: Vec<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -69,20 +75,42 @@ impl<'a> ProjectTree<'a> {
             prefixes: vec![],
             aliases: vec![],
         };
+        let tag_keys = pt.tag_keys();
         if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
                 prefixes: vec![],
                 aliases: vec![],
+                file_tags: vec![],
+                tag_keys,
             };
         }
         pt.build_dir_tree();
         pt.run_stages();
         pt.collect_aliases();
         pt.collect_prefixes();
+        let file_tags = pt.collect_file_tags();
         WalkResult {
             prefixes: pt.prefixes,
             aliases: pt.aliases,
+            file_tags,
+            tag_keys,
         }
+    }
+
+    fn tag_keys(&self) -> Vec<u32> {
+        let rules = self.stages.iter().flat_map(|stage| match stage {
+            ResolveStage::Rules(rules) => rules.as_slice(),
+            ResolveStage::Climb { .. } => &[],
+        });
+        let entries = rules.flat_map(|rule| match &rule.out {
+            pattern::Out::Tag(entries, _) => entries.as_slice(),
+            pattern::Out::Replace(_, Some(entries), _) => entries.as_slice(),
+            _ => &[],
+        });
+        entries
+            .map(|entry| entry.key)
+            .chain(std::iter::once(self.lang.syms.intern("source_root_rel")))
+            .collect()
     }
 
     fn build_dir_tree(&mut self) {
@@ -216,28 +244,51 @@ impl<'a> ProjectTree<'a> {
         }
     }
 
+    /// Import-path aliases a rule file declared as `(__alias key (__str value))`
+    /// on the project tree, longest key first so `@/lib/*` wins over `@/*`.
     fn collect_aliases(&mut self) {
-        self.aliases = self
+        let mut aliases = self
             .tree
             .root()
             .fold_tree(Vec::new(), |aliases, cursor, _w| {
-                if cursor.kind() != C::ConfigField {
+                if !cursor.is(C::Alias) || cursor.sym() == 0 {
                     return;
                 }
-                let key = cursor.sym();
-                if key == 0 {
-                    return;
-                }
-                if let Some(val) = cursor.children().find(|c| c.is(C::Str)) {
-                    let val_sym = val.sym();
-                    if val_sym != 0 {
-                        aliases.push((
-                            self.lang.syms.resolve(key).to_string(),
-                            self.lang.syms.resolve(val_sym).to_string(),
-                        ));
-                    }
+                if let Some(val) = cursor.children().find(|c| c.is(C::Str) && c.sym() != 0) {
+                    aliases.push((
+                        self.lang.syms.resolve(cursor.sym()).to_string(),
+                        self.lang.syms.resolve(val.sym()).to_string(),
+                    ));
                 }
             });
+        aliases.sort_by_key(|(key, _)| std::cmp::Reverse(key.len()));
+        self.aliases = aliases;
+    }
+
+    fn collect_file_tags(&self) -> Vec<(String, Vec<Tag>)> {
+        let markers = &self.config.lookup_from;
+        let source_root_rel = self.lang.syms.intern("source_root_rel");
+        let is_source_root =
+            |n: Cursor| n.is(C::Root) || n.children().any(|c| markers.contains(&c.kind()));
+        self.tree.root().fold_tree(Vec::new(), |out, file, _w| {
+            if !file.is(C::File) {
+                return;
+            }
+            let mut tags: Vec<Tag> = Vec::new();
+            for node in std::iter::once(file).chain(file.ancestors()) {
+                for tag in self.tree.tags.get(&node.index()).into_iter().flatten() {
+                    if !tags.iter().any(|t| t.key == tag.key) {
+                        tags.push(*tag);
+                    }
+                }
+            }
+            let rel = self.path_below(file, is_source_root);
+            tags.push(Tag {
+                key: source_root_rel,
+                val: self.lang.syms.intern(&rel),
+            });
+            out.push((self.node_path(file), tags));
+        })
     }
 
     fn collect_prefixes(&mut self) {
@@ -264,10 +315,13 @@ impl<'a> ProjectTree<'a> {
     }
 
     fn node_path(&self, cursor: Cursor) -> String {
+        self.path_below(cursor, |n| n.is(C::Root))
+    }
+
+    fn path_below(&self, cursor: Cursor, is_root: impl Fn(Cursor) -> bool) -> String {
         let mut parts: Vec<&str> = std::iter::once(cursor)
             .chain(cursor.ancestors())
-            .take_while(|n| !n.is(C::Root))
-            .filter(|n| n.is(C::Dir) && n.sym() != 0)
+            .take_while(|n| !is_root(*n))
             .map(|n| self.lang.syms.resolve(n.sym()))
             .collect();
         parts.reverse();

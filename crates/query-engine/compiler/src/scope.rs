@@ -156,7 +156,9 @@ fn propagate_scope_proofs(
                 (Some(proof), None) if !tainted.contains(edge.to) => {
                     Some((edge.to.to_string(), proof))
                 }
-                (None, Some(proof)) if !tainted.contains(edge.from) => {
+                (None, Some(proof))
+                    if edge.propagates_to_source && !tainted.contains(edge.from) =>
+                {
                     Some((edge.from.to_string(), proof))
                 }
                 _ => None,
@@ -296,6 +298,7 @@ struct ScopeEdge<'a> {
     from: &'a str,
     to: &'a str,
     scope_preserving: bool,
+    propagates_to_source: bool,
 }
 
 fn scope_edges<'a>(
@@ -326,6 +329,11 @@ fn scope_edges<'a>(
                     model
                         .variant_scope(kind, source_kind, target_kind)
                         .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                }),
+                propagates_to_source: relationship.types.iter().all(|kind| {
+                    model
+                        .variant_scope(kind, source_kind, target_kind)
+                        .is_some_and(|scope| scope.propagates_to_source(kind, source_kind))
                 }),
             }
         })

@@ -7,7 +7,7 @@
           "uid": "$ORBIT_DS"
         },
         "enable": true,
-        "expr": "label_replace(group by (image_spec, cluster) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\".*\"}) unless group by (image_spec, cluster) (kube_pod_container_info{container=~\"gkg-.*\", cluster=~\".*\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "expr": "label_replace(group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-.*\", cluster=~\".*\"}) unless group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-.*\", cluster=~\".*\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
         "hide": false,
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Deploys",
@@ -86,7 +86,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\".*\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]) * 60)",
           "legendFormat": "qpm",
           "refId": "A"
         }
@@ -132,7 +132,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\".*\", status=\"compile_error\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\".*\"}[5m])), 1)",
+          "expr": "1 - sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])), 1)",
           "legendFormat": "compiler_ok",
           "refId": "A"
         }
@@ -178,7 +178,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\".*\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\".*\", status!=\"compile_error\"}[5m])), 1)",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"compile_error\"}[5m])), 1)",
           "legendFormat": "pipeline_ok",
           "refId": "A"
         }
@@ -224,7 +224,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=\"gkg-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -270,7 +270,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_failed_total{container=\"gkg-webserver\", cluster=~\".*\", failure_reason=\"security\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_query_pipeline_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=\"security\"}[5m]) * 60)",
           "legendFormat": "rejects/min",
           "refId": "A"
         }
@@ -329,7 +329,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_etl_destination_rows_written_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_etl_destination_rows_written_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]) * 60)",
           "legendFormat": "rows/min",
           "refId": "A"
         }
@@ -375,7 +375,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_etl_destination_written_bytes_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]))",
+          "expr": "sum(rate(gkg_etl_destination_written_bytes_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
           "legendFormat": "B/s",
           "refId": "A"
         }
@@ -421,7 +421,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_handler_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -467,7 +467,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_etl_handler_errors_total{container=\"gkg-indexer\", cluster=~\".*\"}[5m]) * 60)",
+          "expr": "sum(rate(gkg_etl_handler_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]) * 60)",
           "legendFormat": "errors/min",
           "refId": "A"
         }

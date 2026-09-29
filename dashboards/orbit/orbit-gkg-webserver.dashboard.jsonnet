@@ -346,7 +346,7 @@ local schema = [
 
 // 8. Resources -----------------------------------------------------------
 // Mirrors the indexer Resources row exactly. Selector flips to
-// container=gkg-webserver. cAdvisor + kube-state-metrics, no app
+// the webserver container. cAdvisor + kube-state-metrics, no app
 // instrumentation needed.
 local KUBE_SEL = SEL + ', namespace="gkg"';
 local resources = [

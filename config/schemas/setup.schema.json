@@ -4,7 +4,7 @@
   "title": "Orbit setup texts",
   "description": "Every string `orbit setup` writes into an assistant's files: the managed instruction block, the two hook nudges, the MCP server entry, and the values filling {{name}} placeholders in assistant templates. Read by crates/orbit-cli/src/commands/setup/spec.rs.",
   "type": "object",
-  "required": ["mcp_server", "instructions", "nudge_search", "nudge_read"],
+  "required": ["mcp_server", "instructions", "nudge_search", "nudge_read", "graph_first_deny"],
   "additionalProperties": false,
   "properties": {
     "mcp_server": {
@@ -39,6 +39,11 @@
       "type": "string",
       "minLength": 1,
       "description": "Context the hook guard returns for a source-file read."
+    },
+    "graph_first_deny": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reason the graph-first hook guard returns when it blocks the first raw search or source read of a session."
     },
     "template_vars": {
       "type": "object",

@@ -276,7 +276,7 @@ local fleet = [
     'Replicas over time by pool kind',
     'Scraped indexer pods per pool kind. Steps here are KEDA scaling events; a flat ceiling during a queue backlog means the pool is at its maxReplicaCount.',
     [o.target(
-      'count by (%s) (up{%s})' % [o.IDX_KIND, SEL],
+      'count by (%s) (%s)' % [o.IDX_KIND, o.idxUp],
       '{{%s}}' % o.IDX_KIND,
       DS,
     )],
@@ -453,7 +453,7 @@ local resourcesPerPod = [
 
 // 9. Schema migration ----------------------------------------------------
 // Schema migration is orchestrated by the dispatcher (DispatchIndexing
-// mode), so every series here is filtered to the gkg-dispatcher container,
+// mode), so every series here is filtered to the dispatcher container,
 // not the indexer.
 local MIG_SEL = o.GKG_DSP_SEL;
 local migration = [

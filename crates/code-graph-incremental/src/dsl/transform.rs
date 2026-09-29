@@ -62,6 +62,7 @@ impl Tf {
         let re = |i: usize| -> Result<regex::Regex, LoadError> { Ok(regex::Regex::new(arg(i)?)?) };
 
         Ok(match name {
+            "id" => Tf::Id,
             "lowercase" => Tf::Lowercase,
             "stem" => Tf::Stem,
             "strip_prefix" | "strip" => Tf::Strip(s(0)?),
@@ -110,6 +111,8 @@ impl Tf {
             }
             "default" => Tf::Default(s(0)?),
             "tree_path" => Tf::TreePath(s(0)?),
+            "sibling_index" => Tf::SiblingIndex,
+            "kind" => Tf::KindName,
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
     }
@@ -316,6 +319,15 @@ impl Tf {
                     .collect();
                 segments.reverse();
                 lang.syms.intern(&segments.join(sep))
+            }
+            Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
+            Tf::SiblingIndex => {
+                let index = id
+                    .preceding_siblings(&t.arena)
+                    .skip(1)
+                    .filter(|s| t.node(*s).named)
+                    .count();
+                lang.syms.intern(&index.to_string())
             }
             Tf::Pipeline(steps) => {
                 let mut s = t.text(id, lang).to_string();

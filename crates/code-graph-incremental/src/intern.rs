@@ -5,13 +5,24 @@ use crate::canonical::{self, CANONICAL_BASE, Canonical};
 
 pub struct Interner {
     pub(crate) rodeo: ThreadedRodeo,
+    id: u64,
 }
+
+static NEXT_INTERNER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Default for Interner {
     fn default() -> Self {
         Self {
             rodeo: ThreadedRodeo::new(),
+            id: NEXT_INTERNER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
+    }
+}
+
+impl Interner {
+    /// Distinct per interner, so caches keyed on interned ids never mix two.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 }
 

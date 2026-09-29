@@ -1,3 +1,26 @@
+## [0.134.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.133.0...v0.134.0) (2026-09-29)
+
+### Features
+
+* **cli:** add optional hook to require a graph search before normal search in orbit setup ([de4e68f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/de4e68fa92d25e9136da154cc1c2b8eeb3eda7b8)) by Aaron Algutifan
+* **code-graph-incremental:** typescript + rust support ([8de45aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8de45aa7adfbc16cadfb9dd98eaaea6b3a5ace35)) by Michael Usachenko
+* **dashboards:** match orbit container and pool label names ([176376a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/176376a9d20e9ca7973afd2aee9ff1bc6dc5564a)) by Bohdan Parkhomchuk
+
+### Other
+
+* **agents:** correct skip-ci guidance for merged results pipelines ([bc1ef84](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bc1ef844685812fbb873aeaab525dd44524d5d10)) by Dmitry Gruzd
+* **cli:** own top-level help in prompts ([b71469f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b71469fde07a5652946ef98882a0a5b3a388e5cc)) by Dmitry Gruzd
+* **deps:** update rust crate moka to v0.12.16 ([52d222e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/52d222e4e05768408c527c17c7cf0f40f2cfccae)) by GitLab Renovate Bot
+* **remote:** describe fine-grained token support ([77f4e0c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/77f4e0c5d927a1f46b8ab10584f7febd0dbf56c3)) by Michael Angelo Rivera
+
+## [0.133.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.132.0...v0.133.0) (2026-09-28)
+
+### Features
+
+* **code-graph-incremental:** fourteen more languages and their suites ([0c6033c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c6033c6b34c217f4f591ba94fdcbe2deceae4b9)) by Michael Usachenko
+* **code-graph-incremental:** language families ([f8dfac3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f8dfac343d58f8fbc707017439e8978faed7534a)) by Michael Usachenko
+* **server:** report indexing gaps and the error phase ([85e3f9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85e3f9f97b28b1e34e09681040eab2caeadebb4c)) by Jean-Gabriel Doyon
+
 ## [0.132.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.131.0...v0.132.0) (2026-09-28)
 
 ### Features

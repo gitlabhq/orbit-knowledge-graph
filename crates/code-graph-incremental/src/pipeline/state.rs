@@ -256,7 +256,7 @@ struct FullSnapshot {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 impl State {
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {

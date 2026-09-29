@@ -79,8 +79,25 @@ environment, and stores no permission data of its own.
 Programmatic access uses your existing GitLab authentication, scoped to what the token owner
 can see in GitLab.
 
-- REST API: a standard (legacy) personal access token with the `read_api` scope, sent as a
-  Bearer token. Fine-grained personal access tokens are not supported. For more information,
-  see [REST API](access/api.md).
+- REST API: a personal access token with the `read_api` scope, or a
+  [fine-grained personal access token](#fine-grained-personal-access-tokens), sent as a Bearer token.
+  For more information, see the [REST API](access/api.md#authentication).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
+
+### Fine-grained personal access tokens
+
+You can use a fine-grained personal access token
+to authenticate with GitLab Orbit Remote.
+
+If you use a fine-grained personal access token:
+
+- Results from read operations are scoped to the token owner's access level.
+- Group and project resources are not supported. A token generated with only group and project resources
+gets a `403 Forbidden` response during authentication.
+- SAML SSO enforcement does not apply to personal access tokens. A token continues to work after the owner's SAML session expires.
+
+If you want to configure a token to
+work with GitLab Orbit Remote, add the **GitLab Orbit** resource
+to the token when you create it. For more information,
+see [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token).

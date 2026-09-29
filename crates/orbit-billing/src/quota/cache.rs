@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use moka::future::Cache;
 use opentelemetry::metrics::ObservableGauge;
 
-use super::client::{DenyReason, QuotaClient, QuotaDecision, QuotaOutcome};
+use super::client::{DenyReason, FailOpenReason, QuotaClient, QuotaDecision, QuotaOutcome};
 use super::key::{CacheKey, CdotRequest};
 
 // Cached decision plus the instant at which it should be treated as expired.
@@ -32,7 +32,7 @@ fn jittered(ttl: Duration) -> Duration {
 pub(crate) enum QuotaGateDecision {
     Allow,
     Deny(DenyReason),
-    FailOpen,
+    FailOpen(FailOpenReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,8 @@ impl QuotaCache {
 
     /// Returns the gate decision and whether it was served from cache.
     ///
-    /// `FailOpen` means CDot was unreachable or returned an unexpected status.
+    /// `FailOpen` means CDot was unreachable, rejected our credentials, or returned an
+    /// unexpected status.
     /// The caller should still allow the request through but record the
     /// outcome separately from a genuine `Allow`.
     pub(crate) async fn check(&self, request: CdotRequest) -> (QuotaGateDecision, CacheOutcome) {
@@ -103,12 +104,12 @@ impl QuotaCache {
                             expires_at: Instant::now() + jittered(ttl),
                         })
                     }
-                    QuotaOutcome::FailOpen => {
+                    QuotaOutcome::FailOpen(reason) => {
                         record_cdot_duration(
                             start.elapsed().as_secs_f64(),
                             orbit_observability::billing::quota::values::FAIL_OPEN,
                         );
-                        Err(FailOpen)
+                        Err(FailOpen(reason))
                     }
                 }
             })
@@ -116,7 +117,7 @@ impl QuotaCache {
 
         let gate = match entry {
             Ok(cached) => gate_from_decision(cached.decision),
-            Err(_) => QuotaGateDecision::FailOpen,
+            Err(e) => QuotaGateDecision::FailOpen(e.0),
         };
         (gate, CacheOutcome::Miss)
     }
@@ -145,7 +146,7 @@ fn record_cdot_duration(secs: f64, outcome: &'static str) {
 }
 
 #[derive(Debug)]
-struct FailOpen;
+struct FailOpen(FailOpenReason);
 
 impl std::fmt::Display for FailOpen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -182,6 +183,7 @@ impl moka::Expiry<CacheKey, CachedDecision> for ExpireByInstant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quota::client::QuotaAuth;
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
     use axum::routing::head;
@@ -204,6 +206,8 @@ mod tests {
                 feature_qualified_name: "orbit_mcp".into(),
             },
             global_user_id: String::new(),
+            instance_version: String::new(),
+            license_checksum: None,
         }
     }
 
@@ -256,8 +260,10 @@ mod tests {
         let client = Arc::new(
             QuotaClient::new(
                 url,
-                "test@example.com",
-                "test-token",
+                QuotaAuth::AdminToken {
+                    user: "test@example.com".into(),
+                    token: "test-token".into(),
+                },
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
             )
@@ -283,8 +289,10 @@ mod tests {
         let client = Arc::new(
             QuotaClient::new(
                 url,
-                "test@example.com",
-                "test-token",
+                QuotaAuth::AdminToken {
+                    user: "test@example.com".into(),
+                    token: "test-token".into(),
+                },
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
             )
@@ -308,8 +316,10 @@ mod tests {
         let client = Arc::new(
             QuotaClient::new(
                 url,
-                "test@example.com",
-                "test-token",
+                QuotaAuth::AdminToken {
+                    user: "test@example.com".into(),
+                    token: "test-token".into(),
+                },
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
             )

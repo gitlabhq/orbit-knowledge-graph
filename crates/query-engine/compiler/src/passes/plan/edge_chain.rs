@@ -208,7 +208,7 @@ where
     let mut nodes = build_node_plans(input, model);
 
     let (mut hops, elided_fks) = if use_fk_elision {
-        elide_hops(hops, &mut nodes)
+        elide_hops(hops, &mut nodes, input)
     } else {
         (hops, Vec::new())
     };
@@ -406,6 +406,7 @@ where
 fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
+    input: &Input,
 ) -> (Vec<Hop>, Vec<(String, String, String)>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();
@@ -415,7 +416,13 @@ fn elide_hops(
         let would_be_last = keep_hops.is_empty();
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
-            if would_be_last {
+            if would_be_last
+                || input.join_predicates.iter().any(|predicate| {
+                    [&predicate.lhs_node, &predicate.rhs_node]
+                        .into_iter()
+                        .any(|node| node == &hop.from_node || node == &hop.to_node)
+                })
+            {
                 return None;
             }
             let np = nodes.get(&fk.target_node)?;
@@ -617,8 +624,21 @@ fn determine_hydration(
             && !matches!(a.expr.function(), AggFunction::Count)
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
+    let is_join_predicate_target = input.join_predicates.iter().any(|predicate| {
+        [
+            (&predicate.lhs_node, &predicate.lhs_prop),
+            (&predicate.rhs_node, &predicate.rhs_prop),
+        ]
+        .into_iter()
+        .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)
+    });
 
-    if is_group_by_node || is_group_by_property || is_agg_property_target || is_order_by_target {
+    if is_group_by_node
+        || is_group_by_property
+        || is_agg_property_target
+        || is_order_by_target
+        || is_join_predicate_target
+    {
         return HydrationStrategy::Join;
     }
 

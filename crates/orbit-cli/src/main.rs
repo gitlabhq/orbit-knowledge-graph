@@ -24,14 +24,11 @@ use tracing::{Level, debug};
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
 
-const CLI_AGENT_HELP: &str = "Coding agents: load the instance-matched usage guidance first with \
-`glab orbit skills get orbit`, then follow the returned skill.";
-
 #[derive(Parser)]
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
 #[command(
-    about = "Orbit - query the local code graph or the remote Orbit API",
-    after_help = CLI_AGENT_HELP
+    about = descriptions::short("cli"),
+    after_help = descriptions::summary("cli")
 )]
 struct Cli {
     #[command(subcommand)]
@@ -312,6 +309,7 @@ impl SetupFlags {
         agents: Vec<String>,
         all: bool,
         index: bool,
+        graph_first: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -321,6 +319,7 @@ impl SetupFlags {
             dry_run: self.dry_run,
             verbose: self.verbose,
             index,
+            graph_first,
             components,
         }
     }
@@ -372,6 +371,13 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
+        /// Make agents start search with Orbit. Claude Code sometimes skips
+        /// Orbit, so this blocks its first search or file read each session
+        /// and points it to the graph. Later calls get the usual nudge.
+        /// Override at runtime with ORBIT_GRAPH_FIRST=1 or 0.
+        #[arg(long)]
+        graph_first: bool,
+
         #[command(flatten)]
         flags: SetupFlags,
     },
@@ -388,6 +394,9 @@ enum Commands {
     HookGuard {
         #[arg(value_name = "KIND")]
         kind: commands::hook_guard::Kind,
+
+        #[arg(long)]
+        graph_first: bool,
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
@@ -629,20 +638,25 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
+            graph_first,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, components);
+            let options = flags.to_options(agents, all, !no_index, graph_first, components);
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::install(options, flags.target()?, &machine)
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, false, Default::default());
+            let options = flags.to_options(agents, false, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             commands::setup::uninstall(options, flags.target()?, &machine)
         }
-        Commands::HookGuard { kind, mode: _ } => {
-            commands::hook_guard::run(kind);
+        Commands::HookGuard {
+            kind,
+            graph_first,
+            mode: _,
+        } => {
+            commands::hook_guard::run(kind, graph_first, tracker.as_ref(), coding_agent.as_deref());
             Ok(())
         }
         Commands::Query {
@@ -730,31 +744,12 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{CLI_AGENT_HELP, Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs};
     use clap::{CommandFactory, Parser};
 
     #[test]
     fn cli_command_tree_verifies() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn help_directs_coding_agents_to_the_orbit_skill() {
-        // Assert on the agent-facing sentences, not the bare command: `skills get orbit`
-        // also appears in ordinary usage text, so a deleted pointer would otherwise pass.
-        let short_help = Cli::command().render_help().to_string();
-        assert!(short_help.contains(CLI_AGENT_HELP));
-
-        let long_help = Cli::command().render_long_help().to_string();
-        assert!(long_help.contains(CLI_AGENT_HELP));
-
-        let mut command = Cli::command();
-        let skills = command
-            .find_subcommand_mut("skills")
-            .expect("skills subcommand exists")
-            .render_long_help()
-            .to_string();
-        assert!(skills.contains("Coding agents should start with `glab orbit skills get orbit`"));
     }
 
     #[test]
@@ -990,6 +985,7 @@ mod tests {
             ["orbit", "hook-guard", "search"].as_slice(),
             &["orbit", "hook-guard", "search", "--mode", "remote"],
             &["orbit", "hook-guard", "read", "--mode", "local"],
+            &["orbit", "hook-guard", "read", "--graph-first"],
         ] {
             assert!(
                 matches!(Cli::parse_from(argv).command, Commands::HookGuard { .. }),

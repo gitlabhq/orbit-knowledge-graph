@@ -21,7 +21,7 @@ use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Edge, Tree};
+use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -69,13 +69,13 @@ fn workset(
             decision,
             label,
         } = entry;
+        let manifest = decision != Decision::ListOnly && is_manifest(&path);
         let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        if decision == Decision::Parse && in_family {
+        if decision == Decision::Parse && in_family && !manifest {
             listed.candidates.insert(path.clone(), size);
             candidates.push(path);
             continue;
         }
-        let manifest = decision == Decision::Load && is_manifest(&path);
         let content = manifest
             .then(|| std::fs::read_to_string(root.join(&path)).ok())
             .flatten();
@@ -437,6 +437,25 @@ impl Phase<DirtyGraph> for Resolve {
             &paths,
             Some(&state.configs),
         );
+        let tree_by_path: FxHashMap<&str, usize> = state
+            .trees
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.label.as_str(), i))
+            .collect();
+        let file_tags: Vec<(usize, &[Tag])> = walk
+            .file_tags
+            .iter()
+            .filter_map(|(path, tags)| Some((*tree_by_path.get(path.as_str())?, tags.as_slice())))
+            .collect();
+        for tree in &mut state.trees {
+            tree.clear_tags(0, &walk.tag_keys);
+        }
+        for (i, tags) in file_tags {
+            for tag in tags {
+                state.trees[i].set_tag(0, tag.key, tag.val);
+            }
+        }
         let result = state.resolver.resolve(
             &state.trees,
             &state.edges,
