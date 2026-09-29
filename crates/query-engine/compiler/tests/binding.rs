@@ -3,8 +3,47 @@ use std::sync::Arc;
 use compiler::input::Input;
 use compiler::lowering::{lower, scalar};
 use compiler::passes::{codegen, enforce::ResultContext, frontend::gql};
-use compiler::planning::{bind, physical::CurrentRows};
-use query_data_model::DuckDbDataModel;
+use compiler::planning::{
+    bind,
+    physical::{CurrentRows, Read},
+};
+use query_data_model::{ClickHouseDataModel, DuckDbDataModel, QueryDataModel};
+
+#[test]
+fn binding_uses_the_same_semantic_sources_for_both_catalogs() {
+    let ontology = Arc::new(compiler::Ontology::load_embedded().unwrap());
+    let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+    let local = DuckDbDataModel::derive(ontology).unwrap();
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "query_type": "traversal",
+        "nodes": [{ "id": "f", "entity": "File", "columns": ["id", "path"] }]
+    }))
+    .unwrap();
+
+    fn sources(model: &impl QueryDataModel, input: &Input) -> Vec<(String, Vec<String>)> {
+        let mut bound = bind::traversal(input, model, &[], None).unwrap();
+        let mut sources = Vec::new();
+
+        bound.root.visit_mut(&mut |node| {
+            if let compiler::planning::generic::Op::Read(source) = &node.op {
+                sources.push((
+                    model.graph().entity(source.entity).name.clone(),
+                    source
+                        .properties
+                        .iter()
+                        .map(|(_, id)| model.graph().property(*id).name.clone())
+                        .collect(),
+                ));
+            }
+        });
+
+        sources
+    }
+
+    let expected = vec![("File".into(), vec!["id".into(), "path".into()])];
+    assert_eq!(sources(&remote, &input), expected);
+    assert_eq!(sources(&local, &input), expected);
+}
 
 #[test]
 fn both_frontends_filter_before_sort_and_limit_without_projecting_sort_keys() {
@@ -47,8 +86,12 @@ fn both_frontends_filter_before_sort_and_limit_without_projecting_sort_keys() {
         .unwrap();
 
     for input in [json, gql] {
-        let bound = bind::traversal(&input, &model, CurrentRows::Snapshot).unwrap();
-        let query = lower(&bound.root, &bound.values, &scalar::emit)
+        let bound = bind::traversal(&input, &model, &[], Some(input.limit)).unwrap();
+        let physical = bound
+            .root
+            .map_sources(&mut |source| Read::select(source, &model, CurrentRows::Snapshot))
+            .unwrap();
+        let query = lower(&physical, &bound.values, &scalar::emit)
             .unwrap()
             .into_query(&bound.outputs)
             .unwrap();
@@ -89,8 +132,8 @@ fn binding_rejects_unavailable_fields_and_wrong_literal_types() {
             }]
         }"#,
     ] {
-        let input = serde_json::from_str(query).unwrap();
-        assert!(bind::traversal(&input, &model, CurrentRows::Snapshot).is_err());
+        let input: Input = serde_json::from_str(query).unwrap();
+        assert!(bind::traversal(&input, &model, &[], Some(input.limit)).is_err());
     }
 }
 
@@ -112,7 +155,7 @@ fn range_membership_and_null_filters_preserve_sql_semantics() {
         (r#"{"is_null": true}"#, vec![4]),
         (r#"{"is_not_null": true}"#, vec![2, 3]),
     ] {
-        let input = serde_json::from_value(serde_json::json!({
+        let input: Input = serde_json::from_value(serde_json::json!({
             "query_type": "traversal",
             "nodes": [{
                 "id": "f",
@@ -126,8 +169,12 @@ fn range_membership_and_null_filters_preserve_sql_semantics() {
             "order_by": "f.id"
         }))
         .unwrap();
-        let bound = bind::traversal(&input, &model, CurrentRows::Snapshot).unwrap();
-        let query = lower(&bound.root, &bound.values, &scalar::emit)
+        let bound = bind::traversal(&input, &model, &[], Some(input.limit)).unwrap();
+        let physical = bound
+            .root
+            .map_sources(&mut |source| Read::select(source, &model, CurrentRows::Snapshot))
+            .unwrap();
+        let query = lower(&physical, &bound.values, &scalar::emit)
             .unwrap()
             .into_query(&bound.outputs)
             .unwrap();

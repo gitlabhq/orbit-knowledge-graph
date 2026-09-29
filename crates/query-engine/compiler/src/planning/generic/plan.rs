@@ -49,6 +49,27 @@ pub trait Operation {
 }
 
 impl<S, F, E> Node<S, F, E> {
+    pub fn map_sources<T>(self, map: &mut impl FnMut(S) -> Result<T>) -> Result<Node<T, F, E>> {
+        let inputs = self
+            .inputs
+            .into_iter()
+            .map(|input| input.map_sources(map))
+            .collect::<Result<_>>()?;
+
+        let op = match self.op {
+            Op::Read(source) => Op::Read(map(source)?),
+            Op::Filter(predicate) => Op::Filter(predicate),
+            Op::Project(assignments) => Op::Project(assignments),
+            Op::Join { kind, condition } => Op::Join { kind, condition },
+            Op::Union { outputs, arms } => Op::Union { outputs, arms },
+            Op::Sort(keys) => Op::Sort(keys),
+            Op::Limit(limit) => Op::Limit(limit),
+            Op::Extension(extension) => Op::Extension(extension),
+        };
+
+        Ok(Node { op, inputs })
+    }
+
     pub fn visit_mut(&mut self, callback: &mut impl FnMut(&mut Self)) {
         for input in &mut self.inputs {
             input.visit_mut(callback);

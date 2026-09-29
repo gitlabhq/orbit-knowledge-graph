@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
-use ontology::DataType;
-use query_data_model::{PropertyId, QueryDataModel};
+use query_data_model::QueryDataModel;
 
+use super::bind::Source;
 use super::generic::{Function, Operation, Schema, ValueId, ValueType, Values};
 use crate::error::{QueryError, Result};
 
@@ -12,53 +12,35 @@ pub struct Read {
     pub current_rows: CurrentRows,
 }
 
+#[derive(Clone, Copy)]
 pub enum CurrentRows {
     Snapshot,
     Final,
 }
 
 impl Read {
-    pub fn bind(
+    pub fn select(
+        source: Source,
         model: &impl QueryDataModel,
-        properties: &[PropertyId],
         current_rows: CurrentRows,
-        values: &mut Values,
     ) -> Result<Self> {
-        let first = properties
-            .first()
-            .ok_or_else(|| QueryError::ReferenceError("read requires a property".into()))?;
-        let entity = model.graph().property(*first).entity;
-        let name = &model.graph().entity(entity).name;
+        let entity = &model.graph().entity(source.entity).name;
         let table = model
-            .entity_table(name)
-            .ok_or_else(|| QueryError::ReferenceError(format!("entity {name} is unavailable")))?;
-
-        let columns = properties
-            .iter()
-            .map(|id| {
-                let property = model.graph().property(*id);
-                if property.entity != entity {
+            .entity_table(entity)
+            .ok_or_else(|| QueryError::ReferenceError(format!("entity {entity} is unavailable")))?;
+        let columns = source
+            .properties
+            .into_iter()
+            .map(|(value, property)| {
+                if model.graph().property(property).entity != source.entity {
                     return Err(QueryError::ReferenceError(
                         "read properties must belong to one entity".into(),
                     ));
                 }
 
-                let column = model.property_column(*id).ok_or_else(|| {
-                    QueryError::ReferenceError(format!(
-                        "property {name}.{} is not stored",
-                        property.name
-                    ))
+                let column = model.property_column(property).ok_or_else(|| {
+                    QueryError::ReferenceError("selected property is not stored".into())
                 })?;
-
-                let data_type = match property.data_type {
-                    DataType::Bool => ValueType::Bool,
-                    DataType::Int => ValueType::Int64,
-                    DataType::Float => ValueType::Float64,
-                    DataType::Date => ValueType::Date,
-                    DataType::DateTime => ValueType::DateTime,
-                    DataType::String | DataType::Enum | DataType::Uuid => ValueType::String,
-                };
-                let value = values.allocate(ValueType::Nullable(Box::new(data_type)));
                 Ok((value, column.to_string()))
             })
             .collect::<Result<_>>()?;

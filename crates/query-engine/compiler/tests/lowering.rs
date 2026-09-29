@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use compiler::ast;
 use compiler::lowering::{Context, EmitOperation, SqlFragment, lower, scalar};
 use compiler::passes::{codegen, enforce::ResultContext};
+use compiler::planning::bind::Source;
 use compiler::planning::generic::{
     Assignment, Expr, JoinKind, Node, Op, Operation, Schema, SortKey, ValueType, Values,
 };
@@ -24,9 +25,16 @@ fn catalog_reads_bind_independent_values_and_emit_both_dialects() {
 fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
     let id = model.property("File", "id").unwrap().id;
     let mut values = Values::default();
-    let source = Read::bind(model, &[id], mode, &mut values).unwrap();
-    let value = source.columns[0].0;
-    let other = Read::bind(model, &[id], CurrentRows::Snapshot, &mut values).unwrap();
+    let mut source = || Source {
+        entity: model.graph().property(id).entity,
+        properties: vec![(
+            values.allocate(ValueType::Nullable(Box::new(ValueType::Int64))),
+            id,
+        )],
+    };
+    let selected = Read::select(source(), model, mode).unwrap();
+    let value = selected.columns[0].0;
+    let other = Read::select(source(), model, CurrentRows::Snapshot).unwrap();
     assert_ne!(value, other.columns[0].0);
 
     let plan: Plan = Node {
@@ -35,7 +43,7 @@ fn check_catalog(model: &impl QueryDataModel, mode: CurrentRows, remote: bool) {
             arguments: vec![Expr::Value(value), Expr::Int64(2)],
         }),
         inputs: vec![Node {
-            op: Op::Read(source),
+            op: Op::Read(selected),
             inputs: vec![],
         }],
     };

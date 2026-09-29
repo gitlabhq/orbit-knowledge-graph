@@ -14,6 +14,7 @@ use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Node, TableRef};
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
+use crate::lowering::EmitOperation;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::codegen::PaginationContext;
 use crate::passes::enforce::{ResultBindings, ResultContext};
@@ -23,6 +24,7 @@ use crate::passes::{
     check, codegen, cursor, enforce, hydrate, normalize, relationships, response_policy, restrict,
     security, settings, validate,
 };
+use crate::planning::bind::Source;
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
 
@@ -292,6 +294,17 @@ where
 }
 
 fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>) -> Result<()> {
+    use crate::planning::physical::{CurrentRows, Read};
+
+    plan_query(ctx, |source, model| {
+        Read::select(source, model, CurrentRows::Snapshot)
+    })
+}
+
+fn plan_query<C: CompilerCtx, S: EmitOperation>(
+    ctx: &mut C,
+    mut select_source: impl FnMut(Source, &C::Model) -> Result<S>,
+) -> Result<()> {
     use crate::ast::{Expr, OrderExpr, SelectExpr};
     use crate::constants::{redaction_id_column, redaction_type_column};
     use crate::input::OrderDirection;
@@ -301,7 +314,7 @@ fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataMod
     let input = require(ctx.input().clone(), "input")?;
     let [node] = input.nodes.as_slice() else {
         return Err(QueryError::Validation(
-            "local planner requires one node".into(),
+            "traversal planner requires one node".into(),
         ));
     };
 
@@ -316,8 +329,11 @@ fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataMod
         required.push((order.property.clone(), context.alias()));
     }
 
-    let bound = bind::local_traversal(&input, ctx.data_model(), &required)?;
-    let fragment = lower_with_context(&bound.root, &bound.values, &mut context, &scalar::emit)?;
+    let bound = bind::traversal(&input, ctx.data_model(), &required, None)?;
+    let physical = bound
+        .root
+        .map_sources(&mut |source| select_source(source, ctx.data_model()))?;
+    let fragment = lower_with_context(&physical, &bound.values, &mut context, &scalar::emit)?;
 
     let resolve = |value| {
         fragment

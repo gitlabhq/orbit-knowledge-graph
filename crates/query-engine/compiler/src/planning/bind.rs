@@ -1,15 +1,43 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use query_data_model::QueryDataModel;
+use query_data_model::{EntityId, PropertyId, QueryDataModel};
 use serde_json::Value;
 
-use super::generic::{Assignment, Expr, Node, Op, SortKey, ValueId, ValueType, Values};
-use super::physical::{CurrentRows, Read, Scalar};
+use super::generic::{
+    Assignment, Expr, Node, Op, Operation, Schema, SortKey, ValueId, ValueType, Values,
+};
+use super::physical::Scalar;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 
-pub type Plan = Node<Read, Scalar, Infallible>;
+pub type Plan = Node<Source, Scalar, Infallible>;
+
+impl From<ontology::DataType> for ValueType {
+    fn from(data_type: ontology::DataType) -> Self {
+        match data_type {
+            ontology::DataType::Bool => Self::Bool,
+            ontology::DataType::Int => Self::Int64,
+            ontology::DataType::Float => Self::Float64,
+            ontology::DataType::Date => Self::Date,
+            ontology::DataType::DateTime => Self::DateTime,
+            ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid => {
+                Self::String
+            }
+        }
+    }
+}
+
+pub struct Source {
+    pub entity: EntityId,
+    pub properties: Vec<(ValueId, PropertyId)>,
+}
+
+impl Operation for Source {
+    fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
+        Ok(self.properties.iter().map(|(value, _)| *value).collect())
+    }
+}
 
 pub struct BoundQuery {
     pub root: Plan,
@@ -21,23 +49,6 @@ pub struct BoundQuery {
 pub fn traversal(
     input: &Input,
     model: &impl QueryDataModel,
-    current_rows: CurrentRows,
-) -> Result<BoundQuery> {
-    bind(input, model, current_rows, &[], Some(input.limit))
-}
-
-pub fn local_traversal(
-    input: &Input,
-    model: &impl QueryDataModel,
-    required: &[(String, String)],
-) -> Result<BoundQuery> {
-    bind(input, model, CurrentRows::Snapshot, required, None)
-}
-
-fn bind(
-    input: &Input,
-    model: &impl QueryDataModel,
-    current_rows: CurrentRows,
     required: &[(String, String)],
     limit: Option<u32>,
 ) -> Result<BoundQuery> {
@@ -125,11 +136,24 @@ fn bind(
 
     let properties: Vec<_> = needed.values().copied().collect();
     let mut values = Values::default();
-    let read = Read::bind(model, &properties, current_rows, &mut values)?;
+    let properties = properties
+        .into_iter()
+        .map(|property| {
+            let data_type = ValueType::from(model.graph().property(property).data_type);
+            (
+                values.allocate(ValueType::Nullable(Box::new(data_type))),
+                property,
+            )
+        })
+        .collect::<Vec<_>>();
+    let read = Source {
+        entity: entity.id,
+        properties,
+    };
     let bindings: BTreeMap<_, _> = needed
         .keys()
         .copied()
-        .zip(read.columns.iter().map(|(value, _)| *value))
+        .zip(read.properties.iter().map(|(value, _)| *value))
         .collect();
 
     let mut predicates = Vec::new();
@@ -235,14 +259,18 @@ fn bind(
     })
 }
 
-fn call(function: Scalar, arguments: Vec<Expr<Scalar>>) -> Expr<Scalar> {
+pub(super) fn call(function: Scalar, arguments: Vec<Expr<Scalar>>) -> Expr<Scalar> {
     Expr::Call {
         function,
         arguments,
     }
 }
 
-fn bind_filter(value: ValueId, filter: &InputFilter, values: &Values) -> Result<Expr<Scalar>> {
+pub(super) fn bind_filter(
+    value: ValueId,
+    filter: &InputFilter,
+    values: &Values,
+) -> Result<Expr<Scalar>> {
     if filter.rhs_column.is_some() {
         return Err(QueryError::Validation(
             "column comparisons require binding both operands".into(),
