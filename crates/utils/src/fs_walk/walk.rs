@@ -2,6 +2,7 @@
 //! nothing is written — the walk only classifies.
 
 use std::io::Read;
+use std::ops::{Add, AddAssign};
 use std::path::Path;
 
 use ignore::WalkBuilder;
@@ -11,24 +12,57 @@ use super::inventory::FileInventory;
 use super::stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
 /// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
-/// survive), running every file through the hooks. Returns the inventory of
+/// survive), running every file through `hooks`. Returns the inventory of
 /// recorded files with their [`Decision`]. Paths are relative to `root`.
 ///
 /// Listing is cheap and reading is not, so files are read and classified in
-/// parallel, each worker with hooks of its own from `hooks`.
-pub fn walk_dir<H: FileStreamHooks>(
-    root: &Path,
-    hooks: impl Fn() -> H + Sync,
-) -> Result<FileInventory, StreamError> {
-    let entries = list_files(root)?
+/// parallel: each worker classifies with a clone of `hooks`, and what the
+/// clones tallied is added back into `hooks` once the walk is done.
+pub fn walk_dir<H>(root: &Path, hooks: &mut H) -> Result<FileInventory, StreamError>
+where
+    H: FileStreamHooks + Clone + AddAssign + Send + Sync,
+{
+    let worked: Worker<H> = list_files(root)?
         .par_iter()
-        .map_init(
-            || (hooks(), Vec::new()),
-            |(hooks, content), path| classify(root, path, hooks, content),
+        .try_fold(
+            || Worker::new(hooks),
+            |mut worker, path| -> Result<Worker<H>, StreamError> {
+                let entry = classify(root, path, &mut worker.hooks, &mut worker.content)?;
+                worker.entries.extend(entry);
+                Ok(worker)
+            },
         )
-        .filter_map(Result::transpose)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(FileInventory::new(entries))
+        .try_reduce(|| Worker::new(hooks), |a, b| Ok(a + b))?;
+    *hooks += worked.hooks;
+    Ok(FileInventory::new(worked.entries))
+}
+
+/// One rayon worker's share of the walk: its clone of the hooks, its read
+/// buffer and the entries it classified.
+struct Worker<H> {
+    hooks: H,
+    content: Vec<u8>,
+    entries: Vec<FileInventoryEntry>,
+}
+
+impl<H: Clone> Worker<H> {
+    fn new(hooks: &H) -> Self {
+        Self {
+            hooks: hooks.clone(),
+            content: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<H: AddAssign> Add for Worker<H> {
+    type Output = Self;
+
+    fn add(mut self, other: Self) -> Self {
+        self.hooks += other.hooks;
+        self.entries.extend(other.entries);
+        self
+    }
 }
 
 /// Relative paths of the files and symlinks below `root`, with git's listing
@@ -92,14 +126,28 @@ mod tests {
     use super::*;
     use crate::fs_walk::FileLabel;
 
-    struct TestFilter;
+    /// Tallies what it saw, so a walk can be checked to have added every
+    /// worker's share back together.
+    #[derive(Clone, Default)]
+    struct TestFilter {
+        seen: u64,
+        binaries: u64,
+    }
+    impl std::ops::AddAssign for TestFilter {
+        fn add_assign(&mut self, other: Self) {
+            self.seen += other.seen;
+            self.binaries += other.binaries;
+        }
+    }
     impl FileStreamHooks for TestFilter {
         fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            self.seen += 1;
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
                 .then_some((Decision::ListOnly, FileLabel::default()))
         }
         fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
             if content.contains(&0) {
+                self.binaries += 1;
                 (Decision::ListOnly, FileLabel::default())
             } else {
                 (Decision::Parse, FileLabel::default())
@@ -126,9 +174,13 @@ mod tests {
         write(root, "notes/x.rs", b"note\n");
         write(root, ".env", b"secret\n");
 
+        #[derive(Clone)]
         struct KeepAll;
+        impl std::ops::AddAssign for KeepAll {
+            fn add_assign(&mut self, _: Self) {}
+        }
         impl FileStreamHooks for KeepAll {}
-        let inv = walk_dir(root, || KeepAll).unwrap();
+        let inv = walk_dir(root, &mut KeepAll).unwrap();
         let has = |p: &str| inv.iter().any(|e| e.path == p);
 
         assert!(
@@ -148,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn a_large_tree_is_listed_whole_with_every_decision() {
+    fn a_large_tree_is_listed_whole_and_the_hooks_tally_all_of_it() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         for i in 0..600 {
@@ -163,11 +215,17 @@ mod tests {
         write(root, ".gitignore", b"ignored/\n");
         write(root, "ignored/x.rs", b"fn x() {}");
 
-        let inv = walk_dir(root, || TestFilter).unwrap();
+        let mut hooks = TestFilter::default();
+        let inv = walk_dir(root, &mut hooks).unwrap();
 
         assert_eq!(inv.len(), 602, "600 sources, the png, the .gitignore");
         assert_eq!(inv.by_decision(Decision::Parse).count(), 401);
         assert!(inv.iter().map(|e| &e.path).is_sorted());
+        assert_eq!(
+            (hooks.seen, hooks.binaries),
+            (602, 200),
+            "every worker's tally is added back into the caller's hooks"
+        );
     }
 
     #[test]
@@ -180,7 +238,7 @@ mod tests {
         write(root, ".gitignore", b"ignored/\n");
         write(root, "ignored/secret.rs", b"fn secret() {}");
 
-        let inv = walk_dir(root, || TestFilter).unwrap();
+        let inv = walk_dir(root, &mut TestFilter::default()).unwrap();
         let by_path = |p: &str| inv.iter().find(|e| e.path == p);
 
         assert!(
@@ -207,7 +265,7 @@ mod tests {
         write(root, "src/lib.rs", b"pub fn x() {}");
         std::os::unix::fs::symlink("src/lib.rs", root.join("link.rs")).unwrap();
 
-        let inv = walk_dir(root, || TestFilter).unwrap();
+        let inv = walk_dir(root, &mut TestFilter::default()).unwrap();
         let by_path = |p: &str| inv.iter().find(|e| e.path == p);
 
         assert_eq!(by_path("link.rs").unwrap().decision, Decision::ListOnly);

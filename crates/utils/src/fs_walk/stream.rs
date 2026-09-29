@@ -4,6 +4,8 @@
 //! policy via [`step`]; the sources carry no filtering of their own.
 
 use std::path::{Component, Path};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustc_hash::FxHashMap;
 
@@ -192,11 +194,13 @@ pub fn step<H: FileStreamHooks>(
 }
 
 /// A capped running total; the first `add` to overflow short-circuits the
-/// stream. `None` = unlimited.
+/// stream. `None` = unlimited. Clones share the total, so hooks cloned for
+/// parallel workers still enforce one cap between them.
+#[derive(Clone)]
 pub struct Counter {
     metric: &'static str,
     cap: Option<u64>,
-    count: u64,
+    count: Arc<AtomicU64>,
 }
 
 impl Counter {
@@ -204,16 +208,16 @@ impl Counter {
         Self {
             metric,
             cap,
-            count: 0,
+            count: Arc::default(),
         }
     }
 
     pub fn add(&mut self, n: u64) -> Result<(), CapExceeded> {
-        self.count = self.count.saturating_add(n);
-        if let Some(cap) = self.cap.filter(|&cap| self.count > cap) {
+        let count = self.count.fetch_add(n, Ordering::Relaxed).saturating_add(n);
+        if let Some(cap) = self.cap.filter(|&cap| count > cap) {
             return Err(CapExceeded {
                 metric: self.metric,
-                count: self.count,
+                count,
                 cap,
             });
         }

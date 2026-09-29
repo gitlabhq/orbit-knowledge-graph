@@ -583,15 +583,13 @@ fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let filter = || {
-        code_graph::v2::config::CodeFilter::new(
-            Some(MAX_INDEXED_FILE_BYTES),
-            None,
-            code_graph::v2::config::detect_language_from_path,
-        )
-    };
+    let mut filter = code_graph::v2::config::CodeFilter::new(
+        Some(MAX_INDEXED_FILE_BYTES),
+        None,
+        code_graph::v2::config::detect_language_from_path,
+    );
     let file_inventory = std::sync::Arc::new(
-        orbit_utils::fs_walk::walk_dir_parallel(&git.repo_path, filter)
+        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
 

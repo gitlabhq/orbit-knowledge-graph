@@ -38,11 +38,24 @@ pub struct SkipTally {
 /// The code-indexing filter. Construct one per repository stream. Classifies
 /// each file fully (load+parse / load-only / node / drop): the language detector
 /// is injected so the filter never hard-wires the registry.
+#[derive(Clone)]
 pub struct CodeFilter {
     max_file_size: Option<u64>,
     total_bytes: Counter,
     skips: FxHashMap<SkipReason, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
+}
+
+/// Clones that classified in parallel add back what they tallied; the
+/// total-bytes counter is shared between them already.
+impl std::ops::AddAssign for CodeFilter {
+    fn add_assign(&mut self, other: Self) {
+        for (reason, tally) in other.skips {
+            let mine = self.skips.entry(reason).or_default();
+            mine.count += tally.count;
+            mine.bytes += tally.bytes;
+        }
+    }
 }
 
 impl CodeFilter {
