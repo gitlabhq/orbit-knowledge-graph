@@ -31,9 +31,10 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-
 - Traversal columns are the query's node aliases, in pattern order. Each row is one authorized result row.
 - Aggregation columns are the group and metric output names. Node groups print as node literals.
 - Neighbors and path finding print one `path` column, such as `(:User {id: 1})-[:MEMBER_OF]->(:Group {id: 22})`. Neighbor direction follows the stored edge.
-- Values use cypher-shell literals: quoted strings, `TRUE`, `FALSE`, and `NULL`. Long text uses the shared GOON truncation limits.
+- Values use cypher-shell literals: quoted strings, `TRUE`, `FALSE`, and `NULL`. Long text uses the shared GOON truncation limits and adds a `<key>_len` property with the original length.
+- Cells pad to the widest cell in their column. Padding stops at 120 characters, so one long value does not widen every row; longer cells overflow.
 - The footer reports the row count. A paginated page adds `more available` and the next cursor.
-- Identical rendered rows print once.
+- A duplicate path or neighbor prints once, as in the raw format. Traversal and aggregation keep every row.
 
 The formatter reads the authorized, hydrated `PipelineOutput` rows. It does not know the `RETURN` expressions, so a returned property prints inside its node. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
 

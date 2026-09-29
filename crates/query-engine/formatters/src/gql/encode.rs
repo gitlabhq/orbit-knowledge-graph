@@ -11,7 +11,7 @@ use types::{NodeRef, QueryResultRow};
 
 use crate::column_value_to_json;
 use crate::graph::{GraphFormatter, is_reserved_node_key};
-use crate::text::{ordered_pairs, truncate};
+use crate::text::{ordered_pairs, truncate, truncated_len};
 
 pub fn encode(output: &PipelineOutput) -> String {
     let (columns, rows) = match output.compiled.input.query_type {
@@ -19,11 +19,6 @@ pub fn encode(output: &PipelineOutput) -> String {
         QueryType::PathFinding | QueryType::Neighbors => path_table(output),
         _ => node_table(output),
     };
-    let mut seen = HashSet::new();
-    let rows: Vec<Vec<String>> = rows
-        .into_iter()
-        .filter(|row| seen.insert(row.clone()))
-        .collect();
     render(&columns, &rows, output.pagination.as_ref())
 }
 
@@ -54,13 +49,15 @@ fn node_table(output: &PipelineOutput) -> Table {
 
 fn path_table(output: &PipelineOutput) -> Table {
     let prefixes = edge_prefixes(&output.result_context);
-    let rows = output
-        .query_result
-        .authorized_rows()
-        .filter_map(|row| match output.compiled.input.query_type {
+    let rows = output.query_result.authorized_rows().filter_map(|row| {
+        match output.compiled.input.query_type {
             QueryType::Neighbors => neighbor_path(row, output, &prefixes),
             _ => shortest_path(row),
-        })
+        }
+    });
+    let mut seen = HashSet::new();
+    let rows = rows
+        .filter(|path| seen.insert(path.clone()))
         .map(|path| vec![path])
         .collect();
     (vec!["path".into()], rows)
@@ -117,12 +114,11 @@ fn neighbor_path(
     prefixes: &[&str],
 ) -> Option<String> {
     let input = &output.compiled.input;
-    let center = row_node(
-        row,
-        &output.result_context,
-        prefixes,
-        &input.nodes.first()?.id,
-    )?;
+    let center = input
+        .nodes
+        .first()
+        .and_then(|center| row_node(row, &output.result_context, prefixes, &center.id))
+        .unwrap_or_else(null);
     let neighbor = dynamic_node(row.neighbor_node()?);
     let relationship = row
         .get_column_string(relationship_type_column())
@@ -145,7 +141,8 @@ fn neighbor_path(
 fn shortest_path(row: &QueryResultRow) -> Option<String> {
     let (first, rest) = row.path_nodes().split_first()?;
     let mut path = dynamic_node(first);
-    for (node, relationship) in rest.iter().zip(row.edge_kinds()) {
+    for (index, node) in rest.iter().enumerate() {
+        let relationship = row.edge_kinds().get(index).map_or("", String::as_str);
         let _ = write!(path, "-[:{relationship}]->{}", dynamic_node(node));
     }
     Some(path)
@@ -178,6 +175,9 @@ fn node_literal(label: &str, id: i64, properties: &Map<String, Value>) -> String
     for (key, value) in ordered_pairs(properties) {
         if !value.is_null() {
             let _ = write!(out, ", {key}: {}", literal(value, key));
+        }
+        if let Some(length) = truncated_len(value, key) {
+            let _ = write!(out, ", {key}_len: {length}");
         }
     }
     out + "})"
@@ -225,14 +225,18 @@ fn null() -> String {
     "NULL".into()
 }
 
+const MAX_PADDED_WIDTH: usize = 120;
+
 fn render(columns: &[String], rows: &[Vec<String>], page: Option<&PaginationMeta>) -> String {
     let widths: Vec<usize> = columns
         .iter()
         .enumerate()
         .map(|(index, column)| {
+            let header = column.chars().count();
             rows.iter()
                 .map(|row| row[index].chars().count())
-                .fold(column.chars().count(), usize::max)
+                .map(|width| width.min(MAX_PADDED_WIDTH))
+                .fold(header, usize::max)
         })
         .collect();
     let line = |cells: &[String]| {
