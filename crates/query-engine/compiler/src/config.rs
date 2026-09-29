@@ -325,7 +325,10 @@ fn plan_remote(
         ctx,
         crate::planning::backends::clickhouse::select,
         |entity, model| model.redaction_id_column(entity).map(String::from),
-        &[crate::planning::backends::clickhouse::realize_foreign_key],
+        &[
+            crate::planning::backends::clickhouse::realize_foreign_key,
+            crate::planning::backends::clickhouse::fuse_holder,
+        ],
     )
 }
 

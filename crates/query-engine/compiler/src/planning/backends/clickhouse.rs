@@ -1,5 +1,8 @@
 use std::convert::Infallible;
 
+mod fusion;
+pub use fusion::fuse_holder;
+
 use query_data_model::{
     ClickHouseDataModel, EdgeField, Endpoint, QueryBackendCatalog, QueryDataModel,
 };
@@ -21,6 +24,7 @@ pub struct Scan {
     binding: Option<String>,
     relationship: Option<usize>,
     unique_key: Option<Schema>,
+    replacement_key: Vec<String>,
     foreign_key: Option<ForeignKeySource>,
 }
 
@@ -34,6 +38,7 @@ struct ForeignKeySource {
     target_kind: String,
     kind: String,
     fields: Vec<EdgeField>,
+    replacement_key: Vec<String>,
 }
 
 pub fn select(
@@ -80,6 +85,7 @@ pub fn select(
                         target_kind: model.graph().entity(*target).name.clone(),
                         kind: model.graph().relationship(relationships[0]).name.clone(),
                         fields: fields.iter().map(|(_, field)| *field).collect(),
+                        replacement_key: model.backend().table_for_entity(holder)?.sort_key.clone(),
                     })
                 })
         }
@@ -118,6 +124,12 @@ pub fn select(
         });
 
         Ok(Scan {
+            replacement_key: model
+                .backend()
+                .table(&read.table)
+                .expect("resolved table")
+                .sort_key
+                .clone(),
             read,
             deletion_column,
             binding: binding.clone(),
@@ -184,6 +196,7 @@ pub fn realize_foreign_key(
                 binding: None,
                 relationship: scan.relationship,
                 unique_key: None,
+                replacement_key: key.replacement_key.clone(),
                 foreign_key: None,
             }),
             inputs: vec![],

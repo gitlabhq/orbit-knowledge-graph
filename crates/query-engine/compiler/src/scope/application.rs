@@ -45,14 +45,18 @@ fn apply_scan_predicates(
             ..
         } = relation
         {
-            let proof = match relationship {
-                Some(index) => scope.relationships.get(*index).and_then(Option::as_ref),
-                None if model.table_path_scopable(table) => {
-                    scope.nodes.get(bindings.get(alias).unwrap_or(alias))
-                }
-                None => None,
-            };
-            if let Some(proof) = proof {
+            let relationship_proof = relationship
+                .and_then(|index| scope.relationships.get(index))
+                .and_then(Option::as_ref);
+            let node_proof = model
+                .table_path_scopable(table)
+                .then(|| scope.nodes.get(bindings.get(alias).unwrap_or(alias)))
+                .flatten();
+
+            if let Some(proof) = relationship_proof {
+                append_predicate(target, scope_predicate(proof, alias));
+            }
+            if let Some(proof) = node_proof.filter(|proof| Some(*proof) != relationship_proof) {
                 append_predicate(target, scope_predicate(proof, alias));
             }
         }

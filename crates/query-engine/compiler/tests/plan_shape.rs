@@ -262,7 +262,7 @@ fn yaml_plan_shapes() {
                             bind(input, &remote).unwrap(),
                             |source, values| clickhouse::select(source, &remote, values),
                             clickhouse::Scan::explain,
-                            &[clickhouse::realize_foreign_key],
+                            &[clickhouse::realize_foreign_key, clickhouse::fuse_holder],
                             &assertions,
                         )
                         .unwrap()
