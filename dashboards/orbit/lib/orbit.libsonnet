@@ -10,9 +10,6 @@
 
 local catalog = import '../../../crates/orbit-observability/orbit-dashboards/gkg-metrics.json';
 
-// Rendered per flavor: `com` for dashboards.gitlab.net, `dedicated` for a
-// GitLab Dedicated tenant's Grafana. `cargo xtask dashboards` passes
-// `--ext-str flavor=...`; manual jsonnet renders need the same flag.
 local FLAVOR = std.extVar('flavor');
 assert FLAVOR == 'com' || FLAVOR == 'dedicated' : 'unknown dashboard flavor `' + FLAVOR + '`';
 local IS_DEDICATED = FLAVOR == 'dedicated';

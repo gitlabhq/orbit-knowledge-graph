@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# Verify config/vendored/system_note_metadata.actions matches the Rails
-# SystemNoteMetadata::ICON_TYPES at the commit SHA pinned in
-# vendored.gitlab_system_note_actions.version in config/versions.yaml.
-#
-# Called by `mise check:vendored -- gitlab_system_note_actions` which sets:
-#   VENDOR_VERSIONS_FILE  — absolute path to config/versions.yaml
-#   VENDOR_DIR            — absolute path to config/vendored
-#   VENDOR_VERSION        — the pinned Rails commit SHA
-#   VENDOR_NAME           — "gitlab_system_note_actions"
-#
-# Must be invoked through the runner; requires VENDOR_* env vars.
-#
-# Fetches the Rails source from gitlab.com; requires network access.
-# Skippable via [skip system-note-actions-check] in the MR description,
-# MR title, or a commit message, or by setting SKIP_SYSTEM_NOTE_ACTIONS_CHECK=1.
 set -euo pipefail
 
 VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
@@ -25,9 +10,7 @@ CE_RAILS_PATH="app/models/system_note_metadata.rb"
 EE_RAILS_PATH="ee/app/models/ee/system_note_metadata.rb"
 GITLAB_PROJECT="gitlab-org/gitlab"
 
-source "$(dirname "$VERSIONS_FILE")/../scripts/ci-skip-utils.sh"
-
-if ci_skip_requested "system-note-actions-check"; then
+if python "$(dirname "$VERSIONS_FILE")/../ci/skip_check.py" system-note-actions-check; then
     echo "[skip system-note-actions-check] found — skipping."
     exit 0
 fi

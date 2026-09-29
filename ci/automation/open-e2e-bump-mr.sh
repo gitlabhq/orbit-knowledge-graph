@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-#
-# Open (or refresh) the rolling e2e pin-bump MR. Runs from a scheduled
-# pipeline (.gitlab/ci/e2e-pin-bump.yml); DRY_RUN=true logs the diff and
-# stops before pushing.
 
 set -euo pipefail
 
@@ -49,7 +45,7 @@ git push --force origin "HEAD:${BRANCH}"
 
 existing=$(glab api \
   "projects/${PROJECT_ID}/merge_requests?source_branch=${BRANCH}&target_branch=${DEFAULT_BRANCH}&state=opened" \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["web_url"] if d else "")')
+  | jq -r '.[0].web_url // empty')
 
 if [ -n "$existing" ]; then
   log "Refreshed existing MR: $existing"
@@ -59,7 +55,7 @@ fi
 # Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
-  | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then
+  | jq -e 'length > 0' >/dev/null; then
   assign_line="/assign ${ASSIGNEE}"
 else
   log "WARNING: assignee '${ASSIGNEE}' not found; opening the MR unassigned."

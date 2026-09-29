@@ -26,16 +26,11 @@ pre-commit:
     - name: newlines
       run: mise run lint:newlines
       glob: "**/*.{rs,md,yml,yaml,toml,astro,js,ts,json,mdx,vue,rb,css,mjs}"
-    # Advisory/non-blocking: narration lint prints warnings but must not block
-    # the commit. The script exits non-zero on findings; `|| true` absorbs that
-    # exit at the config level so lefthook treats the job as passed. (Lefthook
-    # has no per-job allow_failure primitive — this is the standard workaround.)
-    # To promote to a blocking gate, remove `|| true`.
     - name: narration
-      run: ./scripts/linting/check-narration.sh {staged_files} || true
+      run: mise exec -- uv run --frozen --project ci python ci/linting/check_narration.py {staged_files} || true
       glob: "**/*.rs"
     - name: prose
-      run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
+      run: mise exec -- uv run --frozen --project ci python ci/linting/prose_lint.py {staged_files}
       glob:
         - "AGENTS.md"
         - "CONTEXT.md"
@@ -63,16 +58,16 @@ pre-commit:
         - "mise.toml"
         - "rust-toolchain.toml"
     - name: skill-version-bump
-      run: bash ./scripts/check-skill-version-bump.sh
+      run: mise exec -- uv run --frozen --project ci python ci/check-skill-version-bump.py --ci --staged
       glob: "skills/**/*"
     - name: prompt-version-bump
-      run: bash ./scripts/check-prompt-version-bump.sh
+      run: mise exec -- uv run --frozen --project ci python ci/check-version-bumps.py prompts
       glob: "config/prompts/**/*.yml"
     - name: ontology-schema
       run: mise run ontology:validate
-      glob: "fixtures/ontology/**/*.yaml"
+      glob: "config/ontology/**/*.yaml"
     - name: pinned-version-check
-      run: bash ./scripts/check-pinned-version.sh
+      run: mise exec -- uv run --frozen --project ci python ci/check-version-bumps.py pinned
       glob:
         - "crates/query-engine/formatters/src/**/*.rs"
         - "crates/query-engine/compiler/src/input.rs"

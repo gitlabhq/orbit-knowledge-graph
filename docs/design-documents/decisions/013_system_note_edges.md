@@ -222,7 +222,7 @@ Three-layer defence:
     | Edges emitted | `gkg.indexer.sdlc.edges_emitted_total{entity, edge_kind}` | **Add** to `sdlc.rs` (general-purpose; future entities benefit) |
     | Unknown action drift | `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` | **Add**; cardinality bounded by `ICON_TYPES` (~60–100) |
 
-    Catalog regeneration via `metrics-catalog-check`. The two new instruments land in `orbit-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
+    Catalog regeneration via `generated-files-check`. The two new instruments land in `orbit-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
 9. Bump `config/SCHEMA_VERSION` (currently 44 → 45).
 10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, `AGENTS.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
 11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges`, plus a lifecycle test ported from the closed !1109. The full source of the !1109 lifecycle test is preserved alongside the research package at [`dgruzd/droid-workspace/task/2685`](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/). So future implementers do not need to spelunk a closed-MR branch.

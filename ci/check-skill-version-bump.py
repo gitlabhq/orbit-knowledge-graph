@@ -9,11 +9,8 @@ against origin/main. CI checks the merge request diff base against HEAD. The
 pre-commit hook uses --staged so the check evaluates the exact staged snapshot.
 
 Usage:
-    python3 scripts/check-skill-version-bump.py
-    python3 scripts/check-skill-version-bump.py --ci
-    python3 scripts/check-skill-version-bump.py --staged --ci
-    python3 scripts/check-skill-version-bump.py --base-ref origin/main --ci
-    python3 scripts/check-skill-version-bump.py --debug
+    mise exec -- uv run --frozen --project ci python ci/check-skill-version-bump.py
+    python ci/check-skill-version-bump.py --ci --staged --base-ref origin/main
 """
 
 from __future__ import annotations

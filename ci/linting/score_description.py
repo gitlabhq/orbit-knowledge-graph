@@ -45,7 +45,6 @@ ACRONYM_ALLOW = {
     "GitLab-org", "Orbit", "GKG",
 }
 
-# Tokens that look like code identifiers when they leak into prose.
 SNAKE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")          # foo_bar_baz
 PATHY = re.compile(r"\b\w+(?:::\w+)+\b")                           # a::b::c
 CAMEL = re.compile(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b")      # FooBar

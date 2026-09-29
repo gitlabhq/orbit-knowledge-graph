@@ -140,7 +140,7 @@ invokes the script with standardized environment variables.
 
 1. **Schema validation.** `config/schemas/versions.schema.json` enforces key
    patterns, hex lengths, path restrictions, script prefix, and structural
-   constraints. Validated in CI (`versions-schema-validate`) and locally
+   constraints. Validated in CI (`repository-checks`) and locally
    (`mise versions:validate`).
 2. **Compile time.** `orbit_versions::Versions` deserializes with
    `deny_unknown_fields`, catching structural drift.
@@ -149,7 +149,7 @@ invokes the script with standardized environment variables.
 4. **Runner time.** `scripts/vendored/run.sh` validates preconditions (script
    exists, YAML parses) and postconditions (vendor_dir non-empty, YAML still
    valid, check_script did not modify the file).
-5. **CI time.** The `duckdb-fts-sources-sync-check` job re-vendors the archive
+5. **CI time.** The `vendored-check` job re-vendors the archive
    from upstream and byte-compares it against the committed artifact.
 
 ## Operator workflows

@@ -380,7 +380,7 @@ The Orbit `gkg-indexer` accounts for schema changes in the main ClickHouse datab
 
 The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for Orbit. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
 
-A CI job (`ddl-freshness-check`) detects schema drift. It compares the committed `config/graph.sql` (versioned graph), `config/graph_persistent.sql` (durable unversioned objects), and `config/graph_local.sql` (DuckDB) against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
+A CI job (`generated-files-check`) detects schema drift. It compares the committed `config/graph.sql` (versioned graph), `config/graph_persistent.sql` (durable unversioned objects), and `config/graph_local.sql` (DuckDB) against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
 
 The indexer uses the ontology to create the Orbit ClickHouse tables and build the indexing queries.
 

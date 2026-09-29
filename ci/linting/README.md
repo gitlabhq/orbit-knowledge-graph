@@ -2,20 +2,37 @@
 
 Deterministic lint gates that catch mechanical review feedback (LLM narration
 comments, bloated MR-description headlines, machine-sounding prose) before it
-reaches a human reviewer. Everything for these gates is self-contained in this
-folder so it can be removed as a unit (see *Removing the gates* below). Task #2933.
+reaches a human reviewer. These gates use Python 3.12 and the frozen dependencies
+in `ci/uv.lock`. Task #2933.
 
 ## Contents
 
 | File | Role |
 |---|---|
 | `narration_score.py` | Active narration-comment scorer (two high-precision detectors: `block_label`, `token_overlap`). Dependency-free Python. |
-| `check-narration.sh` | Wrapper for the narration scorer: whole-tree, explicit-files (`{staged_files}`), and MR-diff-scoped (`--diff-base <sha>`) modes. |
+| `check_narration.py` | Runs the narration scorer in-process: whole-tree, explicit-files (`{staged_files}`), and MR changed-line-only (`--diff-base <sha>`) modes. |
 | `score_description.py` | MR-description headline-section scorer (word / code-span / bare-identifier caps). |
-| `check-mr-description.sh` | Reads the description from the predefined `CI_MERGE_REQUEST_DESCRIPTION` variable and runs the scorer. |
-| `prose_lint.py` | Prose linter for the text LLMs read. PEP 723 script (`uv run`, PyYAML only). Modes: `FILE...`, `--all`, `--diff-base <sha>`. |
+| `check_mr_description.py` | Reads `CI_MERGE_REQUEST_DESCRIPTION` and scores its headline in-process. |
+| `prose_lint.py` | Prose linter for the text LLMs read. Uses PyYAML from the shared `ci` project. Modes: `FILE...`, `--all`, `--diff-base <sha>`. |
 | `prose_lint_test.py` | Unit tests for the prose linter (`mise run lint:prose:test`). |
+| `checks_test.py` | CLI tests for narration and MR descriptions, using a temporary Git repository. |
 | `narration-comments.yml` | Lower-precision ast-grep-native fallback for the `block_label` half (see below). Committed for documentation / ast-grep-only setups; **not** the active gate. |
+
+## Commands
+
+Run the Python entrypoints through the shared frozen `ci` project:
+
+```shell
+mise exec -- uv run --frozen --project ci python ci/linting/check_narration.py
+mise exec -- uv run --frozen --project ci python ci/linting/check_narration.py --diff-base origin/main
+mise exec -- uv run --frozen --project ci python ci/linting/check_mr_description.py
+mise exec -- uv run --frozen --project ci python -m unittest discover -s ci/linting -p '*_test.py'
+```
+
+Narration file arguments are repository-relative paths. Quote paths that contain spaces.
+Missing files and non-Rust paths are skipped. An unreachable diff base fails with exit 2.
+Findings return exit 1; CI and lefthook control whether those findings block a change.
+MR descriptions are skipped outside MR pipelines, when empty, or when truncated without a headline boundary.
 
 ## Prose linter
 
@@ -31,7 +48,7 @@ Before scoring, fenced code, tables, headings, blockquotes (quoted people keep
 their own words), link targets, template placeholders, and column-aligned label
 lines are dropped. Inline code counts as
 one word. HTML comment markers are removed but the comment text is scored,
-because template guidance is written for agents. In yaml, every string scalar
+because template guidance is written for agents. In YAML, every string scalar
 is scored except `name`, `version`, `variables`, `license`, `metadata`,
 `allowed-tools`, and `compatibility`.
 
@@ -61,14 +78,15 @@ mise run lint:prose:test
 
 - **lefthook** `pre-commit` job `narration` (advisory; prints warnings, does not
   block — `|| true` in `lefthook.yml`) and `prose` (blocks the commit).
-- **CI** jobs `lint:narration`, `lint:mr-description`, and `lint:prose`, defined in
-  [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). The first two use
-  `allow_failure: true` (yellow/advisory); `lint:prose` blocks. In merge-request
+- **CI** jobs `advisory-checks` and `repository-checks`, defined in
+  [`.gitlab/ci/linting.yml`](../../.gitlab/ci/linting.yml). Narration and description use
+  `allow_failure: true` (yellow/advisory); prose blocks. In merge-request
   pipelines the narration and prose jobs scope to files the MR changed
   (`--diff-base`).
 
 The narration lint measured ~87% precision (~151 flags) over the current
 `crates/` tree (task #2933).
+
 ## ast-grep fallback (`narration-comments.yml`)
 
 ast-grep can express only the `block_label` half of the detector (a
@@ -87,7 +105,7 @@ scorer) at materially lower precision (~70%): the extra flags are continuation
 lines of multi-line why-comments that the Python scorer correctly exempts.
 
 ```shell
-mise exec -- ast-grep scan --rule scripts/linting/narration-comments.yml crates/
+mise exec -- ast-grep scan --rule ci/linting/narration-comments.yml crates/
 ```
 
 ## Promoting a gate to blocking
@@ -105,7 +123,7 @@ The kill-switch is two deletes plus a few one-line reference removals (all
 fail-loud, so nothing silently lingers):
 
 ```shell
-rm -rf scripts/linting .gitlab/ci/linting.yml
+rm -rf ci/linting .gitlab/ci/linting.yml
 # then remove:
 #   - the `- local: .gitlab/ci/linting.yml` line in .gitlab-ci.yml
 #   - the `narration` and `prose` pre-commit jobs in lefthook.yml

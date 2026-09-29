@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --quiet
-# /// script
-# requires-python = ">=3.10"
-# dependencies = ["pyyaml>=6.0"]
-# ///
+#!/usr/bin/env python3
 """
 Prose lint for the text this repo ships to LLMs and reviewers.
 
@@ -327,13 +323,14 @@ def main(argv: list[str]) -> int:
         return 2
     if findings:
         print(f"\nprose lint: {len(findings)} finding(s) in {len({f.path for f in findings})} of {len(files)} file(s).")
-        print("Rewrite the sentence; do not widen the gate. Rules: scripts/linting/README.md")
+        print("Rewrite the sentence; do not widen the gate. Rules: ci/linting/README.md")
         return 1
     print(f"prose lint: {len(files)} file(s) pass.")
     return 0
 
 
 if __name__ == "__main__":
+    os.chdir(Path(__file__).resolve().parents[2])
     try:
         sys.exit(main(sys.argv[1:]))
     except LintError as exc:

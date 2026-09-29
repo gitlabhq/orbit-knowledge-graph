@@ -91,7 +91,7 @@ local-cli-build-windows-amd64:
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip
-    - ./scripts/ci/install-llvm-mingw.sh
+    - ./ci/automation/install-llvm-mingw.sh
     - export PATH="/opt/llvm-mingw/bin:$PATH"
   script:
     - ./scripts/build-local-cli.sh

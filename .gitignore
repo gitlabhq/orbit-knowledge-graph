@@ -1,5 +1,7 @@
 target/
 __pycache__/
+.venv/
+.cache/
 *.pyc
 .DS_Store
 report.xml

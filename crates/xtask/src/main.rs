@@ -1,9 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-mod dashboards;
 mod ddl;
-mod integration_lanes;
 mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
@@ -63,26 +61,10 @@ enum Command {
         #[arg(long, short)]
         diff: Option<std::path::PathBuf>,
     },
-    /// Generate the Orbit Grafana dashboards from the metric catalog.
-    Dashboards {
-        /// Write dashboards under this directory instead of the default.
-        #[arg(short, long)]
-        dir: Option<std::path::PathBuf>,
-        /// Diff regenerated dashboards against the committed files and
-        /// return a non-zero exit if they differ.
-        #[arg(long)]
-        check: bool,
-    },
     /// Manage the schema-migration ledger (config/schema-migrations.yaml).
     MigrationLedger {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
-    },
-    /// Verify that the integration lanes partition every container test.
-    IntegrationLanes {
-        /// Check the filters in .gitlab-ci.yml.
-        #[arg(long)]
-        check: bool,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
@@ -334,8 +316,6 @@ async fn main() -> Result<()> {
             MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
-        Command::Dashboards { dir, check } => dashboards::run(dir, check),
-        Command::IntegrationLanes { check } => integration_lanes::run(check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
         Command::Loadtest {
             endpoint,

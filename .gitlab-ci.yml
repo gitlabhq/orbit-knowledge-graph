@@ -126,6 +126,27 @@ stages:
       junit:
         - target/nextest/ci/junit.xml
 
+.python-check-template:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:0.9.28-python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  needs: []
+  variables:
+    UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+    UV_PYTHON_DOWNLOADS: "never"
+    UV_PROJECT: "$CI_PROJECT_DIR/ci"
+    UV_FROZEN: "true"
+  cache:
+    key:
+      files:
+        - ci/uv.lock
+    paths:
+      - .cache/uv/
+  before_script:
+    - apk add --no-cache bash git
+    - uv sync
+
 # Identity for jobs acting as the Orbit automation bot (infra-mgmt!3039): the
 # glab image plus the bot token from Vault, readable on protected refs only.
 # Extend it and add your own rules, needs, and script.
@@ -141,6 +162,10 @@ stages:
       file: false
       vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
       token: $VAULT_ID_TOKEN
+  before_script:
+    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
+    - apk add --no-cache bash git curl jq coreutils
+    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
 
 # "Solo" scheduled pipelines run exactly one job and skip the rest of the CI
 # suite. A schedule opts in by setting SCHEDULE_ONLY=<job-name>: the named job
@@ -180,17 +205,6 @@ stages:
 
 # Lint Stage
 
-agent-file-sync-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
-
 mr-title-check:
   stage: lint
   image: node:26-alpine
@@ -203,76 +217,7 @@ mr-title-check:
   script:
     - ./scripts/check-mr-title.sh
 
-ontology-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
-    - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
-
-named-query-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json
-
-versions-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - uvx check-jsonschema --verbose --schemafile config/schemas/versions.schema.json config/versions.yaml
-
-migration-ledger-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - uvx check-jsonschema --verbose --schemafile config/schemas/schema-migrations.schema.json config/schema-migrations.yaml
-
-indexer-scenario-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
-
-
-setup-schema-validate:
-  stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
-    - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
-
-generate-config-schema:
+generated-files-check:
   stage: lint
   extends:
     - .job-template
@@ -280,62 +225,11 @@ generate-config-schema:
     - .mr-and-main-rules
   needs: []
   script:
-    - mise run schema:generate
-    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
+    - mise ci:generated
   artifacts:
     paths:
       - config/schemas/config.schema.json
     expire_in: 24 hours
-
-rust-toolchain-sync-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - mise run toolchain:check
-
-metrics-catalog-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - mise run metrics:catalog:check
-
-dashboards-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - mise run dashboards:check
-
-query-language-docs-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - mise run docs:query-language:check
-
-ddl-freshness-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - bash ./scripts/check-ddl-freshness.sh
 
 integration-test-lane-coverage-check:
   stage: lint
@@ -348,129 +242,22 @@ integration-test-lane-coverage-check:
     - mise run lint:integration-test-lanes
     - sccache --show-stats || true
 
-migration-ledger-check:
-  stage: lint
+vendored-check:
   extends:
-    - .job-template
-    - .sccache-template
+    - .python-check-template
     - .mr-only-rules
-  needs: []
   script:
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - apk add --no-cache curl gzip tar yq
+    - uv run ci/check_vendored.py
 
-pinned-version-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-
-skill-version-bump-check:
-  stage: lint
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git
-    - |
-      if ! git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1; then
-        git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
-        export BASE_REF_OVERRIDE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-      fi
-      python3 scripts/check-skill-version-bump.py --ci --no-worktree ${BASE_REF_OVERRIDE:+--base-ref "$BASE_REF_OVERRIDE"}
-
-prompt-version-bump-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git
-    - |
-      if ! git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1; then
-        git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
-        export CI_MERGE_REQUEST_DIFF_BASE_SHA="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-      fi
-      sh scripts/check-prompt-version-bump.sh
-
-iglu-schema-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  # Full check (local file vs upstream content from the public Iglu
-  # Pages CDN). Drift between committed schema JSON and upstream fails
-  # the job.
-  script:
-    - apk add --no-cache bash curl python3 yq
-    - bash ./scripts/vendored/run.sh check iglu
-
-system-note-actions-check:
-  stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  # Verifies config/vendored/system_note_metadata.actions matches Rails
-  # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
-  script:
-    - apk add --no-cache bash curl python3 yq
-    - bash ./scripts/vendored/run.sh check gitlab_system_note_actions
-
-duckdb-fts-sources-sync-check:
-  stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache bash git gzip tar yq
-    - bash ./scripts/vendored/run.sh check duckdb
-
-unused-deps-check:
+rust-hygiene-check:
   stage: lint
   extends:
     - .job-template
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo shear
-
-fmt-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .mr-only-rules
-  script:
-    - cargo fmt --all -- --check
-
-newline-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .mr-only-rules
-  script:
-    - mise run lint:newlines
+    - mise ci:hygiene
 
 lint-check:
   stage: lint
@@ -479,8 +266,7 @@ lint-check:
     - .sccache-template
     - .mr-only-rules
   script:
-    - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
-    - cargo clippy -p duckdb-client --all-targets -- -D warnings
+    - mise lint:code
     - sccache --show-stats || true
 
 # Security Stage
@@ -759,29 +545,12 @@ integration-test-data-correctness:
       test(=server::performance::performance_queries)
 
 corpus-smoke-test:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  tags:
-    - ${RUNNER_LARGE}
-  services:
-    - name: docker:dind
-      alias: docker
+  extends: .integration-test-template
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    TESTCONTAINERS_HOST_OVERRIDE: docker
     NEXTEST_FILTER: test(corpus_smoke)
-  needs: []
   before_script:
     - !reference [.sccache-template, before_script]
     - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-  script:
-    # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
-    # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
-    - sccache --show-stats || true
 
 # Benchmark Stage
 #
@@ -937,10 +706,9 @@ code-indexing-benchmark-v2-analyze:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
 
-.docker-build:
+.docker-build-template:
   stage: build
   image: docker:29
-  needs: []
   services:
     - name: docker:29-dind
       alias: docker
@@ -948,17 +716,23 @@ code-indexing-benchmark-v2-analyze:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
+  script:
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+.docker-build:
+  extends: .docker-build-template
+  needs: []
   artifacts:
     paths:
       - image-digests/
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  script:
+  before_script:
     - git fetch --tags
     - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1s/^v//p')
     - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
+    - export IMAGE_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
 docker-build-amd64:
   extends: .docker-build
@@ -998,24 +772,16 @@ docker-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64@$(cat image-digests/arm64)"
 
 docker-build-mr:
-  stage: build
-  image: docker:29
+  extends: .docker-build-template
   tags:
     - ${RUNNER_LARGE}
   needs: []
-  services:
-    - name: docker:29-dind
-      alias: docker
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    IMAGE_NAME: gkg
+    IMAGE_TAG: develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
-  script:
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
@@ -1151,23 +917,15 @@ semantic-release:
     - npx semantic-release
 
 .docker-release:
-  stage: build
-  image: docker:29
-  services:
-    - name: docker:29-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    IMAGE_NAME: gkg
+  extends: .docker-build-template
   artifacts:
     paths:
       - image-digests/
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
-  script:
+  before_script:
     - export GKG_VERSION="${CI_COMMIT_TAG#v}"
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${GKG_VERSION}-${ARCH}"
+    - export IMAGE_TAG="${GKG_VERSION}-${ARCH}"
 
 release-build-amd64:
   extends: .docker-release
@@ -1265,7 +1023,7 @@ review-docs-cleanup:
 #   GOOGLE_CLOUD_PROJECT — GCP project ID for Vertex AI
 #   VERTEX_SA_KEY_B64    — Masked + Hidden
 
-ai:performance:
+.ai-review-template:
   extends: .ai-review-base
   stage: ai
   timeout: 1 hour
@@ -1279,47 +1037,25 @@ ai:performance:
   environment:
     name: ai-review
     action: access
+  variables:
+    GOOGLE_CLOUD_LOCATION: "global"
+
+ai:performance:
+  extends: .ai-review-template
   variables:
     AI_AGENT: performance
-    GOOGLE_CLOUD_LOCATION: "global"
-    AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
+    AI_REFS: &ai-code-refs "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
 
 ai:security:
-  extends: .ai-review-base
-  stage: ai
-  timeout: 1 hour
-  needs: []
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
-      allow_failure: true
-  environment:
-    name: ai-review
-    action: access
+  extends: .ai-review-template
   variables:
     AI_AGENT: security
-    GOOGLE_CLOUD_LOCATION: "global"
-    AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
+    AI_REFS: *ai-code-refs
 
 ai:docs:
-  extends: .ai-review-base
-  stage: ai
-  timeout: 1 hour
-  needs: []
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
-      allow_failure: true
-  environment:
-    name: ai-review
-    action: access
+  extends: .ai-review-template
   variables:
     AI_AGENT: docs
-    GOOGLE_CLOUD_LOCATION: "global"
 
 # E2E Stage
 

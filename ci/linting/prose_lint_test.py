@@ -1,8 +1,4 @@
-#!/usr/bin/env -S uv run --quiet
-# /// script
-# requires-python = ">=3.10"
-# dependencies = ["pyyaml>=6.0"]
-# ///
+#!/usr/bin/env python3
 import os
 import subprocess
 import tempfile

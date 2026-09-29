@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
-# Orchestrator for the orbit-perf CI job (see .gitlab/ci/orbit-perf.yml).
-#
-# Brings up gitlab-dev-stack + Orbit with caproni (config in
-# scripts/ci/orbit-perf/caproni), seeds gkg's ClickHouse with an
-# xtask-generated synthetic graph (bulk Parquet load, bypassing siphon/seed/
-# indexing), and runs the gRPC load test (xtask loadtest) against gkg.
-#
-# Env (from the CI job): SYNTH_CONFIG, ROUNDS, CONCURRENCY, LOAD_JOBS.
 set -euo pipefail
 
-ROOT="$(pwd)"                                   # knowledge-graph checkout (xtask lives here)
+ROOT="$(pwd)"
 SYNTH_CONFIG="${SYNTH_CONFIG:-crates/xtask/simulator_small.yaml}"
 ROUNDS="${ROUNDS:-5}"
 CONCURRENCY="${CONCURRENCY:-20}"
 LOAD_JOBS="${LOAD_JOBS:-4}"
-CAPRONI_DIR="$ROOT/scripts/ci/orbit-perf/caproni"
+CAPRONI_DIR="$ROOT/ci/automation/orbit-perf/caproni"
 
 log() { echo "==> $*" >&2; }
 # Debug build, so it shares the compile cache with the lint jobs that also build xtask.
@@ -23,9 +15,6 @@ cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$
 kc()  { cap kubectl "$@"; }
 chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }
 
-# ---------------------------------------------------------------------------
-# 1. Start the stack in the background; it does not depend on the synth data.
-# ---------------------------------------------------------------------------
 log "[1/4] bringing up gitlab-dev-stack + Orbit in the background"
 mise -C "$CAPRONI_DIR" install
 UP_LOG="$ROOT/caproni-up.log"
@@ -37,9 +26,6 @@ UP_LOG="$ROOT/caproni-up.log"
 ) >"$UP_LOG" 2>&1 &
 UP_PID=$!
 
-# ---------------------------------------------------------------------------
-# 2. Build xtask + generate the synthetic graph (Parquet).
-# ---------------------------------------------------------------------------
 log "[2/4] generating synthetic graph ($SYNTH_CONFIG)"
 xtask synth generate -c "$SYNTH_CONFIG" --force
 OUT_DIR="$(grep -E '^\s*output_dir:' "$SYNTH_CONFIG" | head -1 | awk '{print $2}' | tr -d '"'"'"'')"
@@ -72,9 +58,6 @@ if ! wait "$UP_PID"; then
 fi
 cat "$UP_LOG" >&2
 
-# ---------------------------------------------------------------------------
-# 3. Bulk-load the Parquet into gkg's versioned ClickHouse tables.
-# ---------------------------------------------------------------------------
 log "[3/4] loading synthetic graph into gkg ClickHouse"
 # Sort by version number, not lexically: a plain DESC ranks v9 above v72.
 PFX=""
@@ -132,9 +115,6 @@ for t in gl_merge_request gl_note gl_edge gl_project gl_group gl_user; do
   log "       ${PFX}_${t} = ${n}"
 done
 
-# ---------------------------------------------------------------------------
-# 4. Port-forward gkg gRPC + run the gRPC load test (xtask loadtest).
-# ---------------------------------------------------------------------------
 log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY)"
 
 kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >/tmp/gkg-pf.log 2>&1 &

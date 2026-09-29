@@ -16,11 +16,5 @@ doc-principles-sync:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "doc-principles-sync"
-  before_script:
-    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
-    - apk add --no-cache bash curl python3 git coreutils
-    # The project-level GITLAB_TOKEN variable outranks glab auth login config,
-    # so override it or glab acts as that token's bot.
-    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
   script:
-    - bash scripts/ci/sync-doc-principles.sh
+    - bash ci/automation/sync-doc-principles.sh

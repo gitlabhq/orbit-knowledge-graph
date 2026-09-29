@@ -1,5 +1,3 @@
-# Orbit performance test: seeds a synthetic graph into a real caproni + Orbit
-# stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
 # Default branch only, never on MRs: it stands up a full cluster.
 orbit-perf:
   extends:
@@ -32,7 +30,7 @@ orbit-perf:
     ROUNDS: "5"
     CONCURRENCY: "20"
   script:
-    - bash scripts/ci/orbit-perf.sh
+    - bash ci/automation/orbit-perf.sh
   artifacts:
     when: always
     paths:

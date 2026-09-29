@@ -27,7 +27,6 @@ Usage:
 import sys
 import re
 
-# Imperative / section-label openers that begin a narration comment.
 BLOCK_LABEL_OPENERS = {
     "setup", "set", "cleanup", "clean", "teardown", "arrange", "act",
     "assert", "given", "when", "then", "test", "tests", "testing",

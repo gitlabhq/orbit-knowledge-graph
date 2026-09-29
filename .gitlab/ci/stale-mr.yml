@@ -35,4 +35,4 @@ stale-mr-sweep:
     - apk add --no-cache bash jq coreutils
     - export GITLAB_TOKEN="$STALE_MR_GITLAB_TOKEN"
   script:
-    - bash scripts/ci/close-stale-mrs.sh
+    - bash ci/automation/close-stale-mrs.sh

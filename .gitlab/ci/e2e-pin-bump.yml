@@ -13,10 +13,7 @@ e2e-pin-bump:
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-pin-bump"
   before_script:
-    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
-    - apk add --no-cache bash curl python3 git coreutils yq
-    # The project-level GITLAB_TOKEN variable outranks glab auth login config,
-    # so override it or glab acts as that token's bot.
-    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
+    - !reference [.automation-bot, before_script]
+    - apk add --no-cache python3 yq
   script:
-    - bash scripts/ci/open-e2e-bump-mr.sh
+    - bash ci/automation/open-e2e-bump-mr.sh
