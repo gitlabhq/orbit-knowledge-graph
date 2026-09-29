@@ -8,7 +8,8 @@ use std::path::Path;
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 pub use code_graph::v2::error::{AbortPhase, FileFault, FileReason, FileSkip};
 use orbit_utils::fs_walk::{
-    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step, walk_dir,
+    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
+    walk_dir_parallel,
 };
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -19,7 +20,7 @@ pub fn code_filter() -> CodeFilter {
 
 /// Walk a repository on disk, honouring `.gitignore`, and classify every file.
 pub fn walk(root: &Path) -> Result<FileInventory, StreamError> {
-    walk_dir(root, &mut code_filter())
+    walk_dir_parallel(root, code_filter)
 }
 
 /// Classify the named files under `root`; for a change set, where a full

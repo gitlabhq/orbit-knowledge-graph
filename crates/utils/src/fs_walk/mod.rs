@@ -7,4 +7,4 @@ pub use stream::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
     SkipReason, StreamError, step,
 };
-pub use walk::walk_dir;
+pub use walk::{walk_dir, walk_dir_parallel};
