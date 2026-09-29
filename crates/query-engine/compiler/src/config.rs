@@ -117,7 +117,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         security {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, scope_proofs]
             mutates: [node]
         }
         cursor {
