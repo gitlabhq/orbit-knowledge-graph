@@ -31,7 +31,8 @@ CI pipelines, or custom tooling.
 
 ## Authentication
 
-All endpoints require a GitLab personal access token with `read_api` scope,
+All endpoints require a GitLab personal access token with `read_api` scope, or a
+[fine-grained personal access token](../security.md#fine-grained-personal-access-tokens),
 passed as a Bearer token:
 
 ```shell
