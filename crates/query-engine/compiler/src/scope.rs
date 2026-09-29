@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod application;
 mod preparation;
@@ -11,6 +11,13 @@ pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
     requirements: Vec<ScopeProof>,
+    table_scans: HashSet<String>,
+}
+
+impl QueryScope {
+    pub fn table_scans(&self) -> &HashSet<String> {
+        &self.table_scans
+    }
 }
 
 use ontology::TraversalPathKind;
@@ -158,8 +165,6 @@ fn propagate_scope_proofs(
     model: &(impl query_data_model::QueryDataModel + ?Sized),
     seed: &HashMap<String, ScopeProof>,
 ) -> HashMap<String, ScopeProof> {
-    use std::collections::HashSet;
-
     if seed.is_empty() {
         return HashMap::new();
     }
@@ -212,9 +217,15 @@ fn propagate_scope_proofs(
 }
 
 fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
-    let key = match value {
-        PathScopeId::Numeric(id) => Expr::param(ChType::Int64, *id),
-        PathScopeId::Text(text) => Expr::param(ChType::String, text.clone()),
+    let (key, from) = match value {
+        PathScopeId::Numeric(id) => (
+            Expr::param(ChType::Int64, *id),
+            TableRef::scan(source_table, LOOKUP_ALIAS),
+        ),
+        PathScopeId::Text(text) => (
+            Expr::param(ChType::String, text.clone()),
+            TableRef::scan_final(source_table, LOOKUP_ALIAS),
+        ),
     };
     let latest = |column: &str| {
         Expr::func(
@@ -241,7 +252,7 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
     );
     Expr::Scalar(Box::new(Query {
         select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::scan(source_table, LOOKUP_ALIAS),
+        from,
         where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
         ..Default::default()
     }))

@@ -176,16 +176,18 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
+    table_scans: &HashSet<String>,
 ) -> Result<Plan> {
-    plan(input, model, hydration_options, true)
+    plan(input, model, hydration_options, true, table_scans)
 }
 
 pub fn plan_duckdb(
     input: &Input,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
+    table_scans: &HashSet<String>,
 ) -> Result<Plan> {
-    plan(input, model, hydration_options, false)
+    plan(input, model, hydration_options, false, table_scans)
 }
 
 fn plan<M>(
@@ -193,13 +195,14 @@ fn plan<M>(
     model: &M,
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
+    table_scans: &HashSet<String>,
 ) -> Result<Plan>
 where
     M: QueryDataModel + ?Sized,
 {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            Ok(edge_chain::plan(input, model, use_fk_elision))
+            Ok(edge_chain::plan(input, model, use_fk_elision, table_scans))
         }
         QueryType::Neighbors => neighbors::plan_neighbors(input, model),
         QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),

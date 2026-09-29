@@ -200,7 +200,12 @@ pub enum FkShape {
     Chain,
 }
 
-pub fn plan<M>(input: &Input, model: &M, use_fk_elision: bool) -> Plan
+pub fn plan<M>(
+    input: &Input,
+    model: &M,
+    use_fk_elision: bool,
+    table_scans: &HashSet<String>,
+) -> Plan
 where
     M: QueryDataModel + ?Sized,
 {
@@ -220,7 +225,13 @@ where
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
-            node_plan.hydration = determine_hydration(node_plan, input, &hops, &denormalized);
+            node_plan.hydration = determine_hydration(
+                node_plan,
+                input,
+                &hops,
+                &denormalized,
+                table_scans.contains(&node_plan.alias),
+            );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
         }
@@ -607,6 +618,7 @@ fn determine_hydration(
     input: &Input,
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
+    requires_table_scan: bool,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -650,11 +662,7 @@ fn determine_hydration(
 
     if has_uncovered_filter {
         HydrationStrategy::FilterOnly
-    } else if input
-        .nodes
-        .iter()
-        .any(|node| node.id == *alias && node.requires_table_scan)
-    {
+    } else if requires_table_scan {
         HydrationStrategy::Join
     } else {
         HydrationStrategy::Skip
