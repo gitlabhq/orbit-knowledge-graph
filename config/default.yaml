@@ -213,6 +213,7 @@ billing:
   quota:
     enabled: false
     customers_dot_url: "http://localhost:5000"
+    auth_mode: admin_token                 # admin_token (.com) | license_checksum (self-managed, Dedicated)
     request_timeout_ms: 1000
     fallback_cache_ttl_secs: 3600
     # api_user: ""
