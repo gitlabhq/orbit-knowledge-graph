@@ -86,11 +86,11 @@ fn named_language(frontend: Frontend) -> named_queries::Language {
 
 fn schema_query_result(
     response: &SchemaResponse,
-    use_llm_format: bool,
+    text_format: bool,
 ) -> Result<ExecuteQueryResult, PipelineError> {
     use crate::proto::execute_query_result::Content;
 
-    let content = if use_llm_format {
+    let content = if text_format {
         ToolService::encode_schema_toon(response)
             .map(Content::FormattedText)
             .map_err(|error| PipelineError::custom(error.to_string()))?
