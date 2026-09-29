@@ -13,7 +13,7 @@ use orbit_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
 pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
-pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter, encode as gql_encode};
+pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter};
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
     PaginationResponse,

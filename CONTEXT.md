@@ -149,5 +149,5 @@ A line-oriented text format for representing graph query results compactly. Desi
 _Avoid_: LLM format, text format
 
 **GQL Response Format**:
-A text table that renders query results in GQL pattern syntax. Nodes print as `(:Label {id: 1, ...})` and relationships as `-[:REL]->`. Used when queries specify `format=gql` (ADR 019). Intended to replace **GOON** once evals confirm it performs at least as well.
+A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019). Intended to replace **GOON** once evals confirm it performs at least as well.
 _Avoid_: Cypher output

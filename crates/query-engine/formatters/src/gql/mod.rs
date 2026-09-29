@@ -4,12 +4,9 @@ use semver::Version;
 use serde_json::Value;
 use shared::PipelineOutput;
 
-use super::graph::GraphFormatter;
 use super::{FormatName, ResultFormatter};
 
 mod encode;
-
-pub use encode::encode;
 
 pub static GQL_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
     orbit_versions::VERSIONS
@@ -31,7 +28,6 @@ impl ResultFormatter for GqlFormatter {
     }
 
     fn format(&self, output: &PipelineOutput) -> Value {
-        let response = GraphFormatter.build_response(output);
-        Value::String(encode::encode(&response, &GQL_OUTPUT_FORMAT_VERSION))
+        Value::String(encode::encode(output))
     }
 }
