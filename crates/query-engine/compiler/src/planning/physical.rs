@@ -6,14 +6,14 @@ use super::bind::Source;
 use super::generic::{Expr, Function, Node, Op, Operation, Schema, ValueId, ValueType, Values};
 use crate::error::{QueryError, Result};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Read {
     pub table: String,
     pub columns: Vec<(ValueId, String)>,
     pub current_rows: CurrentRows,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CurrentRows {
     Snapshot,
     Final,

@@ -327,7 +327,7 @@ fn plan_remote(
     )
 }
 
-fn plan_query<C: CompilerCtx, S: EmitOperation + Clone>(
+fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
     ctx: &mut C,
     mut select_source: impl FnMut(
         Source,

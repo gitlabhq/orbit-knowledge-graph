@@ -19,10 +19,14 @@ pub enum ValueType {
     Record(Vec<ValueType>),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Values(Vec<ValueType>);
 
 impl Values {
+    pub fn extends(&self, previous: &Self) -> bool {
+        self.0.starts_with(&previous.0)
+    }
+
     pub fn allocate(&mut self, data_type: ValueType) -> ValueId {
         let id = ValueId(self.0.len());
         self.0.push(data_type);

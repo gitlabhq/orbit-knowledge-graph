@@ -23,14 +23,6 @@ pub fn sip<S: Operation + Clone, E: Operation + Clone>(
         return Ok(vec![]);
     };
 
-    if root
-        .inputs
-        .iter()
-        .any(|input| matches!(input.op, Op::Reference { .. }))
-    {
-        return Ok(vec![]);
-    }
-
     let mut schemas = Vec::new();
     for subplan in &candidate.program.subplans {
         schemas.push(subplan.output_with(&candidate.values, &schemas)?);
@@ -45,6 +37,44 @@ pub fn sip<S: Operation + Clone, E: Operation + Clone>(
     } else {
         return Ok(vec![]);
     };
+
+    for producer in 0..2 {
+        let consumer = 1 - producer;
+        let Op::Reference { subplan, exports } = &root.inputs[producer].op else {
+            continue;
+        };
+        let membership = &root.inputs[consumer];
+        let Op::Join {
+            kind: JoinKind::Semi,
+            condition:
+                Expr::Call {
+                    function: Scalar::Equal,
+                    arguments,
+                },
+        } = &membership.op
+        else {
+            continue;
+        };
+        let [Expr::Value(consumer_key), Expr::Value(producer_key)] = arguments.as_slice() else {
+            continue;
+        };
+        let Op::Reference {
+            subplan: key_source,
+            exports: key_exports,
+        } = &membership.inputs[1].op
+        else {
+            continue;
+        };
+
+        if *consumer_key == keys[consumer]
+            && key_source == subplan
+            && exports.iter().any(|(source, target)| {
+                *target == keys[producer] && key_exports.contains(&(*source, *producer_key))
+            })
+        {
+            return Ok(vec![]);
+        }
+    }
 
     let mut alternatives = Vec::new();
     for producer in 0..2 {
