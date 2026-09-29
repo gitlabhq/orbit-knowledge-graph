@@ -1419,6 +1419,9 @@
         "customers_dot_url": {
           "type": "string"
         },
+        "auth_mode": {
+          "$ref": "#/$defs/QuotaAuthMode"
+        },
         "api_user": {
           "type": [
             "string",
@@ -1446,8 +1449,23 @@
       "required": [
         "enabled",
         "customers_dot_url",
+        "auth_mode",
         "request_timeout_ms",
         "fallback_cache_ttl_secs"
+      ]
+    },
+    "QuotaAuthMode": {
+      "oneOf": [
+        {
+          "description": "`X-Admin-Email` / `X-Admin-Token` from `api_user` / `api_token`. GitLab.com only.",
+          "type": "string",
+          "const": "admin_token"
+        },
+        {
+          "description": "`X-License-Token` from the `license_checksum` JWT claim. Self-managed and Dedicated,\nwhere the CustomersDot admin token must not be deployed.",
+          "type": "string",
+          "const": "license_checksum"
+        }
       ]
     },
     "FeaturesConfig": {
