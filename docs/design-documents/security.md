@@ -57,6 +57,21 @@ sequenceDiagram
     Workhorse-->>-Client: 13. Return final, redacted data
 ```
 
+## Token Gateway: Fine-Grained Personal Access Tokens
+
+Fine-grained personal access tokens gate Orbit endpoints the way they gate Global Search's `/search`.
+Rails checks the token once, before the route runs, and does not read it again.
+Results then follow the token owner's access through Layers 1 to 3.
+
+- `read_orbit` (Orbit: Read, User tab) guards every Orbit REST route and `POST /api/v4/orbit/mcp`.
+  Every route declares the user boundary, so group-scoped and project-scoped tokens get `403`.
+- The other permissions on the token do not filter Orbit results, and Orbit does not parse queries for namespaces.
+- Group-limited access is deferred to `/groups/:id/orbit/*` routes, where the caller picks the group in the path.
+  Filtering by the token's selected groups was rejected in review: token scopes gate endpoints, they do not filter results.
+  See [issue 992](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992).
+
+Prior art in Rails: the [Global Search manifest](https://gitlab.com/gitlab-org/gitlab/-/blob/236dbf8447e1/config/authz/permission_groups/assignable_permissions/search/global_search/use.yml) and [routes](https://gitlab.com/gitlab-org/gitlab/-/blob/236dbf8447e1/lib/api/search.rb#L265).
+
 ## Layer 1: Logical Tenant Segregation by Organization
 
 The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces, regardless of which organization(s) the paths belong to.
