@@ -169,6 +169,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
 - When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- Containment elision preserves the requested direction and constrains the target's traversal-path depth. The compiler retains the target's table scan even when the query does not return its properties.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 

@@ -1969,6 +1969,27 @@ mod tests {
                 "n",
                 "'CONTAINS'|'HAS_NOTE'",
             ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "p.created_at",
+                "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
+                "d.state",
+                "d",
+                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "mr",
+                "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
+            ),
         ];
         for (nodes, rels, group, agg, expect) in cases {
             let sql = compile_sql_scoped(nodes, rels, group, agg);
@@ -2068,6 +2089,12 @@ mod tests {
                 "Branch",
                 r#""from":"a","to":"x""#,
                 "(x.traversal_path = (SELECT",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x","direction":"incoming""#,
+                "gl_edge",
             ),
             ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
             ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),

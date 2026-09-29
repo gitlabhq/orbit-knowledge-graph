@@ -1,0 +1,8 @@
+description: GQL rejects incoming containment from a branch to its project
+
+query:
+  gql: |
+    MATCH (p:Project {id: 7000})<-[:CONTAINS]-(b:Branch) RETURN count(b) AS c LIMIT 10
+
+expect:
+  compile_error: "CONTAINS goes from Project to Branch; reverse the arrow"
