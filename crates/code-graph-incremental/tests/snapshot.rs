@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::Changes;
+use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, State, inventory, templates};
 
@@ -159,6 +159,6 @@ fn a_snapshot_from_another_format_version_is_refused_by_name() {
 
     assert_eq!(
         error.to_string(),
-        "snapshot format v99; this build reads v1"
+        format!("snapshot format v99; this build reads v{SNAPSHOT_VERSION}")
     );
 }

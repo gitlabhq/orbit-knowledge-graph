@@ -196,6 +196,8 @@ pub enum Canonical {
         props(def_type = "true", callable = "true", display = "EnumVariant")
     )]
     EnumVariant,
+    #[strum(serialize = "__macro", props(def_type = "true", display = "Macro"))]
+    Macro,
 
     #[strum(serialize = "__ssa_hint")]
     SsaHint,

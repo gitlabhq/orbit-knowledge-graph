@@ -61,6 +61,9 @@ pub struct LinkConfig {
     /// Whether an import may rebind a name already defined in the same scope.
     /// Ruby autoloads must not; a local class always wins.
     pub imports_shadow_locals: bool,
+    /// Whether an import path may name a def in the current file, as
+    /// `use crate::dep::Service` does for an inline `mod dep {}`.
+    pub inline_modules: bool,
 }
 
 impl Default for LinkConfig {
@@ -68,6 +71,7 @@ impl Default for LinkConfig {
         Self {
             builtins: Default::default(),
             imports_shadow_locals: true,
+            inline_modules: false,
         }
     }
 }
@@ -120,6 +124,8 @@ struct LinkSection {
     builtins: Vec<String>,
     #[serde(default = "default_true")]
     imports_shadow_locals: bool,
+    #[serde(default)]
+    inline_modules: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -148,6 +154,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
         .map_or_else(LinkConfig::default, |l| LinkConfig {
             builtins: l.builtins.iter().map(|b| lang.syms.intern(b)).collect(),
             imports_shadow_locals: l.imports_shadow_locals,
+            inline_modules: l.inline_modules,
         });
     let Some(r) = section.resolve.as_ref() else {
         return Ok(Config {

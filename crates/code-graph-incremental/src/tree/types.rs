@@ -204,6 +204,12 @@ impl Tree {
         }
     }
 
+    pub fn clear_tags(&mut self, node: u32, keys: &[u32]) {
+        if let Some(tags) = self.tags.get_mut(&node) {
+            tags.retain(|t| !keys.contains(&t.key));
+        }
+    }
+
     pub fn get_tag(&self, node: u32, key: u32) -> Option<u32> {
         self.tags
             .get(&node)

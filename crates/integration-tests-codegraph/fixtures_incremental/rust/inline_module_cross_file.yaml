@@ -1,0 +1,28 @@
+name: "Rust: imports from an inline module in another file"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "probe"
+  - path: src/lib.rs
+    content: |
+      pub mod usage;
+      pub mod dep {
+          pub struct Service;
+          impl Service { pub fn ping(&self) {} }
+          pub fn helper() {}
+      }
+  - path: src/usage.rs
+    content: |
+      use crate::dep::{Service, helper};
+      pub fn run() { let s = Service; s.ping(); helper(); }
+tests:
+  - name: "cross-file inline module"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: "dep::Service::ping" } }
+      - { row: { callee: "dep::helper" } }

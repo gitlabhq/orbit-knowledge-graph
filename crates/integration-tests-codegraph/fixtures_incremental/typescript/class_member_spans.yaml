@@ -1,0 +1,64 @@
+name: "TypeScript class members keep their kinds and full spans"
+
+pipeline: js
+
+fixtures:
+  - path: lib/members.ts
+    content: |-
+      const dynamicKey = 'dyn';
+
+      export abstract class Shape {
+        #secret(): number {
+          return 1;
+        }
+
+        get area(): number {
+          return this.#secret();
+        }
+
+        set area(value: number) {
+          void value;
+        }
+
+        static origin(): Shape | null {
+          return null;
+        }
+
+        [dynamicKey](): void {}
+
+        abstract perimeter(): number;
+
+        describe(): string { return 'shape'; } }
+
+tests:
+  - name: Regular, private, accessor, static, and abstract methods are all extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/members.ts' AND d.fqn STARTS WITH 'Shape::' AND d.definition_type <> 'Variable'
+      RETURN d.fqn AS fqn, d.definition_type AS dt, d.start_line AS sl, d.end_line AS el
+    assert:
+      - { row_count: 6 }
+      - { row: { fqn: "Shape::secret", dt: "Method", sl: 4, el: 6 } }
+      - { row: { fqn: "Shape::area", dt: "Method", sl: 8, el: 10 } }
+      - { row: { fqn: "Shape::area", dt: "Method", sl: 12, el: 14 } }
+      - { row: { fqn: "Shape::origin", dt: "StaticMethod", sl: 16, el: 18 } }
+      - { row: { fqn: "Shape::perimeter", dt: "Method", sl: 22, el: 22 } }
+      - { row: { fqn: "Shape::describe", dt: "Method", sl: 24, el: 24 } }
+
+  - name: Computed keys are not extracted as members
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/members.ts' AND d.name = 'dynamicKey' AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: Definitions ending at EOF without a trailing newline keep their end columns
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/members.ts' AND d.fqn IN ['Shape', 'Shape::describe']
+      RETURN d.fqn AS fqn, d.end_line AS el, d.end_char AS ec
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Shape", el: 24, ec: 43 } }
+      - { row: { fqn: "Shape::describe", el: 24, ec: 41 } }
