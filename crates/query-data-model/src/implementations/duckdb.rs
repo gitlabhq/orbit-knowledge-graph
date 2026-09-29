@@ -50,14 +50,10 @@ impl QueryBackendCatalog for DuckDbCatalog {
             .unwrap_or_default()
     }
 
-    fn property_column(&self, property: PropertyId) -> Option<&str> {
-        self.property_facts.get(property.index())?.column.as_deref()
-    }
-
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization> {
         self.property_facts
             .get(property.index())
-            .map(|facts| &facts.realization)
+            .and_then(|facts| facts.realization.as_ref())
     }
 
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity> {
@@ -214,7 +210,14 @@ impl DuckDbCatalog {
                 let Some(property) = graph.property_id(entity_id, &field.name) else {
                     continue;
                 };
-                property_facts[property.index()].column = field.column_name().map(String::from);
+                property_facts[property.index()].realization = Some(match &field.source {
+                    ontology::FieldSource::DatabaseColumn(column) => PropertyRealization::Stored {
+                        column: column.clone(),
+                    },
+                    ontology::FieldSource::Virtual(source) => {
+                        PropertyRealization::Virtual(source.clone())
+                    }
+                });
             }
             entities[entity_id.index()] = Some(DuckDbEntityLayout {
                 table: node.destination_table.clone(),

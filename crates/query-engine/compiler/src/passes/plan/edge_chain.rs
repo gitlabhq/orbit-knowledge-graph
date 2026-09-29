@@ -52,6 +52,7 @@ pub struct HopFk {
     pub fk_column: String,
     /// The other node's alias (the one the FK points to).
     pub target_node: String,
+    pub referenced_column: String,
 }
 
 pub struct NodePlan {
@@ -328,26 +329,31 @@ where
                 .and_then(|node| node.entity.as_deref());
             let fk = from_entity
                 .zip(to_entity)
-                .and_then(|(source, target)| model.foreign_key(&rel.types, source, target))
+                .and_then(|(from, to)| match rel.direction {
+                    Direction::Outgoing => model.foreign_key(&rel.types, from, to),
+                    Direction::Incoming => model.foreign_key(&rel.types, to, from),
+                    Direction::Both => None,
+                })
                 .and_then(|foreign_key| {
-                    let holder = &model.graph().entity(foreign_key.holder).name;
                     let fk_column = model.property_column(foreign_key.property)?.to_string();
-                    let fk_node = if from_entity == Some(holder.as_str()) {
-                        rel.from.clone()
-                    } else if to_entity == Some(holder.as_str()) {
-                        rel.to.clone()
+                    let referenced_column = model
+                        .property_column(foreign_key.referenced_key)?
+                        .to_string();
+                    let holder_is_from = matches!(
+                        (rel.direction, foreign_key.holder),
+                        (Direction::Outgoing, query_data_model::Endpoint::Source)
+                            | (Direction::Incoming, query_data_model::Endpoint::Target)
+                    );
+                    let (fk_node, target_node) = if holder_is_from {
+                        (rel.from.clone(), rel.to.clone())
                     } else {
-                        return None;
-                    };
-                    let target_node = if fk_node == rel.from {
-                        rel.to.clone()
-                    } else {
-                        rel.from.clone()
+                        (rel.to.clone(), rel.from.clone())
                     };
                     Some(HopFk {
                         fk_node,
                         fk_column,
                         target_node,
+                        referenced_column,
                     })
                 });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
@@ -426,6 +432,7 @@ fn elide_hops(
             }
             let np = nodes.get(&fk.target_node)?;
             if np.selectivity == Selectivity::Pinned
+                && fk.referenced_column == DEFAULT_PRIMARY_KEY
                 && !np.node_ids.is_empty()
                 && hop.filters.is_empty()
             {
@@ -759,7 +766,12 @@ fn compute_node_edge_mappings(
                     } else {
                         fk.fk_node.clone()
                     };
-                    mappings.insert(fk.target_node.clone(), (fk_alias, fk.fk_column.clone()));
+                    let target_identity = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+                        (fk_alias, fk.fk_column.clone())
+                    } else {
+                        (fk.target_node.clone(), DEFAULT_PRIMARY_KEY.to_string())
+                    };
+                    mappings.insert(fk.target_node.clone(), target_identity);
                 }
             }
         }
@@ -832,7 +844,8 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         let Some(np) = nodes.get(&fk.target_node) else {
             continue;
         };
-        let needs = np.hydration == HydrationStrategy::Join
+        let needs = fk.referenced_column != DEFAULT_PRIMARY_KEY
+            || np.hydration == HydrationStrategy::Join
             || (input.query_type != QueryType::Aggregation
                 && matches!(&np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
         if needs {
@@ -879,6 +892,7 @@ mod tests {
                 fk_node: from.to_string(),
                 fk_column: "fk_id".to_string(),
                 target_node: to.to_string(),
+                referenced_column: DEFAULT_PRIMARY_KEY.to_string(),
             }),
             filters: Vec::new(),
             join_prev: None,
