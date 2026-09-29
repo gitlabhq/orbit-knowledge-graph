@@ -82,3 +82,33 @@ pub struct Exported {
     pub state: State,
     pub tables: Vec<(String, RecordBatch)>,
 }
+
+impl super::Labelled for SourceFile {
+    fn label(&self) -> &str {
+        &self.path
+    }
+}
+
+impl super::Labelled for Parsed {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for Rewritten {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for Canonical {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for LinkedFile {
+    fn label(&self) -> &str {
+        &self.tree.label
+    }
+}

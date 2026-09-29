@@ -62,6 +62,10 @@ struct IndexArgs {
     /// its state under ~/.gitlab/orbit/var so `orbit reindex` can follow.
     #[arg(long = "ff", value_name = "FLAG", value_delimiter = ',')]
     feature_flags: Vec<String>,
+
+    /// With --ff=inc: seconds a language family may take before the run stops.
+    #[arg(long, value_name = "SECONDS", default_value = "30")]
+    budget: u64,
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -70,6 +74,10 @@ struct ReindexArgs {
     /// Repository path, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
+
+    /// Include the slowest files per phase in the output
+    #[arg(short, long)]
+    stats: bool,
 
     /// Verbose logging to stderr
     #[arg(short, long)]
@@ -83,6 +91,10 @@ struct ReindexArgs {
     /// incremental engine.
     #[arg(long = "ff", value_name = "FLAG", value_delimiter = ',')]
     feature_flags: Vec<String>,
+
+    /// Seconds a language family may take before the run stops.
+    #[arg(long, value_name = "SECONDS", default_value = "30")]
+    budget: u64,
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -592,20 +604,39 @@ async fn dispatch(
             verbose,
             db,
             feature_flags,
+            budget,
         }) => match feature_flags.iter().any(|f| f == "inc") {
-            true => commands::index::incremental::index(path, verbose, db),
+            true => commands::index::incremental::index(
+                path,
+                commands::index::incremental::Options {
+                    stats,
+                    verbose,
+                    db,
+                    budget_seconds: budget,
+                },
+            ),
             false => commands::index::run(path, threads, stats, verbose, db),
         },
         Commands::Reindex(ReindexArgs {
             path,
+            stats,
             verbose,
             db,
             feature_flags,
+            budget,
         }) => {
             if !feature_flags.iter().any(|f| f == "inc") {
                 anyhow::bail!("reindex needs the incremental engine: pass --ff=inc");
             }
-            commands::index::incremental::reindex(path, verbose, db)
+            commands::index::incremental::reindex(
+                path,
+                commands::index::incremental::Options {
+                    stats,
+                    verbose,
+                    db,
+                    budget_seconds: budget,
+                },
+            )
         }
         Commands::Grep(GrepArgs {
             query,
@@ -906,6 +937,7 @@ mod tests {
                 verbose: false,
                 db: None,
                 feature_flags: vec![],
+                budget: 30,
             }
         );
 

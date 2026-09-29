@@ -159,11 +159,24 @@ impl<'e> Context<'e> {
 pub struct Report {
     pub skipped: Vec<Killed>,
     pub phases: Vec<PhaseReport>,
+    /// How long each file took in each per-file phase, skipped ones included.
+    pub files: Vec<FileTiming>,
 }
 
 pub struct PhaseReport {
     pub name: String,
     pub elapsed: Duration,
+}
+
+pub struct FileTiming {
+    pub path: String,
+    pub phase: String,
+    pub elapsed: Duration,
+}
+
+/// The file an item of a per-file phase belongs to.
+pub trait Labelled {
+    fn label(&self) -> &str;
 }
 
 /// Sees the run as it happens; implement only the methods you need.

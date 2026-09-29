@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
@@ -11,15 +12,16 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, ItemPhase, Lazy, LinkedFile,
-    Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
+    Lazy, LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile,
+    Sources, State, Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
 use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
-use crate::pattern::{self, EdgeCtx};
+use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
@@ -195,6 +197,7 @@ pub struct Each<P>(pub P);
 impl<C, P> Phase<Workset<C>> for Each<P>
 where
     C: IntoParallel,
+    C::Item: Labelled,
     P: ItemPhase<C::Item> + Sync,
     P::Output: Send,
 {
@@ -212,16 +215,31 @@ where
             listed,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
-        let (items, killed): (Vec<_>, Vec<_>) = items
+        let (outcomes, timings): (Vec<_>, Vec<_>) = items
             .into_parallel()
-            .map(|item| phase.run(env, run, item))
-            .partition_map(|r| match r {
-                Ok(v) => rayon::iter::Either::Left(v),
-                Err(k) => rayon::iter::Either::Right(k),
-            });
+            .map(|item| {
+                let path = item.label().to_string();
+                let started = Instant::now();
+                let outcome = phase.run(env, run, item);
+                (outcome, (path, started.elapsed()))
+            })
+            .unzip();
         context.run.check()?;
-        for k in killed {
-            context.skip(k);
+        let phase_name = self.0.name();
+        context
+            .report
+            .files
+            .extend(timings.into_iter().map(|(path, elapsed)| FileTiming {
+                path,
+                phase: phase_name.to_string(),
+                elapsed,
+            }));
+        let mut items = Vec::with_capacity(outcomes.len());
+        for outcome in outcomes {
+            match outcome {
+                Ok(v) => items.push(v),
+                Err(k) => context.skip(k),
+            }
         }
         Ok(Workset {
             state,
@@ -474,6 +492,19 @@ impl Phase<DirtyGraph> for Resolve {
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
+        context
+            .report
+            .files
+            .extend(
+                result
+                    .file_timings
+                    .into_iter()
+                    .map(|(fi, elapsed)| FileTiming {
+                        path: state.trees[fi].label.clone(),
+                        phase: "resolve".to_string(),
+                        elapsed,
+                    }),
+            );
         for k in result.killed {
             context.skip(k);
         }
@@ -497,10 +528,11 @@ impl Phase<Resolved> for Display {
         Resolved { mut state }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
+        let edges = EdgeIndex::new(&state.edges);
         for (fi, tree) in state.trees.iter_mut().enumerate() {
             let ctx = EdgeCtx {
                 tree_index: fi as u32,
-                edges: &state.edges,
+                edges: &edges,
             };
             let _ = pattern::apply_rewrites_with_edges(
                 tree,

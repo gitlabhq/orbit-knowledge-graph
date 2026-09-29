@@ -7,14 +7,17 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{
-    Changes, Context, Display, Emit, Export, Observer, Pipeline, Report, Resolved, State,
+    Changes, Context, Display, Emit, Export, FileTiming, Observer, Pipeline, Report, Resolved,
+    State,
 };
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, Envelope, Scalar, inventory, templates};
 use ontology::Ontology;
 use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -53,6 +56,15 @@ struct FamilyOutput {
     rows: BTreeMap<String, usize>,
     skipped_files: usize,
     phases: Vec<(String, f64)>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    slowest_files: Vec<SlowFile>,
+}
+
+#[derive(Serialize)]
+struct SlowFile {
+    path: String,
+    phase: String,
+    ms: f64,
 }
 
 #[derive(Serialize)]
@@ -61,12 +73,21 @@ struct ChangeCounts {
     removed: usize,
 }
 
-pub(crate) fn index(path: PathBuf, verbose: bool, db: Option<PathBuf>) -> Result<()> {
-    run(path, verbose, db, Mode::Full)
+pub(crate) struct Options {
+    pub stats: bool,
+    pub verbose: bool,
+    pub db: Option<PathBuf>,
+    /// The run budget of one language family; per-file budgets come from the
+    /// crate's limits.
+    pub budget_seconds: u64,
 }
 
-pub(crate) fn reindex(path: PathBuf, verbose: bool, db: Option<PathBuf>) -> Result<()> {
-    run(path, verbose, db, Mode::Changed)
+pub(crate) fn index(path: PathBuf, options: Options) -> Result<()> {
+    run(path, options, Mode::Full)
+}
+
+pub(crate) fn reindex(path: PathBuf, options: Options) -> Result<()> {
+    run(path, options, Mode::Changed)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -75,9 +96,9 @@ enum Mode {
     Changed,
 }
 
-fn run(path: PathBuf, verbose: bool, db: Option<PathBuf>, mode: Mode) -> Result<()> {
-    super::install_tracing(verbose, false);
-    let db_path = workspace::resolve_db_path(db)?;
+fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
+    super::install_tracing(options.verbose, false);
+    let db_path = workspace::resolve_db_path(options.db.clone())?;
     let workspace = workspace::Workspace::open_default()?;
     let repos = workspace.resolve_repos(&path)?;
     if repos.is_empty() {
@@ -92,6 +113,8 @@ fn run(path: PathBuf, verbose: bool, db: Option<PathBuf>, mode: Mode) -> Result<
             db_path: &db_path,
             ontology: &ontology,
             state_dir: workspace.var_dir(git.project_id),
+            budget_ms: options.budget_seconds * 1000,
+            stats: options.stats,
         };
         let output = match mode {
             Mode::Full => project.index_all()?,
@@ -107,6 +130,8 @@ struct Project<'a> {
     db_path: &'a Path,
     ontology: &'a Ontology,
     state_dir: PathBuf,
+    budget_ms: u64,
+    stats: bool,
 }
 
 /// The work one family gets in a run.
@@ -197,6 +222,7 @@ impl Project<'_> {
         super::clear_project(&client, self.git, self.ontology)?;
         std::fs::create_dir_all(&self.state_dir)?;
         let root = &self.git.repo_path;
+        let mut shared = SharedRows::default();
         let mut outputs = Vec::new();
         for (family, job) in work {
             let snapshot = self.snapshot_path(family);
@@ -205,15 +231,17 @@ impl Project<'_> {
                     .with_context(|| format!("failed to load {}", snapshot.display()))
             };
             let log = PhaseLog(family.family());
-            let env;
+            let mut env;
             let graph = match job {
                 FamilyWork::Index(entries) => {
                     env = Env::for_lang(family)?;
+                    env.limits.total_ms = self.budget_ms;
                     templates::index(Context::new(&env).observe(log), root, entries)?
                 }
                 FamilyWork::Reindex(changes) => {
                     let (loaded, state) = load()?;
                     env = loaded;
+                    env.limits.total_ms = self.budget_ms;
                     templates::reindex(Context::new(&env).observe(log), state, root, changes)?
                 }
                 FamilyWork::Keep => {
@@ -222,7 +250,7 @@ impl Project<'_> {
                     Pipeline::new(Context::new(&env), Resolved { state })
                 }
             };
-            outputs.push(self.export(family, &env, graph, &client)?);
+            outputs.push(self.export(family, &env, graph, &client, &mut shared)?);
         }
         self.save_state(&outputs, owner)?;
         Ok(outputs)
@@ -236,6 +264,7 @@ impl Project<'_> {
         env: &Env,
         graph: Pipeline<'_, Resolved>,
         client: &duckdb_client::DuckDbClient,
+        shared: &mut SharedRows,
     ) -> Result<FamilyOutput> {
         let envelope = Envelope::new([
             ("project_id", Scalar::Int(self.git.project_id)),
@@ -249,9 +278,10 @@ impl Project<'_> {
                 ontology: self.ontology,
                 envelope,
             })?
-            .then(Emit(|table: &str, batch: RecordBatch| {
+            .then(Emit(|table: &str, batch: RecordBatch| -> Result<()> {
+                let batch = shared.unseen(table, &batch)?;
                 *rows.entry(table.to_string()).or_default() += batch.num_rows();
-                client.insert_batch(table, &batch)
+                Ok(client.insert_batch(table, &batch)?)
             }))?
             .finish();
         let state = exported.state;
@@ -264,6 +294,10 @@ impl Project<'_> {
             rows,
             skipped_files: context.report.skipped.len(),
             phases: phase_seconds(&context.report),
+            slowest_files: match self.stats {
+                true => slowest_files(&context.report, 20),
+                false => Vec::new(),
+            },
         })
     }
 
@@ -365,6 +399,79 @@ fn parsed_language(entry: &FileInventoryEntry) -> Option<SupportLang> {
     (entry.decision == Decision::Parse)
         .then(|| SupportLang::from_path(&entry.path))
         .flatten()
+        .filter(|lang| lang.has_rules())
+}
+
+/// Every family exports the directories above its files, so a directory
+/// and its edge to a parent come out once per run: the first family wins.
+#[derive(Default)]
+struct SharedRows {
+    directories: FxHashSet<i64>,
+    containment: FxHashSet<(i64, i64)>,
+}
+
+impl SharedRows {
+    fn unseen(&mut self, table: &str, batch: &RecordBatch) -> Result<RecordBatch> {
+        let keep: Vec<bool> = match table {
+            "gl_directory" => {
+                let ids = int_column(batch, "id")?;
+                (0..batch.num_rows())
+                    .map(|i| self.directories.insert(ids.value(i)))
+                    .collect()
+            }
+            "gl_edge" => {
+                let (sources, targets) = (
+                    int_column(batch, "source_id")?,
+                    int_column(batch, "target_id")?,
+                );
+                let kinds = string_column(batch, "target_kind")?;
+                (0..batch.num_rows())
+                    .map(|i| {
+                        kinds.value(i) != "Directory"
+                            || self
+                                .containment
+                                .insert((sources.value(i), targets.value(i)))
+                    })
+                    .collect()
+            }
+            _ => return Ok(batch.clone()),
+        };
+        if keep.iter().all(|&k| k) {
+            return Ok(batch.clone());
+        }
+        Ok(arrow::compute::filter_record_batch(
+            batch,
+            &BooleanArray::from(keep),
+        )?)
+    }
+}
+
+fn int_column<'b>(batch: &'b RecordBatch, name: &str) -> Result<&'b Int64Array> {
+    batch
+        .column_by_name(name)
+        .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+        .with_context(|| format!("export batch has no Int64 column {name}"))
+}
+
+fn string_column<'b>(batch: &'b RecordBatch, name: &str) -> Result<&'b StringArray> {
+    batch
+        .column_by_name(name)
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        .with_context(|| format!("export batch has no Utf8 column {name}"))
+}
+
+fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
+    let mut timings: Vec<&FileTiming> = report.files.iter().collect();
+    timings.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
+    timings
+        .into_iter()
+        .take(count)
+        .map(|t| SlowFile {
+            path: t.path.clone(),
+            phase: t.phase.clone(),
+            ms: t.elapsed.as_secs_f64() * 1000.0,
+        })
+        .collect()
 }
 
 fn phase_seconds(report: &Report) -> Vec<(String, f64)> {

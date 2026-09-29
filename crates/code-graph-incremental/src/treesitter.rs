@@ -129,6 +129,12 @@ impl SupportLang {
             .map_or_else(|| self.into(), |(name, _)| name.as_str())
     }
 
+    /// Whether a rule file exists for the language; a grammar alone only
+    /// lists files.
+    pub fn has_rules(self) -> bool {
+        lang_yaml(self).is_some()
+    }
+
     /// The language that stands for a family name (`js_ts`, `rust`): the
     /// family's first member, or the language itself.
     pub fn from_family(name: &str) -> Option<Self> {

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use rustc_hash::FxHashSet;
+
 use indextree::NodeId;
 use smallvec::SmallVec;
 
@@ -79,9 +81,38 @@ pub enum EdgeDir {
     Outgoing,
 }
 
+/// Which nodes have an edge of each kind, so `has_incoming` and
+/// `has_outgoing` answer from a set rather than a scan of every edge.
+pub struct EdgeIndex {
+    incoming: FxHashSet<(EdgeKind, u32, u32)>,
+    outgoing: FxHashSet<(EdgeKind, u32, u32)>,
+}
+
+impl EdgeIndex {
+    pub fn new(edges: &[Edge]) -> Self {
+        Self {
+            incoming: edges
+                .iter()
+                .map(|e| (e.kind, e.to_tree, e.to_node))
+                .collect(),
+            outgoing: edges
+                .iter()
+                .map(|e| (e.kind, e.from_tree, e.from_node))
+                .collect(),
+        }
+    }
+
+    pub fn has(&self, kind: EdgeKind, dir: EdgeDir, tree: u32, node: u32) -> bool {
+        match dir {
+            EdgeDir::Incoming => self.incoming.contains(&(kind, tree, node)),
+            EdgeDir::Outgoing => self.outgoing.contains(&(kind, tree, node)),
+        }
+    }
+}
+
 pub struct EdgeCtx<'a> {
     pub tree_index: u32,
-    pub edges: &'a [Edge],
+    pub edges: &'a EdgeIndex,
 }
 
 pub enum Text {
