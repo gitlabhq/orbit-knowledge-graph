@@ -582,3 +582,57 @@ mod tests {
         assert!(!dir.path().join("big.txt").exists());
     }
 }
+
+#[cfg(test)]
+mod backpressure {
+    use super::*;
+    use crate::files::CapExceeded;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts files whose bytes are off the stream but not yet settled by a
+    /// worker, and remembers the most that were in flight at once.
+    #[derive(Default)]
+    struct SlowSettle {
+        in_flight: AtomicUsize,
+        peak: AtomicUsize,
+    }
+    impl Pass for SlowSettle {
+        fn header(&self, _: &mut File) -> Result<Need, CapExceeded> {
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(now, Ordering::SeqCst);
+            Ok(Need::Bytes)
+        }
+        fn content(&self, _: &mut File, _: &[u8]) {
+            std::thread::sleep(std::time::Duration::from_micros(200));
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// The inflating thread is faster than the workers; it must wait on the
+    /// channel instead of inflating the whole archive into memory.
+    #[test]
+    fn inflating_never_runs_more_than_the_lookahead_ahead_of_the_workers() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tb = tar::Builder::new(Vec::new());
+        for i in 0..2_000 {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(8);
+            h.set_mode(0o644);
+            h.set_cksum();
+            tb.append_data(&mut h, format!("root/f{i}.rs"), &b"fn a(){}"[..])
+                .unwrap();
+        }
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(&tb.into_inner().unwrap()).unwrap();
+        let data = gz.finish().unwrap();
+        let pass = SlowSettle::default();
+
+        let inv = extract(&data[..], dir.path(), &pass).unwrap();
+
+        assert_eq!(inv.len(), 2_000);
+        let ceiling = LOOKAHEAD + rayon::current_num_threads() + 1;
+        let peak = pass.peak.load(Ordering::SeqCst);
+        assert!(peak <= ceiling, "peak in flight {peak} exceeds {ceiling}");
+        assert!(peak > 1, "workers must run alongside the inflating thread");
+    }
+}

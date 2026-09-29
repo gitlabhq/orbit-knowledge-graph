@@ -101,6 +101,8 @@ fn linking_a_file_yields_its_local_edges() {
     );
 }
 
+/// A blob under a source extension cannot be settled from its header; it is
+/// read once, by the worker that would have parsed it, and turned down there.
 #[test]
 fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
     let repo = tempfile::tempdir().unwrap();
@@ -110,6 +112,7 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
             ("main.py", MAIN.as_bytes()),
             ("README.md", b"# hi\n"),
             ("logo.png", b"\x89PNG\x00\x00"),
+            ("blob.py", b"\x00\x01\x02 not python"),
         ],
     );
     let env = python_env(Limits::UNLIMITED);
@@ -127,14 +130,15 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
         })
         .collect();
     rows.sort();
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     assert_eq!(rows[0], ("README.md".into(), 0, None));
+    assert_eq!(rows[1], ("blob.py".into(), 0, Some("skip_binary")));
     assert_eq!(
-        rows[1],
+        rows[2],
         ("logo.png".into(), 0, Some("skip_excluded_extension"))
     );
-    assert_eq!(rows[2].0, "main.py");
-    assert!(rows[2].1 > 0);
+    assert_eq!(rows[3].0, "main.py");
+    assert!(rows[3].1 > 0);
     assert_eq!(graph.dirty.len(), 1, "only the parsed file needs resolving");
 }
 
