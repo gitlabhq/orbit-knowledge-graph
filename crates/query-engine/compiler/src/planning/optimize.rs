@@ -1,4 +1,5 @@
 use crate::error::{QueryError, Result};
+use std::collections::HashMap;
 
 use super::generic::{Function, Node, Op, Operation, Program, Values};
 
@@ -38,6 +39,7 @@ pub fn stages<
     stages: &[&[Rule<S, F, E>]],
 ) -> Result<Vec<Candidate<S, F, E>>> {
     initial.program.output(&initial.values)?;
+    let preserved_values = initial.values.len();
     let mut alternatives = vec![initial];
 
     for rules in stages {
@@ -77,8 +79,9 @@ pub fn stages<
                 for rule in *rules {
                     for rewritten in rule(&local)? {
                         validate_rewrite(&local, &rewritten)?;
-                        let expanded = replace(&candidate, owner, &path, rewritten);
+                        let mut expanded = replace(&candidate, owner, &path, rewritten);
                         expanded.program.output(&expanded.values)?;
+                        expanded.canonicalize(preserved_values)?;
 
                         if !alternatives.contains(&expanded) {
                             alternatives.push(expanded);
@@ -92,6 +95,84 @@ pub fn stages<
     }
 
     Ok(alternatives)
+}
+
+impl<S: Operation + Clone, F: Function + Clone, E: Operation + Clone> Candidate<S, F, E> {
+    pub fn canonicalize(&mut self, preserved_values: usize) -> Result<()> {
+        if preserved_values > self.values.len() {
+            return Err(QueryError::PipelineInvariant(
+                "canonicalization exceeds the value catalog".into(),
+            ));
+        }
+
+        self.program.output(&self.values)?;
+        let mut order = Vec::new();
+        let mut visited = vec![false; self.program.subplans.len()];
+
+        fn dependencies<S: Clone, F: Clone, E: Clone>(
+            node: &Node<S, F, E>,
+            subplans: &[Node<S, F, E>],
+            visited: &mut [bool],
+            order: &mut Vec<usize>,
+        ) {
+            if let Op::Reference { subplan, .. } = &node.op
+                && !visited[subplan.0]
+            {
+                visited[subplan.0] = true;
+                dependencies(&subplans[subplan.0], subplans, visited, order);
+                order.push(subplan.0);
+            }
+
+            for input in &node.inputs {
+                dependencies(input, subplans, visited, order);
+            }
+        }
+
+        dependencies(
+            &self.program.root,
+            &self.program.subplans,
+            &mut visited,
+            &mut order,
+        );
+        let indices: HashMap<_, _> = order
+            .iter()
+            .enumerate()
+            .map(|(new, old)| (*old, new))
+            .collect();
+        self.program.subplans = order
+            .into_iter()
+            .map(|index| self.program.subplans[index].clone())
+            .collect();
+
+        let mut values = self.values.prefix(preserved_values);
+        let mut mapping: HashMap<_, _> = values.ids().map(|id| (id, id)).collect();
+        for root in self
+            .program
+            .subplans
+            .iter_mut()
+            .chain(std::iter::once(&mut self.program.root))
+        {
+            root.visit_mut(&mut |node| {
+                if let Op::Reference { subplan, .. } = &mut node.op {
+                    subplan.0 = indices[&subplan.0];
+                }
+            });
+            root.map_values(&mut |value| {
+                *value = *mapping.entry(*value).or_insert_with(|| {
+                    values.allocate(
+                        self.values
+                            .data_type(*value)
+                            .expect("validated value")
+                            .clone(),
+                    )
+                });
+            });
+        }
+
+        self.values = values;
+        self.program.output(&self.values)?;
+        Ok(())
+    }
 }
 
 fn collect_locations<S, F, E>(

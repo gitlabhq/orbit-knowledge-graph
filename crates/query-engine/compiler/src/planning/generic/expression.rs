@@ -23,6 +23,22 @@ pub enum ValueType {
 pub struct Values(Vec<ValueType>);
 
 impl Values {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn prefix(&self, length: usize) -> Self {
+        Self(self.0[..length].to_vec())
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = ValueId> {
+        (0..self.0.len()).map(ValueId)
+    }
+
     pub fn extends(&self, previous: &Self) -> bool {
         self.0.starts_with(&previous.0)
     }
@@ -65,6 +81,14 @@ pub trait Function {
 }
 
 impl<F> Expr<F> {
+    pub fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
+        self.visit_mut(&mut |expression| {
+            if let Self::Value(value) = expression {
+                map(value);
+            }
+        });
+    }
+
     pub fn visit_mut(&mut self, callback: &mut impl FnMut(&mut Self)) {
         match self {
             Self::Call { arguments, .. } => {

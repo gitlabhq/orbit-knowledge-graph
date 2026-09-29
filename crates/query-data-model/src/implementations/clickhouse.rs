@@ -33,6 +33,14 @@ pub struct EntityLayout {
 }
 
 #[derive(Debug)]
+pub struct ViewMapping {
+    pub table: String,
+    pub hops: Vec<ontology::denormalized::JoinHop>,
+    pub properties: HashMap<(usize, PropertyId), String>,
+    pub path_columns: Vec<PathColumn>,
+}
+
+#[derive(Debug)]
 pub struct ClickHouseCatalog {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
@@ -42,9 +50,14 @@ pub struct ClickHouseCatalog {
     tables: HashMap<String, TableLayout>,
     denormalized: DenormalizedCatalog,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
+    views: Vec<ViewMapping>,
 }
 
 impl ClickHouseCatalog {
+    pub fn views(&self) -> &[ViewMapping] {
+        &self.views
+    }
+
     pub fn entity(&self, id: EntityId) -> Option<&EntityLayout> {
         self.entities.get(id.index())?.as_ref()
     }
@@ -444,8 +457,9 @@ impl ClickHouseCatalog {
             );
         }
 
+        let mut views = Vec::new();
         for join in ontology.denormalized_joins() {
-            let path_columns = join
+            let path_columns: Vec<_> = join
                 .traversal_path_columns()
                 .map(|(index, name)| PathColumn {
                     name,
@@ -455,6 +469,28 @@ impl ClickHouseCatalog {
                     }),
                 })
                 .collect();
+            let mut properties = HashMap::new();
+            for (index, table) in join.tables.iter().enumerate() {
+                for entity in graph.entities().filter(|entity| {
+                    entities[entity.id.index()]
+                        .as_ref()
+                        .is_some_and(|layout| layout.table == table.table)
+                }) {
+                    for property in &entity.properties {
+                        if let Some(PropertyRealization::Stored { column }) =
+                            &property_facts[property.index()].realization
+                        {
+                            properties.insert((index, *property), join.column_for(index, column));
+                        }
+                    }
+                }
+            }
+            views.push(ViewMapping {
+                table: join.table.clone(),
+                hops: join.hops.clone(),
+                properties,
+                path_columns: path_columns.clone(),
+            });
             let columns = join
                 .tables
                 .iter()
@@ -494,6 +530,7 @@ impl ClickHouseCatalog {
             tables,
             denormalized: DenormalizedCatalog::new(denormalized),
             traversal_path_lookups,
+            views,
         })
     }
 }

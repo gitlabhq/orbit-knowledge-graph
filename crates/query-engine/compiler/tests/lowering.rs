@@ -122,6 +122,8 @@ fn execute<E: EmitOperation>(plan: &Node<Read, Scalar, E>, values: &Values) -> V
 struct TakeOne;
 
 impl Operation for TakeOne {
+    fn map_values(&mut self, _: &mut impl FnMut(&mut compiler::planning::generic::ValueId)) {}
+
     fn output(&self, inputs: &[Schema], _: &Values) -> compiler::Result<Schema> {
         let [input] = inputs else {
             return Err(compiler::QueryError::PipelineInvariant(

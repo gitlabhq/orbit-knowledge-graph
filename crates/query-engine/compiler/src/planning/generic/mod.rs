@@ -1,4 +1,5 @@
 mod expression;
+pub mod facts;
 mod plan;
 
 pub use expression::{Expr, Function, ValueId, ValueType, Values};

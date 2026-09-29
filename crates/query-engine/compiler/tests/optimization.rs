@@ -52,7 +52,7 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
     );
     let repeated = candidates(root.clone(), values.clone(), &[rules::sip, rules::sip]).unwrap();
     let candidates = candidates(root, values, &[rules::sip]).unwrap();
-    assert_eq!(candidates.len(), 13);
+    assert_eq!(candidates.len(), 9);
     assert!(repeated == candidates);
     assert!(
         candidates
@@ -73,7 +73,10 @@ fn sip_candidates_preserve_join_rows_with_duplicate_and_null_keys() {
         .unwrap();
 
     for candidate in &candidates {
-        let repeated = stages(candidate.clone(), &[&[rules::sip]]).unwrap();
+        let mut repeated = stages(candidate.clone(), &[&[rules::sip]]).unwrap();
+        for candidate in &mut repeated {
+            candidate.canonicalize(3).unwrap();
+        }
         assert!(
             repeated
                 .iter()
@@ -292,5 +295,46 @@ fn references_reject_cycles_missing_exports_and_type_mismatches() {
             root: reference(0, exports.0, exports.1),
         };
         assert!(program.output(&values).is_err());
+    }
+}
+
+#[test]
+fn bounded_chain_candidate_growth_is_explicit() {
+    for joins in 1..=3 {
+        let mut values = Values::default();
+        let mut read = || {
+            let value = values.allocate(ValueType::Int64);
+            (
+                value,
+                Node::<Read, Scalar, Infallible> {
+                    op: Op::Read(Read {
+                        table: "items".into(),
+                        columns: vec![(value, "id".into())],
+                        current_rows: CurrentRows::Snapshot,
+                    }),
+                    inputs: vec![],
+                },
+            )
+        };
+        let (mut key, mut root) = read();
+
+        for _ in 0..joins {
+            let (next, input) = read();
+            root = Node {
+                op: Op::Join {
+                    kind: JoinKind::Inner,
+                    condition: Expr::Call {
+                        function: Scalar::Equal,
+                        arguments: vec![Expr::Value(key), Expr::Value(next)],
+                    },
+                },
+                inputs: vec![root, input],
+            };
+            key = next;
+        }
+
+        let result = candidates(root, values, &[rules::sip]).unwrap();
+        assert_eq!(result.len(), 3usize.pow(joins));
+        println!("{joins} joins: {} canonical candidates", result.len());
     }
 }

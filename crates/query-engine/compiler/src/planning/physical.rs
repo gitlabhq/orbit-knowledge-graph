@@ -165,6 +165,10 @@ impl Read {
 }
 
 impl Operation for Read {
+    fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
+        self.columns.iter_mut().for_each(|(value, _)| map(value));
+    }
+
     fn output(&self, inputs: &[Schema], _: &Values) -> Result<Schema> {
         if !inputs.is_empty() {
             return Err(QueryError::PipelineInvariant(
@@ -177,6 +181,10 @@ impl Operation for Read {
 }
 
 impl Operation for Infallible {
+    fn map_values(&mut self, _: &mut impl FnMut(&mut ValueId)) {
+        match *self {}
+    }
+
     fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
         match *self {}
     }

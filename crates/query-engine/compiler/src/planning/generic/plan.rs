@@ -91,6 +91,64 @@ pub enum Op<S, F, E> {
 
 pub trait Operation {
     fn output(&self, inputs: &[Schema], values: &Values) -> Result<Schema>;
+    fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId));
+
+    fn unique_keys(&self) -> Vec<Schema> {
+        Vec::new()
+    }
+
+    fn key_coverage(&self) -> super::facts::KeyCoverage {
+        super::facts::KeyCoverage::Unknown
+    }
+}
+
+impl<S: Operation, F, E: Operation> Node<S, F, E> {
+    pub fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
+        self.visit_mut(&mut |node| match &mut node.op {
+            Op::Read(source) => source.map_values(map),
+            Op::Extension(extension) => extension.map_values(map),
+            Op::Reference { exports, .. } => {
+                for (source, output) in exports {
+                    map(source);
+                    map(output);
+                }
+            }
+            Op::Filter(expression)
+            | Op::Join {
+                condition: expression,
+                ..
+            } => expression.map_values(map),
+            Op::Project(assignments) => {
+                for assignment in assignments {
+                    assignment.expression.map_values(map);
+                    map(&mut assignment.output);
+                }
+            }
+            Op::Aggregate { groups, measures } => {
+                for group in groups {
+                    group.expression.map_values(map);
+                    map(&mut group.output);
+                }
+                for measure in measures {
+                    for expression in measure.argument.iter_mut().chain(measure.filter.iter_mut()) {
+                        expression.map_values(map);
+                    }
+                    map(&mut measure.output);
+                }
+            }
+            Op::Union { outputs, arms } => {
+                for value in outputs.iter_mut().chain(arms.iter_mut().flatten()) {
+                    map(value);
+                }
+            }
+            Op::Sort(keys) => {
+                for key in keys {
+                    map(&mut key.value);
+                }
+            }
+            Op::Limit(_) => {}
+        });
+    }
 }
 
 impl<S, F, E> Node<S, F, E> {

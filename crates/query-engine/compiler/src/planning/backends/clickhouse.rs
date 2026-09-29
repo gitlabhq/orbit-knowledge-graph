@@ -15,6 +15,7 @@ pub struct Scan {
     deletion_column: String,
     binding: Option<String>,
     relationship: Option<usize>,
+    unique_key: Option<Schema>,
 }
 
 pub fn select(
@@ -41,16 +42,49 @@ pub fn select(
             })?
             .to_string();
 
+        let unique_key = model.backend().table(&read.table).and_then(|table| {
+            (!table.sort_key.is_empty())
+                .then(|| {
+                    table
+                        .sort_key
+                        .iter()
+                        .map(|column| {
+                            read.columns
+                                .iter()
+                                .find(|(_, name)| name == column)
+                                .map(|(value, _)| *value)
+                        })
+                        .collect::<Option<Vec<_>>>()
+                })
+                .flatten()
+        });
+
         Ok(Scan {
             read,
             deletion_column,
             binding: binding.clone(),
             relationship,
+            unique_key,
         })
     })
 }
 
 impl Operation for Scan {
+    fn map_values(&mut self, map: &mut impl FnMut(&mut crate::planning::generic::ValueId)) {
+        self.read.map_values(map);
+        for value in self.unique_key.iter_mut().flatten() {
+            map(value);
+        }
+    }
+
+    fn unique_keys(&self) -> Vec<Schema> {
+        self.unique_key.iter().cloned().collect()
+    }
+
+    fn key_coverage(&self) -> crate::planning::generic::facts::KeyCoverage {
+        crate::planning::generic::facts::KeyCoverage::Exact
+    }
+
     fn output(&self, inputs: &[Schema], values: &Values) -> Result<Schema> {
         self.read.output(inputs, values)
     }

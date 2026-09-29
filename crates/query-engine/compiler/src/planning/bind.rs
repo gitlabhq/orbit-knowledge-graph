@@ -42,6 +42,15 @@ pub enum Source {
 }
 
 impl Operation for Source {
+    fn map_values(&mut self, map: &mut impl FnMut(&mut ValueId)) {
+        match self {
+            Self::Entity { properties, .. } => {
+                properties.iter_mut().for_each(|(value, _)| map(value))
+            }
+            Self::Edge { fields, .. } => fields.iter_mut().for_each(|(value, _)| map(value)),
+        }
+    }
+
     fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
         Ok(match self {
             Self::Entity { properties, .. } => properties.iter().map(|(value, _)| *value).collect(),

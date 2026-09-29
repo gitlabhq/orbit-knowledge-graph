@@ -7,6 +7,10 @@ use compiler::planning::generic::{
 struct Source(Schema);
 
 impl Operation for Source {
+    fn map_values(&mut self, map: &mut impl FnMut(&mut compiler::planning::generic::ValueId)) {
+        self.0.iter_mut().for_each(map);
+    }
+
     fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
         Ok(self.0.clone())
     }
