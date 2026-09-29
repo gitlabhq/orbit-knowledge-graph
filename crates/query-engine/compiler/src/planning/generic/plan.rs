@@ -50,14 +50,29 @@ pub trait Operation {
 
 impl<S, F, E> Node<S, F, E> {
     pub fn map_sources<T>(self, map: &mut impl FnMut(S) -> Result<T>) -> Result<Node<T, F, E>> {
-        let inputs = self
+        self.expand_sources(&mut |source| {
+            Ok(Node {
+                op: Op::Read(map(source)?),
+                inputs: vec![],
+            })
+        })
+    }
+
+    pub fn expand_sources<T>(
+        self,
+        map: &mut impl FnMut(S) -> Result<Node<T, F, E>>,
+    ) -> Result<Node<T, F, E>> {
+        let inputs: Vec<_> = self
             .inputs
             .into_iter()
-            .map(|input| input.map_sources(map))
+            .map(|input| input.expand_sources(map))
             .collect::<Result<_>>()?;
 
         let op = match self.op {
-            Op::Read(source) => Op::Read(map(source)?),
+            Op::Read(source) => {
+                require(inputs.is_empty(), "read cannot have inputs")?;
+                return map(source);
+            }
             Op::Filter(predicate) => Op::Filter(predicate),
             Op::Project(assignments) => Op::Project(assignments),
             Op::Join { kind, condition } => Op::Join { kind, condition },

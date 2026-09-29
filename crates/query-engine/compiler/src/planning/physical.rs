@@ -1,9 +1,9 @@
 use std::convert::Infallible;
 
-use query_data_model::{QueryBackendCatalog, QueryDataModel};
+use query_data_model::{EdgeField, QueryBackendCatalog, QueryDataModel};
 
 use super::bind::Source;
-use super::generic::{Function, Operation, Schema, ValueId, ValueType, Values};
+use super::generic::{Expr, Function, Node, Op, Operation, Schema, ValueId, ValueType, Values};
 use crate::error::{QueryError, Result};
 
 pub struct Read {
@@ -18,6 +18,106 @@ pub enum CurrentRows {
     Final,
 }
 
+pub type PhysicalPlan = Node<Read, Scalar, Infallible>;
+
+pub fn select_source(
+    source: Source,
+    model: &impl QueryDataModel,
+    current_rows: CurrentRows,
+    values: &mut Values,
+) -> Result<PhysicalPlan> {
+    let Source::Edge {
+        relationships,
+        fields,
+    } = source
+    else {
+        return Ok(Node {
+            op: Op::Read(Read::select(source, model, current_rows)?),
+            inputs: vec![],
+        });
+    };
+
+    let mut tables = model.query_backend().edge_tables(&relationships);
+    tables.sort();
+    tables.dedup();
+    if tables.is_empty() {
+        return Err(QueryError::ReferenceError(
+            "edge source has no storage table".into(),
+        ));
+    }
+
+    let outputs: Vec<_> = fields.iter().map(|(value, _)| *value).collect();
+    let mut inputs = Vec::new();
+    let mut arms = Vec::new();
+
+    for table in tables {
+        let mut columns = Vec::new();
+        let mut arm = Vec::new();
+        let mut kind_value = None;
+
+        for (output, field) in &fields {
+            let column = model
+                .query_backend()
+                .edge_field_column(&table, *field)
+                .ok_or_else(|| {
+                    QueryError::ReferenceError(format!(
+                        "edge field {field:?} is unavailable in {table}"
+                    ))
+                })?;
+            let value = values.allocate(values.data_type(*output)?.clone());
+            columns.push((value, column.to_string()));
+            arm.push(value);
+
+            if *field == EdgeField::RelationshipKind {
+                kind_value = Some(value);
+            }
+        }
+
+        let mut root = Node {
+            op: Op::Read(Read {
+                table: table.clone(),
+                columns,
+                current_rows,
+            }),
+            inputs: vec![],
+        };
+
+        if !relationships.is_empty() {
+            let kind = kind_value.ok_or_else(|| {
+                QueryError::ReferenceError("edge source requires its relationship kind".into())
+            })?;
+            let predicate = relationships
+                .iter()
+                .filter(|id| model.query_backend().relationship_table(**id) == Some(table.as_str()))
+                .map(|id| Expr::Call {
+                    function: Scalar::Equal,
+                    arguments: vec![
+                        Expr::Value(kind),
+                        Expr::String(model.graph().relationship(*id).name.clone()),
+                    ],
+                })
+                .reduce(|left, right| Expr::Call {
+                    function: Scalar::Or,
+                    arguments: vec![left, right],
+                })
+                .unwrap_or(Expr::Bool(false));
+
+            root = Node {
+                op: Op::Filter(predicate),
+                inputs: vec![root],
+            };
+        }
+
+        arms.push(arm);
+        inputs.push(root);
+    }
+
+    Ok(Node {
+        op: Op::Union { outputs, arms },
+        inputs,
+    })
+}
+
 impl Read {
     pub fn select(
         source: Source,
@@ -25,7 +125,9 @@ impl Read {
         current_rows: CurrentRows,
     ) -> Result<Self> {
         let Source::Entity { entity, properties } = source else {
-            return Self::select_edge(source, model, current_rows);
+            return Err(QueryError::ReferenceError(
+                "edge sources require plan selection".into(),
+            ));
         };
 
         let entity_id = entity;
@@ -51,45 +153,6 @@ impl Read {
 
         Ok(Self {
             table: table.to_string(),
-            columns,
-            current_rows,
-        })
-    }
-
-    fn select_edge(
-        source: Source,
-        model: &impl QueryDataModel,
-        current_rows: CurrentRows,
-    ) -> Result<Self> {
-        let Source::Edge {
-            relationships,
-            fields,
-        } = source
-        else {
-            unreachable!()
-        };
-        let tables = model.query_backend().edge_tables(&relationships);
-        let [table] = tables.as_slice() else {
-            return Err(QueryError::Lowering(
-                "multi-table edges require union source selection".into(),
-            ));
-        };
-
-        let columns = fields
-            .into_iter()
-            .map(|(value, field)| {
-                let column = model
-                    .query_backend()
-                    .edge_field_column(table, field)
-                    .ok_or_else(|| {
-                        QueryError::ReferenceError(format!("edge field {field:?} is unavailable"))
-                    })?;
-                Ok((value, column.to_string()))
-            })
-            .collect::<Result<_>>()?;
-
-        Ok(Self {
-            table: table.clone(),
             columns,
             current_rows,
         })

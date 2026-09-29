@@ -25,8 +25,11 @@ use crate::passes::{
     security, settings, validate,
 };
 use crate::planning::bind::Source;
+use crate::planning::generic::{Node as PlanNode, Values};
+use crate::planning::physical::Scalar;
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
+use std::convert::Infallible;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
@@ -294,16 +297,20 @@ where
 }
 
 fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>) -> Result<()> {
-    use crate::planning::physical::{CurrentRows, Read};
+    use crate::planning::physical::{CurrentRows, select_source};
 
-    plan_query(ctx, |source, model| {
-        Read::select(source, model, CurrentRows::Snapshot)
+    plan_query(ctx, |source, model, values| {
+        select_source(source, model, CurrentRows::Snapshot, values)
     })
 }
 
 fn plan_query<C: CompilerCtx, S: EmitOperation>(
     ctx: &mut C,
-    mut select_source: impl FnMut(Source, &C::Model) -> Result<S>,
+    mut select_source: impl FnMut(
+        Source,
+        &C::Model,
+        &mut Values,
+    ) -> Result<PlanNode<S, Scalar, Infallible>>,
 ) -> Result<()> {
     use crate::ast::{Expr, OrderExpr, SelectExpr};
     use crate::constants::{redaction_id_column, redaction_type_column};
@@ -333,10 +340,10 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
         .iter()
         .map(|_| std::array::from_fn(|_| context.alias()))
         .collect();
-    let bound = graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?;
+    let mut bound = graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?;
     let physical = bound
         .root
-        .map_sources(&mut |source| select_source(source, ctx.data_model()))?;
+        .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
     let fragment = lower_with_context(&physical, &bound.values, &mut context, &scalar::emit)?;
 
     let resolve = |value| {
