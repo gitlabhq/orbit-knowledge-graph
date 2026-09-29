@@ -129,6 +129,15 @@ impl SupportLang {
             .map_or_else(|| self.into(), |(name, _)| name.as_str())
     }
 
+    /// The language that stands for a family name (`js_ts`, `rust`): the
+    /// family's first member, or the language itself.
+    pub fn from_family(name: &str) -> Option<Self> {
+        match LANG_CONFIG.families.get(name) {
+            Some(family) => family.members.first().copied(),
+            None => Self::from_alias(name),
+        }
+    }
+
     /// The family's members in declared order; a standalone language alone.
     pub fn family_members(self) -> Vec<Self> {
         LANG_CONFIG

@@ -57,6 +57,32 @@ struct IndexArgs {
     /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Feature flags. `--ff=inc` indexes with the incremental engine and keeps
+    /// its state under ~/.gitlab/orbit/var so `orbit reindex` can follow.
+    #[arg(long = "ff", value_name = "FLAG", value_delimiter = ',')]
+    feature_flags: Vec<String>,
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(about = descriptions::short("reindex"), long_about = descriptions::long("reindex"))]
+struct ReindexArgs {
+    /// Repository path, or a directory that holds repositories (default: current directory).
+    #[arg(value_name = "PATH", default_value = ".")]
+    path: PathBuf,
+
+    /// Verbose logging to stderr
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
+    #[arg(long, value_name = "PATH")]
+    db: Option<PathBuf>,
+
+    /// Feature flags; `--ff=inc` is required, reindex only exists for the
+    /// incremental engine.
+    #[arg(long = "ff", value_name = "FLAG", value_delimiter = ',')]
+    feature_flags: Vec<String>,
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -338,6 +364,7 @@ enum Commands {
     /// Print the version string and exit.
     Version,
     Index(IndexArgs),
+    Reindex(ReindexArgs),
     Grep(GrepArgs),
     Context(ContextArgs),
     Sql(SqlArgs),
@@ -564,7 +591,22 @@ async fn dispatch(
             stats,
             verbose,
             db,
-        }) => commands::index::run(path, threads, stats, verbose, db),
+            feature_flags,
+        }) => match feature_flags.iter().any(|f| f == "inc") {
+            true => commands::index::incremental::index(path, verbose, db),
+            false => commands::index::run(path, threads, stats, verbose, db),
+        },
+        Commands::Reindex(ReindexArgs {
+            path,
+            verbose,
+            db,
+            feature_flags,
+        }) => {
+            if !feature_flags.iter().any(|f| f == "inc") {
+                anyhow::bail!("reindex needs the incremental engine: pass --ff=inc");
+            }
+            commands::index::incremental::reindex(path, verbose, db)
+        }
         Commands::Grep(GrepArgs {
             query,
             repo,
@@ -827,6 +869,28 @@ mod tests {
     }
 
     #[test]
+    fn feature_flags_take_both_spellings() {
+        for argv in [
+            vec!["orbit", "index", ".", "--ff=inc"],
+            vec!["orbit", "index", ".", "--ff", "inc"],
+        ] {
+            let Commands::Index(index) = Cli::parse_from(argv).command else {
+                panic!("expected index");
+            };
+            assert_eq!(index.feature_flags, vec!["inc".to_string()]);
+        }
+        let Commands::Reindex(reindex) =
+            Cli::parse_from(["orbit", "reindex", "--ff=inc,other"]).command
+        else {
+            panic!("expected reindex");
+        };
+        assert_eq!(
+            reindex.feature_flags,
+            vec!["inc".to_string(), "other".to_string()]
+        );
+    }
+
+    #[test]
     fn former_local_and_remote_verbs_parse_at_top_level() {
         let Commands::Index(index) =
             Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]).command
@@ -841,6 +905,7 @@ mod tests {
                 stats: false,
                 verbose: false,
                 db: None,
+                feature_flags: vec![],
             }
         );
 

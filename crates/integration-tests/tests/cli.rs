@@ -173,6 +173,130 @@ fn reindex_idempotent() {
 }
 
 #[test]
+fn incremental_reindex_follows_the_working_tree() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            ("Cargo.toml", "[package]\nname = \"demo\"\n"),
+            (
+                "src/lib.rs",
+                "pub mod util;\npub fn run() { util::helper(); }\n",
+            ),
+            ("src/util.rs", "pub fn helper() {}\n"),
+            ("README.md", "demo\n"),
+        ],
+    );
+    let orbit = |args: &[&str]| {
+        let out = orbit_cmd()
+            .args(args)
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "orbit {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let names = |sql: &str| -> Vec<String> {
+        rows(&orbit_sql(sql, data_dir.path()))
+            .iter()
+            .map(|r| r["n"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let definitions = "SELECT fqn AS n FROM gl_definition ORDER BY fqn";
+    let files = "SELECT path AS n FROM gl_file ORDER BY path";
+
+    let out = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "reindex before any index must fail");
+
+    orbit(&["index", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(names(definitions), ["run", "util::helper"]);
+
+    std::fs::write(
+        repo.join("src/util.rs"),
+        "pub fn helper() {}\npub fn extra() {}\n",
+    )
+    .unwrap();
+    git(repo, &["commit", "-qam", "edit"]);
+    std::fs::write(repo.join("src/new.rs"), "pub fn fresh() {}\n").unwrap();
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(
+        names(definitions),
+        ["new::fresh", "run", "util::extra", "util::helper"]
+    );
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-qm", "add new"]);
+    git(repo, &["mv", "src/new.rs", "src/moved.rs"]);
+    git(repo, &["rm", "-q", "README.md"]);
+    std::fs::create_dir_all(repo.join("py")).unwrap();
+    std::fs::write(repo.join("py/mod.py"), "def py_fn():\n    pass\n").unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-qm", "rename, remove, add python"]);
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(
+        names(definitions),
+        [
+            "moved::fresh",
+            "py.mod.py_fn",
+            "run",
+            "util::extra",
+            "util::helper"
+        ]
+    );
+    assert_eq!(
+        names(files),
+        [
+            "Cargo.toml",
+            "py/mod.py",
+            "src/lib.rs",
+            "src/moved.rs",
+            "src/util.rs"
+        ]
+    );
+
+    let state_dir = data_dir.path().join("var");
+    let snapshots: BTreeSet<String> = std::fs::read_dir(
+        state_dir
+            .read_dir()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path(),
+    )
+    .unwrap()
+    .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+    .collect();
+    assert_eq!(
+        snapshots,
+        BTreeSet::from([
+            "graph.python.bin".to_string(),
+            "graph.rust.bin".to_string(),
+            "index.json".to_string()
+        ])
+    );
+
+    let out = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "reindex without --ff=inc must refuse"
+    );
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");

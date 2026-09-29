@@ -53,6 +53,12 @@ impl Workspace {
         self.root.join("graph.duckdb")
     }
 
+    /// Where a project keeps state between runs, such as incremental
+    /// snapshots: `~/.gitlab/orbit/var/<project_id>/`.
+    pub fn var_dir(&self, project_id: i64) -> PathBuf {
+        self.root.join("var").join(project_id.to_string())
+    }
+
     /// Discover git repos in a directory, including nested repos when
     /// the path itself is a git repo. Returns canonical paths.
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
@@ -404,6 +410,114 @@ pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
         .trim()
         .to_string();
     dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {top}"))
+}
+
+/// Paths whose content differs between two trees. Renames count as a
+/// removal plus a change.
+#[derive(Default)]
+pub struct GitChanges {
+    pub changed: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl GitChanges {
+    /// Every path named, changed or removed.
+    pub fn paths(&self) -> impl Iterator<Item = &String> {
+        self.changed.iter().chain(&self.removed)
+    }
+
+    pub fn settled(mut self) -> Self {
+        for list in [&mut self.changed, &mut self.removed] {
+            list.sort();
+            list.dedup();
+        }
+        self.removed.retain(|p| !self.changed.contains(p));
+        self
+    }
+}
+
+/// Committed changes since `base_sha`, plus whatever the working tree adds
+/// on top of HEAD.
+pub fn git_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
+    let committed = git_stdout(
+        repo_path,
+        &["diff", "--name-status", "-z", base_sha, "HEAD"],
+    )?;
+    let mut changes = GitChanges::default();
+    parse_name_status(&committed, &mut changes);
+    parse_porcelain(&git_status(repo_path)?, &mut changes);
+    Ok(changes.settled())
+}
+
+/// Uncommitted and untracked changes: what an index of the working tree
+/// holds beyond HEAD.
+pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
+    let mut changes = GitChanges::default();
+    parse_porcelain(&git_status(repo_path)?, &mut changes);
+    Ok(changes.settled())
+}
+
+fn git_status(repo_path: &Path) -> Result<String> {
+    git_stdout(
+        repo_path,
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+    )
+}
+
+/// `git diff --name-status -z`: `M\0path\0`, or `R100\0old\0new\0`.
+fn parse_name_status(output: &str, changes: &mut GitChanges) {
+    let mut fields = output.split('\0').filter(|f| !f.is_empty());
+    while let Some(status) = fields.next() {
+        let Some(path) = fields.next() else { break };
+        match status.chars().next() {
+            Some('D') => changes.removed.push(path.to_string()),
+            Some('R' | 'C') => {
+                changes.removed.push(path.to_string());
+                if let Some(new_path) = fields.next() {
+                    changes.changed.push(new_path.to_string());
+                }
+            }
+            _ => changes.changed.push(path.to_string()),
+        }
+    }
+}
+
+/// `git status --porcelain -z`: `XY path\0`, or `R  new\0old\0`.
+fn parse_porcelain(output: &str, changes: &mut GitChanges) {
+    let mut fields = output.split('\0').filter(|f| !f.is_empty());
+    while let Some(entry) = fields.next() {
+        let Some((status, path)) = entry.split_at_checked(3) else {
+            break;
+        };
+        let status = status.trim_end();
+        if status.contains('D') {
+            changes.removed.push(path.to_string());
+        } else {
+            changes.changed.push(path.to_string());
+        }
+        if (status.starts_with('R') || status.starts_with('C'))
+            && let Some(old_path) = fields.next()
+        {
+            changes.removed.push(old_path.to_string());
+        }
+    }
+}
+
+fn git_stdout(repo_path: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_path)
+        .output()
+        .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed in {}: {}",
+            args.join(" "),
+            repo_path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout).context("git output is not valid UTF-8")
 }
 
 /// Mask clears the sign bit so the result is always a positive i64.

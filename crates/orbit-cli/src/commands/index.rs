@@ -1,3 +1,4 @@
+pub(crate) mod incremental;
 mod summary;
 
 use std::collections::HashMap;

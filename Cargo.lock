@@ -5522,6 +5522,7 @@ dependencies = [
  "clap",
  "cliclack",
  "code-graph",
+ "code-graph-incremental",
  "dirs",
  "duckdb-client",
  "dunce",
