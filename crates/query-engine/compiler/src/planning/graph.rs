@@ -14,8 +14,10 @@ pub fn traversal(
     required: &[(String, String, String)],
     edge_outputs: &[[String; 5]],
 ) -> Result<BoundQuery> {
-    if input.query_type != QueryType::Traversal
-        || input.nodes.is_empty()
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) || input.nodes.is_empty()
         || !input.join_predicates.is_empty()
     {
         return Err(QueryError::Validation(
@@ -51,8 +53,13 @@ pub fn traversal(
             .ok_or_else(|| {
                 QueryError::PipelineInvariant("node identity must be required".into())
             })?;
+        let mut source = node.clone();
+        if input.query_type == QueryType::Aggregation {
+            source.columns = Some(crate::input::ColumnSelection::List(vec![]));
+        }
+
         let single = Input {
-            nodes: vec![node.clone()],
+            nodes: vec![source],
             ..Default::default()
         };
         let bound = bind_node(&single, model, &fields, None, values)?;

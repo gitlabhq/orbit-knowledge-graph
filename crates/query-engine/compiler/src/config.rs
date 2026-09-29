@@ -316,7 +316,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     use crate::constants::{redaction_id_column, redaction_type_column};
     use crate::input::OrderDirection;
     use crate::lowering::{Context, lower_with_context, scalar};
-    use crate::planning::graph;
+    use crate::planning::{aggregation, graph};
 
     let input = require(ctx.input().clone(), "input")?;
     let mut context = Context::default();
@@ -340,7 +340,12 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
         .iter()
         .map(|_| std::array::from_fn(|_| context.alias()))
         .collect();
-    let mut bound = graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?;
+    let aggregate = input.query_type == QueryType::Aggregation;
+    let mut bound = if aggregate {
+        aggregation::bind(&input, ctx.data_model(), || context.alias())?
+    } else {
+        graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?
+    };
     let physical = bound
         .root
         .expand_sources(&mut |source| select_source(source, ctx.data_model(), &mut bound.values))?;
@@ -354,28 +359,56 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
             .map(|(_, expression)| expression.clone())
             .ok_or_else(|| QueryError::Lowering("required result value was not exported".into()))
     };
-    let identities = input
-        .nodes
-        .iter()
-        .zip(&bound.required)
-        .filter(|(node, _)| {
-            !input
-                .order_by
-                .as_ref()
-                .is_some_and(|order| order.node == node.id && order.property == node.id_property)
-        })
-        .map(|(_, value)| resolve(*value).map(OrderExpr::asc))
-        .collect::<Result<Vec<_>>>()?;
-    let order = input
-        .order_by
-        .as_ref()
-        .map(|order| {
-            Ok::<_, QueryError>(OrderExpr {
-                expr: resolve(bound.required[input.nodes.len()])?,
-                desc: order.direction == OrderDirection::Desc,
+    let identities = if aggregate {
+        bound
+            .required
+            .iter()
+            .map(|value| resolve(*value).map(OrderExpr::asc))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        input
+            .nodes
+            .iter()
+            .zip(&bound.required)
+            .filter(|(node, _)| {
+                !input.order_by.as_ref().is_some_and(|order| {
+                    order.node == node.id && order.property == node.id_property
+                })
             })
-        })
-        .transpose()?;
+            .map(|(_, value)| resolve(*value).map(OrderExpr::asc))
+            .collect::<Result<Vec<_>>>()?
+    };
+    let order = if aggregate {
+        input
+            .aggregation
+            .sort
+            .as_ref()
+            .map(|order| {
+                let index = bound
+                    .outputs
+                    .iter()
+                    .position(|name| name == &order.column)
+                    .ok_or_else(|| {
+                        QueryError::ReferenceError("aggregate sort output is missing".into())
+                    })?;
+                Ok::<_, QueryError>(OrderExpr {
+                    expr: fragment.exports[index].1.clone(),
+                    desc: order.direction == OrderDirection::Desc,
+                })
+            })
+            .transpose()?
+    } else {
+        input
+            .order_by
+            .as_ref()
+            .map(|order| {
+                Ok::<_, QueryError>(OrderExpr {
+                    expr: resolve(bound.required[input.nodes.len()])?,
+                    desc: order.direction == OrderDirection::Desc,
+                })
+            })
+            .transpose()?
+    };
 
     let mut query = fragment.into_query(&bound.outputs)?;
     if let Some((_, _, hidden)) = required.last().filter(|_| input.order_by.is_some()) {
@@ -386,7 +419,11 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     query.order_by = order.into_iter().collect();
 
     let mut result = ResultContext::new().with_query_type(input.query_type);
-    for node in &input.nodes {
+    for node in input.nodes.iter().filter(|node| {
+        !aggregate
+            || crate::input::node_group_ids(&input.aggregation.group_by)
+                .any(|alias| alias == node.id)
+    }) {
         let entity = node
             .entity
             .as_deref()
@@ -398,8 +435,11 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
         result.add_node(&node.id, entity);
     }
 
-    for (relationship, [source, target, source_kind, target_kind, kind]) in
-        input.relationships.iter().zip(edge_outputs)
+    for (relationship, [source, target, source_kind, target_kind, kind]) in input
+        .relationships
+        .iter()
+        .zip(edge_outputs)
+        .filter(|_| !aggregate)
     {
         result.add_edge(enforce::EdgeMeta {
             column_prefix: String::new(),
