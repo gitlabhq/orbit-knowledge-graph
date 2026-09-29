@@ -418,6 +418,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn descriptions_lead_with_capabilities_not_imperatives() {
+        for definition in all_tools() {
+            for banned in ["Use Orbit for", "Use Orbit when", "Do not use Orbit"] {
+                assert!(
+                    !definition.description.contains(banned),
+                    "{} should state capabilities instead of \"{banned}\"",
+                    definition.name
+                );
+            }
+        }
+    }
+
     fn inline_description(frontend: Frontend) -> String {
         ToolRegistry::tools_with_catalog(frontend, true)
             .into_iter()
