@@ -97,14 +97,15 @@ impl Pending {
         target: &Path,
     ) -> Result<Option<FileInventoryEntry>, StreamError> {
         let Pending {
-            mut meta,
+            meta,
             content,
             dest,
         } = self;
-        let (decision, label) = hooks.on_content(&meta, &content);
-        meta.decision = decision;
-        meta.label = label;
-        match decision {
+        let decided = hooks.on_content(&meta, &content);
+        let Some(meta) = meta.settled(decided) else {
+            return Ok(None);
+        };
+        match meta.decision {
             Decision::Drop => Ok(None),
             Decision::ListOnly => Ok(Some(meta)),
             // Both loaded states materialize the bytes; only the parse axis
@@ -204,21 +205,15 @@ fn inflate<R: Read, H: FileStreamHooks>(
             ))));
         }
         let dest = target.join(&relative_path);
-        let mut meta = FileInventoryEntry {
-            path: relative_path.to_string_lossy().into_owned(),
-            size: entry.size(),
-            decision: Decision::ListOnly,
-            label: Default::default(),
-        };
+        let meta =
+            FileInventoryEntry::listed(relative_path.to_string_lossy().into_owned(), entry.size());
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
             // A symlink is never a parse candidate, we'd be parsing the link, not
             // source, so the hooks settle it (and record why); we keep only the
             // within-root deferral, which is the source's security mechanism.
-            let (decision, label) = hooks.on_non_regular(&meta);
-            meta.decision = decision;
-            meta.label = label;
-            if meta.decision != Decision::Drop {
+            let decided = hooks.on_non_regular(&meta);
+            if let Some(meta) = meta.settled(decided) {
                 let link_target = entry
                     .link_name()
                     .map_err(std::io::Error::other)?
@@ -230,13 +225,8 @@ fn inflate<R: Read, H: FileStreamHooks>(
             continue;
         }
         if entry_type == tar::EntryType::Regular {
-            meta.decision = Decision::Parse;
-            if let Some((decision, label)) = settle_header(hooks, &meta)? {
-                meta.decision = decision;
-                meta.label = label;
-                if meta.decision != Decision::Drop {
-                    inflated.entries.push(meta);
-                }
+            if let Some(settled) = settle_header(hooks, &meta)? {
+                inflated.entries.extend(meta.settled(settled));
                 continue;
             }
             let mut content = Vec::with_capacity(entry.size() as usize);

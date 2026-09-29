@@ -5,6 +5,6 @@ pub mod walk;
 pub use inventory::FileInventory;
 pub use stream::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
-    SkipReason, StreamError, classify_in_parallel, settle_header, step,
+    SkipReason, StreamError, classify_in_parallel, settle_file, settle_header,
 };
-pub use walk::walk_dir;
+pub use walk::{classify_paths, walk_dir};

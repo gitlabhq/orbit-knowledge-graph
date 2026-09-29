@@ -118,9 +118,10 @@ fn classify_agrees_with_walk() {
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
     let walked = inventory::walk(repo.path()).unwrap().into_inner();
-    let paths = walked.iter().map(|e| e.path.clone());
-    let mut classified = inventory::classify(repo.path(), paths);
-    classified.sort_by(|a, b| a.path.cmp(&b.path));
+    let paths = walked.iter().map(|e| e.path.clone()).collect();
+    let classified = inventory::classify(repo.path(), paths)
+        .unwrap()
+        .into_inner();
 
     assert_eq!(walked.len(), files.len() + 1);
     assert_eq!(strip(walked), strip(classified));

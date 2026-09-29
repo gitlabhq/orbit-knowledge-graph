@@ -75,7 +75,9 @@ pub fn run_incremental_suite(yaml: &str) {
         changed.extend(write_fixtures(&step.modify, repo.path()));
         let changed = changed.into_iter().map(|(path, _)| path);
         let changes = Changes {
-            changed: inventory::classify(repo.path(), changed),
+            changed: inventory::classify(repo.path(), changed.collect())
+                .expect("classify changed files")
+                .into_inner(),
             removed: step.remove.clone(),
         };
         let graph = templates::reindex(Context::new(&env), state, repo.path(), changes)

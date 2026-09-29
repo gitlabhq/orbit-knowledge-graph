@@ -9,23 +9,45 @@ use ignore::WalkBuilder;
 
 use super::inventory::FileInventory;
 use super::stream::{
-    Decision, FileInventoryEntry, FileStreamHooks, StreamError, classify_in_parallel, step,
+    FileInventoryEntry, FileStreamHooks, StreamError, classify_in_parallel, settle_file,
 };
 
 /// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
 /// survive), running every file through `hooks`. Returns the inventory of
 /// recorded files with their [`Decision`]. Paths are relative to `root`.
-///
-/// Listing is cheap and reading is not, so files are read and classified in
-/// parallel: each worker classifies with a clone of `hooks`, and what the
-/// clones tallied is added back into `hooks` once the walk is done.
 pub fn walk_dir<H>(root: &Path, hooks: &mut H) -> Result<FileInventory, StreamError>
 where
     H: FileStreamHooks + Clone + AddAssign + Send + Sync,
 {
-    let files = list_files(root)?;
-    let entries = classify_in_parallel(files, hooks, |hooks, content, path| {
-        classify(root, &path, hooks, content)
+    classify_paths(root, list_files(root)?, hooks)
+}
+
+/// Classify the named files under `root`: a walk's listing, or a change set
+/// where a walk is not wanted. Listing is cheap and reading is not, so files
+/// are read and classified in parallel, each worker with a clone of `hooks`
+/// that is added back once done. A symlink has no content to sniff and is
+/// never a parse candidate, so the hooks settle it without a read.
+pub fn classify_paths<H>(
+    root: &Path,
+    paths: Vec<String>,
+    hooks: &mut H,
+) -> Result<FileInventory, StreamError>
+where
+    H: FileStreamHooks + Clone + AddAssign + Send + Sync,
+{
+    let entries = classify_in_parallel(paths, hooks, |hooks, content, path| {
+        let abs_path = root.join(&path);
+        let metadata = abs_path.symlink_metadata()?;
+        let file = FileInventoryEntry::listed(path, metadata.len());
+        match metadata.is_symlink() {
+            true => {
+                let decided = hooks.on_non_regular(&file);
+                Ok(file.settled(decided))
+            }
+            false => settle_file(hooks, file, content, |buf| {
+                std::fs::File::open(&abs_path)?.read_to_end(buf).map(drop)
+            }),
+        }
     })?;
     Ok(FileInventory::new(entries))
 }
@@ -58,38 +80,10 @@ fn list_files(root: &Path) -> Result<Vec<String>, StreamError> {
     Ok(files)
 }
 
-/// The hooks' decision on one file; `None` when they drop it. A symlink has
-/// no content to sniff and is never a parse candidate, so the hooks settle
-/// it without a read, same as the tar source.
-fn classify<H: FileStreamHooks>(
-    root: &Path,
-    path: &str,
-    hooks: &mut H,
-    content: &mut Vec<u8>,
-) -> Result<Option<FileInventoryEntry>, StreamError> {
-    let abs_path = root.join(path);
-    let metadata = abs_path.symlink_metadata()?;
-    let mut entry = FileInventoryEntry {
-        path: path.to_string(),
-        size: metadata.len(),
-        decision: Decision::ListOnly,
-        label: Default::default(),
-    };
-    let (decision, label) = match metadata.is_symlink() {
-        true => hooks.on_non_regular(&entry),
-        false => step(hooks, &entry, content, |buf| {
-            std::fs::File::open(&abs_path)?.read_to_end(buf).map(drop)
-        })?,
-    };
-    entry.decision = decision;
-    entry.label = label;
-    Ok((decision != Decision::Drop).then_some(entry))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs_walk::FileLabel;
+    use crate::fs_walk::{Decision, FileLabel};
 
     /// Tallies what it saw, so a walk can be checked to have added every
     /// worker's share back together.

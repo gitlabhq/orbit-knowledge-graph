@@ -89,6 +89,25 @@ pub struct FileInventoryEntry {
     pub label: FileLabel,
 }
 
+impl FileInventoryEntry {
+    /// A file as it arrives from its source: listed, not yet decided.
+    pub fn listed(path: String, size: u64) -> Self {
+        Self {
+            path,
+            size,
+            decision: Decision::ListOnly,
+            label: FileLabel::default(),
+        }
+    }
+
+    /// The entry carrying the hooks' decision, or nothing if they dropped it.
+    pub fn settled(mut self, (decision, label): (Decision, FileLabel)) -> Option<Self> {
+        self.decision = decision;
+        self.label = label;
+        (decision != Decision::Drop).then_some(self)
+    }
+}
+
 /// Normalize each path, drop duplicates (first wins), and sort. Sources call
 /// this so every consumer receives one canonical inventory.
 pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInventoryEntry> {
@@ -179,23 +198,28 @@ pub trait FileStreamHooks {
     }
 }
 
-/// `content` is caller-owned to reuse across entries.
-pub fn step<H: FileStreamHooks>(
+/// The whole decision for one file whose bytes `read` can supply: counters
+/// and header first, the bytes only if the hooks need them. `None` when the
+/// hooks drop the file. `content` is caller-owned to reuse across files.
+pub fn settle_file<H: FileStreamHooks>(
     hooks: &mut H,
-    file: &FileInventoryEntry,
+    file: FileInventoryEntry,
     content: &mut Vec<u8>,
-    sniff: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
-) -> Result<(Decision, FileLabel), StreamError> {
-    if let Some(settled) = settle_header(hooks, file)? {
-        return Ok(settled);
-    }
-    content.clear();
-    sniff(content)?;
-    Ok(hooks.on_content(file, content))
+    read: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
+) -> Result<Option<FileInventoryEntry>, StreamError> {
+    let settled = match settle_header(hooks, &file)? {
+        Some(settled) => settled,
+        None => {
+            content.clear();
+            read(content)?;
+            hooks.on_content(&file, content)
+        }
+    };
+    Ok(file.settled(settled))
 }
 
-/// The part of `step` that needs no bytes: charge the counters, then let the
-/// hooks settle the file from its path and size if they can.
+/// The part of the decision that needs no bytes: charge the counters, then
+/// let the hooks settle the file from its path and size if they can.
 pub fn settle_header<H: FileStreamHooks>(
     hooks: &mut H,
     file: &FileInventoryEntry,
@@ -342,52 +366,60 @@ mod tests {
     }
 
     #[test]
-    fn step_settles_in_header_without_sniffing() {
+    fn a_header_settled_file_is_never_read() {
         let mut h = TestHooks {
             bytes: Counter::new("bytes", None),
         };
-        let mut prefix = Vec::new();
-        let (d, _) = step(&mut h, &entry("a.png", 10), &mut prefix, |_| {
-            panic!("a header-settled file must never be sniffed")
+        let settled = settle_file(&mut h, entry("a.png", 10), &mut Vec::new(), |_| {
+            panic!("a header-settled file must never be read")
         })
         .unwrap();
-        assert_eq!(d, Decision::Drop);
+        assert!(settled.is_none(), "the hooks drop it");
     }
 
     #[test]
-    fn step_admits_kept_file() {
+    fn a_kept_file_is_read_and_admitted() {
         let mut h = TestHooks {
             bytes: Counter::new("bytes", Some(100)),
         };
-        let mut prefix = Vec::new();
-        let (d, _) = step(&mut h, &entry("a.rs", 10), &mut prefix, |buf| {
+        let settled = settle_file(&mut h, entry("a.rs", 10), &mut Vec::new(), |buf| {
             buf.extend_from_slice(b"fn main");
             Ok(())
         })
         .unwrap();
-        assert_eq!(d, Decision::Parse);
+        assert_eq!(settled.unwrap().decision, Decision::Parse);
     }
 
     #[test]
-    fn step_charges_cap_before_keep_decision() {
+    fn the_cap_is_charged_before_the_keep_decision() {
         let mut h = TestHooks {
             bytes: Counter::new("bytes", Some(5)),
         };
-        let mut prefix = Vec::new();
-        let err = step(&mut h, &entry("a.rs", 10), &mut prefix, |_| Ok(())).unwrap_err();
+        let err = settle_file(&mut h, entry("a.rs", 10), &mut Vec::new(), |_| Ok(())).unwrap_err();
         assert!(matches!(err, StreamError::Cap(_)));
     }
 
     #[test]
-    fn step_caps_charge_even_header_dropped_files() {
+    fn the_cap_charges_even_header_dropped_files() {
         let mut h = TestHooks {
             bytes: Counter::new("bytes", Some(5)),
         };
-        let mut prefix = Vec::new();
-        let err = step(&mut h, &entry("blob.png", 10), &mut prefix, |_| Ok(())).unwrap_err();
+        let err =
+            settle_file(&mut h, entry("blob.png", 10), &mut Vec::new(), |_| Ok(())).unwrap_err();
         assert!(
             matches!(err, StreamError::Cap(_)),
             "a dropped file's bytes must still count toward the cap"
+        );
+    }
+
+    #[test]
+    fn clones_of_a_counter_share_one_cap() {
+        let mut a = Counter::new("bytes", Some(100));
+        let mut b = a.clone();
+        assert!(a.add(60).is_ok());
+        assert!(
+            b.add(60).is_err(),
+            "the second clone sees the first one's 60"
         );
     }
 

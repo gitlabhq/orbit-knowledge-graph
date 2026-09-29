@@ -7,9 +7,7 @@ use std::path::Path;
 
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 pub use code_graph::v2::error::{AbortPhase, FileFault, FileReason, FileSkip};
-use orbit_utils::fs_walk::{
-    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step, walk_dir,
-};
+use orbit_utils::fs_walk::{FileInventory, StreamError, classify_paths, walk_dir};
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -24,33 +22,8 @@ pub fn walk(root: &Path) -> Result<FileInventory, StreamError> {
 
 /// Classify the named files under `root`; for a change set, where a full
 /// walk is not wanted.
-pub fn classify(root: &Path, paths: impl IntoIterator<Item = String>) -> Vec<FileInventoryEntry> {
-    let mut hooks = code_filter();
-    let mut content = Vec::new();
-    paths
-        .into_iter()
-        .map(|path| {
-            let abs = root.join(&path);
-            let link_meta = std::fs::symlink_metadata(&abs);
-            let is_symlink = link_meta.as_ref().is_ok_and(|m| m.file_type().is_symlink());
-            let mut meta = FileInventoryEntry {
-                path,
-                size: link_meta.map_or(0, |m| m.len()),
-                decision: Decision::ListOnly,
-                label: Default::default(),
-            };
-            let settled = (!is_symlink)
-                .then(|| {
-                    step(&mut hooks, &meta, &mut content, |buf| {
-                        std::io::Read::read_to_end(&mut std::fs::File::open(&abs)?, buf).map(|_| ())
-                    })
-                    .ok()
-                })
-                .flatten();
-            (meta.decision, meta.label) = settled.unwrap_or_else(|| hooks.on_non_regular(&meta));
-            meta
-        })
-        .collect()
+pub fn classify(root: &Path, paths: Vec<String>) -> Result<FileInventory, StreamError> {
+    classify_paths(root, paths, &mut code_filter())
 }
 
 /// The reason a file that overran a budget carries, in production's labels.

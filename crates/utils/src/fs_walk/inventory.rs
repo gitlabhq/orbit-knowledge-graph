@@ -3,9 +3,7 @@ use std::ops::Deref;
 
 use rustc_hash::FxHashMap;
 
-use super::stream::{
-    Decision, FileInventoryEntry, FileStreamHooks, StreamError, canonicalize_inventory, step,
-};
+use super::stream::{Decision, FileInventoryEntry, canonicalize_inventory};
 
 #[derive(Debug, Clone)]
 pub struct FileInventory(Vec<FileInventoryEntry>);
@@ -70,31 +68,6 @@ impl FileInventory {
         groups
     }
 
-    /// Run a second [`FileStreamHooks`] pass. `read_content` provides bytes
-    /// on demand (`None` = header-only). Drops entries reclassified as `Drop`.
-    pub fn refine<H: FileStreamHooks>(
-        self,
-        hooks: &mut H,
-        read_content: impl Fn(&str) -> Option<Vec<u8>>,
-    ) -> Result<Self, StreamError> {
-        let mut out = Vec::with_capacity(self.0.len());
-        let mut buf = Vec::new();
-        for mut entry in self.0 {
-            let (decision, label) = step(hooks, &entry, &mut buf, |buf| {
-                if let Some(bytes) = read_content(&entry.path) {
-                    buf.extend_from_slice(&bytes);
-                }
-                Ok(())
-            })?;
-            entry.decision = decision;
-            entry.label = label;
-            if entry.decision != Decision::Drop {
-                out.push(entry);
-            }
-        }
-        Ok(Self(out))
-    }
-
     /// Mutate entries in place without the hook pipeline. Drops entries
     /// reclassified as `Drop`.
     pub fn reclassify(mut self, mut f: impl FnMut(&mut FileInventoryEntry)) -> Self {
@@ -121,7 +94,6 @@ impl Deref for FileInventory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs_walk::{ContentClass, FileLabel, SkipReason};
 
     fn entry(path: &str, size: u64, decision: Decision) -> FileInventoryEntry {
         FileInventoryEntry {
@@ -129,15 +101,6 @@ mod tests {
             size,
             decision,
             label: Default::default(),
-        }
-    }
-
-    fn labeled(path: &str, size: u64, decision: Decision, label: FileLabel) -> FileInventoryEntry {
-        FileInventoryEntry {
-            path: path.into(),
-            size,
-            decision,
-            label,
         }
     }
 
@@ -172,44 +135,5 @@ mod tests {
         assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
         assert!(!inv.contains("logo.png"));
         assert_eq!(inv.len(), 2);
-    }
-
-    struct UpgradeTextToParseHooks;
-    impl FileStreamHooks for UpgradeTextToParseHooks {
-        fn on_header(&mut self, file: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
-            if file.label.content == ContentClass::Text && file.decision == Decision::Load {
-                Some((Decision::Parse, file.label.clone()))
-            } else {
-                Some((file.decision, file.label.clone()))
-            }
-        }
-    }
-
-    #[test]
-    fn refine_upgrades_text_to_parse_and_preserves_others() {
-        let text = FileLabel {
-            skip: None,
-            content: ContentClass::Text,
-            detail: None,
-            extension: Some("toml".into()),
-        };
-        let skipped = FileLabel {
-            skip: Some(SkipReason::ExcludedExtension),
-            content: ContentClass::Unknown,
-            detail: None,
-            extension: Some("png".into()),
-        };
-        let inv = FileInventory::new(vec![
-            labeled("Cargo.toml", 50, Decision::Load, text),
-            labeled("logo.png", 5000, Decision::ListOnly, skipped),
-            entry("src/main.rs", 100, Decision::Parse),
-        ]);
-
-        let mut hooks = UpgradeTextToParseHooks;
-        let inv = inv.refine(&mut hooks, |_| None).unwrap();
-
-        assert_eq!(inv.find("Cargo.toml").unwrap().decision, Decision::Parse);
-        assert_eq!(inv.find("src/main.rs").unwrap().decision, Decision::Parse);
-        assert_eq!(inv.find("logo.png").unwrap().decision, Decision::ListOnly);
     }
 }

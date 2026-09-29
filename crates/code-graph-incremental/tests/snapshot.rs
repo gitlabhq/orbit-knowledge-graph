@@ -33,7 +33,9 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         std::fs::remove_file(repo.join(path)).unwrap();
     }
     let changes = Changes {
-        changed: inventory::classify(repo, changed),
+        changed: inventory::classify(repo, changed)
+            .expect("classify changed files")
+            .into_inner(),
         removed: removed.iter().map(|s| s.to_string()).collect(),
     };
     templates::reindex(Context::new(env), state, repo, changes)
