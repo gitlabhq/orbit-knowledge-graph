@@ -46,8 +46,8 @@ Prerequisites:
 - A maintenance window for one PostgreSQL restart.
 - Helm 3 and `kubectl` access to the cluster.
 
-The commands on this page use Siphon 0.0.137-beta and the Siphon Helm chart 1.22.1. Prefer the latest
-versions. To find them, see:
+The versions in the commands on this page are for reference only. Prefer the latest versions. To
+find them, see:
 
 - [Siphon releases](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases)
 - [Siphon Helm chart releases](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases)
