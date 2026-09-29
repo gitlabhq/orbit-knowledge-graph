@@ -21,9 +21,8 @@ use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
-use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
+    check, codegen, cursor, enforce, hydrate, normalize, relationships,
     response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
@@ -44,7 +43,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub pagination: PaginationContext,
         pub scope_proofs: crate::scope::QueryScope,
         pub hydration_options: HydrationCompileOptions,
-        pub query_plan: QueryPlan,
         pub node: Node,
         pub lowered_metadata: LoweredMetadata,
         pub result_ctx: ResultContext,
@@ -80,20 +78,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         restrict {
             reads_env: [data_model, security_ctx]
             mutates: [input, scope_proofs]
-        }
-        plan_clickhouse {
-            reads_env: [data_model]
-            reads_state: [hydration_options]
-            mutates: [input, query_plan]
-        }
-        plan_duckdb {
-            reads_env: [data_model]
-            reads_state: [hydration_options]
-            mutates: [input, query_plan]
-        }
-        lower {
-            reads_state: [input]
-            mutates: [query_plan, node, lowered_metadata]
         }
         scope_requirements {
             reads_env: [data_model]
@@ -134,7 +118,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         settings {
             reads_state: [input, node, pagination]
-            mutates: [query_plan, query_config]
+            mutates: [query_config]
         }
         codegen {
             reads_state: [node, input, pagination]
@@ -150,32 +134,32 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
+            state: [input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            phases: [restrict, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate_local, normalize, enforce_local, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, enforce_local, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -272,47 +256,6 @@ where
     let scope_proofs = crate::scope::prepare(&mut input, scope_proofs, ctx.data_model());
     ctx.set_input(input);
     ctx.set_scope_proofs(scope_proofs);
-    Ok(())
-}
-
-fn plan_clickhouse(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
-) -> Result<()> {
-    plan_with(ctx, plan::plan_clickhouse)
-}
-
-fn plan_duckdb(
-    ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>,
-) -> Result<()> {
-    plan_with(ctx, plan::plan_duckdb)
-}
-
-fn plan_with<C>(
-    ctx: &mut C,
-    build: impl FnOnce(&Input, &C::Model, HydrationCompileOptions) -> Result<QueryPlan>,
-) -> Result<()>
-where
-    C: CompilerCtx,
-{
-    let input = require(ctx.take_input(), "input")?;
-    let hydration_options = ctx
-        .hydration_options()
-        .as_ref()
-        .copied()
-        .unwrap_or_default();
-    let query_plan = build(&input, ctx.data_model(), hydration_options)?;
-    ctx.set_input(input);
-    ctx.set_query_plan(query_plan);
-    Ok(())
-}
-
-fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input)?;
-    ctx.set_query_plan(query_plan);
-    ctx.set_node(lowered.ast);
-    ctx.set_lowered_metadata(lowered.metadata);
     Ok(())
 }
 
@@ -434,10 +377,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
         })?;
     }
 
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    if query_plan.hops.len() >= 3 {
-        config.compiler_derived.join_order_algorithm = Some("dpsize".into());
-    }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
@@ -453,7 +392,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
             config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
         }
     }
-    ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);
     Ok(())
 }

@@ -48,6 +48,7 @@ pub mod types;
 
 pub mod config;
 pub mod passes;
+pub mod planning;
 
 pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
