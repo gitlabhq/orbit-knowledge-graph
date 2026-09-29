@@ -19,7 +19,7 @@ pub fn code_filter() -> CodeFilter {
 
 /// Walk a repository on disk, honouring `.gitignore`, and classify every file.
 pub fn walk(root: &Path) -> Result<FileInventory, StreamError> {
-    walk_dir(root, &mut code_filter())
+    walk_dir(root, code_filter)
 }
 
 /// Classify the named files under `root`; for a change set, where a full
