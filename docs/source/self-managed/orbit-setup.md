@@ -37,6 +37,12 @@ Prerequisites:
 - The Owner role for the group you want to index.
 - Administrator access to GitLab.
 
+The versions in the commands on this page are for reference only. Prefer the latest versions. To
+find them, see:
+
+- [GitLab Orbit releases](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
+- [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases)
+
 Set up GitLab Orbit in this order:
 
 1. Create the ClickHouse database and identities.
@@ -65,7 +71,7 @@ To create the database and the identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.96.0 \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -193,7 +199,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
 
    ```yaml
    image:
-     tag: "0.96.0"
+     tag: "0.134.0"
 
    secrets:
      perKey:
@@ -246,7 +252,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    ```shell
    helm upgrade --install gkg \
      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
-     --version 1.5.0 \
+     --version 3.0.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
