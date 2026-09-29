@@ -13,9 +13,8 @@ use crate::input::Direction;
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing,
-    fk_values_from_candidate_scan, latest_node_predicates, node_ids_from_candidate_scan,
-    node_select_columns,
+    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing, latest_node_predicates,
+    node_select_columns, node_values_from_candidate_scan,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
@@ -84,9 +83,10 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         let cte_name = candidate_cte_name(center_alias);
         ctes.push(Cte::new(
             &cte_name,
-            node_ids_from_candidate_scan(
+            node_values_from_candidate_scan(
                 center_alias,
                 center_table,
+                DEFAULT_PRIMARY_KEY,
                 center_np,
                 candidate_extra_predicates
                     .get(center_alias)
@@ -113,7 +113,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
-        if !target_np.node_ids.is_empty() {
+        if !target_np.node_ids.is_empty() && fk.referenced_column == DEFAULT_PRIMARY_KEY {
             center_where_parts.push(id_list_predicate(
                 center_alias,
                 &fk.fk_column,
@@ -147,7 +147,10 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
             fk.fk_node.clone()
         };
 
-        if !target_np.node_ids.is_empty() && fk_alias != center_alias {
+        if !target_np.node_ids.is_empty()
+            && fk_alias != center_alias
+            && fk.referenced_column == DEFAULT_PRIMARY_KEY
+        {
             where_parts.push(id_list_predicate(
                 &fk_alias,
                 &fk.fk_column,
@@ -173,7 +176,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 let narrow_name = format!("_narrow_{}", fk.target_node);
                 ctes.push(Cte::new(
                     &narrow_name,
-                    fk_values_from_candidate_scan(
+                    node_values_from_candidate_scan(
                         center_alias,
                         center_table,
                         &fk.fk_column,
@@ -201,7 +204,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
-                false,
+                &fk.referenced_column,
                 narrow,
                 node_sort_key,
             )?;
@@ -213,6 +216,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
+                &fk.referenced_column,
                 &mut ctes,
             )?);
         }
@@ -249,16 +253,21 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
             .unwrap_or("");
         let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
 
+        let target_id = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+            Expr::col(center_alias, &fk.fk_column)
+        } else {
+            Expr::col(&fk.target_node, DEFAULT_PRIMARY_KEY)
+        };
         let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == *source {
             (
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
                 source_entity,
-                Expr::col(center_alias, &fk.fk_column),
+                target_id,
                 target_entity,
             )
         } else {
             (
-                Expr::col(center_alias, &fk.fk_column),
+                target_id,
                 source_entity,
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
                 target_entity,
@@ -321,7 +330,7 @@ fn fk_candidate_extra_predicates(plan: &Plan) -> Result<HashMap<String, Vec<Expr
         let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
-        if target_np.node_ids.is_empty() {
+        if target_np.node_ids.is_empty() || fk.referenced_column != DEFAULT_PRIMARY_KEY {
             continue;
         }
         let fk_alias = fk.fk_node.clone();
@@ -364,9 +373,10 @@ fn emit_join_target_candidate_ctes(
         let cte_name = candidate_cte_name(&fk.target_node);
         ctes.push(Cte::new(
             &cte_name,
-            node_ids_from_candidate_scan(
+            node_values_from_candidate_scan(
                 &fk.target_node,
                 table,
+                &fk.referenced_column,
                 target_np,
                 candidate_extra_predicates
                     .get(&fk.target_node)
@@ -429,17 +439,10 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
             QueryError::Lowering(format!("FK chain node '{new_alias}' not found"))
         })?;
 
-        let on = if fk.fk_node == hop.to_node {
-            Expr::eq(
-                Expr::col(&hop.to_node, &fk.fk_column),
-                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
-            )
-        } else {
-            Expr::eq(
-                Expr::col(&hop.from_node, &fk.fk_column),
-                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
-            )
-        };
+        let on = Expr::eq(
+            Expr::col(&fk.fk_node, &fk.fk_column),
+            Expr::col(&fk.target_node, &fk.referenced_column),
+        );
         from = TableRef::join(JoinType::Inner, from, node_scan(new_np)?, on);
         selects.extend(node_select_columns(new_alias, new_np));
         reached.insert(hop.from_node.as_str());

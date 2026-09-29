@@ -54,27 +54,7 @@ pub(super) fn emit_node_join_with_narrowing(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
-    use_traversal_path_join: bool,
-    narrow: Option<NarrowSource>,
-    sort_key: &[String],
-) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    emit_node_join_inner(
-        from,
-        np,
-        edge_alias,
-        edge_col,
-        use_traversal_path_join,
-        narrow,
-        sort_key,
-    )
-}
-
-fn emit_node_join_inner(
-    from: TableRef,
-    np: &NodePlan,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
+    node_column: &str,
     narrow: Option<NarrowSource>,
     sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
@@ -85,7 +65,7 @@ fn emit_node_join_inner(
     let alias = &np.alias;
 
     let in_predicate = narrow.map(|NarrowSource::Cte(cte_name)| Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+        expr: Box::new(Expr::col(alias, node_column)),
         cte_name,
         column: DEFAULT_PRIMARY_KEY.to_string(),
     });
@@ -128,33 +108,13 @@ fn emit_node_join_inner(
         JoinType::Inner,
         from,
         node_scan,
-        node_join_condition(alias, edge_alias, edge_col, use_traversal_path_join, np),
+        Expr::eq(
+            Expr::col(alias, node_column),
+            Expr::col(edge_alias, edge_col),
+        ),
     );
 
     Ok((joined, selects, vec![]))
-}
-
-fn node_join_condition(
-    alias: &str,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
-    np: &NodePlan,
-) -> Expr {
-    let mut on = Expr::eq(
-        Expr::col(alias, DEFAULT_PRIMARY_KEY),
-        Expr::col(edge_alias, edge_col),
-    );
-    if use_traversal_path_join && np.has_traversal_path {
-        on = Expr::and(
-            on,
-            Expr::eq(
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-            ),
-        );
-    }
-    on
 }
 
 // Authoritative filter: dedup with FINAL before filtering so a stale matching version can't resurrect a row.
@@ -162,6 +122,7 @@ pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
+    node_column: &str,
     ctes: &mut Vec<Cte>,
 ) -> Result<Vec<Expr>> {
     let table = np
@@ -174,7 +135,10 @@ pub(super) fn emit_filter_subquery(
     ctes.push(Cte::new(
         &cte_name,
         Query {
-            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+            select: vec![SelectExpr::new(
+                Expr::col(alias, node_column),
+                DEFAULT_PRIMARY_KEY,
+            )],
             from: TableRef::scan_final(table, alias),
             where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
             ..Default::default()
@@ -210,26 +174,10 @@ fn node_ids_dedup_scan(
     })
 }
 
-pub(super) fn node_ids_from_candidate_scan(
+pub(super) fn node_values_from_candidate_scan(
     alias: &str,
     table: &str,
-    np: &NodePlan,
-    extra_predicates: Vec<Expr>,
-) -> Query {
-    let mut predicates = latest_node_predicates(alias, np);
-    predicates.extend(extra_predicates);
-    Query {
-        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(predicates),
-        ..Default::default()
-    }
-}
-
-pub(super) fn fk_values_from_candidate_scan(
-    alias: &str,
-    table: &str,
-    fk_column: &str,
+    column: &str,
     np: &NodePlan,
     extra_predicates: Vec<Expr>,
 ) -> Query {
@@ -237,7 +185,7 @@ pub(super) fn fk_values_from_candidate_scan(
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::new(
-            Expr::col(alias, fk_column),
+            Expr::col(alias, column),
             DEFAULT_PRIMARY_KEY,
         )],
         from: TableRef::scan(table, alias),
