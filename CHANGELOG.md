@@ -1,3 +1,15 @@
+## [0.135.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.134.0...v0.135.0) (2026-09-29)
+
+### Features
+
+* **billing:** authenticate quota checks with the license checksum on self-managed ([7375103](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7375103a8979a30391caedb0b4431624f163b616)) by Sharmad Nachnolkar
+* **server:** limit GetItemCounts to one path ([325f6dc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/325f6dcd3e820810d523d14c64084de6f2bc3c67)) by Jean-Gabriel Doyon
+
+### Other
+
+* add service accounts page for Orbit Remote ([545b988](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/545b988059ec4f6f42730fa1c4c49a4e326d4aa3)) by Jean-Gabriel Doyon
+* **compiler:** separate scope processing from planning ([7bb65ad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7bb65addee2d5a469ab6d25225152802188ab007)) by Michael Usachenko
+
 ## [0.134.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.133.0...v0.134.0) (2026-09-29)
 
 ### Features
