@@ -344,6 +344,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
 
     let input = require(ctx.input().clone(), "input")?;
     let mut context = Context::default();
+    let aggregate = input.query_type == QueryType::Aggregation;
     let mut required: Vec<_> = input
         .nodes
         .iter()
@@ -370,10 +371,11 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
         if let Some(property) = redaction_property(entity.id, ctx.data_model())
             && property != node.id_property
         {
-            if input.query_type == QueryType::Aggregation {
-                return Err(QueryError::Validation(
-                    "aggregation with a separate redaction identity is not yet supported".into(),
-                ));
+            if aggregate
+                && !crate::input::node_group_ids(&input.aggregation.group_by)
+                    .any(|alias| alias == node.id)
+            {
+                continue;
             }
 
             let position = required.len();
@@ -387,9 +389,14 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
         .iter()
         .map(|_| std::array::from_fn(|_| context.alias()))
         .collect();
-    let aggregate = input.query_type == QueryType::Aggregation;
     let mut bound = if aggregate {
-        aggregation::bind(&input, ctx.data_model(), || context.alias())?
+        let grouped_outputs = redactions
+            .iter()
+            .map(|(_, position)| required[*position].clone())
+            .collect::<Vec<_>>();
+        aggregation::bind(&input, ctx.data_model(), &grouped_outputs, || {
+            context.alias()
+        })?
     } else {
         graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?
     };
@@ -460,11 +467,16 @@ fn plan_query<C: CompilerCtx, S: EmitOperation>(
     let redactions = redactions
         .into_iter()
         .map(|(alias, position)| {
-            Ok((
-                alias,
-                resolve(bound.required[position])?,
-                required[position].2.clone(),
-            ))
+            let hidden = &required[position].2;
+            let output = bound
+                .outputs
+                .iter()
+                .position(|name| name == hidden)
+                .ok_or_else(|| {
+                    QueryError::Lowering("redaction identity was not exported".into())
+                })?;
+
+            Ok((alias, fragment.exports[output].1.clone(), hidden.clone()))
         })
         .collect::<Result<Vec<_>>>()?;
 

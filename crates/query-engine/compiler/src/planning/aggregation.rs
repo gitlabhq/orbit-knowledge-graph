@@ -13,6 +13,7 @@ use crate::input::{AggFunction, Input, InputGroupByKey};
 pub fn bind(
     input: &Input,
     model: &impl QueryDataModel,
+    required_outputs: &[(String, String, String)],
     mut name: impl FnMut() -> String,
 ) -> Result<BoundQuery> {
     let mut fields = BTreeMap::new();
@@ -36,6 +37,16 @@ pub fn bind(
         if let Some(property) = metric.expr.property() {
             require(metric.expr.node(), property);
         }
+    }
+
+    for (node, property, _) in required_outputs {
+        if !crate::input::node_group_ids(&input.aggregation.group_by).any(|group| group == node) {
+            return Err(QueryError::Validation(
+                "required aggregate identity must belong to a grouped node".into(),
+            ));
+        }
+
+        require(node, property);
     }
 
     let required = fields
@@ -93,6 +104,16 @@ pub fn bind(
     }
 
     let mut measures = Vec::new();
+    for (node, property, name) in required_outputs {
+        let source = resolve(node, Some(property))?;
+        let output = values.allocate(values.data_type(source)?.clone());
+        groups.push(Assignment {
+            output,
+            expression: Expr::Value(source),
+        });
+        outputs.push(name.clone());
+    }
+
     for metric in &input.aggregation.metrics {
         let function = match metric.expr.function() {
             AggFunction::Count => AggregateFunction::Count,
