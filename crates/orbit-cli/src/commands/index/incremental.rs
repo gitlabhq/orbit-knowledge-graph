@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
-use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
+use std::sync::Arc;
+
+use arrow::array::{Array, ArrayRef, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{
     Changes, Context, Display, Emit, Export, FileTiming, Observer, Pipeline, Report, Resolved,
@@ -154,7 +156,7 @@ impl Project<'_> {
         let work = by_family
             .into_values()
             .map(|(family, entries)| (family, FamilyWork::Index(entries)));
-        let families = self.run_families(work, owner)?;
+        let families = self.run_families(work, owner, Mode::Full)?;
         Ok(self.output("index", started, families, None))
     }
 
@@ -205,7 +207,7 @@ impl Project<'_> {
         for (family, entries) in changed.into_values() {
             work.insert(family.family(), (family, FamilyWork::Index(entries)));
         }
-        let families = self.run_families(work.into_values(), owner)?;
+        let families = self.run_families(work.into_values(), owner, Mode::Changed)?;
         Ok(self.output("reindex", started, families, Some(counts)))
     }
 
@@ -215,20 +217,27 @@ impl Project<'_> {
         &self,
         work: impl IntoIterator<Item = (SupportLang, FamilyWork)>,
         owner: Option<SupportLang>,
+        mode: Mode,
     ) -> Result<Vec<FamilyOutput>> {
         let client = duckdb_client::DuckDbClient::open(self.db_path)
             .context("failed to open DuckDB for writing")?;
-        super::clear_project(&client, self.git, self.ontology)?;
+        let mut shared = match mode {
+            Mode::Full => {
+                super::clear_project(&client, self.git, self.ontology)?;
+                SharedRows::default()
+            }
+            Mode::Changed => {
+                self.stamp_commit(&client)?;
+                SharedRows::in_database(&client, self.git.project_id)?
+            }
+        };
         std::fs::create_dir_all(&self.state_dir)?;
         let root = &self.git.repo_path;
-        let mut shared = SharedRows::default();
+        let mut families = Vec::new();
         let mut outputs = Vec::new();
         for (family, job) in work {
+            families.push(family.family().to_string());
             let snapshot = self.snapshot_path(family);
-            let load = || {
-                State::load(&snapshot, family)
-                    .with_context(|| format!("failed to load {}", snapshot.display()))
-            };
             let log = PhaseLog(family.family());
             let mut env;
             let graph = match job {
@@ -238,21 +247,94 @@ impl Project<'_> {
                     templates::index(Context::new(&env).observe(log), root, entries)?
                 }
                 FamilyWork::Reindex(changes) => {
-                    let (loaded, state) = load()?;
+                    let (loaded, state) = State::load(&snapshot, family)
+                        .with_context(|| format!("failed to load {}", snapshot.display()))?;
                     env = loaded;
                     env.limits.total_ms = self.budget_ms;
+                    let previous = state.trees.iter().map(|t| t.label.as_str());
+                    let removed = changes.removed.iter().map(String::as_str);
+                    self.forget_files(&client, previous.chain(removed))?;
                     templates::reindex(Context::new(&env).observe(log), state, root, changes)?
                 }
-                FamilyWork::Keep => {
-                    let (loaded, state) = load()?;
-                    env = loaded;
-                    Pipeline::new(Context::new(&env), Resolved { state })
-                }
+                FamilyWork::Keep => continue,
             };
             outputs.push(self.export(family, &env, graph, &client, &mut shared)?);
         }
-        self.save_state(&outputs, owner)?;
+        let started = Instant::now();
+        super::finish_project(&client, self.git, self.ontology)?;
+        info!("search index {:.2}s", started.elapsed().as_secs_f64());
+        self.save_state(&families, owner)?;
         Ok(outputs)
+    }
+
+    /// Kept families' rows stay as they are; they now describe this commit.
+    fn stamp_commit(&self, client: &duckdb_client::DuckDbClient) -> Result<()> {
+        for table in [
+            "gl_directory",
+            "gl_file",
+            "gl_definition",
+            "gl_imported_symbol",
+        ] {
+            client.execute(
+                &format!("UPDATE {table} SET commit_sha = ?, branch = ? WHERE project_id = ?"),
+                &[
+                    serde_json::json!(self.git.commit_sha),
+                    serde_json::json!(self.git.branch),
+                    serde_json::json!(self.git.project_id),
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Drops the rows of the given files and every edge touching them: the
+    /// family's share of the project before it is exported again.
+    fn forget_files<'p>(
+        &self,
+        client: &duckdb_client::DuckDbClient,
+        paths: impl Iterator<Item = &'p str>,
+    ) -> Result<()> {
+        let paths = RecordBatch::try_from_iter([(
+            "path",
+            Arc::new(StringArray::from_iter_values(paths)) as ArrayRef,
+        )])?;
+        client.execute(
+            "CREATE OR REPLACE TEMP TABLE stale_paths (path VARCHAR)",
+            &[],
+        )?;
+        client.insert_batch("stale_paths", &paths)?;
+        let project = serde_json::json!(self.git.project_id);
+        let files = [
+            ("gl_file", "path"),
+            ("gl_definition", "file_path"),
+            ("gl_imported_symbol", "file_path"),
+        ];
+        let stale = |(table, column): &(&str, &str)| {
+            format!(
+                "SELECT id FROM {table} WHERE project_id = {} AND {column} IN (SELECT path FROM stale_paths)",
+                self.git.project_id
+            )
+        };
+        let stale_ids = files
+            .iter()
+            .map(stale)
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        client.execute(
+            &format!(
+                "DELETE FROM gl_edge WHERE source_id IN ({stale_ids}) OR target_id IN ({stale_ids})"
+            ),
+            &[],
+        )?;
+        for (table, column) in files {
+            client.execute(
+                &format!(
+                    "DELETE FROM {table} WHERE project_id = ? AND {column} IN (SELECT path FROM stale_paths)"
+                ),
+                std::slice::from_ref(&project),
+            )?;
+        }
+        Ok(())
     }
 
     /// Writes the family's rows into DuckDB and the snapshot the next run
@@ -323,12 +405,12 @@ impl Project<'_> {
             .join(format!("graph.{}.bin", family.family()))
     }
 
-    fn save_state(&self, families: &[FamilyOutput], owner: Option<SupportLang>) -> Result<()> {
+    fn save_state(&self, families: &[String], owner: Option<SupportLang>) -> Result<()> {
         let dirty = workspace::git_working_changes(&self.git.repo_path)?;
         let saved = SavedIndex {
             commit_sha: self.git.commit_sha.clone(),
             dirty: dirty.paths().cloned().collect(),
-            families: families.iter().map(|f| f.family.clone()).collect(),
+            families: families.to_vec(),
             owner: owner.map(|lang| lang.family().to_string()),
         };
         std::fs::write(
@@ -410,6 +492,35 @@ struct SharedRows {
 }
 
 impl SharedRows {
+    /// What a reindex must not add again: the directories and their edges
+    /// already in the database.
+    fn in_database(client: &duckdb_client::DuckDbClient, project_id: i64) -> Result<Self> {
+        let mut shared = Self::default();
+        let ids = client.query_arrow(&format!(
+            "SELECT id FROM gl_directory WHERE project_id = {project_id}"
+        ))?;
+        for batch in &ids {
+            shared.directories.extend(int_column(batch, "id")?.values());
+        }
+        let edges = client.query_arrow(&format!(
+            "SELECT source_id, target_id FROM gl_edge WHERE target_kind = 'Directory' AND target_id IN (SELECT id FROM gl_directory WHERE project_id = {project_id})"
+        ))?;
+        for batch in &edges {
+            let (sources, targets) = (
+                int_column(batch, "source_id")?,
+                int_column(batch, "target_id")?,
+            );
+            shared.containment.extend(
+                sources
+                    .values()
+                    .iter()
+                    .zip(targets.values())
+                    .map(|(&s, &t)| (s, t)),
+            );
+        }
+        Ok(shared)
+    }
+
     fn unseen(&mut self, table: &str, batch: &RecordBatch) -> Result<RecordBatch> {
         let keep: Vec<bool> = match table {
             "gl_directory" => {

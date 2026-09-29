@@ -300,6 +300,18 @@ fn incremental_reindex_follows_the_working_tree() {
         ]
     );
 
+    let grep = orbit_cmd()
+        .args(["grep", "helper", "--repo", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        grep.status.success() && String::from_utf8_lossy(&grep.stdout).contains("util::helper"),
+        "grep after an incremental index: {}{}",
+        String::from_utf8_lossy(&grep.stdout),
+        String::from_utf8_lossy(&grep.stderr)
+    );
+
     let state_dir = data_dir.path().join("var");
     let snapshots: BTreeSet<String> = std::fs::read_dir(
         state_dir
