@@ -38,6 +38,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
+    let mut node_tables = HashSet::from([center_alias.to_string()]);
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
@@ -209,6 +210,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 node_sort_key,
             )?;
             from = new_from;
+            node_tables.insert(fk.target_node.clone());
             selects.extend(ns);
             where_parts.extend(nw);
         } else if target_np.hydration == HydrationStrategy::FilterOnly {
@@ -226,6 +228,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut edge_aliases = Vec::new();
     if !matches!(plan.body, PlanBody::Traversal) {
         return Ok(EmitOutput {
+            node_tables,
             from,
             edge_aliases,
             where_parts,
@@ -298,6 +301,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        node_tables,
         from,
         edge_aliases,
         where_parts,
@@ -492,6 +496,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        node_tables: reached.into_iter().map(String::from).collect(),
         from,
         edge_aliases,
         where_parts: Vec::new(),

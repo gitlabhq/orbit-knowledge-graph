@@ -22,6 +22,7 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {
+        node_tables: std::collections::HashSet::from([alias.clone()]),
         from,
         edge_aliases: vec![],
         where_parts,

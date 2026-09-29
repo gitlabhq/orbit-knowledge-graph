@@ -1,4 +1,5 @@
 mod dialects;
+mod lowered_bindings;
 mod ontology;
 mod setup;
 #[allow(dead_code)]

@@ -333,6 +333,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in plan".into()))?;
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
+    let mut node_tables = HashSet::new();
 
     for (i, hop) in plan.hops.iter().enumerate() {
         let edge_alias = &edge_aliases[i];
@@ -409,6 +410,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         node_sort_key,
                     )?;
                     from = new_from;
+                    node_tables.insert(node_alias.clone());
                     selects.extend(ns);
                     where_parts.extend(nw);
                 }
@@ -430,6 +432,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             node_sort_key,
                         )?;
                         from = new_from;
+                        node_tables.insert(node_alias.clone());
                         selects.extend(ns);
                         where_parts.extend(nw);
                     }
@@ -440,6 +443,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        node_tables,
         from,
         edge_aliases,
         where_parts,

@@ -11,17 +11,41 @@ mod single_node;
 pub mod traversal;
 
 use crate::ast::*;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::plan::{Plan, PlanBody, Strategy};
 use super::shared;
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
-    pub node_sources: std::collections::HashMap<String, (String, String)>,
+    pub nodes: HashMap<String, NodeBinding>,
     pub edges: Vec<LoweredEdge>,
     pub stable_order: Vec<OrderExpr>,
+}
+
+#[derive(Clone)]
+pub struct NodeBinding {
+    pub identity: Expr,
+    pub table_alias: Option<String>,
+    pub traversal_path: Option<Expr>,
+    pub projected: bool,
+}
+
+impl NodeBinding {
+    fn property(&self, property: &str) -> Result<Expr> {
+        if property == DEFAULT_PRIMARY_KEY {
+            return Ok(self.identity.clone());
+        }
+        self.table_alias
+            .as_ref()
+            .map(|alias| Expr::col(alias, property))
+            .ok_or_else(|| {
+                QueryError::Lowering(format!("property '{property}' has no visible node table"))
+            })
+    }
 }
 
 #[derive(Clone)]
@@ -52,6 +76,7 @@ pub struct EmitOutput {
     pub where_parts: Vec<Expr>,
     pub select: Vec<SelectExpr>,
     pub ctes: Vec<Cte>,
+    pub node_tables: HashSet<String>,
     /// Edge predicates for `-If` aggregate combinators. When set, the
     /// aggregation pass emits `countIf(cond)` / `sumIf(col, cond)` / etc.
     /// and the predicates are already in the LIMIT BY subquery's WHERE.
@@ -59,6 +84,44 @@ pub struct EmitOutput {
 }
 
 impl EmitOutput {
+    fn node_bindings(&self, plan: &Plan, input: &Input) -> Result<HashMap<String, NodeBinding>> {
+        input
+            .nodes
+            .iter()
+            .filter(|node| plan.nodes.contains_key(&node.id))
+            .map(|node| {
+                let source = plan.node_edge_mappings.get(&node.id);
+                let visible = |alias: &str| {
+                    self.node_tables.contains(alias)
+                        || self.edge_aliases.iter().any(|edge| edge == alias)
+                };
+                let identity = match source {
+                    Some((alias, column)) if visible(alias) => Expr::col(alias, column),
+                    Some(_) if node.node_ids.len() == 1 => Expr::lit(node.node_ids[0]),
+                    None if visible(&node.id) => Expr::col(&node.id, &node.id_property),
+                    _ => {
+                        return Err(QueryError::Lowering(format!(
+                            "node '{}' has no emitted identity",
+                            node.id
+                        )));
+                    }
+                };
+                let path_alias = source.map_or(node.id.as_str(), |(alias, _)| alias.as_str());
+                let traversal_path =
+                    visible(path_alias).then(|| Expr::col(path_alias, TRAVERSAL_PATH_COLUMN));
+                Ok((
+                    node.id.clone(),
+                    NodeBinding {
+                        identity,
+                        table_alias: self.node_tables.contains(&node.id).then(|| node.id.clone()),
+                        traversal_path,
+                        projected: false,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     pub fn into_query(
         self,
         mut select: Vec<SelectExpr>,
@@ -81,33 +144,56 @@ impl EmitOutput {
 }
 
 pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
+    let mut nodes = HashMap::new();
     let mut node = match &plan.body {
-        PlanBody::Traversal => traversal::emit_traversal(plan, input),
+        PlanBody::Traversal => {
+            let output = plan.emit_edge_chain()?;
+            nodes = output.node_bindings(plan, input)?;
+            traversal::emit_traversal(plan, input, output)
+        }
         PlanBody::Aggregation {
             aggregations,
             agg_sort,
-        } => aggregation::emit_aggregation(
-            plan,
-            input,
-            aggregations,
-            &input.aggregation.group_by,
-            agg_sort.as_ref(),
-        ),
+        } => {
+            let output = plan.emit_edge_chain()?;
+            nodes = output.node_bindings(plan, input)?;
+            aggregation::emit_aggregation(
+                plan,
+                input,
+                aggregations,
+                &input.aggregation.group_by,
+                agg_sort.as_ref(),
+                output,
+            )
+        }
         PlanBody::Neighbors {
             center,
             direction,
             edge,
             has_non_denorm,
             center_tp_lookup,
-        } => neighbors::emit_neighbors(
-            plan,
-            input,
-            center,
-            *direction,
-            edge,
-            *has_non_denorm,
-            center_tp_lookup.as_ref(),
-        ),
+        } => {
+            let center_plan = &plan.nodes[center];
+            nodes.insert(
+                center.clone(),
+                NodeBinding {
+                    identity: Expr::col("e", direction.edge_columns().0),
+                    table_alias: (*has_non_denorm || !center_plan.uses_default_pk())
+                        .then(|| center.clone()),
+                    traversal_path: None,
+                    projected: true,
+                },
+            );
+            neighbors::emit_neighbors(
+                plan,
+                input,
+                center,
+                *direction,
+                edge,
+                *has_non_denorm,
+                center_tp_lookup.as_ref(),
+            )
+        }
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, input, pf),
         PlanBody::Hydration { nodes, options } => hydration::emit_hydration(
             nodes,
@@ -120,32 +206,20 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     if !input.join_predicates.is_empty()
         && let Node::Query(q) = &mut node
     {
-        let column = |alias: &str, property: &str| {
-            if property == ontology::constants::DEFAULT_PRIMARY_KEY
-                && let Some((table, column)) = plan.node_edge_mappings.get(alias)
-            {
-                (table.to_string(), column.to_string())
-            } else {
-                (alias.to_string(), property.to_string())
-            }
+        let column = |alias: &str, property: &str| -> Result<Expr> {
+            nodes
+                .get(alias)
+                .ok_or_else(|| {
+                    QueryError::Lowering(format!("node '{alias}' has no lowered binding"))
+                })?
+                .property(property)
         };
         for jp in &input.join_predicates {
-            let (lhs_alias, lhs_property) = column(&jp.lhs_node, &jp.lhs_prop);
-            let filter = InputFilter {
-                op: Some(jp.op),
-                rhs_column: Some(column(&jp.rhs_node, &jp.rhs_prop)),
-                ..Default::default()
-            };
-            let pred = shared::filter_to_expr(
-                &lhs_alias,
-                &lhs_property,
-                &crate::passes::plan::BoundFilter {
-                    filter,
-                    property: None,
-                    data_type: None,
-                    selectivity: ontology::FieldSelectivity::High,
-                },
-            );
+            let pred = shared::comparison(
+                column(&jp.lhs_node, &jp.lhs_prop)?,
+                jp.op,
+                column(&jp.rhs_node, &jp.rhs_prop)?,
+            )?;
             q.where_clause = Some(match q.where_clause.take() {
                 Some(existing) => Expr::and(existing, pred),
                 None => pred,
@@ -203,34 +277,25 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
                 )),
             ],
         },
-        _ => {
-            if input.relationships.is_empty() {
-                return Ok(LoweredQuery {
-                    ast: node,
-                    metadata: LoweredMetadata {
-                        node_sources: plan.node_edge_mappings(),
-                        edges,
-                        stable_order: input
-                            .nodes
-                            .iter()
-                            .map(|node| OrderExpr::asc(Expr::col(&node.id, &node.id_property)))
-                            .collect(),
-                    },
-                });
-            }
-            let mut sources: Vec<_> = plan.node_edge_mappings.values().cloned().collect();
-            sources.sort();
-            sources.dedup();
-            sources
-                .into_iter()
-                .map(|(alias, column)| OrderExpr::asc(Expr::col(alias, column)))
-                .collect()
-        }
+        _ if input.relationships.is_empty() => input
+            .nodes
+            .iter()
+            .filter_map(|node| nodes.get(&node.id))
+            .map(|binding| OrderExpr::asc(binding.identity.clone()))
+            .collect(),
+        _ => plan
+            .node_edge_mappings
+            .iter()
+            .filter_map(|(node, source)| nodes.get(node).map(|binding| (source, &binding.identity)))
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
+            .map(|identity| OrderExpr::asc(identity.clone()))
+            .collect(),
     };
     Ok(LoweredQuery {
         ast: node,
         metadata: LoweredMetadata {
-            node_sources: plan.node_edge_mappings(),
+            nodes,
             edges,
             stable_order,
         },

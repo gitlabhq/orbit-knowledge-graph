@@ -2,25 +2,20 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
+use super::EmitOutput;
 use crate::constants::*;
 use crate::passes::plan::{Plan, Strategy};
 use crate::passes::shared::edge_select_columns;
 use crate::passes::shared::edge_select_columns_with_prefix;
 
-pub fn emit_traversal(plan: &Plan, input: &Input) -> Result<Node> {
-    if matches!(plan.strategy, Strategy::SingleNode) {
-        return emit_single_node(plan, input);
-    }
-
-    let output = plan.emit_edge_chain()?;
-
+pub fn emit_traversal(plan: &Plan, input: &Input, output: EmitOutput) -> Result<Node> {
     let mut select = Vec::new();
     let already_has_edge_cols = output.select.iter().any(|s| {
         s.alias
             .as_deref()
             .is_some_and(|a| a.ends_with(EDGE_TYPE_SUFFIX))
     });
-    if !already_has_edge_cols {
+    if !matches!(plan.strategy, Strategy::SingleNode) && !already_has_edge_cols {
         for (i, ea) in output.edge_aliases.iter().enumerate() {
             let is_multi = plan.hops.get(i).is_some_and(|h| h.max_hops > 1);
             if is_multi {
@@ -48,23 +43,5 @@ pub fn emit_traversal(plan: &Plan, input: &Input) -> Result<Node> {
         })
         .unwrap_or_default();
     let q = output.into_query(select, vec![], order_by, input.limit);
-    Ok(Node::Query(Box::new(q)))
-}
-
-fn emit_single_node(plan: &Plan, input: &Input) -> Result<Node> {
-    let output = plan.emit_edge_chain()?;
-
-    let order_by = input
-        .order_by
-        .as_ref()
-        .map(|ob| {
-            vec![if matches!(ob.direction, OrderDirection::Desc) {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }]
-        })
-        .unwrap_or_default();
-    let q = output.into_query(vec![], vec![], order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
 }
