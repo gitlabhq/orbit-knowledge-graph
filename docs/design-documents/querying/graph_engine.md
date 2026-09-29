@@ -74,7 +74,7 @@ All later passes continue to use that AST.
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope, including scope-only container removal ([Security](../security.md)) |
+| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope ([Security](../security.md)) |
 | 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
 | 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
 | 7 | `response_policy` | Applies transport-size policy to result projections |
@@ -170,16 +170,16 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
 - The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- Scope preparation retains anchor nodes and relationships. A shared namespace does not prove relationship membership, existence, or multiplicity.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
 **Where it lands**
 
-- Scope preparation runs after restriction. It stores node and relationship proofs in pipeline state and removes eligible scope-only containers before planning.
+- Scope preparation runs after restriction. It stores node and relationship proofs in pipeline state without removing query nodes or relationships.
 - Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
 - Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
-- Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
+- Security injection adds caller authorization filters beside the scope filters. Required joins retain their endpoint existence checks.
 - Scope application, security injection, and final checks share callback-based query walkers. The walkers cover queries nested in expressions as well as derived tables and CTEs.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)

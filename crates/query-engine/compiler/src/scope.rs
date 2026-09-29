@@ -10,13 +10,12 @@ pub use preparation::prepare;
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
-    requirements: Vec<ScopeProof>,
 }
 
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Expr, Query, SelectExpr, TableRef};
 use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -54,17 +53,6 @@ pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
         .iter()
         .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
     Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
-}
-
-pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
-    Expr::and_all(proof.0.iter().map(|source| {
-        Some(Expr::binary(
-            Op::Ne,
-            scope_value_expr(source),
-            Expr::string(UNRESOLVED_PATH),
-        ))
-    }))
-    .expect("scope proof has at least one source")
 }
 
 fn scope_value_expr(source: &ScopeSource) -> Expr {
@@ -262,14 +250,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
         }
     }
     keys
-}
-pub fn is_scope_only(node: &InputNode) -> bool {
-    if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
-        return false;
-    }
-    let anchor_filters = single_full_path(node).is_some() as usize
-        + (node.node_ids.is_empty() && single_id(node).is_some()) as usize;
-    node.filters.len() == anchor_filters
 }
 
 fn single_id(node: &InputNode) -> Option<i64> {

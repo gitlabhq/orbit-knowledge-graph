@@ -19,5 +19,4 @@ physical:
       - (Scan gl_definition Snapshot ...)
     reject:
       - (CurrentRows ...)
-skip: true
-skip_reason: Scope preparation removes the pinned CALLS endpoint without preserving relationship membership
+skip: false

@@ -200,7 +200,7 @@ fn yaml_plan_shapes() {
                         let mut input = normalize::normalize(input.clone(), &remote).unwrap();
                         let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
                         let proofs = restrict::restrict(&mut input, &remote, &security).unwrap();
-                        compiler::scope::prepare(&mut input, proofs, &remote);
+                        compiler::scope::prepare(&input, proofs, &remote);
                         physical(
                             bind(input, &remote).unwrap(),
                             |source, values| clickhouse::select(source, &remote, values),

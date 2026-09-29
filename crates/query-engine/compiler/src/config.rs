@@ -261,7 +261,7 @@ where
     let security_ctx = ctx.security_ctx().clone();
     let mut input = require(ctx.take_input(), "input")?;
     let scope_proofs = restrict::restrict(&mut input, ctx.data_model(), &security_ctx)?;
-    let scope_proofs = crate::scope::prepare(&mut input, scope_proofs, ctx.data_model());
+    let scope_proofs = crate::scope::prepare(&input, scope_proofs, ctx.data_model());
     ctx.set_input(input);
     ctx.set_scope_proofs(scope_proofs);
     Ok(())

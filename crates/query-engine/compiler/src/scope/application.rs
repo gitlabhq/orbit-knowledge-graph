@@ -1,7 +1,7 @@
 use query_data_model::QueryDataModel;
 use std::collections::HashMap;
 
-use super::{QueryScope, resolved_scope_guard, scope_predicate};
+use super::{QueryScope, scope_predicate};
 use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Node, TableRef};
 use crate::error::Result;
@@ -27,9 +27,6 @@ pub fn apply_with_bindings(
         apply_scan_predicates(&query.from, &mut query.where_clause, scope, model, bindings);
         Ok(())
     })?;
-    for requirement in &scope.requirements {
-        append_predicate(&mut query.where_clause, resolved_scope_guard(requirement));
-    }
     Ok(())
 }
 

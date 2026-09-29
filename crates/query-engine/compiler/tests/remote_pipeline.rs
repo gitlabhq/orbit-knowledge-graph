@@ -56,6 +56,17 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
     let ungrouped_sql = ungrouped.base.render();
     let ungrouped_sql = ungrouped_sql.split(" SETTINGS ").next().unwrap();
 
+    let calls = compile(
+        "MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 10})
+         RETURN count(caller) AS n",
+        Frontend::Gql,
+        &ontology,
+        &security,
+    )
+    .unwrap();
+    let calls_sql = calls.base.render();
+    let calls_sql = calls_sql.split(" SETTINGS ").next().unwrap();
+
     let setup = "CREATE TABLE gl_project (
         id Int64, name String, traversal_path String, _version UInt64, _deleted Bool
     ) ENGINE = ReplacingMergeTree(_version) ORDER BY (traversal_path, id);
@@ -72,7 +83,15 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
     INSERT INTO gl_definition VALUES
         (10, 1000, '1/100/', 1, false),
         (11, 1000, '1/100/', 1, false),
-        (12, 2000, '1/200/', 1, false);";
+        (12, 2000, '1/200/', 1, false);
+    CREATE TABLE gl_code_edge (
+        source_id Int64, target_id Int64, source_kind String, target_kind String,
+        relationship_kind String, traversal_path String, _version UInt64, _deleted Bool
+    ) ENGINE = ReplacingMergeTree(_version)
+      ORDER BY (traversal_path, source_id, target_id, source_kind, target_kind, relationship_kind);
+    INSERT INTO gl_code_edge VALUES
+        (11, 10, 'Definition', 'Definition', 'CALLS', '1/100/', 1, false),
+        (10, 11, 'Definition', 'Definition', 'CALLS', '1/100/', 1, false);";
 
     let mut child = Command::new("docker")
         .args([
@@ -90,7 +109,7 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
         .unwrap();
     write!(
         child.stdin.take().unwrap(),
-        "{setup}\n{sql} FORMAT TSV;\n{scoped_sql} FORMAT TSV;\n{grouped_sql} FORMAT TSV;\n{ungrouped_sql} FORMAT TSV;"
+        "{setup}\n{sql} FORMAT TSV;\n{scoped_sql} FORMAT TSV;\n{grouped_sql} FORMAT TSV;\n{ungrouped_sql} FORMAT TSV;\n{calls_sql} FORMAT TSV;"
     )
     .unwrap();
     let output = child.wait_with_output().unwrap();
@@ -102,6 +121,6 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim(),
-        "1\n1\n10\t1000\t1\n11\t1000\t1\n2"
+        "1\n1\n10\t1000\t1\n11\t1000\t1\n2\n1"
     );
 }
