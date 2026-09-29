@@ -15,7 +15,7 @@ mod state;
 
 pub use artifacts::*;
 pub use phases::*;
-pub use state::{SourceFile, State};
+pub use state::{SNAPSHOT_VERSION, SourceFile, State};
 
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
