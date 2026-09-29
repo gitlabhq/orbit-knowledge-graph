@@ -1763,9 +1763,10 @@ mod tests {
             "center should get a candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j")
-                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe"),
-            "outer latest-row reads should use dedup (FINAL or LIMIT BY), got:\n{sql}"
+            sql.contains("FROM gl_job AS j FINAL")
+                && sql.contains("LIMIT 1 BY pipe.traversal_path, pipe.id) AS pipe WHERE")
+                && sql.contains("AS pipe ON (pipe.id = j.pipeline_id)"),
+            "joined target filters must run after latest-row dedup, got:\n{sql}"
         );
         assert!(
             sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
@@ -1839,9 +1840,11 @@ mod tests {
             "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
-                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
-            "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
+            sql.contains("FROM gl_pipeline AS p1 FINAL")
+                && sql.contains(
+                    "LIMIT 1 BY p2.traversal_path, p2.id) AS p2 WHERE (p2._deleted = false)",
+                ),
+            "joined target deletion filtering must run after latest-row dedup, got:\n{sql}"
         );
     }
 

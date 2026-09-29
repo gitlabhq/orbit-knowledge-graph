@@ -71,38 +71,25 @@ pub(super) fn emit_node_join_with_narrowing(
     });
 
     let selects = node_select_columns(alias, np);
-    let mut wheres = latest_node_predicates(alias, np);
-    let narrowed = in_predicate.is_some();
-    if let Some(in_predicate) = in_predicate {
-        wheres.push(in_predicate);
-    }
-
-    // Broad target: FINAL streams deduped rows in PK order so the top-level LIMIT
-    // short-circuits the join. Narrowed target: candidate set is tiny, LIMIT 1 BY is cheaper.
-    let node_scan = if narrowed {
-        let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                order_by,
-                limit_by,
-                ..Default::default()
-            },
+    let scan = match in_predicate {
+        Some(predicate) => limit_by_scan(
+            table,
             alias,
-        )
-    } else {
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan_final(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                ..Default::default()
-            },
-            alias,
-        )
+            vec![SelectExpr::star()],
+            sort_key,
+            vec![predicate],
+        ),
+        None => TableRef::scan_final(table, alias),
     };
+    let node_scan = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: scan,
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
+        },
+        alias,
+    );
 
     let joined = TableRef::join(
         JoinType::Inner,
