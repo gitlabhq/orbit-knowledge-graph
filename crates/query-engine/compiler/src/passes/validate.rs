@@ -158,10 +158,6 @@ const MAX_ID_RANGE_SPAN: i64 = 100_000;
 /// MAX_NODE_IDS (500).
 const MAX_PATH_ANCHOR_RANGE: i64 = 500;
 
-/// Maximum number of rows the lowerer will resolve from a filtered
-/// path_finding endpoint CTE. Matches the node_ids cap (500).
-pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
-
 /// Whether a path_finding endpoint has bounded selectivity.
 /// Uses the tighter MAX_PATH_ANCHOR_RANGE cap for id_range because
 /// the BFS frontier cost is O(anchors * E^depth).

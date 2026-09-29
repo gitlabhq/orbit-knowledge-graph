@@ -1,11 +1,13 @@
-use std::collections::HashMap;
-
 use ontology::constants::*;
 
 use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
-use crate::passes::plan::BoundFilter;
+#[derive(Clone)]
+pub struct BoundFilter {
+    pub filter: InputFilter,
+    pub data_type: Option<ontology::DataType>,
+}
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
@@ -131,20 +133,15 @@ pub fn ordered_filters(
             let metadata = match owner {
                 FilterOwner::Entity(entity) => model
                     .property_for_entity_id(entity, property)
-                    .map(|property| (Some(property.id), Some(property.data_type))),
-                FilterOwner::Table(table) => Some((None, model.table_column_type(table, property))),
+                    .map(|property| property.data_type),
+                FilterOwner::Table(table) => model.table_column_type(table, property),
             };
-            let (property_id, data_type) = metadata.unwrap_or_default();
             filters.iter().map(move |filter| {
                 (
                     property.clone(),
                     BoundFilter {
                         filter: filter.clone(),
-                        property: property_id,
-                        data_type,
-                        selectivity: property_id
-                            .map(|property| model.property_selectivity(property))
-                            .unwrap_or_default(),
+                        data_type: metadata,
                     },
                 )
             })
@@ -382,29 +379,4 @@ pub fn dedup_subquery(
         },
         deleted_false(alias),
     )
-}
-
-pub fn has_non_denorm_filters(
-    filters: &[(String, BoundFilter)],
-    denormalized: &HashMap<
-        query_data_model::DenormalizedKey,
-        query_data_model::DenormalizedProperty,
-    >,
-) -> bool {
-    filters.iter().any(|(_, filter)| {
-        let Some(property) = filter.property else {
-            return true;
-        };
-        [
-            query_data_model::DenormalizedDirection::Source,
-            query_data_model::DenormalizedDirection::Target,
-        ]
-        .into_iter()
-        .all(|direction| {
-            !denormalized.contains_key(&query_data_model::DenormalizedKey {
-                property,
-                direction,
-            })
-        })
-    })
 }

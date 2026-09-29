@@ -12,6 +12,12 @@ use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
+#[derive(Clone, Copy, Default)]
+pub struct HydrationCompileOptions {
+    pub dynamic: bool,
+    pub path_segment_budget: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HydrationPlan {
     None,

@@ -111,7 +111,9 @@ impl DenormalizedCatalog {
     }
 
     pub fn properties(&self) -> impl Iterator<Item = (DenormalizedKey, &DenormalizedProperty)> {
-        self.properties.iter().map(|(key, property)| (*key, property))
+        self.properties
+            .iter()
+            .map(|(key, property)| (*key, property))
     }
 }
 

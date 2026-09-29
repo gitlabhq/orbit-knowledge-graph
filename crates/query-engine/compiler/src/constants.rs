@@ -73,34 +73,3 @@ pub const EDGE_ALIAS_SUFFIXES: &[&str] = &[
     EDGE_DST_SUFFIX,
     EDGE_DST_TYPE_SUFFIX,
 ];
-
-pub(crate) const DEPTH_COLUMN: &str = "depth";
-
-pub(crate) const PATH_NODES_COLUMN: &str = "path_nodes";
-
-/// Raw CTE-internal column before projection; distinct from `EDGE_KINDS_COLUMN`
-/// (`_gkg_edge_kinds`), which is the output alias.
-pub(crate) const FRONTIER_EDGE_KINDS_COLUMN: &str = "edge_kinds";
-
-pub(crate) const ANCHOR_ID_COLUMN: &str = "anchor_id";
-
-pub(crate) const END_ID_COLUMN: &str = "end_id";
-
-pub(crate) const END_KIND_COLUMN: &str = "end_kind";
-
-pub(crate) const FORWARD_CTE: &str = "forward";
-
-pub(crate) const BACKWARD_CTE: &str = "backward";
-
-pub(crate) const FORWARD_ALIAS: &str = "f";
-
-pub(crate) const BACKWARD_ALIAS: &str = "b";
-
-pub(crate) const PATHS_ALIAS: &str = "paths";
-
-const NODE_FILTER_CTE_PREFIX: &str = "_nf_";
-
-/// CTE name for a node-filter: `_nf_{alias}`.
-pub(crate) fn node_filter_cte(alias: &str) -> String {
-    format!("{NODE_FILTER_CTE_PREFIX}{alias}")
-}

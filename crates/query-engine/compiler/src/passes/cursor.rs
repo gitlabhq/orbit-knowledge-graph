@@ -11,7 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
-use crate::passes::lower::LoweredMetadata;
+use crate::passes::enforce::ResultBindings;
 use orbit_utils::clickhouse::ChType;
 
 pub fn cursor_column(i: usize) -> String {
@@ -91,7 +91,7 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
 pub fn apply(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &ResultBindings,
     query_hash: u64,
 ) -> Result<usize> {
     let Node::Query(q) = node else {

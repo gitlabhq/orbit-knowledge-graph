@@ -13,11 +13,24 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
-use crate::passes::lower::LoweredMetadata;
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Default)]
+pub struct ResultBindings {
+    pub node_sources: HashMap<String, (String, String)>,
+    pub edges: Vec<EdgeBinding>,
+    pub stable_order: Vec<crate::ast::OrderExpr>,
+}
+
+#[derive(Clone)]
+pub struct EdgeBinding {
+    pub column_prefix: String,
+    pub path_column: Option<String>,
+    pub rel_types: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -124,7 +137,7 @@ impl ResultContext {
 pub fn enforce_lowered_return(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &ResultBindings,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
@@ -141,7 +154,7 @@ pub fn enforce_lowered_return(
 pub fn enforce_local_return(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &ResultBindings,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
@@ -154,7 +167,7 @@ pub fn enforce_local_return(
 fn enforce_lowered_return_with(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &ResultBindings,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
@@ -214,7 +227,7 @@ fn enforce_lowered_return_with(
 pub fn enforce_role_scans(
     node: &mut Node,
     input: &Input,
-    metadata: &LoweredMetadata,
+    metadata: &ResultBindings,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
@@ -364,11 +377,9 @@ fn enforce_return_columns(
                                 node_predicates.push(filter_to_expr(
                                     &node.id,
                                     prop,
-                                    &crate::passes::plan::BoundFilter {
+                                    &crate::passes::shared::BoundFilter {
                                         filter: filter.clone(),
-                                        property: None,
                                         data_type,
-                                        selectivity: ontology::FieldSelectivity::High,
                                     },
                                 ));
                             }

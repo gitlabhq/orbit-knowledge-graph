@@ -47,6 +47,7 @@ pub mod scope;
 pub mod types;
 
 pub mod config;
+pub mod lowering;
 pub mod passes;
 pub mod planning;
 
@@ -76,12 +77,12 @@ pub use passes::codegen::{
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
+pub use passes::hydrate::HydrationCompileOptions;
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
 pub use passes::normalize::build_entity_auth;
-pub use passes::plan::HydrationCompileOptions;
 pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 

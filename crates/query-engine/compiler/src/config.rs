@@ -16,14 +16,12 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::codegen::PaginationContext;
-use crate::passes::enforce::ResultContext;
+use crate::passes::enforce::{ResultBindings, ResultContext};
 use crate::passes::frontend;
-use crate::passes::hydrate::HydrationPlan;
-use crate::passes::lower::LoweredMetadata;
-use crate::passes::plan::HydrationCompileOptions;
+use crate::passes::hydrate::{HydrationCompileOptions, HydrationPlan};
 use crate::passes::{
-    check, codegen, cursor, enforce, hydrate, normalize, relationships,
-    response_policy, restrict, security, settings, validate,
+    check, codegen, cursor, enforce, hydrate, normalize, relationships, response_policy, restrict,
+    security, settings, validate,
 };
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
@@ -44,7 +42,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub scope_proofs: crate::scope::QueryScope,
         pub hydration_options: HydrationCompileOptions,
         pub node: Node,
-        pub lowered_metadata: LoweredMetadata,
+        pub lowered_metadata: ResultBindings,
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
