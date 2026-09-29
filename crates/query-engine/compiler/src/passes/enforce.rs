@@ -182,7 +182,12 @@ pub fn enforce_lowered_return(
         result.add_node(&node.id, entity);
     }
     if input.query_type != QueryType::Aggregation {
-        for (relationship, outputs) in input.relationships.iter().zip(&requirements.edge_outputs) {
+        for (index, (relationship, outputs)) in input
+            .relationships
+            .iter()
+            .zip(&requirements.edge_outputs)
+            .enumerate()
+        {
             let names = outputs
                 .iter()
                 .map(|output| {
@@ -198,8 +203,9 @@ pub fn enforce_lowered_return(
             let [source, target, source_kind, target_kind, kind]: [String; 5] =
                 names.try_into().expect("five edge fields");
             result.add_edge(EdgeMeta {
-                column_prefix: String::new(),
-                path_column: None,
+                column_prefix: crate::constants::edge_column_prefix(index),
+                path_column: (relationship.hops != crate::input::HopRange::default())
+                    .then(|| crate::constants::edge_path_column(index)),
                 rel_types: relationship.types.clone(),
                 from_alias: relationship.from.clone(),
                 to_alias: relationship.to.clone(),

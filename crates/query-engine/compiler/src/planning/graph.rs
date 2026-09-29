@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use query_data_model::{EdgeField, QueryDataModel};
 
-use super::bind::{BoundQuery, Plan, Source, bind_filter, bind_node, call};
+use super::bind::{BoundQuery, Plan, Source, bind_filter, bind_node, call, comparison};
 use super::generic::{Expr, JoinKind, Node, Op, ValueType, Values};
 use super::physical::Scalar;
 use crate::ast::Identifier;
@@ -19,10 +19,9 @@ pub fn traversal(
         input.query_type,
         QueryType::Traversal | QueryType::Aggregation
     ) || input.nodes.is_empty()
-        || !input.join_predicates.is_empty()
     {
         return Err(QueryError::Validation(
-            "graph binding requires a traversal without column comparisons".into(),
+            "graph binding requires a traversal or aggregation with nodes".into(),
         ));
     }
 
@@ -37,17 +36,36 @@ pub fn traversal(
     let mut outputs = Vec::new();
     let mut required_values = HashMap::new();
     let mut components: Vec<(Vec<String>, Plan)> = Vec::new();
+    let mut compared = BTreeMap::new();
+    for predicate in &input.join_predicates {
+        for key in [
+            (&predicate.lhs_node, &predicate.lhs_prop),
+            (&predicate.rhs_node, &predicate.rhs_prop),
+        ] {
+            compared
+                .entry((key.0.clone(), key.1.clone()))
+                .or_insert_with(Identifier::generated);
+        }
+    }
+    let mut hidden_values = HashSet::new();
 
     for node in &input.nodes {
         if nodes.contains_key(&node.id) {
             return Err(QueryError::ReferenceError("duplicate node binding".into()));
         }
 
-        let fields: Vec<_> = required
+        let mut fields: Vec<_> = required
             .iter()
             .filter(|(alias, _, _)| alias == &node.id)
             .map(|(_, property, name)| (property.clone(), name.clone()))
             .collect();
+        let public_fields = fields.len();
+        fields.extend(
+            compared
+                .iter()
+                .filter(|((alias, _), _)| alias == &node.id)
+                .map(|((_, property), name)| (property.clone(), name.clone())),
+        );
         let identity = fields
             .iter()
             .position(|(property, _)| property == &node.id_property)
@@ -86,15 +104,22 @@ pub fn traversal(
                 node.entity.as_deref().unwrap_or_default(),
             ),
         );
-        outputs.extend(bound.outputs);
+        let hidden_count = fields.len() - public_fields;
+        hidden_values.extend(bound.required.iter().skip(public_fields).copied());
+        outputs.extend(
+            bound
+                .outputs
+                .into_iter()
+                .take(bound.root.output(&values)?.len() - hidden_count),
+        );
         components.push((vec![node.id.clone()], bound.root));
     }
 
     let mut edge_plans = Vec::new();
     for (index, (relationship, names)) in input.relationships.iter().zip(edge_outputs).enumerate() {
-        if relationship.hops != HopRange::default() || relationship.direction == Direction::Both {
+        if relationship.direction == Direction::Both {
             return Err(QueryError::Validation(
-                "edge binding currently supports directed single hops".into(),
+                "traversal requires a directed relationship".into(),
             ));
         }
 
@@ -109,6 +134,20 @@ pub fn traversal(
         } else {
             (from, to)
         };
+        if relationship.hops != HopRange::default() {
+            let (edge, ids) = super::hops::bind(
+                relationship,
+                index,
+                (source.1, target.1),
+                model,
+                &mut values,
+            )?;
+            edge_plans.push((relationship, edge, source.0, target.0, ids));
+            outputs.extend(names.iter().cloned());
+            outputs.push(crate::constants::edge_path_column(index).into());
+            outputs.push(format!("{}depth", crate::constants::edge_column_prefix(index)).into());
+            continue;
+        }
         let fields = [
             EdgeField::SourceId,
             EdgeField::TargetId,
@@ -221,6 +260,7 @@ pub fn traversal(
         .collect::<Result<Vec<_>>>()?
         .into_iter()
         .flatten()
+        .filter(|value| !hidden_values.contains(value))
         .collect::<Vec<_>>();
 
     for (relationship, edge, source, target, ids) in edge_plans {
@@ -262,7 +302,29 @@ pub fn traversal(
         return Err(QueryError::Validation("disconnected traversal".into()));
     }
 
-    let (_, root) = components.pop().unwrap();
+    let (_, mut root) = components.pop().unwrap();
+    for predicate in &input.join_predicates {
+        let operand = |node: &String, property: &String| {
+            compared
+                .get(&(node.clone(), property.clone()))
+                .and_then(|name| required_values.get(name))
+                .copied()
+                .map(Expr::Value)
+                .ok_or_else(|| {
+                    QueryError::ReferenceError("comparison operand was not bound".into())
+                })
+        };
+        root = Node {
+            op: Op::Filter(call(
+                comparison(predicate.op)?,
+                vec![
+                    operand(&predicate.lhs_node, &predicate.lhs_prop)?,
+                    operand(&predicate.rhs_node, &predicate.rhs_prop)?,
+                ],
+            )),
+            inputs: vec![root],
+        };
+    }
     let root = Node {
         op: Op::Project(
             output_values

@@ -5,6 +5,7 @@ pub mod cost;
 pub mod explain;
 pub mod generic;
 pub mod graph;
+mod hops;
 pub mod hydration;
 pub mod neighbors;
 pub mod optimize;

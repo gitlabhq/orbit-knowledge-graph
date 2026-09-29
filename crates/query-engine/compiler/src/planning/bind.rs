@@ -247,8 +247,19 @@ pub(super) fn bind_node(
         needed.insert(name, property(name)?.id);
     }
 
-    for name in node.filters.keys() {
+    for (name, filters) in &node.filters {
         needed.insert(name, property(name)?.id);
+        for (alias, name) in filters
+            .iter()
+            .filter_map(|filter| filter.rhs_column.as_ref())
+        {
+            if alias != &node.id {
+                return Err(QueryError::ReferenceError(
+                    "column comparison refers to another binding".into(),
+                ));
+            }
+            needed.insert(name, property(name)?.id);
+        }
     }
 
     if !node.node_ids.is_empty() || node.id_range.is_some() {
@@ -289,7 +300,17 @@ pub(super) fn bind_node(
     let mut predicates = Vec::new();
     for (name, value) in &bindings {
         for filter in node.filters.get(*name).into_iter().flatten() {
-            predicates.push(bind_filter(*value, filter, &values)?);
+            predicates.push(if let Some((_, property)) = &filter.rhs_column {
+                call(
+                    comparison(filter.op.unwrap_or(FilterOp::Eq))?,
+                    vec![
+                        Expr::Value(*value),
+                        Expr::Value(bindings[property.as_str()]),
+                    ],
+                )
+            } else {
+                bind_filter(*value, filter, &values)?
+            });
         }
     }
 
@@ -426,12 +447,12 @@ pub(super) fn bind_filter(
     }
 
     let function = match filter.op.unwrap_or(FilterOp::Eq) {
-        FilterOp::Eq => Scalar::Equal,
-        FilterOp::Ne => Scalar::NotEqual,
-        FilterOp::Gt => Scalar::Greater,
-        FilterOp::Gte => Scalar::GreaterEqual,
-        FilterOp::Lt => Scalar::Less,
-        FilterOp::Lte => Scalar::LessEqual,
+        op @ (FilterOp::Eq
+        | FilterOp::Ne
+        | FilterOp::Gt
+        | FilterOp::Gte
+        | FilterOp::Lt
+        | FilterOp::Lte) => comparison(op)?,
         FilterOp::Contains => Scalar::Contains,
         FilterOp::StartsWith => Scalar::StartsWith,
         FilterOp::EndsWith => Scalar::EndsWith,
@@ -457,6 +478,22 @@ pub(super) fn bind_filter(
     ))
 }
 
+pub(super) fn comparison(operator: FilterOp) -> Result<Scalar> {
+    Ok(match operator {
+        FilterOp::Eq => Scalar::Equal,
+        FilterOp::Ne => Scalar::NotEqual,
+        FilterOp::Gt => Scalar::Greater,
+        FilterOp::Gte => Scalar::GreaterEqual,
+        FilterOp::Lt => Scalar::Less,
+        FilterOp::Lte => Scalar::LessEqual,
+        _ => {
+            return Err(QueryError::Validation(
+                "column comparison requires a comparison operator".into(),
+            ));
+        }
+    })
+}
+
 fn literal(value: &Value, data_type: &ValueType) -> Result<Expr<Scalar>> {
     let base = match data_type {
         ValueType::Nullable(inner) => inner.as_ref(),
@@ -474,6 +511,10 @@ fn literal(value: &Value, data_type: &ValueType) -> Result<Expr<Scalar>> {
                 .ok_or_else(|| QueryError::Validation("invalid float literal".into()))?,
         ),
         (ValueType::String, Value::String(value)) => Expr::String(value.clone()),
+        (ValueType::Date | ValueType::DateTime, Value::String(value)) => Expr::Cast {
+            value: Box::new(Expr::String(value.clone())),
+            data_type: base.clone(),
+        },
         _ => {
             return Err(QueryError::Validation(
                 "filter literal does not match property type".into(),

@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 
-use super::Identifier;
+use super::{Identifier, ValueType};
 use regex::Regex;
 use serde_json::Value;
 
@@ -21,6 +21,10 @@ pub enum Expr {
     Identifier(Identifier),
     /// Constant value, type inferred from Value.
     Literal(Value),
+    Cast {
+        value: Box<Expr>,
+        data_type: ValueType,
+    },
     Param {
         data_type: ChType,
         value: Value,

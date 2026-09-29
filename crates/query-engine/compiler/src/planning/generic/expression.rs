@@ -5,19 +5,7 @@ use super::{Schema, require};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ValueId(usize);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ValueType {
-    Bool,
-    Int64,
-    UInt64,
-    Float64,
-    String,
-    Date,
-    DateTime,
-    Nullable(Box<ValueType>),
-    List(Box<ValueType>),
-    Record(Vec<ValueType>),
-}
+pub use crate::ast::ValueType;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Values(Vec<ValueType>);

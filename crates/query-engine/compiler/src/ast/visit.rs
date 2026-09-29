@@ -74,6 +74,7 @@ pub fn visit_expressions<'a>(
             visit_expressions(right, callback)?;
         }
         Expr::UnaryOp { expr, .. }
+        | Expr::Cast { value: expr, .. }
         | Expr::InSubquery { expr, .. }
         | Expr::InSelect { expr, .. }
         | Expr::Lambda { body: expr, .. } => {
@@ -179,6 +180,7 @@ fn visit_expr_queries(
             visit_expr_queries(right, callback)
         }
         Expr::UnaryOp { expr, .. }
+        | Expr::Cast { value: expr, .. }
         | Expr::InSubquery { expr, .. }
         | Expr::Lambda { body: expr, .. } => visit_expr_queries(expr, callback),
         Expr::FuncCall { args, .. } => {

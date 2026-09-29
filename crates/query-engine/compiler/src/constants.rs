@@ -57,6 +57,13 @@ pub const HYDRATION_NODE_ALIAS: &str = "hydrate";
 pub const MAX_DYNAMIC_HYDRATION_RESULTS: usize = 1000;
 
 pub const EDGE_PATH_SUFFIX: &str = "path";
+pub fn edge_path_column(index: usize) -> String {
+    format!("{}{EDGE_PATH_SUFFIX}", edge_column_prefix(index))
+}
+
+pub fn edge_column_prefix(index: usize) -> String {
+    format!("{}edge_{index}_", internal_column_prefix())
+}
 pub const EDGE_TYPE_SUFFIX: &str = "type";
 pub const EDGE_SRC_SUFFIX: &str = "src";
 pub const EDGE_SRC_TYPE_SUFFIX: &str = "src_type";

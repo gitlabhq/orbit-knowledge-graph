@@ -2,7 +2,7 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, ValueType};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -67,6 +67,24 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
 struct Context {
     params: ParamBindings,
     names: super::names::Names,
+}
+
+fn cast_type(data_type: &ValueType) -> String {
+    match data_type {
+        ValueType::Bool => "Bool".into(),
+        ValueType::Int64 => "Int64".into(),
+        ValueType::UInt64 => "UInt64".into(),
+        ValueType::Float64 => "Float64".into(),
+        ValueType::String => "String".into(),
+        ValueType::Date => "Date".into(),
+        ValueType::DateTime => "DateTime64(3)".into(),
+        ValueType::Nullable(inner) => format!("Nullable({})", cast_type(inner)),
+        ValueType::List(inner) => format!("Array({})", cast_type(inner)),
+        ValueType::Record(fields) => format!(
+            "Tuple({})",
+            fields.iter().map(cast_type).collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 impl Context {
@@ -215,6 +233,14 @@ impl Context {
             ),
             Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::Cast { value, data_type } => {
+                let value = self.emit_expr(value);
+                if *data_type == ValueType::DateTime {
+                    format!("parseDateTime64BestEffort({value})")
+                } else {
+                    format!("CAST({value} AS {})", cast_type(data_type))
+                }
+            }
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::Aggregate {
                 name,

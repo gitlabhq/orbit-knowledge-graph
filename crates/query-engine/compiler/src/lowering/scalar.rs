@@ -1,4 +1,4 @@
-use crate::ast::{ChType, Expr as SqlExpr, Op};
+use crate::ast::{Expr as SqlExpr, Op};
 use crate::error::{QueryError, Result};
 use crate::planning::generic::Expr;
 use crate::planning::physical::Scalar;
@@ -8,11 +8,16 @@ use super::{Bindings, resolve};
 pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
     Ok(match expression {
         Expr::Value(value) => resolve(bindings, *value)?,
-        Expr::Bool(value) => SqlExpr::param(ChType::Bool, *value),
-        Expr::Int64(value) => SqlExpr::int(*value),
-        Expr::String(value) => SqlExpr::string(value),
-        Expr::Float64(value) if value.is_finite() => SqlExpr::param(ChType::Float64, *value),
+        Expr::Bool(value) => SqlExpr::lit(*value),
+        Expr::Int64(value) => SqlExpr::lit(*value),
+        Expr::UInt64(value) => SqlExpr::lit(*value),
+        Expr::String(value) => SqlExpr::lit(value.clone()),
+        Expr::Float64(value) if value.is_finite() => SqlExpr::lit(*value),
         Expr::Null(_) => SqlExpr::lit(serde_json::Value::Null),
+        Expr::Cast { value, data_type } => SqlExpr::Cast {
+            value: Box::new(emit(value, bindings)?),
+            data_type: data_type.clone(),
+        },
         Expr::Call {
             function,
             arguments,
@@ -23,6 +28,8 @@ pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
                 .collect::<Result<Vec<_>>>()?;
 
             match (function, arguments.as_slice()) {
+                (Scalar::Record, _) => SqlExpr::func("tuple", arguments),
+                (Scalar::List, _) => SqlExpr::func("array", arguments),
                 (Scalar::Equal, [left, right]) => SqlExpr::eq(left.clone(), right.clone()),
                 (Scalar::NotEqual, [left, right]) => {
                     SqlExpr::binary(Op::Ne, left.clone(), right.clone())

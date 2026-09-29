@@ -13,7 +13,7 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, ValueType};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -41,6 +41,24 @@ struct Context {
     names: super::names::Names,
     params: HashMap<String, ParamValue>,
     param_counter: usize,
+}
+
+fn cast_type(data_type: &ValueType) -> String {
+    match data_type {
+        ValueType::Bool => "BOOLEAN".into(),
+        ValueType::Int64 => "BIGINT".into(),
+        ValueType::UInt64 => "UBIGINT".into(),
+        ValueType::Float64 => "DOUBLE".into(),
+        ValueType::String => "VARCHAR".into(),
+        ValueType::Date => "DATE".into(),
+        ValueType::DateTime => "TIMESTAMPTZ".into(),
+        ValueType::Nullable(inner) => cast_type(inner),
+        ValueType::List(inner) => format!("{}[]", cast_type(inner)),
+        ValueType::Record(fields) => format!(
+            "ROW({})",
+            fields.iter().map(cast_type).collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 impl Context {
@@ -195,6 +213,11 @@ impl Context {
             ),
             Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::Cast { value, data_type } => format!(
+                "CAST({} AS {})",
+                self.emit_expr(value),
+                cast_type(data_type),
+            ),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(name, args),
             Expr::Aggregate {

@@ -240,11 +240,29 @@ pub enum Scalar {
     Contains,
     StartsWith,
     EndsWith,
+    Record,
+    List,
     Truncate(crate::input::TruncateUnit),
 }
 
 impl Function for Scalar {
     fn return_type(&self, arguments: &[ValueType]) -> Result<ValueType> {
+        if matches!(self, Self::Record) {
+            return Ok(ValueType::Record(arguments.to_vec()));
+        }
+        if matches!(self, Self::List) {
+            let Some(first) = arguments.first() else {
+                return Err(QueryError::PipelineInvariant(
+                    "list requires an element type".into(),
+                ));
+            };
+            if arguments.iter().any(|argument| argument != first) {
+                return Err(QueryError::PipelineInvariant(
+                    "list elements require matching types".into(),
+                ));
+            }
+            return Ok(ValueType::List(Box::new(first.clone())));
+        }
         let base = |data_type: &ValueType| match data_type {
             ValueType::Nullable(inner) => inner.as_ref().clone(),
             other => other.clone(),
