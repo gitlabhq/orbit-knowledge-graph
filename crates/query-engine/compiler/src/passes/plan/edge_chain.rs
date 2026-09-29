@@ -649,10 +649,16 @@ fn determine_hydration(
         .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
 
     if has_uncovered_filter {
-        return HydrationStrategy::FilterOnly;
+        HydrationStrategy::FilterOnly
+    } else if input
+        .nodes
+        .iter()
+        .any(|node| node.id == *alias && node.requires_table_scan)
+    {
+        HydrationStrategy::Join
+    } else {
+        HydrationStrategy::Skip
     }
-
-    HydrationStrategy::Skip
 }
 
 // Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag

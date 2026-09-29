@@ -17,7 +17,7 @@ use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
-use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
+use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
@@ -350,17 +350,15 @@ fn scope_edges<'a>(
         .relationships
         .iter()
         .map(|relationship| {
-            let source_kind = entities
-                .get(relationship.from.as_str())
-                .copied()
-                .unwrap_or_default();
-            let target_kind = entities
-                .get(relationship.to.as_str())
-                .copied()
-                .unwrap_or_default();
+            let (from, to) = match relationship.direction {
+                Direction::Incoming => (&relationship.to, &relationship.from),
+                Direction::Outgoing | Direction::Both => (&relationship.from, &relationship.to),
+            };
+            let source_kind = entities.get(from.as_str()).copied().unwrap_or_default();
+            let target_kind = entities.get(to.as_str()).copied().unwrap_or_default();
             ScopeEdge {
-                from: &relationship.from,
-                to: &relationship.to,
+                from,
+                to,
                 scope_preserving: relationship.types.iter().all(|kind| {
                     model
                         .variant_scope(kind, source_kind, target_kind)

@@ -157,6 +157,8 @@ pub struct InputNode {
     /// queries, pruning granules through the primary key.
     #[serde(skip)]
     pub traversal_paths: Vec<TraversalPath>,
+    #[serde(skip)]
+    pub requires_table_scan: bool,
 }
 
 impl Default for InputNode {
@@ -170,6 +172,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             traversal_paths: Vec::new(),
+            requires_table_scan: false,
         }
     }
 }
