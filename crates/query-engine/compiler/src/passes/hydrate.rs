@@ -117,12 +117,7 @@ pub fn generate_hydration_plan(
             HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, model);
-
-            // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
-            if input.query_type == QueryType::Aggregation {
-                templates.retain(|t| !t.virtual_columns.is_empty());
-            }
+            let templates = build_static_templates(input, emitted, model);
 
             if templates.is_empty() {
                 HydrationPlan::None
@@ -142,6 +137,11 @@ fn build_static_templates(
     input
         .nodes
         .iter()
+        .filter(|node| {
+            input.query_type != QueryType::Aggregation
+                || crate::input::node_group_ids(&input.aggregation.group_by)
+                    .any(|alias| alias == node.id)
+        })
         .filter_map(|node| {
             let entity = node.entity.as_ref()?;
             let entity_id = model.entity(entity)?.id;

@@ -64,6 +64,11 @@ pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
                 (Scalar::EndsWith, [value, suffix]) => {
                     SqlExpr::func("endsWith", vec![value.clone(), suffix.clone()])
                 }
+                (Scalar::TokenSearch(kind), [value, query]) => SqlExpr::TokenSearch {
+                    kind: *kind,
+                    value: Box::new(value.clone()),
+                    query: Box::new(query.clone()),
+                },
                 (Scalar::Truncate(unit), [value]) => SqlExpr::func(
                     "dateTrunc",
                     vec![SqlExpr::string(unit.name()), value.clone()],

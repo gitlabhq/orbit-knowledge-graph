@@ -99,3 +99,47 @@ fn remote_text_filters_match_local_results_after_current_row_and_security_filter
     }
     assert_eq!(clickhouse::execute(&script).trim(), expected.join("\n"));
 }
+
+#[test]
+#[ignore = "requires Docker with ClickHouse"]
+fn token_filters_match_words_instead_of_substrings() {
+    let ontology = Arc::new(Ontology::load_embedded().unwrap());
+    let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
+    use query_data_model::QueryDataModel;
+    let property = model.property("MergeRequest", "title").unwrap();
+    assert!(model.has_text_index(property.id));
+    let security = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+    let mut script = String::from(
+        "CREATE TABLE gl_merge_request(id Int64, title String, traversal_path String, _version UInt64, _deleted Bool)
+         ENGINE = ReplacingMergeTree(_version) ORDER BY (traversal_path, id);
+         INSERT INTO gl_merge_request VALUES
+             (1, 'fix parser', '1/100/', 1, false),
+             (2, 'prefix parser', '1/100/', 1, false),
+             (3, 'fix renderer', '1/100/', 1, false);"
+    );
+    for (index, (operator, value)) in [
+        ("token_match", "fix"),
+        ("all_tokens", "fix parser"),
+        ("any_tokens", "fix parser"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let input = serde_json::json!({
+            "query_type": "traversal",
+            "nodes": [{ "id": "m", "entity": "MergeRequest", "columns": ["id"], "node_ids": [1, 2, 3],
+                "filters": { "title": { (operator): value } } }]
+        });
+        let compiled =
+            compile(&input.to_string(), Frontend::JsonDsl, &ontology, &security).unwrap();
+        let rendered = compiled.base.render();
+        let sql = rendered.split(" SETTINGS ").next().unwrap();
+        script.push_str(&format!(
+            "SELECT {index}, m_id FROM ({sql}) ORDER BY m_id FORMAT TSV;"
+        ));
+    }
+    assert_eq!(
+        clickhouse::execute(&script).trim(),
+        "0\t1\n0\t3\n1\t1\n2\t1\n2\t2\n2\t3"
+    );
+}

@@ -8,7 +8,7 @@ use super::generic::{
     Assignment, Expr, Node, Op, Operation, Schema, SortKey, ValueId, ValueType, Values,
 };
 use super::physical::Scalar;
-use crate::ast::Identifier;
+use crate::ast::{Identifier, TokenSearch};
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 
@@ -49,6 +49,7 @@ pub(super) fn dynamic_edges(
             endpoints: None,
             relationships,
             fields: edge.into_iter().zip(fields).collect(),
+            properties: vec![],
         },
         edge,
     ))
@@ -80,6 +81,7 @@ pub enum Source {
         endpoints: Option<(EntityId, EntityId)>,
         relationships: Vec<RelationshipId>,
         fields: Vec<(ValueId, EdgeField)>,
+        properties: Vec<(ValueId, String)>,
     },
 }
 
@@ -89,14 +91,25 @@ impl Operation for Source {
             Self::Entity { properties, .. } => {
                 properties.iter_mut().for_each(|(value, _)| map(value))
             }
-            Self::Edge { fields, .. } => fields.iter_mut().for_each(|(value, _)| map(value)),
+            Self::Edge {
+                fields, properties, ..
+            } => {
+                fields.iter_mut().for_each(|(value, _)| map(value));
+                properties.iter_mut().for_each(|(value, _)| map(value));
+            }
         }
     }
 
     fn output(&self, _: &[Schema], _: &Values) -> Result<Schema> {
         Ok(match self {
             Self::Entity { properties, .. } => properties.iter().map(|(value, _)| *value).collect(),
-            Self::Edge { fields, .. } => fields.iter().map(|(value, _)| *value).collect(),
+            Self::Edge {
+                fields, properties, ..
+            } => fields
+                .iter()
+                .map(|(value, _)| *value)
+                .chain(properties.iter().map(|(value, _)| *value))
+                .collect(),
         })
     }
 }
@@ -133,6 +146,7 @@ impl Source {
                 relationship,
                 relationships,
                 fields,
+                properties,
                 ..
             } => SExpression::node(
                 "Edge",
@@ -146,12 +160,20 @@ impl Source {
                     ),
                     SExpression::node(
                         "Fields",
-                        fields.iter().map(|(id, field)| {
-                            SExpression::node(
-                                "Field",
-                                [value(*id), SExpression::atom(format!("{field:?}"))],
-                            )
-                        }),
+                        fields
+                            .iter()
+                            .map(|(id, field)| {
+                                SExpression::node(
+                                    "Field",
+                                    [value(*id), SExpression::atom(format!("{field:?}"))],
+                                )
+                            })
+                            .chain(properties.iter().map(|(id, property)| {
+                                SExpression::node(
+                                    "Property",
+                                    [value(*id), SExpression::atom(property)],
+                                )
+                            })),
                     ),
                 ],
             ),
@@ -456,6 +478,9 @@ pub(super) fn bind_filter(
         FilterOp::Contains => Scalar::Contains,
         FilterOp::StartsWith => Scalar::StartsWith,
         FilterOp::EndsWith => Scalar::EndsWith,
+        FilterOp::TokenMatch => Scalar::TokenSearch(TokenSearch::Single),
+        FilterOp::AllTokens => Scalar::TokenSearch(TokenSearch::All),
+        FilterOp::AnyTokens => Scalar::TokenSearch(TokenSearch::Any),
         FilterOp::IsNull => return Ok(call(Scalar::IsNull, vec![Expr::Value(value)])),
         FilterOp::IsNotNull => return Ok(call(Scalar::IsNotNull, vec![Expr::Value(value)])),
         _ => {

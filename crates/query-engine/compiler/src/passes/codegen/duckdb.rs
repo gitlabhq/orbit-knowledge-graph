@@ -13,7 +13,9 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, ValueType};
+use crate::ast::{
+    ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, TokenSearch, ValueType,
+};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -213,6 +215,20 @@ impl Context {
             ),
             Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::TokenSearch { kind, value, query } => {
+                let value = self.emit_expr(value);
+                let query = self.emit_expr(query);
+                let tokens = format!("regexp_split_to_array({value}, '[^a-zA-Z0-9]+')");
+                match kind {
+                    TokenSearch::Single => format!("list_contains({tokens}, {query})"),
+                    TokenSearch::All => format!(
+                        "list_has_all({tokens}, regexp_split_to_array({query}, '[^a-zA-Z0-9]+'))"
+                    ),
+                    TokenSearch::Any => format!(
+                        "list_has_any({tokens}, regexp_split_to_array({query}, '[^a-zA-Z0-9]+'))"
+                    ),
+                }
+            }
             Expr::Cast { value, data_type } => format!(
                 "CAST({} AS {})",
                 self.emit_expr(value),

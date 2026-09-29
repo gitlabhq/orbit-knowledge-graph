@@ -73,18 +73,19 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         ),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
-        Some(FilterOp::TokenMatch) => Expr::func(
-            "hasToken",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AllTokens) => Expr::func(
-            "hasAllTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AnyTokens) => Expr::func(
-            "hasAnyTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
+        Some(operator @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens)) => {
+            let kind = match operator {
+                FilterOp::TokenMatch => TokenSearch::Single,
+                FilterOp::AllTokens => TokenSearch::All,
+                FilterOp::AnyTokens => TokenSearch::Any,
+                _ => unreachable!(),
+            };
+            Expr::TokenSearch {
+                kind,
+                value: Box::new(col),
+                query: Box::new(Expr::lit(str_val())),
+            }
+        }
     }
 }
 

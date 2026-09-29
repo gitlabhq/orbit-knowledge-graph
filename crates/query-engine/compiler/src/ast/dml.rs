@@ -11,6 +11,13 @@ use serde_json::Value;
 
 pub use orbit_utils::clickhouse::{ChScalar, ChType};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenSearch {
+    Single,
+    All,
+    Any,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Column {
@@ -24,6 +31,11 @@ pub enum Expr {
     Cast {
         value: Box<Expr>,
         data_type: ValueType,
+    },
+    TokenSearch {
+        kind: TokenSearch,
+        value: Box<Expr>,
+        query: Box<Expr>,
     },
     Param {
         data_type: ChType,

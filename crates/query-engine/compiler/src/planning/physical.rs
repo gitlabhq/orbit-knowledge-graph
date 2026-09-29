@@ -30,6 +30,7 @@ pub fn select_source(
     let Source::Edge {
         relationships,
         fields,
+        properties,
         ..
     } = source
     else {
@@ -48,7 +49,11 @@ pub fn select_source(
         ));
     }
 
-    let outputs: Vec<_> = fields.iter().map(|(value, _)| *value).collect();
+    let outputs: Vec<_> = fields
+        .iter()
+        .map(|(value, _)| *value)
+        .chain(properties.iter().map(|(value, _)| *value))
+        .collect();
     let mut inputs = Vec::new();
     let mut arms = Vec::new();
 
@@ -73,6 +78,22 @@ pub fn select_source(
             if *field == EdgeField::RelationshipKind {
                 kind_value = Some(value);
             }
+        }
+
+        for (output, property) in &properties {
+            let data_type = model.table_column_type(&table, property).ok_or_else(|| {
+                QueryError::ReferenceError(format!(
+                    "edge property {property} is unavailable in {table}"
+                ))
+            })?;
+            if values.data_type(*output)? != &ValueType::from(data_type) {
+                return Err(QueryError::ReferenceError(
+                    "edge property type differs across routes".into(),
+                ));
+            }
+            let value = values.allocate(values.data_type(*output)?.clone());
+            columns.push((value, property.clone()));
+            arm.push(value);
         }
 
         let mut root = Node {
@@ -240,6 +261,7 @@ pub enum Scalar {
     Contains,
     StartsWith,
     EndsWith,
+    TokenSearch(crate::ast::TokenSearch),
     Record,
     List,
     Truncate(crate::input::TruncateUnit),
@@ -302,9 +324,10 @@ impl Function for Scalar {
                 base(left) == ValueType::Bool && base(right) == ValueType::Bool
             }
             (Self::IsNull | Self::IsNotNull, [_]) => true,
-            (Self::Contains | Self::StartsWith | Self::EndsWith, [left, right]) => {
-                base(left) == ValueType::String && base(right) == ValueType::String
-            }
+            (
+                Self::Contains | Self::StartsWith | Self::EndsWith | Self::TokenSearch(_),
+                [left, right],
+            ) => base(left) == ValueType::String && base(right) == ValueType::String,
             _ => false,
         };
 

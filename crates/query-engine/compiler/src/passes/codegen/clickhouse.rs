@@ -2,7 +2,9 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, ValueType};
+use crate::ast::{
+    ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, TokenSearch, ValueType,
+};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -233,6 +235,18 @@ impl Context {
             ),
             Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
+            Expr::TokenSearch { kind, value, query } => {
+                let function = match kind {
+                    TokenSearch::Single => "hasToken",
+                    TokenSearch::All => "hasAllTokens",
+                    TokenSearch::Any => "hasAnyTokens",
+                };
+                format!(
+                    "{function}({}, {})",
+                    self.emit_expr(value),
+                    self.emit_expr(query)
+                )
+            }
             Expr::Cast { value, data_type } => {
                 let value = self.emit_expr(value);
                 if *data_type == ValueType::DateTime {

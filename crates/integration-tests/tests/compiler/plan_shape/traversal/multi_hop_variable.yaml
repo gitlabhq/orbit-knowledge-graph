@@ -2,10 +2,12 @@ name: "Variable-length 1..3: three depth arms in one union"
 input: {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"p","hops":[1,3]}],"limit":10}
 logical:
   expect:
-    - (Bind r2 (Union (Project ..., 1 AS depth, ... (_)) (Project ..., 2 AS depth, ... (_)) (Project ..., 3 AS depth, ... (_))))
-    - (Project ..., e0.path_nodes AS hop_e0_path_nodes, ... (_))
+    - (Union (Outputs _ _ _ _ _ _ _) (Arms _ _ _) (Project (Outputs ... (Assign _ 1)) _) (Project (Outputs ... (Assign _ 2)) _) (Project (Outputs ... (Assign _ 3)) _))
+    - (List (Record _ _) (Record _ _) (Record _ _) (Record _ _))
+    - (Join Inner (And (Equal _ _) (Equal _ _)) _ _)
 physical:
   clickhouse:
     expect:
-      - (Bind r2 (Union (Project ..., 1 AS depth, ... (_)) (Project ..., 2 AS depth, ... (_)) (Project ..., 3 AS depth, ... (_))))
-skip: true
+      - (Union (Outputs _ _ _ _ _ _ _) (Arms _ _ _) (Project (Outputs ... (Assign _ 1)) _) (Project (Outputs ... (Assign _ 2)) _) (Project (Outputs ... (Assign _ 3)) _))
+      - (List (Record _ _) (Record _ _) (Record _ _) (Record _ _))
+skip: false

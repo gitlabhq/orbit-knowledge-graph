@@ -69,7 +69,12 @@ pub fn visit_expressions<'a>(
                 visit_expressions(expression, callback)?;
             }
         }
-        Expr::BinaryOp { left, right, .. } => {
+        Expr::BinaryOp { left, right, .. }
+        | Expr::TokenSearch {
+            value: left,
+            query: right,
+            ..
+        } => {
             visit_expressions(left, callback)?;
             visit_expressions(right, callback)?;
         }
@@ -175,7 +180,12 @@ fn visit_expr_queries(
             visit_queries_mut(query, callback)
         }
         Expr::Scalar(query) => visit_queries_mut(query, callback),
-        Expr::BinaryOp { left, right, .. } => {
+        Expr::BinaryOp { left, right, .. }
+        | Expr::TokenSearch {
+            value: left,
+            query: right,
+            ..
+        } => {
             visit_expr_queries(left, callback)?;
             visit_expr_queries(right, callback)
         }

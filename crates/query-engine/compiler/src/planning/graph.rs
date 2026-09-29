@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use query_data_model::{EdgeField, QueryDataModel};
+use query_data_model::{EdgeField, QueryBackendCatalog, QueryDataModel};
 
 use super::bind::{BoundQuery, Plan, Source, bind_filter, bind_node, call, comparison};
 use super::generic::{Expr, JoinKind, Node, Op, ValueType, Values};
@@ -206,6 +206,7 @@ pub fn traversal(
         }
 
         let mut filters: Vec<_> = relationship.filters.iter().collect();
+        let mut properties = Vec::new();
         filters.sort_unstable_by_key(|(name, _)| *name);
 
         for (name, filters) in filters {
@@ -216,9 +217,24 @@ pub fn traversal(
                 "target_kind" => EdgeField::TargetKind,
                 "relationship_kind" => EdgeField::RelationshipKind,
                 _ => {
-                    return Err(QueryError::Validation(format!(
-                        "edge property {name} has no semantic binding yet"
-                    )));
+                    let tables = model.query_backend().edge_tables(&kinds);
+                    let data_type = tables
+                        .first()
+                        .and_then(|table| model.table_column_type(table, name))
+                        .ok_or_else(|| {
+                            QueryError::ReferenceError(format!(
+                                "edge property {name} is unavailable"
+                            ))
+                        })?;
+                    let value = values.allocate(ValueType::from(data_type));
+                    properties.push((value, name.clone()));
+                    for filter in filters {
+                        predicate = call(
+                            Scalar::And,
+                            vec![predicate, bind_filter(value, filter, &values)?],
+                        );
+                    }
+                    continue;
                 }
             };
             let value = fields
@@ -246,6 +262,7 @@ pub fn traversal(
                     )),
                     relationships: kinds,
                     fields,
+                    properties,
                 }),
                 inputs: vec![],
             }],

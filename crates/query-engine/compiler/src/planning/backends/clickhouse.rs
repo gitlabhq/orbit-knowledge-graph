@@ -54,8 +54,10 @@ pub fn select(
             endpoints: Some((source, target)),
             relationships,
             fields,
+            properties,
             ..
-        } if relationships.len() == 1
+        } if properties.is_empty()
+            && relationships.len() == 1
             && model
                 .variant_scope(
                     &model.graph().relationship(relationships[0]).name,

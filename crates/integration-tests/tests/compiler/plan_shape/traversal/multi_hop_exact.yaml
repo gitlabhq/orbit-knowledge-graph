@@ -2,13 +2,14 @@ name: "Exact 2 hops: one depth arm, aliased as the hop, outer filter reads it li
 input: {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[2,2]}],"limit":10}
 logical:
   expect:
-    - (Bind r2 (Union (Project ..., e2.target_id AS target_id, ..., 2 AS depth, ... (Join e1.target_id = e2.source_id (_) (_)))))
+    - (Union (Outputs _ _ _ _ _ _ _) (Arms (Values _ _ _ _ _ _ _)) (Project (Outputs ... (Assign _ (List (Record _ _) (Record _ _) (Record _ _))) (Assign _ 2)) _))
+    - (Join Inner (And (Equal _ _) (Equal _ _)) _ _)
   reject:
-    - (Project ..., 1 AS depth, ... (_))
+    - (Project (Outputs ... (Assign _ 1)) _)
 physical:
   clickhouse:
     expect:
-      - (Bind r2 (Union (Project ..., 2 AS depth, ... (...))))
-      - (Scan EdgeTables(gl_edge) AS e1)
-      - (Scan EdgeTables(gl_edge) AS e2)
-skip: true
+      - (Union (Outputs _ _ _ _ _ _ _) (Arms (Values _ _ _ _ _ _ _)) (Project (Outputs ... (Assign _ (List (Record _ _) (Record _ _) (Record _ _))) (Assign _ 2)) _))
+      - (Join Inner (And (Equal _ _) (Equal _ _)) _ _)
+      - (Scan gl_edge Final _)
+skip: false
