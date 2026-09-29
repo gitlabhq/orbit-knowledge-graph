@@ -5,6 +5,7 @@ use query_data_model::QueryDataModel;
 use super::bind::BoundQuery;
 use super::generic::{AggregateFunction, Assignment, Expr, Measure, Node, Op};
 use super::graph;
+use super::physical::Scalar;
 use crate::constants::redaction_id_column;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, InputGroupByKey};
@@ -26,12 +27,6 @@ pub fn bind(
     }
 
     for group in &input.aggregation.group_by {
-        if group.truncate().is_some() {
-            return Err(QueryError::Validation(
-                "group truncation has no typed binding yet".into(),
-            ));
-        }
-
         if let Some(property) = group.property() {
             require(group.node(), property);
         }
@@ -77,14 +72,19 @@ pub fn bind(
     let mut groups = Vec::new();
     let mut outputs = Vec::new();
     let mut group_values = Vec::new();
+    let available = bound.root.output(&values)?;
 
     for group in &input.aggregation.group_by {
         let source = resolve(group.node(), group.property())?;
-        let output = values.allocate(values.data_type(source)?.clone());
-        groups.push(Assignment {
-            output,
-            expression: Expr::Value(source),
-        });
+        let expression = match group.truncate() {
+            Some(unit) => Expr::Call {
+                function: Scalar::Truncate(unit),
+                arguments: vec![Expr::Value(source)],
+            },
+            None => Expr::Value(source),
+        };
+        let output = values.allocate(expression.data_type(&available, &values)?);
+        groups.push(Assignment { output, expression });
         group_values.push(output);
         outputs.push(match group {
             InputGroupByKey::Node { node, .. } => redaction_id_column(node),

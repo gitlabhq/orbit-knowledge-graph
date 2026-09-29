@@ -189,6 +189,7 @@ pub enum Scalar {
     Or,
     IsNull,
     IsNotNull,
+    Truncate(crate::input::TruncateUnit),
 }
 
 impl Function for Scalar {
@@ -197,6 +198,26 @@ impl Function for Scalar {
             ValueType::Nullable(inner) => inner.as_ref().clone(),
             other => other.clone(),
         };
+
+        if let Self::Truncate(_) = self {
+            let [argument] = arguments else {
+                return Err(QueryError::PipelineInvariant(
+                    "time bucket requires one argument".into(),
+                ));
+            };
+
+            if !matches!(base(argument), ValueType::Date | ValueType::DateTime) {
+                return Err(QueryError::PipelineInvariant(
+                    "time bucket requires a date or timestamp".into(),
+                ));
+            }
+
+            return Ok(if matches!(argument, ValueType::Nullable(_)) {
+                ValueType::Nullable(Box::new(ValueType::DateTime))
+            } else {
+                ValueType::DateTime
+            });
+        }
 
         let valid = match (self, arguments) {
             (

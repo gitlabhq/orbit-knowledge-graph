@@ -43,6 +43,10 @@ pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
                 (Scalar::Or, [left, right]) => SqlExpr::binary(Op::Or, left.clone(), right.clone()),
                 (Scalar::IsNull, [value]) => SqlExpr::unary(Op::IsNull, value.clone()),
                 (Scalar::IsNotNull, [value]) => SqlExpr::unary(Op::IsNotNull, value.clone()),
+                (Scalar::Truncate(unit), [value]) => SqlExpr::func(
+                    "dateTrunc",
+                    vec![SqlExpr::string(unit.name()), value.clone()],
+                ),
                 _ => return Err(QueryError::Lowering("invalid scalar arguments".into())),
             }
         }

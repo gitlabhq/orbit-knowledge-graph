@@ -299,6 +299,7 @@ impl Context {
         }
 
         let duckdb_name = match name {
+            "dateTrunc" => "date_trunc",
             "startsWith" => "starts_with",
             "endsWith" => "ends_with",
             "substringUTF8" => "substring",
