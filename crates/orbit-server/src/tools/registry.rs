@@ -419,9 +419,20 @@ mod tests {
     }
 
     #[test]
-    fn descriptions_lead_with_capabilities_not_imperatives() {
-        for definition in all_tools() {
-            for banned in ["Use Orbit for", "Use Orbit when", "Do not use Orbit"] {
+    fn descriptions_do_not_say_use_orbit_for() {
+        let mut definitions = all_commands();
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            for inline_catalog in [false, true] {
+                definitions.extend(ToolRegistry::tools_with_catalog(frontend, inline_catalog));
+            }
+        }
+        for definition in definitions {
+            for banned in [
+                "Use Orbit for",
+                "Use Orbit when",
+                "Do not use Orbit",
+                "Use it for",
+            ] {
                 assert!(
                     !definition.description.contains(banned),
                     "{} should state capabilities instead of \"{banned}\"",

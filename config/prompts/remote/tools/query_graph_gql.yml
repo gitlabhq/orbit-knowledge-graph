@@ -4,9 +4,8 @@ summary: >-
   Traverse GitLab relationships and code structure with openCypher 9-based syntax:
   callers, imports, blast radius, joins across entity types, grouped counts.
 description: >-
-  Query GitLab relationships with read-only openCypher 9-based syntax (MATCH ... RETURN).
-  Use it for traversals, blast radius, joins, and grouped counts. Use normal
-  GitLab tools for one known entity, a plain list or count, or a write.
+  Read-only openCypher 9-based syntax (MATCH ... RETURN) with traversal, blast
+  radius, join, and grouped-count capabilities across GitLab relationships.
   Schema: CALL db.schema('NodeName') or CALL db.schema().
   Anchor a node by ID or literal filter. LIMIT isn't a filter.
   Use -[:TYPE]->; max 3 hops. WHERE uses AND. One ORDER BY key.

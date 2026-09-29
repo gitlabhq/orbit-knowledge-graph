@@ -5,10 +5,10 @@ description: >-
   Orbit is the GitLab Knowledge Graph. It has code-structure and cross-entity
   capabilities the normal GitLab tools lack. These include callers,
   definitions, imports, blast radius, relationship traversal, joins across
-  projects, grouped counts, and repository maps. It answers "who calls X",
+  entities or projects, grouped counts, and repository maps. It answers "who calls X",
   "what breaks if I change Y", or "which MRs touched files imported by Z". Use
   it even when the user does not mention Orbit. It does not cover one known MR,
-  project, or user. It does not cover plain lists, counts, or writes. Use the
+  project, or user. It does not cover a plain list or count, or writes. Use the
   normal GitLab tools for those.
   {% if catalog %}The command catalog is included below as JSON. Call
   invoke_command with a command's name and put the inputs matching its
