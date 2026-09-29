@@ -99,6 +99,7 @@ pub enum TableRef {
         table: String,
         alias: String,
         final_: bool,
+        relationship: Option<usize>,
     },
     Join {
         join_type: JoinType,
@@ -228,6 +229,7 @@ impl Default for Query {
                 table: String::new(),
                 alias: String::new(),
                 final_: false,
+                relationship: None,
             },
             where_clause: None,
             group_by: vec![],
@@ -429,11 +431,33 @@ impl Expr {
 }
 
 impl TableRef {
+    pub fn with_relationship(mut self, index: usize) -> Self {
+        self.set_relationship(index);
+        self
+    }
+
+    fn set_relationship(&mut self, index: usize) {
+        match self {
+            Self::Scan { relationship, .. } => *relationship = Some(index),
+            Self::Subquery { query, .. } => query.from.set_relationship(index),
+            Self::Union { queries, .. } => {
+                for query in queries {
+                    query.from.set_relationship(index);
+                }
+            }
+            Self::Join { left, right, .. } => {
+                left.set_relationship(index);
+                right.set_relationship(index);
+            }
+        }
+    }
+
     pub fn scan(table: impl Into<String>, alias: impl Into<String>) -> Self {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
             final_: false,
+            relationship: None,
         }
     }
 
@@ -442,6 +466,7 @@ impl TableRef {
             table: table.into(),
             alias: alias.into(),
             final_: true,
+            relationship: None,
         }
     }
 

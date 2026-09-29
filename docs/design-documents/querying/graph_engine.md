@@ -71,12 +71,12 @@ All later passes continue to use that AST.
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope, including scope-only container removal ([Security](../security.md)) |
 | 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
 | 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
-| 7 | `scope_requirements` | Adds semantic guards required by scope-anchor elision |
-| 8 | `response_policy` | Applies transport-size policy to result projections |
-| 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
+| 7 | `response_policy` | Applies transport-size policy to result projections |
+| 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
+| 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
 | 12 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
@@ -95,6 +95,7 @@ The planner emits ClickHouse SQL similar to these patterns:
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. This applies when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
 - Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
+- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison. FK hop removal keeps relationships needed by these comparisons.
 - FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`. They then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates. The compiler does not build a same-table center candidate that only repeats the center node's own filters.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
@@ -137,7 +138,17 @@ denormalized_joins:
       - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
 ```
 
-That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them. Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning). It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor. So a hop may cross namespaces just as it may in an edge chain. A row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`.
+Adjacent tables join on the ID or edge ID that links them.
+Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join.
+Every other column of every table is copied under a `t{i}_` prefix.
+The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key.
+The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning).
+It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`.
+The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor.
+So a hop may cross namespaces just as it may in an edge chain.
+A row is returned only when the caller is authorized for every namespace it touches.
+The loader only requires that at least one table in the chain is scoped.
 
 Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/`. That directory mirrors `config/ontology/` and is merged over it. Run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed. It checks the table holds exactly the rows the live source join produces. It runs the YAML query scenarios against the overlaid ontology.
 
@@ -163,14 +174,17 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 **Where it lands**
 
-- The `restrict` pass derives the per-alias prefixes, stores them on `Input.compiler.scope_prefixes`, and stamps each edge whose endpoints share a prefix (`InputRelationship.scope_prefix`).
-- The security pass keeps the caller's authorization `startsWith` set on every scan and ANDs the scope predicate beside it. The `check` pass is unchanged and the prefix can only narrow. ClickHouse intersects both ranges (273 granules with both, 1 367 with the broad set alone).
-- The lowerer emits the same predicate on stamped edge scans.
+- Scope preparation runs after restriction. It stores node and relationship proofs in pipeline state and removes eligible scope-only containers before planning.
+- Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
+- Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
+- Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
+- Scope application, security injection, and final checks share callback-based query walkers. The walkers cover queries nested in expressions as well as derived tables and CTEs.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
 - Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
-- An edge row's `traversal_path` is its source entity's, so a prefix floods across scope-preserving edges to every reachable node and edge. A two-pass taint walk resolves the exact variant (`is_scope_preserving_triple`) and refuses aliases reachable through a cross-namespace edge.
+- Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. A project's path cannot constrain its ancestor group or that group's membership edges.
+- Other scope-preserving variants propagate prefixes in both directions. A two-pass taint walk resolves the exact variant and refuses aliases reachable through a cross-namespace edge.
 - Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).
 
 ## Request Flow (Deployed)

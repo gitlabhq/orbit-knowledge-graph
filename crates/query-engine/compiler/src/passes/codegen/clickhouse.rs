@@ -303,6 +303,7 @@ impl Context {
                 table,
                 alias,
                 final_,
+                ..
             } => {
                 if *final_ {
                     Ok(format!("{table} AS {alias} FINAL"))

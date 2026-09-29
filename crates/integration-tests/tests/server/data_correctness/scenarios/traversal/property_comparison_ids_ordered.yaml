@@ -1,0 +1,16 @@
+description: Cross-node ID comparison preserves matching containment edges
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)
+    WHERE p.id > g.id
+    RETURN g, p LIMIT 20
+
+expect:
+  node_count: 3
+  nodes:
+    Group: { ids: [100] }
+    Project: { ids: [1000, 1002] }
+  edges:
+    CONTAINS: [[100, 1000], [100, 1002]]
+  referential_integrity: true

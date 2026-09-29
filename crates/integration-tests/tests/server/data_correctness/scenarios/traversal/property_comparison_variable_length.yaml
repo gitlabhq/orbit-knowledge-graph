@@ -1,0 +1,16 @@
+description: Cross-node comparisons filter endpoints across both variable-length union arms
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS*1..2]->(p:Project)
+    WHERE p.id > g.id AND g.visibility_level = p.visibility_level
+    RETURN g, p LIMIT 20
+
+expect:
+  node_count: 3
+  nodes:
+    Group: { ids: [100] }
+    Project: { ids: [1000, 1010], absent: [1002] }
+  edges:
+    CONTAINS: [[100, 1000], [100, 1010]]
+  referential_integrity: true
