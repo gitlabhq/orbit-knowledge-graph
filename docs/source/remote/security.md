@@ -86,7 +86,7 @@ can see in GitLab.
   [fine-grained personal access token](#fine-grained-personal-access-tokens), sent as a Bearer token.
   For more information, see the [REST API](access/api.md#authentication).
 - Service accounts: a bot user with a personal access token, scoped to the groups where the
-  account is a member. For more information, see [service accounts](service-accounts.md).
+  account is a member. For more information, see [service accounts](#service-accounts).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
 
@@ -106,3 +106,86 @@ If you want to configure a token to
 work with GitLab Orbit Remote, add the **GitLab Orbit** resource
 to the token when you create it. For more information,
 see [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token).
+
+## Service accounts
+
+Use a [service account](https://docs.gitlab.com/user/profile/service_accounts/) to query GitLab Orbit from a script, a CI/CD job, or an AI agent.
+The account authenticates to the [REST API](access/api.md) with a personal access token.
+Like a person, the account sees only data from the groups where it is a member.
+
+A new service account has no access to the graph.
+The account gets scope from these memberships:
+
+- Direct membership of a group with the Reporter role or higher.
+  The membership also covers all subgroups and projects in that group.
+- Membership of a group that is shared with another group.
+  The account gets the lower of its own role and the role in the group link.
+
+These memberships do not add to the scope:
+
+- Membership of a project only.
+- Membership with the Guest or Planner role.
+- An expired membership.
+- Membership of a group outside the top-level groups where GitLab Orbit is on.
+
+The role of the account controls which data it can query, as described in
+[roles required to query GitLab Orbit](#roles-required-to-query-gitlab-orbit).
+
+> [!warning]
+> Do not give a query bot administrator or auditor access.
+> GitLab Orbit does not limit the scope of these accounts, so a leaked token exposes every group where GitLab Orbit is on.
+
+### Set up a service account for GitLab Orbit
+
+Prerequisites:
+
+- The Owner role for the group.
+
+To set up a service account:
+
+1. [Create a group service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account).
+   A project service account can only join its own project, so it cannot get scope.
+   A group service account can only join its own group and the subgroups and projects in that group, so create one for each top-level group.
+1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account) for the account.
+   Select only the `read_api` scope.
+   Fine-grained personal access tokens are not supported.
+1. [Add the account to each group](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project) that the tool must query.
+   Select the Reporter role, or the Security Manager role if the tool must read security data.
+   Add the account to the lowest subgroup that contains the data.
+
+### Verify the scope of a service account
+
+Verify the scope after you set up the account, and each time you change its memberships.
+
+To verify the scope:
+
+1. Put this query in a file named `request.json`:
+
+   ```json orbit-query
+   {
+     "query": {
+       "query_type": "traversal",
+       "nodes": [{
+         "id": "g",
+         "entity": "Group",
+         "filters": {"visibility_level": {"in": ["private", "internal", "public"]}},
+         "columns": ["name", "full_path"]
+       }],
+       "limit": 50
+     },
+     "response_format": "raw"
+   }
+   ```
+
+1. Send the query with the service account token:
+
+   ```shell
+   curl --request POST \
+     --header "Authorization: Bearer <your_token>" \
+     --header "Content-Type: application/json" \
+     --data @request.json \
+     --url "https://gitlab.com/api/v4/orbit/query"
+   ```
+
+1. Check that the `full_path` values match only the groups that you added the account to.
+   If other groups appear, check that the account is not an administrator or auditor.

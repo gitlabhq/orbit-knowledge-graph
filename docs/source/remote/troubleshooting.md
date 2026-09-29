@@ -60,3 +60,42 @@ The `read_api` scope alone is not sufficient for the MCP transport.
 
 To resolve this issue, create a token with the `mcp_orbit` scope, or authenticate again to grant
 the additional scope.
+
+## Error: `403 Forbidden - No Orbit enabled namespaces available`
+
+A query from a service account might fail with `403 Forbidden - No Orbit enabled namespaces available`.
+
+This issue occurs when the service account has no membership that gives it scope.
+
+To resolve this issue, add the account to a group where GitLab Orbit is on.
+Select the Reporter role or higher.
+For more information, see [service accounts](security.md#service-accounts).
+
+## Error: `403 Forbidden` with no message
+
+A query from a service account might fail with `403 Forbidden` and no other message.
+
+This issue occurs when no group of the account has a license for GitLab Orbit.
+
+To resolve this issue, add the account to a group where GitLab Orbit is on.
+The top-level group must have a Premium or Ultimate subscription.
+If you added the account a short time ago, GitLab can keep the earlier result for a few minutes.
+Wait a few minutes, then send the query again.
+
+## Error: `404 Not Found` for a service account
+
+All GitLab Orbit endpoints might return `404 Not Found` for a service account.
+
+This issue occurs when the `knowledge_graph` feature flag is not enabled for the service account.
+GitLab checks the flag for each user, so the flag can be on for you and off for the service account.
+
+To resolve this issue, ask your GitLab administrator to enable the flag for the service account.
+
+## Service account results do not include security data
+
+Results from a service account might not include security entities.
+
+This issue occurs when the account has the Reporter role.
+GitLab Orbit removes security entities from the results and from aggregate counts.
+
+To resolve this issue, give the account the Security Manager role in the group.
