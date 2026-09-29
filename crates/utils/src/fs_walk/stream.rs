@@ -3,10 +3,12 @@
 //! ([`super::walk`]) — and both run every entry through one [`FileStreamHooks`]
 //! policy via [`step`]; the sources carry no filtering of their own.
 
+use std::ops::{Add, AddAssign};
 use std::path::{Component, Path};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 /// Why a file was not loaded. Snake_case for metric labels.
@@ -184,13 +186,78 @@ pub fn step<H: FileStreamHooks>(
     content: &mut Vec<u8>,
     sniff: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
 ) -> Result<(Decision, FileLabel), StreamError> {
-    hooks.admit(file)?;
-    content.clear();
-    if let Some(settled) = hooks.on_header(file) {
+    if let Some(settled) = settle_header(hooks, file)? {
         return Ok(settled);
     }
+    content.clear();
     sniff(content)?;
     Ok(hooks.on_content(file, content))
+}
+
+/// The part of `step` that needs no bytes: charge the counters, then let the
+/// hooks settle the file from its path and size if they can.
+pub fn settle_header<H: FileStreamHooks>(
+    hooks: &mut H,
+    file: &FileInventoryEntry,
+) -> Result<Option<(Decision, FileLabel)>, StreamError> {
+    hooks.admit(file)?;
+    Ok(hooks.on_header(file))
+}
+
+/// Runs `each` over `items` on rayon workers, every worker with its own clone
+/// of `hooks` and its own scratch buffer, and adds what the workers tallied
+/// back into `hooks`. `hooks` should be fresh: a clone carries what it holds.
+pub fn classify_in_parallel<H, I, F>(
+    items: I,
+    hooks: &mut H,
+    each: F,
+) -> Result<Vec<FileInventoryEntry>, StreamError>
+where
+    H: FileStreamHooks + Clone + AddAssign + Send + Sync,
+    I: IntoParallelIterator,
+    F: Fn(&mut H, &mut Vec<u8>, I::Item) -> Result<Option<FileInventoryEntry>, StreamError> + Sync,
+{
+    let worked: Worker<H> = items
+        .into_par_iter()
+        .try_fold(
+            || Worker::new(hooks),
+            |mut worker, item| -> Result<Worker<H>, StreamError> {
+                let entry = each(&mut worker.hooks, &mut worker.content, item)?;
+                worker.entries.extend(entry);
+                Ok(worker)
+            },
+        )
+        .try_reduce(|| Worker::new(hooks), |a, b| Ok(a + b))?;
+    *hooks += worked.hooks;
+    Ok(worked.entries)
+}
+
+/// One rayon worker's share: its clone of the hooks, its scratch buffer and
+/// the entries it produced.
+struct Worker<H> {
+    hooks: H,
+    content: Vec<u8>,
+    entries: Vec<FileInventoryEntry>,
+}
+
+impl<H: Clone> Worker<H> {
+    fn new(hooks: &H) -> Self {
+        Self {
+            hooks: hooks.clone(),
+            content: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<H: AddAssign> Add for Worker<H> {
+    type Output = Self;
+
+    fn add(mut self, other: Self) -> Self {
+        self.hooks += other.hooks;
+        self.entries.extend(other.entries);
+        self
+    }
 }
 
 /// A capped running total; the first `add` to overflow short-circuits the

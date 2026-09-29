@@ -4,38 +4,155 @@
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
+use std::ops::AddAssign;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use rayon::prelude::*;
 use tracing::warn;
 
 use crate::fs_walk::{
-    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
+    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError,
+    classify_in_parallel, settle_header,
 };
 
 /// Extract a gzipped tar from `reader` into `target_dir`, running every regular
 /// file through `hooks`. Loaded files are written to disk; every non-dropped
 /// file (and symlink) is returned in the inventory.
-pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
+///
+/// Inflating is one sequential stream, so that thread only reads: it settles
+/// what the hooks can decide from a header, and sends every other file's bytes
+/// ahead through a bounded channel to workers that classify them, write them
+/// and tally with their own clone of `hooks`, added back at the end.
+pub fn extract_tar_gz<R: Read, H>(
     reader: R,
     target_dir: &Path,
     hooks: &mut H,
-) -> Result<FileInventory, StreamError> {
+) -> Result<FileInventory, StreamError>
+where
+    H: FileStreamHooks + Clone + AddAssign + Send + Sync,
+{
     std::fs::create_dir_all(target_dir)?;
+    let target = target_dir.canonicalize()?;
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<Pending>(LOOKAHEAD);
 
+    let mut inflating_hooks = hooks.clone();
+    let (inflated, classified) = std::thread::scope(|scope| {
+        let classifying = scope.spawn(|| {
+            classify_in_parallel(
+                receiver.into_iter().par_bridge(),
+                hooks,
+                |hooks, _, pending| pending.settle(hooks, &target),
+            )
+        });
+        let inflated = inflate(reader, &target, &mut inflating_hooks, sender);
+        let classified = classifying.join().expect("classifying thread panicked");
+        (inflated, classified)
+    });
+    // A failure on either side closes the channel and ends the other; the
+    // side that failed on its own has the error worth reporting.
+    let (mut inventory, deferred_symlinks) = match (inflated, classified) {
+        (Err(inflate_error), Err(_)) => return Err(inflate_error),
+        (inflated, classified) => {
+            let Inflated { entries, symlinks } = inflated?;
+            let mut inventory = classified?;
+            inventory.extend(entries);
+            (inventory, symlinks)
+        }
+    };
+    *hooks += inflating_hooks;
+
+    for (link_path, link_target) in deferred_symlinks {
+        crate::fs::safe_create_dir_all(&link_path, &target).map_err(std::io::Error::other)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&link_target, &link_path)?;
+    }
+    let removed_symlinks = crate::fs::validate_symlinks(&target).map_err(std::io::Error::other)?;
+    if !removed_symlinks.is_empty() {
+        let removed: std::collections::HashSet<String> = removed_symlinks
+            .iter()
+            .map(|r| r.relative_path.to_string_lossy().into_owned())
+            .collect();
+        inventory.retain(|entry| !removed.contains(&entry.path));
+    }
+    Ok(FileInventory::new(inventory))
+}
+
+/// How many files' bytes may wait between the inflating thread and the
+/// workers; with the per-file size cap this bounds the memory in flight.
+const LOOKAHEAD: usize = 64;
+
+/// A regular file the header did not settle: its bytes, read off the stream,
+/// waiting for a worker.
+struct Pending {
+    meta: FileInventoryEntry,
+    content: Vec<u8>,
+    dest: PathBuf,
+}
+
+impl Pending {
+    fn settle<H: FileStreamHooks>(
+        self,
+        hooks: &mut H,
+        target: &Path,
+    ) -> Result<Option<FileInventoryEntry>, StreamError> {
+        let Pending {
+            mut meta,
+            content,
+            dest,
+        } = self;
+        let (decision, label) = hooks.on_content(&meta, &content);
+        meta.decision = decision;
+        meta.label = label;
+        match decision {
+            Decision::Drop => Ok(None),
+            Decision::ListOnly => Ok(Some(meta)),
+            // Both loaded states materialize the bytes; only the parse axis
+            // differs, which the pipeline acts on, not the extractor.
+            Decision::Parse | Decision::Load => {
+                // A containment escape (PermissionDenied from resolve_dest_within)
+                // is fatal; any other error, a path the filesystem rejects such
+                // as an over-long file or directory component, skips the entry.
+                let written = crate::fs::resolve_dest_within(target, &dest)
+                    .and_then(std::fs::File::create)
+                    .and_then(|mut file| file.write_all(&content));
+                match written {
+                    Ok(()) => Ok(Some(meta)),
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        Err(StreamError::Io(e))
+                    }
+                    Err(e) => {
+                        warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
+                        Ok(None)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What the inflating thread settled itself: header-decided files and
+/// symlinks, the latter created only once every regular file exists.
+#[derive(Default)]
+struct Inflated {
+    entries: Vec<FileInventoryEntry>,
+    symlinks: Vec<(PathBuf, PathBuf)>,
+}
+
+fn inflate<R: Read, H: FileStreamHooks>(
+    reader: R,
+    target: &Path,
+    hooks: &mut H,
+    sender: std::sync::mpsc::SyncSender<Pending>,
+) -> Result<Inflated, StreamError> {
     let mut archive = tar::Archive::new(GzDecoder::new(reader));
-    let target_canonical = target_dir.canonicalize()?;
-
     // The first entry sets the Gitaly archive root (`<slug>-<ref>/`); all others
     // must share it.
     let mut archive_root: Option<OsString> = None;
-
     // Symlinks are deferred until all regular files and directories exist, so no
     // symlink is on disk during the main loop to redirect a create_dir_all or
     // dest.exists() outside the target.
-    let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut inventory = Vec::new();
-    let mut content = Vec::new();
+    let mut inflated = Inflated::default();
 
     // False + a truncation-shaped error on the first `next()` means the body
     // ended before any tar header could be read (empty/truncated repo).
@@ -86,18 +203,18 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 relative_path.display()
             ))));
         }
-        let dest = target_canonical.join(&relative_path);
+        let dest = target.join(&relative_path);
+        let mut meta = FileInventoryEntry {
+            path: relative_path.to_string_lossy().into_owned(),
+            size: entry.size(),
+            decision: Decision::ListOnly,
+            label: Default::default(),
+        };
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
-            // A symlink is never a parse candidate — we'd be parsing the link, not
-            // source — so the hooks settle it (and record why); we keep only the
+            // A symlink is never a parse candidate, we'd be parsing the link, not
+            // source, so the hooks settle it (and record why); we keep only the
             // within-root deferral, which is the source's security mechanism.
-            let mut meta = FileInventoryEntry {
-                path: relative_path.to_string_lossy().into_owned(),
-                size: entry.size(),
-                decision: Decision::ListOnly,
-                label: Default::default(),
-            };
             let (decision, label) = hooks.on_non_regular(&meta);
             meta.decision = decision;
             meta.label = label;
@@ -107,52 +224,35 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                     .map_err(std::io::Error::other)?
                     .map(|cow| cow.into_owned())
                     .unwrap_or_default();
-                deferred_symlinks.push((dest, link_target));
-                inventory.push(meta);
+                inflated.symlinks.push((dest, link_target));
+                inflated.entries.push(meta);
             }
             continue;
         }
-
         if entry_type == tar::EntryType::Regular {
-            let mut meta = FileInventoryEntry {
-                path: relative_path.to_string_lossy().into_owned(),
-                size: entry.size(),
-                decision: Decision::Parse,
-                label: Default::default(),
-            };
-            let (decision, label) = step(hooks, &meta, &mut content, |buf| {
-                entry.read_to_end(buf).map(|_| ())
-            })?;
-            meta.decision = decision;
-            meta.label = label;
-            match meta.decision {
-                Decision::Drop => continue,
-                Decision::ListOnly => inventory.push(meta),
-                // Both loaded states materialize the bytes; only the parse axis
-                // differs, which the pipeline acts on, not the extractor.
-                Decision::Parse | Decision::Load => {
-                    // A containment escape (PermissionDenied from resolve_dest_within)
-                    // is fatal; any other error — a path the filesystem rejects such
-                    // as an over-long file or directory component — skips the entry.
-                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
-                        .and_then(std::fs::File::create)
-                        .and_then(|mut file| file.write_all(&content));
-                    match written {
-                        Ok(()) => inventory.push(meta),
-                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                            return Err(StreamError::Io(e));
-                        }
-                        Err(e) => {
-                            warn!(entry = %meta.path, error = %e, "skipping archive entry that could not be written");
-                            continue;
-                        }
-                    }
+            meta.decision = Decision::Parse;
+            if let Some((decision, label)) = settle_header(hooks, &meta)? {
+                meta.decision = decision;
+                meta.label = label;
+                if meta.decision != Decision::Drop {
+                    inflated.entries.push(meta);
                 }
+                continue;
+            }
+            let mut content = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut content)?;
+            let pending = Pending {
+                meta,
+                content,
+                dest,
+            };
+            if sender.send(pending).is_err() {
+                // The workers stopped; their error is the one to report.
+                return Ok(inflated);
             }
             continue;
         }
-
-        let unpacked = crate::fs::resolve_dest_within(&target_canonical, &dest)
+        let unpacked = crate::fs::resolve_dest_within(target, &dest)
             .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
         match unpacked {
             Ok(()) => {}
@@ -165,25 +265,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             }
         }
     }
-
-    for (link_path, target) in deferred_symlinks {
-        crate::fs::safe_create_dir_all(&link_path, &target_canonical)
-            .map_err(std::io::Error::other)?;
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link_path)?;
-    }
-
-    let removed_symlinks =
-        crate::fs::validate_symlinks(&target_canonical).map_err(std::io::Error::other)?;
-    if !removed_symlinks.is_empty() {
-        let removed: std::collections::HashSet<String> = removed_symlinks
-            .iter()
-            .map(|r| r.relative_path.to_string_lossy().into_owned())
-            .collect();
-        inventory.retain(|entry| !removed.contains(&entry.path));
-    }
-
-    Ok(FileInventory::new(inventory))
+    Ok(inflated)
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
@@ -218,12 +300,20 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
+    #[derive(Clone)]
     struct ParseAll;
+    impl AddAssign for ParseAll {
+        fn add_assign(&mut self, _: Self) {}
+    }
     impl FileStreamHooks for ParseAll {}
 
     /// Drops files by extension (header) and by a NUL in content; mirrors the
     /// shape of the production `CodeFilter` without depending on code-graph.
+    #[derive(Clone)]
     struct TestFilter;
+    impl AddAssign for TestFilter {
+        fn add_assign(&mut self, _: Self) {}
+    }
     impl FileStreamHooks for TestFilter {
         fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
@@ -449,6 +539,83 @@ mod tests {
         ));
     }
 
+    /// Tallies what it saw, so an extraction can be checked to have added the
+    /// inflating thread's and every worker's share back together.
+    #[derive(Clone, Default)]
+    struct Tallying {
+        headers: u64,
+        contents: u64,
+    }
+    impl AddAssign for Tallying {
+        fn add_assign(&mut self, other: Self) {
+            self.headers += other.headers;
+            self.contents += other.contents;
+        }
+    }
+    impl FileStreamHooks for Tallying {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            self.headers += 1;
+            (f.size > 64).then_some((Decision::ListOnly, FileLabel::default()))
+        }
+        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
+            self.contents += 1;
+            match content.contains(&0) {
+                true => (Decision::ListOnly, FileLabel::default()),
+                false => (Decision::Parse, FileLabel::default()),
+            }
+        }
+    }
+
+    #[test]
+    fn a_large_archive_is_extracted_whole_and_the_hooks_tally_all_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = vec![b'x'; 100];
+        let mut files: Vec<(String, Vec<u8>)> = (0..600)
+            .map(|i| {
+                let body: Vec<u8> = match i % 3 {
+                    0 => b"\x00blob".to_vec(),
+                    1 => big.clone(),
+                    _ => b"fn f() {}".to_vec(),
+                };
+                (format!("project-main/src/mod{}/file{i}.rs", i % 7), body)
+            })
+            .collect();
+        files.sort();
+        let entries: Vec<Entry> = files
+            .iter()
+            .map(|(path, body)| Entry::File(path, body))
+            .collect();
+        let data = build_archive(&entries);
+
+        let mut hooks = Tallying::default();
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut hooks).unwrap();
+
+        assert_eq!(inv.len(), 600);
+        assert_eq!(inv.by_decision(Decision::Parse).count(), 200);
+        assert!(inv.iter().map(|e| &e.path).is_sorted());
+        assert_eq!(
+            (hooks.headers, hooks.contents),
+            (600, 400),
+            "header settlements on the inflating thread and content ones on the workers all add up"
+        );
+        assert_eq!(
+            files_under(dir.path()),
+            200,
+            "only parsed files are written"
+        );
+    }
+
+    fn files_under(root: &Path) -> usize {
+        std::fs::read_dir(root)
+            .unwrap()
+            .flatten()
+            .map(|e| match e.file_type().unwrap().is_dir() {
+                true => files_under(&e.path()),
+                false => 1,
+            })
+            .sum()
+    }
+
     #[test]
     fn list_only_files_are_recorded_but_not_written() {
         let dir = tempfile::tempdir().unwrap();
@@ -500,7 +667,11 @@ mod tests {
 
     /// Skips files above a byte limit, so the test can observe which size the
     /// guard was handed.
+    #[derive(Clone)]
     struct MaxSize(u64);
+    impl AddAssign for MaxSize {
+        fn add_assign(&mut self, _: Self) {}
+    }
     impl FileStreamHooks for MaxSize {
         fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default()))

@@ -2,14 +2,15 @@
 //! nothing is written — the walk only classifies.
 
 use std::io::Read;
-use std::ops::{Add, AddAssign};
+use std::ops::AddAssign;
 use std::path::Path;
 
 use ignore::WalkBuilder;
-use rayon::prelude::*;
 
 use super::inventory::FileInventory;
-use super::stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
+use super::stream::{
+    Decision, FileInventoryEntry, FileStreamHooks, StreamError, classify_in_parallel, step,
+};
 
 /// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
 /// survive), running every file through `hooks`. Returns the inventory of
@@ -22,47 +23,11 @@ pub fn walk_dir<H>(root: &Path, hooks: &mut H) -> Result<FileInventory, StreamEr
 where
     H: FileStreamHooks + Clone + AddAssign + Send + Sync,
 {
-    let worked: Worker<H> = list_files(root)?
-        .par_iter()
-        .try_fold(
-            || Worker::new(hooks),
-            |mut worker, path| -> Result<Worker<H>, StreamError> {
-                let entry = classify(root, path, &mut worker.hooks, &mut worker.content)?;
-                worker.entries.extend(entry);
-                Ok(worker)
-            },
-        )
-        .try_reduce(|| Worker::new(hooks), |a, b| Ok(a + b))?;
-    *hooks += worked.hooks;
-    Ok(FileInventory::new(worked.entries))
-}
-
-/// One rayon worker's share of the walk: its clone of the hooks, its read
-/// buffer and the entries it classified.
-struct Worker<H> {
-    hooks: H,
-    content: Vec<u8>,
-    entries: Vec<FileInventoryEntry>,
-}
-
-impl<H: Clone> Worker<H> {
-    fn new(hooks: &H) -> Self {
-        Self {
-            hooks: hooks.clone(),
-            content: Vec::new(),
-            entries: Vec::new(),
-        }
-    }
-}
-
-impl<H: AddAssign> Add for Worker<H> {
-    type Output = Self;
-
-    fn add(mut self, other: Self) -> Self {
-        self.hooks += other.hooks;
-        self.entries.extend(other.entries);
-        self
-    }
+    let files = list_files(root)?;
+    let entries = classify_in_parallel(files, hooks, |hooks, content, path| {
+        classify(root, &path, hooks, content)
+    })?;
+    Ok(FileInventory::new(entries))
 }
 
 /// Relative paths of the files and symlinks below `root`, with git's listing
