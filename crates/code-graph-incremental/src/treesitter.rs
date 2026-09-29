@@ -140,7 +140,9 @@ impl SupportLang {
     pub fn from_family(name: &str) -> Option<Self> {
         match LANG_CONFIG.families.get(name) {
             Some(family) => family.members.first().copied(),
-            None => Self::from_alias(name),
+            None => all_languages()
+                .map(|(lang, _)| lang)
+                .find(|lang| <&str>::from(*lang) == name),
         }
     }
 

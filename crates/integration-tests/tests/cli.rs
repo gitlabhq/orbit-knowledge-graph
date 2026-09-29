@@ -186,6 +186,8 @@ fn incremental_reindex_follows_the_working_tree() {
                 "pub mod util;\npub fn run() { util::helper(); }\n",
             ),
             ("src/util.rs", "pub fn helper() {}\n"),
+            ("lib/greeter.rb", "class Greeter\n  def hi; end\nend\n"),
+            ("lib/other.rb", "class Other\n  def stay; end\nend\n"),
             ("README.md", "demo\n"),
         ],
     );
@@ -218,19 +220,46 @@ fn incremental_reindex_follows_the_working_tree() {
     assert!(!out.status.success(), "reindex before any index must fail");
 
     orbit(&["index", repo.to_str().unwrap(), "--ff=inc"]);
-    assert_eq!(names(definitions), ["run", "util::helper"]);
+    let sorted = |defs: &[&str]| -> Vec<String> {
+        let mut all: Vec<String> = defs.iter().map(|s| s.to_string()).collect();
+        all.sort();
+        all
+    };
+    let ruby = ["Greeter", "Greeter::hi", "Other", "Other::stay"];
+    assert_eq!(
+        names(definitions),
+        sorted(&[&["run", "util::helper"][..], &ruby].concat())
+    );
 
     std::fs::write(
         repo.join("src/util.rs"),
         "pub fn helper() {}\npub fn extra() {}\n",
     )
     .unwrap();
+    std::fs::write(
+        repo.join("lib/greeter.rb"),
+        "class Greeter\n  def hi; end\n  def bye; end\nend\n",
+    )
+    .unwrap();
     git(repo, &["commit", "-qam", "edit"]);
     std::fs::write(repo.join("src/new.rs"), "pub fn fresh() {}\n").unwrap();
     orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    let ruby = [
+        "Greeter",
+        "Greeter::bye",
+        "Greeter::hi",
+        "Other",
+        "Other::stay",
+    ];
     assert_eq!(
         names(definitions),
-        ["new::fresh", "run", "util::extra", "util::helper"]
+        sorted(
+            &[
+                &["new::fresh", "run", "util::extra", "util::helper"][..],
+                &ruby
+            ]
+            .concat()
+        )
     );
 
     git(repo, &["add", "-A"]);
@@ -244,18 +273,26 @@ fn incremental_reindex_follows_the_working_tree() {
     orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
     assert_eq!(
         names(definitions),
-        [
-            "moved::fresh",
-            "py.mod.py_fn",
-            "run",
-            "util::extra",
-            "util::helper"
-        ]
+        sorted(
+            &[
+                &[
+                    "moved::fresh",
+                    "py.mod.py_fn",
+                    "run",
+                    "util::extra",
+                    "util::helper"
+                ][..],
+                &ruby
+            ]
+            .concat()
+        )
     );
     assert_eq!(
         names(files),
         [
             "Cargo.toml",
+            "lib/greeter.rb",
+            "lib/other.rb",
             "py/mod.py",
             "src/lib.rs",
             "src/moved.rs",
@@ -280,6 +317,7 @@ fn incremental_reindex_follows_the_working_tree() {
         snapshots,
         BTreeSet::from([
             "graph.python.bin".to_string(),
+            "graph.ruby.bin".to_string(),
             "graph.rust.bin".to_string(),
             "index.json".to_string()
         ])

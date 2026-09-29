@@ -185,11 +185,10 @@ impl Project<'_> {
         let mut removed = split_paths_by_family(changes.removed, owner);
 
         let mut work: BTreeMap<&'static str, (SupportLang, FamilyWork)> = BTreeMap::new();
-        for family in saved
-            .families
-            .iter()
-            .filter_map(|f| SupportLang::from_family(f))
-        {
+        for name in &saved.families {
+            let family = SupportLang::from_family(name).with_context(|| {
+                format!("{STATE_FILE} names a language family this build does not know: {name}")
+            })?;
             let entries = changed
                 .remove(family.family())
                 .map_or_else(Vec::new, |(_, entries)| entries);
