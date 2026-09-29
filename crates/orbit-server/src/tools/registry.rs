@@ -51,6 +51,22 @@ pub(super) fn list_commands_description(frontend: Frontend) -> String {
         .expect("template placeholders are validated against the prompt file at build time")
 }
 
+/// Description for callers that cannot afford a discovery turn: the full
+/// command catalog (name, description, input schema) is inlined as compact JSON.
+pub(super) fn inline_list_commands_description(frontend: Frontend) -> String {
+    let catalog = serde_json::to_string(&CommandRegistry::commands_for(frontend))
+        .expect("command definitions serialize to JSON");
+
+    let mut environment = minijinja::Environment::new();
+    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    environment
+        .render_str(
+            prompt("list_commands_inline").description(),
+            minijinja::context! { catalog },
+        )
+        .expect("template placeholders are validated against the prompt file at build time")
+}
+
 pub(super) mod params {
     use query_engine::compiler::Frontend;
     use serde_json::{Value, json};
@@ -128,13 +144,27 @@ impl ToolRegistry {
     }
 
     pub fn tools_for(frontend: Frontend) -> Vec<ToolDefinition> {
-        vec![Self::list_commands(frontend), Self::invoke_command()]
+        Self::tools_with_catalog(frontend, false)
     }
 
-    fn list_commands(frontend: Frontend) -> ToolDefinition {
+    /// When `inline_catalog` is set, `list_commands` carries the full command
+    /// catalog in its description so the caller can skip the discovery turn.
+    pub fn tools_with_catalog(frontend: Frontend, inline_catalog: bool) -> Vec<ToolDefinition> {
+        vec![
+            Self::list_commands(frontend, inline_catalog),
+            Self::invoke_command(),
+        ]
+    }
+
+    fn list_commands(frontend: Frontend, inline_catalog: bool) -> ToolDefinition {
+        let description = if inline_catalog {
+            inline_list_commands_description(frontend)
+        } else {
+            list_commands_description(frontend)
+        };
         ToolDefinition {
             name: "list_commands".into(),
-            description: list_commands_description(frontend),
+            description,
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -349,6 +379,54 @@ mod tests {
                 definition.name
             );
         }
+    }
+
+    fn inline_description(frontend: Frontend) -> String {
+        ToolRegistry::tools_with_catalog(frontend, true)
+            .into_iter()
+            .find(|tool| tool.name == "list_commands")
+            .expect("list_commands tool")
+            .description
+    }
+
+    #[test]
+    fn inlined_description_stays_under_size_budget() {
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let length = inline_description(frontend).len();
+            assert!(
+                length < 4096,
+                "{frontend:?} inlined description is {length} B"
+            );
+        }
+    }
+
+    #[test]
+    fn inlined_description_carries_every_command_name_and_schema() {
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let description = inline_description(frontend);
+            for command in CommandRegistry::commands_for(frontend) {
+                let entry = serde_json::to_string(&command).unwrap();
+                assert!(
+                    description.contains(&entry),
+                    "{frontend:?} missing catalog entry for {}",
+                    command.name
+                );
+            }
+            assert!(!description.contains("Call this before invoke_command"));
+        }
+    }
+
+    #[test]
+    fn default_tools_do_not_inline_the_catalog() {
+        let description = ToolRegistry::tools_for(Frontend::JsonDsl)
+            .into_iter()
+            .find(|tool| tool.name == "list_commands")
+            .unwrap()
+            .description;
+        assert!(description.contains("Call this before invoke_command"));
+        assert!(
+            !description.contains("\"inputSchema\"") && !description.contains("\"parameters\"")
+        );
     }
 
     #[test]

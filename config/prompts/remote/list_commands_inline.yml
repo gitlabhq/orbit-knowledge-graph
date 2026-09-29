@@ -1,0 +1,16 @@
+name: list_commands_inline
+version: 1.0.0
+variables: [catalog]
+description: >-
+  Discover Orbit commands for questions about GitLab relationships and code
+  structure. Use Orbit for callers, definitions, imports, blast radius,
+  relationship traversal, joins across entities or projects, grouped counts,
+  and repository maps. Do not use Orbit for one known MR, project, or user, for
+  a plain list or count, or for writes. Use the normal GitLab tools for those.
+  The command catalog with each command's input schema is included below, so
+  pass a command name and its parameters to invoke_command directly.
+
+
+  Available commands (JSON):
+
+  {{ catalog }}

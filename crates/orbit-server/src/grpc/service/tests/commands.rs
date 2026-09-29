@@ -541,3 +541,29 @@ async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
     };
     assert!(text.contains("QueryDSL v"));
 }
+
+#[tokio::test]
+async fn list_tools_inlines_the_command_catalog_only_for_dws_callers() {
+    let service = test_service();
+    let mut descriptions = Vec::new();
+    for source_type in [SourceType::Dws, SourceType::Mcp] {
+        let tools = service
+            .list_tools(authed_request_from(
+                ListToolsRequest::default(),
+                1,
+                source_type,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        let list_commands = tools
+            .tools
+            .into_iter()
+            .find(|tool| tool.name == "list_commands")
+            .unwrap();
+        descriptions.push(list_commands.description);
+    }
+
+    assert!(descriptions[0].contains("\"name\":\"query_graph\""));
+    assert!(!descriptions[1].contains("\"name\":\"query_graph\""));
+}
