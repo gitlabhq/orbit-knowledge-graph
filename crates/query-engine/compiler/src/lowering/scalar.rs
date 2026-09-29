@@ -43,6 +43,20 @@ pub fn emit(expression: &Expr<Scalar>, bindings: &Bindings) -> Result<SqlExpr> {
                 (Scalar::Or, [left, right]) => SqlExpr::binary(Op::Or, left.clone(), right.clone()),
                 (Scalar::IsNull, [value]) => SqlExpr::unary(Op::IsNull, value.clone()),
                 (Scalar::IsNotNull, [value]) => SqlExpr::unary(Op::IsNotNull, value.clone()),
+                (Scalar::Contains, [value, search]) => SqlExpr::binary(
+                    Op::Gt,
+                    SqlExpr::func(
+                        "positionCaseInsensitive",
+                        vec![value.clone(), search.clone()],
+                    ),
+                    SqlExpr::int(0),
+                ),
+                (Scalar::StartsWith, [value, prefix]) => {
+                    SqlExpr::func("startsWith", vec![value.clone(), prefix.clone()])
+                }
+                (Scalar::EndsWith, [value, suffix]) => {
+                    SqlExpr::func("endsWith", vec![value.clone(), suffix.clone()])
+                }
                 (Scalar::Truncate(unit), [value]) => SqlExpr::func(
                     "dateTrunc",
                     vec![SqlExpr::string(unit.name()), value.clone()],

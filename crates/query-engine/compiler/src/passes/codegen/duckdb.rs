@@ -23,6 +23,7 @@ use super::{ParamValue, ParameterizedQuery, SqlDialect};
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
+    ctx.names = super::names::Names::new(ast);
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -37,6 +38,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 }
 
 struct Context {
+    names: super::names::Names,
     params: HashMap<String, ParamValue>,
     param_counter: usize,
 }
@@ -44,6 +46,7 @@ struct Context {
 impl Context {
     fn new() -> Self {
         Self {
+            names: Default::default(),
             params: HashMap::new(),
             param_counter: 0,
         }
@@ -90,13 +93,14 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
+                let name = self.names.resolve(&cte.name);
                 if cte.recursive {
                     // DuckDB: recursive CTE bodies must not have LIMIT/OFFSET.
                     let inner = self.emit_query_body_without_limit(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
+                    Ok(format!("{name} AS ({inner})"))
                 } else {
-                    let inner = self.emit_query_body(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
+                    let inner = self.emit_query(&cte.query)?;
+                    Ok(format!("{name} AS ({inner})"))
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -122,7 +126,7 @@ impl Context {
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
-                    Some(alias) => format!("{expr} AS {alias}"),
+                    Some(alias) => format!("{expr} AS {}", self.names.resolve(alias)),
                     None => expr,
                 }
             })
@@ -184,8 +188,12 @@ impl Context {
             return "true".to_string();
         }
         match e {
-            Expr::Column { table, column } => format!("{table}.{column}"),
-            Expr::Identifier(name) => name.clone(),
+            Expr::Column { table, column } => format!(
+                "{}.{}",
+                self.names.resolve(table),
+                self.names.resolve(column)
+            ),
+            Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(name, args),
@@ -238,7 +246,11 @@ impl Context {
                 column,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!(
+                    "{e} IN (SELECT {} FROM {})",
+                    self.names.resolve(column),
+                    self.names.resolve(cte_name)
+                )
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -290,7 +302,7 @@ impl Context {
         if name == "positionCaseInsensitive" && args.len() == 2 {
             let col = self.emit_expr(&args[0]);
             let search = self.emit_expr(&args[1]);
-            return format!("contains(lower({col}), lower({search}))");
+            return format!("strpos(lower({col}), lower({search}))");
         }
         if name == "sumIf" && args.len() == 2 {
             let col = self.emit_expr(&args[0]);
@@ -381,7 +393,14 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Scan { table, alias, .. } => Ok(format!("{table} AS {alias}")),
+            TableRef::Scan { table, alias, .. } => {
+                Ok(format!("{table} AS {}", self.names.resolve(alias)))
+            }
+            TableRef::Reference { name, alias } => Ok(format!(
+                "{} AS {}",
+                self.names.resolve(name),
+                self.names.resolve(alias)
+            )),
             TableRef::Join {
                 join_type,
                 left,
@@ -404,11 +423,15 @@ impl Context {
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
-                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
+                Ok(format!(
+                    "({}) AS {}",
+                    union_parts.join(" UNION ALL "),
+                    self.names.resolve(alias)
+                ))
             }
             TableRef::Subquery { query, alias } => {
                 let inner_sql = self.emit_query(query)?;
-                Ok(format!("({inner_sql}) AS {alias}"))
+                Ok(format!("({inner_sql}) AS {}", self.names.resolve(alias)))
             }
         }
     }

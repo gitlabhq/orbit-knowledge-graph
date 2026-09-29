@@ -237,6 +237,9 @@ pub enum Scalar {
     Or,
     IsNull,
     IsNotNull,
+    Contains,
+    StartsWith,
+    EndsWith,
     Truncate(crate::input::TruncateUnit),
 }
 
@@ -281,6 +284,9 @@ impl Function for Scalar {
                 base(left) == ValueType::Bool && base(right) == ValueType::Bool
             }
             (Self::IsNull | Self::IsNotNull, [_]) => true,
+            (Self::Contains | Self::StartsWith | Self::EndsWith, [left, right]) => {
+                base(left) == ValueType::String && base(right) == ValueType::String
+            }
             _ => false,
         };
 

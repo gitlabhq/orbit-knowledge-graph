@@ -17,6 +17,7 @@ pub fn codegen(
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
+    ctx.names = super::names::Names::new(ast);
     let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -55,6 +56,7 @@ pub fn codegen(
 /// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
     let mut ctx = Context::new();
+    ctx.names = super::names::Names::new(node);
     let sql = match node {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -64,12 +66,14 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
 
 struct Context {
     params: ParamBindings,
+    names: super::names::Names,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
             params: ParamBindings::default(),
+            names: Default::default(),
         }
     }
 
@@ -114,11 +118,12 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query_body(&cte.query)?;
+                let inner = self.emit_query(&cte.query)?;
+                let name = self.names.resolve(&cte.name);
                 if cte.materialized {
-                    Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
+                    Ok(format!("{name} AS MATERIALIZED ({inner})"))
                 } else {
-                    Ok(format!("{} AS ({})", cte.name, inner))
+                    Ok(format!("{name} AS ({inner})"))
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -135,7 +140,7 @@ impl Context {
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
-                    Some(alias) => format!("{expr} AS {alias}"),
+                    Some(alias) => format!("{expr} AS {}", self.names.resolve(alias)),
                     None => expr,
                 }
             })
@@ -203,8 +208,12 @@ impl Context {
 
     fn emit_expr(&mut self, e: &Expr) -> String {
         match e {
-            Expr::Column { table, column } => format!("{table}.{column}"),
-            Expr::Identifier(name) => name.clone(),
+            Expr::Column { table, column } => format!(
+                "{}.{}",
+                self.names.resolve(table),
+                self.names.resolve(column)
+            ),
+            Expr::Identifier(name) => self.names.resolve(name),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::Aggregate {
@@ -259,7 +268,11 @@ impl Context {
                 column,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!(
+                    "{e} IN (SELECT {} FROM {})",
+                    self.names.resolve(column),
+                    self.names.resolve(cte_name)
+                )
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -320,12 +333,18 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
+            TableRef::Reference { name, alias } => Ok(format!(
+                "{} AS {}",
+                self.names.resolve(name),
+                self.names.resolve(alias)
+            )),
             TableRef::Scan {
                 table,
                 alias,
                 final_,
                 ..
             } => {
+                let alias = self.names.resolve(alias);
                 if *final_ {
                     Ok(format!("{table} AS {alias} FINAL"))
                 } else {
@@ -354,11 +373,15 @@ impl Context {
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
-                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
+                Ok(format!(
+                    "({}) AS {}",
+                    union_parts.join(" UNION ALL "),
+                    self.names.resolve(alias)
+                ))
             }
             TableRef::Subquery { query, alias } => {
                 let inner_sql = self.emit_query(query)?;
-                Ok(format!("({inner_sql}) AS {alias}"))
+                Ok(format!("({inner_sql}) AS {}", self.names.resolve(alias)))
             }
         }
     }

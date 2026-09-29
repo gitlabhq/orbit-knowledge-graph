@@ -4,6 +4,7 @@ use std::sync::Arc;
 #[path = "support/clickhouse.rs"]
 mod database;
 
+use compiler::ast::Identifier;
 use compiler::constants::redaction_id_column;
 use compiler::input::Input;
 use compiler::lowering::{Context, lower_program, scalar};
@@ -15,7 +16,7 @@ use query_data_model::ClickHouseDataModel;
 
 type Candidate = optimize::Candidate<clickhouse::Scan, Scalar, Infallible>;
 
-fn incoming_candidates() -> (ClickHouseDataModel, Vec<String>, Vec<Candidate>) {
+fn incoming_candidates() -> (ClickHouseDataModel, Vec<Identifier>, Vec<Candidate>) {
     let model = ClickHouseDataModel::derive(Arc::new(compiler::Ontology::load_embedded().unwrap()))
         .unwrap();
     let input: Input = serde_json::from_value(serde_json::json!({
@@ -34,7 +35,7 @@ fn incoming_candidates() -> (ClickHouseDataModel, Vec<String>, Vec<Candidate>) {
             (
                 node.id.clone(),
                 node.id_property.clone(),
-                redaction_id_column(&node.id),
+                redaction_id_column(&node.id).into(),
             )
         })
         .collect::<Vec<_>>();

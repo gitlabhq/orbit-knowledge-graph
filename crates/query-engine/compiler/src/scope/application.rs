@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use super::{QueryScope, scope_predicate};
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Node, TableRef};
+use crate::ast::{Expr, Identifier, Node, TableRef};
 use crate::error::Result;
 
 pub fn apply(
@@ -18,7 +18,7 @@ pub fn apply_with_bindings(
     node: &mut Node,
     scope: &QueryScope,
     model: &(impl QueryDataModel + ?Sized),
-    bindings: &HashMap<String, String>,
+    bindings: &HashMap<Identifier, String>,
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -35,7 +35,7 @@ fn apply_scan_predicates(
     target: &mut Option<Expr>,
     scope: &QueryScope,
     model: &(impl QueryDataModel + ?Sized),
-    bindings: &HashMap<String, String>,
+    bindings: &HashMap<Identifier, String>,
 ) {
     visit_relations(table, &mut |relation| {
         if let TableRef::Scan {
@@ -50,7 +50,13 @@ fn apply_scan_predicates(
                 .and_then(Option::as_ref);
             let node_proof = model
                 .table_path_scopable(table)
-                .then(|| scope.nodes.get(bindings.get(alias).unwrap_or(alias)))
+                .then(|| {
+                    bindings
+                        .get(alias)
+                        .map(String::as_str)
+                        .or_else(|| alias.name())
+                        .and_then(|binding| scope.nodes.get(binding))
+                })
                 .flatten();
 
             if let Some(proof) = relationship_proof {

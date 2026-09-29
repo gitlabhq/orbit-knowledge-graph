@@ -156,6 +156,29 @@ impl<S: Operation, F, E: Operation> Node<S, F, E> {
 }
 
 impl<S, F, E> Node<S, F, E> {
+    pub fn map_extensions<T>(self, map: &mut impl FnMut(E) -> T) -> Node<S, F, T> {
+        let op = match self.op {
+            Op::Read(source) => Op::Read(source),
+            Op::Reference { subplan, exports } => Op::Reference { subplan, exports },
+            Op::Filter(predicate) => Op::Filter(predicate),
+            Op::Project(assignments) => Op::Project(assignments),
+            Op::Aggregate { groups, measures } => Op::Aggregate { groups, measures },
+            Op::Join { kind, condition } => Op::Join { kind, condition },
+            Op::Union { outputs, arms } => Op::Union { outputs, arms },
+            Op::Sort(keys) => Op::Sort(keys),
+            Op::Limit(limit) => Op::Limit(limit),
+            Op::Extension(extension) => Op::Extension(map(extension)),
+        };
+        Node {
+            op,
+            inputs: self
+                .inputs
+                .into_iter()
+                .map(|input| input.map_extensions(map))
+                .collect(),
+        }
+    }
+
     pub fn map_sources<T>(self, map: &mut impl FnMut(S) -> Result<T>) -> Result<Node<T, F, E>> {
         self.expand_sources(&mut |source| {
             Ok(Node {

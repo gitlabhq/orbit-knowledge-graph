@@ -151,7 +151,7 @@ fn check_fusion(remote: bool) {
                     "right_path",
                     "right_name",
                 ]
-                .map(String::from),
+                .map(compiler::ast::Identifier::from),
             )
             .unwrap();
             let node = compiler::Node::Query(Box::new(query));

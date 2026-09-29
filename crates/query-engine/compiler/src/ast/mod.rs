@@ -5,6 +5,8 @@
 
 pub mod ddl;
 pub mod dml;
+mod identifier;
 pub mod visit;
 
 pub use dml::*;
+pub use identifier::{Identifier, Symbol};

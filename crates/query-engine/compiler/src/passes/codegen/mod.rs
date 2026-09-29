@@ -91,3 +91,4 @@ impl std::fmt::Display for ParameterizedQuery {
         write!(f, "{}", self.render())
     }
 }
+mod names;

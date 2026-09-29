@@ -3,7 +3,7 @@ use std::convert::Infallible;
 
 pub mod scalar;
 
-use crate::ast::{self, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{self, Expr, Identifier, Query, SelectExpr, TableRef};
 use crate::error::{QueryError, Result};
 use crate::planning::generic::{
     self, Function, JoinKind, Node, Op, Operation, Program, ValueId, Values,
@@ -40,6 +40,7 @@ impl EmitOperation for Infallible {
 
 pub type Bindings = HashMap<ValueId, Expr>;
 
+#[derive(Clone)]
 pub struct SqlFragment {
     pub query: Query,
     pub exports: Vec<(ValueId, Expr)>,
@@ -47,9 +48,8 @@ pub struct SqlFragment {
 
 #[derive(Default)]
 pub struct Context {
-    next_alias: usize,
-    pub source_bindings: HashMap<String, String>,
-    subplans: Vec<(String, Vec<(ValueId, String)>)>,
+    pub source_bindings: HashMap<Identifier, String>,
+    subplans: Vec<(Identifier, Vec<(ValueId, Identifier)>)>,
 }
 
 pub fn lower_program<S: EmitOperation, F: Function, E: EmitOperation>(
@@ -88,11 +88,8 @@ pub fn lower_program<S: EmitOperation, F: Function, E: EmitOperation>(
 }
 
 impl Context {
-    pub fn alias(&mut self) -> String {
-        let alias = format!("_q{}", self.next_alias);
-        self.next_alias += 1;
-
-        alias
+    pub fn alias(&mut self) -> Identifier {
+        Identifier::generated()
     }
 
     pub fn relation(
@@ -189,7 +186,10 @@ fn emit_node<S: EmitOperation, F: Function, E: EmitOperation>(
 
             Ok(SqlFragment {
                 query: Query {
-                    from: TableRef::scan(name, alias),
+                    from: TableRef::Reference {
+                        name: name.clone(),
+                        alias,
+                    },
                     ..Default::default()
                 },
                 exports,
@@ -414,7 +414,7 @@ pub fn resolve(bindings: &Bindings, value: ValueId) -> Result<Expr> {
 }
 
 impl SqlFragment {
-    pub fn into_query(mut self, names: &[String]) -> Result<Query> {
+    pub fn into_query(mut self, names: &[Identifier]) -> Result<Query> {
         if names.len() != self.exports.len() {
             return Err(QueryError::Lowering(
                 "result name count does not match plan output".into(),

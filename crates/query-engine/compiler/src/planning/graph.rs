@@ -5,14 +5,15 @@ use query_data_model::{EdgeField, QueryDataModel};
 use super::bind::{BoundQuery, Plan, Source, bind_filter, bind_node, call};
 use super::generic::{Expr, JoinKind, Node, Op, ValueType, Values};
 use super::physical::Scalar;
+use crate::ast::Identifier;
 use crate::error::{QueryError, Result};
 use crate::input::{Direction, HopRange, Input, QueryType};
 
 pub fn traversal(
     input: &Input,
     model: &impl QueryDataModel,
-    required: &[(String, String, String)],
-    edge_outputs: &[[String; 5]],
+    required: &[(String, String, Identifier)],
+    edge_outputs: &[[Identifier; 5]],
 ) -> Result<BoundQuery> {
     if !matches!(
         input.query_type,
@@ -54,6 +55,15 @@ pub fn traversal(
                 QueryError::PipelineInvariant("node identity must be required".into())
             })?;
         let mut source = node.clone();
+        if let Some(entity) = &source.entity {
+            if let Some(crate::input::ColumnSelection::List(columns)) = &mut source.columns {
+                columns.retain(|column| model.virtual_source(entity, column).is_none());
+            }
+            source
+                .filters
+                .retain(|property, _| model.virtual_source(entity, property).is_none());
+        }
+
         if input.query_type == QueryType::Aggregation {
             source.columns = Some(crate::input::ColumnSelection::List(vec![]));
         }

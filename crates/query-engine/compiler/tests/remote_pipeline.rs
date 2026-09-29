@@ -68,6 +68,32 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
     let calls_sql = calls.base.render();
     let calls_sql = calls_sql.split(" SETTINGS ").next().unwrap();
 
+    let traversal = compile(
+        &serde_json::json!({
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "d", "entity": "Definition", "columns": ["id", "project_id"],
+                "filters": { "id": { "in": [10, 11, 12] } }
+            }]
+        })
+        .to_string(),
+        Frontend::JsonDsl,
+        &ontology,
+        &security,
+    )
+    .unwrap();
+    let identity = traversal.base.result_context.get("d").unwrap();
+    let traversal_sql = traversal.base.render();
+    let traversal_sql = traversal_sql.split(" SETTINGS ").next().unwrap();
+    let traversal_sql = format!(
+        "SELECT {}, {}, {}, {} FROM ({traversal_sql}) ORDER BY {}",
+        identity.pk_column,
+        identity.id_column,
+        identity.type_column,
+        compiler::constants::traversal_path_column("d"),
+        identity.pk_column,
+    );
+
     let setup = "CREATE TABLE gl_project (
         id Int64, name String, traversal_path String, _version UInt64, _deleted Bool
     ) ENGINE = ReplacingMergeTree(_version) ORDER BY (traversal_path, id);
@@ -95,7 +121,10 @@ fn remote_reads_filter_current_rows_and_authorize_before_aggregation() {
         (10, 11, 'Definition', 'Definition', 'CALLS', '1/100/', 1, false);";
 
     let output = clickhouse::execute(&format!(
-        "{setup}\n{sql} FORMAT TSV;\n{scoped_sql} FORMAT TSV;\n{grouped_sql} FORMAT TSV;\n{ungrouped_sql} FORMAT TSV;\n{calls_sql} FORMAT TSV;"
+        "{setup}\n{sql} FORMAT TSV;\n{scoped_sql} FORMAT TSV;\n{grouped_sql} FORMAT TSV;\n{ungrouped_sql} FORMAT TSV;\n{calls_sql} FORMAT TSV;\n{traversal_sql} FORMAT TSV;"
     ));
-    assert_eq!(output.trim(), "1\n1\n10\t1000\t1\n11\t1000\t1\n2\n1");
+    assert_eq!(
+        output.trim(),
+        "1\n1\n10\t1000\t1\n11\t1000\t1\n2\n1\n10\t1000\tDefinition\t1/100/\n11\t1000\tDefinition\t1/100/"
+    );
 }

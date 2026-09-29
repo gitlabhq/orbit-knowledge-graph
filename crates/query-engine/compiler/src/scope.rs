@@ -15,7 +15,7 @@ pub struct QueryScope {
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{ChType, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Expr, Identifier, Query, SelectExpr, TableRef};
 use crate::input::{FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -41,12 +41,13 @@ impl ScopeProof {
     }
 }
 
-pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
+pub fn scope_predicate(proof: &ScopeProof, alias: impl Into<Identifier>) -> Expr {
+    let alias = alias.into();
     let values: Vec<Expr> = proof.0.iter().map(scope_value_expr).collect();
     let matches = values.iter().map(|path| {
         Some(Expr::func(
             "startsWith",
-            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+            vec![Expr::col(&alias, TRAVERSAL_PATH_COLUMN), path.clone()],
         ))
     });
     let unresolved = values

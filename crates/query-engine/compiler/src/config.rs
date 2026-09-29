@@ -17,7 +17,7 @@ use crate::input::{Input, QueryType};
 use crate::lowering::EmitOperation;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::codegen::PaginationContext;
-use crate::passes::enforce::{ResultBindings, ResultContext};
+use crate::passes::enforce::{ResultBindings, ResultContext, ReturnRequirements};
 use crate::passes::frontend;
 use crate::passes::hydrate::{HydrationCompileOptions, HydrationPlan};
 use crate::passes::{
@@ -48,6 +48,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub hydration_options: HydrationCompileOptions,
         pub node: Node,
         pub lowered_metadata: ResultBindings,
+        pub return_requirements: ReturnRequirements,
         pub result_ctx: ResultContext,
         pub query_config: QueryConfig,
         pub hydration_plan: HydrationPlan,
@@ -80,13 +81,28 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         plan_local {
             reads_env: [data_model]
-            reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
+            reads_state: [input, return_requirements]
+            mutates: [node, lowered_metadata]
         }
         plan_remote {
             reads_env: [data_model]
+            reads_state: [input, return_requirements]
+            mutates: [node, lowered_metadata]
+        }
+        plan_hydration {
+            reads_env: [data_model]
+            reads_state: [input, hydration_options]
+            mutates: [node]
+        }
+        prepare_return {
+            reads_env: [data_model]
             reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
+            mutates: [return_requirements]
+        }
+        enforce_return {
+            reads_env: [data_model]
+            reads_state: [input, return_requirements]
+            mutates: [node, result_ctx]
         }
         restrict {
             reads_env: [data_model, security_ctx]
@@ -101,11 +117,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [data_model]
             reads_state: [input]
             mutates: [node]
-        }
-        enforce {
-            reads_env: [data_model]
-            reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
         }
         security {
             reads_env: [security_ctx, data_model]
@@ -142,32 +153,32 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_remote, response_policy, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, return_requirements, result_ctx, query_config, hydration_plan, output]
+            phases: [json_dsl_parse, validate, normalize, restrict, prepare_return, plan_remote, enforce_return, response_policy, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_remote, response_policy, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, return_requirements, result_ctx, query_config, hydration_plan, output]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, prepare_return, plan_remote, enforce_return, response_policy, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, scope_requirements, response_policy, enforce, settings, codegen]
+            state: [input, pagination, scope_proofs, hydration_options, node, lowered_metadata, return_requirements, result_ctx, query_config, hydration_plan, output]
+            phases: [restrict, prepare_return, plan_hydration, enforce_return, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_local, cursor, duckdb_codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, return_requirements, result_ctx, hydration_plan, output]
+            phases: [json_dsl_parse, validate_local, normalize, prepare_return, plan_local, enforce_return, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_local, cursor, duckdb_codegen]
+            state: [raw, input, pagination, scope_proofs, hydration_options, node, lowered_metadata, return_requirements, result_ctx, hydration_plan, output]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, prepare_return, plan_local, enforce_return, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -290,30 +301,12 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn enforce<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
-{
-    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
-    let mut node = require(ctx.take_node(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
-    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model())?;
-    let result_context =
-        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
-    ctx.set_node(node);
-    ctx.set_lowered_metadata(metadata);
-    ctx.set_result_ctx(result_context);
-    Ok(())
-}
-
 fn plan_local(ctx: &mut impl CompilerCtx<Model = query_data_model::DuckDbDataModel>) -> Result<()> {
     use crate::planning::physical::{CurrentRows, select_source};
 
     plan_query(
         ctx,
         |source, model, values| select_source(source, model, CurrentRows::Snapshot, values),
-        |_, _| None,
         &[],
     )
 }
@@ -324,12 +317,42 @@ fn plan_remote(
     plan_query(
         ctx,
         crate::planning::backends::clickhouse::select,
-        |entity, model| model.redaction_id_column(entity).map(String::from),
         &[
             crate::planning::backends::clickhouse::realize_foreign_key,
             crate::planning::backends::clickhouse::fuse_holder,
         ],
     )
+}
+
+fn plan_hydration(
+    ctx: &mut impl CompilerCtx<Model = query_data_model::ClickHouseDataModel>,
+) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    let options = ctx
+        .hydration_options()
+        .as_ref()
+        .copied()
+        .unwrap_or_default();
+    let node = crate::planning::hydration::plan(input, options, ctx.data_model())?;
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn prepare_return(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    let requirements = ReturnRequirements::prepare(input, ctx.data_model())?;
+    ctx.set_return_requirements(requirements);
+    Ok(())
+}
+
+fn enforce_return(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.input().as_ref(), "input")?;
+    let requirements = require(ctx.return_requirements().as_ref(), "return_requirements")?;
+    let result = enforce::enforce_lowered_return(&mut node, input, requirements, ctx.data_model())?;
+    ctx.set_node(node);
+    ctx.set_result_ctx(result);
+    Ok(())
 }
 
 fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
@@ -339,11 +362,9 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
         &C::Model,
         &mut Values,
     ) -> Result<PlanNode<S, Scalar, Infallible>>,
-    redaction_property: impl Fn(query_data_model::EntityId, &C::Model) -> Option<String>,
     source_rules: &[crate::planning::optimize::Rule<S, Scalar, Infallible>],
 ) -> Result<()> {
-    use crate::ast::{Expr, OrderExpr, SelectExpr};
-    use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
+    use crate::ast::OrderExpr;
     use crate::input::OrderDirection;
     use crate::lowering::{Context, lower_program, scalar};
     use crate::planning::{aggregation, graph, optimize};
@@ -351,60 +372,43 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
     let input = require(ctx.input().clone(), "input")?;
     let mut context = Context::default();
     let aggregate = input.query_type == QueryType::Aggregation;
-    let mut required: Vec<_> = input
-        .nodes
-        .iter()
-        .map(|node| {
-            (
-                node.id.clone(),
-                node.id_property.clone(),
-                redaction_id_column(&node.id),
-            )
-        })
-        .collect();
-    if let Some(order) = &input.order_by {
-        required.push((order.node.clone(), order.property.clone(), context.alias()));
+    if input.query_type == QueryType::PathFinding {
+        let (node, metadata) =
+            crate::planning::path_finding::plan(&input, ctx.data_model(), |source, values| {
+                select_source(source, ctx.data_model(), values)
+            })?;
+        ctx.set_node(node);
+        ctx.set_lowered_metadata(metadata);
+        return Ok(());
     }
-
-    let mut redactions = Vec::new();
-    for node in &input.nodes {
-        let entity = node
-            .entity
-            .as_deref()
-            .and_then(|name| ctx.data_model().entity(name))
-            .ok_or_else(|| QueryError::ReferenceError("node entity is unavailable".into()))?;
-
-        if let Some(property) = redaction_property(entity.id, ctx.data_model())
-            && property != node.id_property
-        {
-            if aggregate
-                && !crate::input::node_group_ids(&input.aggregation.group_by)
-                    .any(|alias| alias == node.id)
-            {
-                continue;
-            }
-
-            let position = required.len();
-            required.push((node.id.clone(), property, context.alias()));
-            redactions.push((node.id.clone(), position));
-        }
+    let requirements = require(ctx.return_requirements().as_ref(), "return_requirements")?;
+    if input.query_type == QueryType::Neighbors {
+        let (node, metadata) = crate::planning::neighbors::plan(
+            &input,
+            requirements,
+            ctx.data_model(),
+            |source, values| select_source(source, ctx.data_model(), values),
+        )?;
+        ctx.set_node(node);
+        ctx.set_lowered_metadata(metadata);
+        return Ok(());
     }
-
-    let edge_outputs: Vec<[String; 5]> = input
-        .relationships
-        .iter()
-        .map(|_| std::array::from_fn(|_| context.alias()))
-        .collect();
     let mut bound = if aggregate {
-        let grouped_outputs = redactions
+        let grouped_outputs = requirements
+            .redactions
             .iter()
-            .map(|(_, position)| required[*position].clone())
+            .map(|(_, position)| requirements.required[*position].clone())
             .collect::<Vec<_>>();
         aggregation::bind(&input, ctx.data_model(), &grouped_outputs, || {
             context.alias()
         })?
     } else {
-        graph::traversal(&input, ctx.data_model(), &required, &edge_outputs)?
+        graph::traversal(
+            &input,
+            ctx.data_model(),
+            &requirements.required,
+            &requirements.edge_outputs,
+        )?
     };
     let physical = bound
         .root
@@ -459,7 +463,7 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
                 let index = bound
                     .outputs
                     .iter()
-                    .position(|name| name == &order.column)
+                    .position(|name| name.name() == Some(order.column.as_str()))
                     .ok_or_else(|| {
                         QueryError::ReferenceError("aggregate sort output is missing".into())
                     })?;
@@ -482,93 +486,14 @@ fn plan_query<C: CompilerCtx, S: EmitOperation + Clone + PartialEq>(
             .transpose()?
     };
 
-    let redactions = redactions
-        .into_iter()
-        .map(|(alias, position)| {
-            let hidden = &required[position].2;
-            let output = bound
-                .outputs
-                .iter()
-                .position(|name| name == hidden)
-                .ok_or_else(|| {
-                    QueryError::Lowering("redaction identity was not exported".into())
-                })?;
-
-            Ok((alias, fragment.exports[output].1.clone(), hidden.clone()))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
     let mut query = fragment.into_query(&bound.outputs)?;
-    if let Some((_, _, hidden)) = required
-        .get(input.nodes.len())
-        .filter(|_| input.order_by.is_some())
-    {
-        query
-            .select
-            .retain(|select| select.alias.as_ref() != Some(hidden));
-    }
     query.order_by = order.into_iter().collect();
-
-    for (alias, expression, hidden) in redactions {
-        query
-            .select
-            .retain(|select| select.alias.as_ref() != Some(&hidden));
-        let identity = redaction_id_column(&alias);
-        for select in &mut query.select {
-            if select.alias.as_ref() == Some(&identity) {
-                select.alias = Some(primary_key_column(&alias));
-            }
-        }
-        query.select.push(SelectExpr::new(expression, identity));
-    }
-
-    let mut result = ResultContext::new().with_query_type(input.query_type);
-    for (entity, auth) in ctx.data_model().entity_auth() {
-        result.add_entity_auth(entity, auth.clone());
-    }
-    for node in input.nodes.iter().filter(|node| {
-        !aggregate
-            || crate::input::node_group_ids(&input.aggregation.group_by)
-                .any(|alias| alias == node.id)
-    }) {
-        let entity = node
-            .entity
-            .as_deref()
-            .ok_or_else(|| QueryError::ReferenceError("node requires an entity".into()))?;
-        query.select.push(SelectExpr::new(
-            Expr::string(entity),
-            redaction_type_column(&node.id),
-        ));
-        result.add_node(&node.id, entity);
-    }
-
-    for (relationship, [source, target, source_kind, target_kind, kind]) in input
-        .relationships
-        .iter()
-        .zip(edge_outputs)
-        .filter(|_| !aggregate)
-    {
-        result.add_edge(enforce::EdgeMeta {
-            column_prefix: String::new(),
-            path_column: None,
-            rel_types: relationship.types.clone(),
-            from_alias: relationship.from.clone(),
-            to_alias: relationship.to.clone(),
-            type_column: kind,
-            src_column: source,
-            dst_column: target,
-            src_type_column: source_kind,
-            dst_type_column: target_kind,
-        });
-    }
 
     ctx.set_node(Node::Query(Box::new(query)));
     ctx.set_lowered_metadata(ResultBindings {
         source_bindings: context.source_bindings,
         stable_order: identities,
-        ..Default::default()
     });
-    ctx.set_result_ctx(result);
     Ok(())
 }
 

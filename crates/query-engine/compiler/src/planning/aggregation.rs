@@ -6,6 +6,7 @@ use super::bind::BoundQuery;
 use super::generic::{AggregateFunction, Assignment, Expr, Measure, Node, Op};
 use super::graph;
 use super::physical::Scalar;
+use crate::ast::Identifier;
 use crate::constants::redaction_id_column;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, InputGroupByKey};
@@ -13,8 +14,8 @@ use crate::input::{AggFunction, Input, InputGroupByKey};
 pub fn bind(
     input: &Input,
     model: &impl QueryDataModel,
-    required_outputs: &[(String, String, String)],
-    mut name: impl FnMut() -> String,
+    required_outputs: &[(String, String, Identifier)],
+    mut name: impl FnMut() -> Identifier,
 ) -> Result<BoundQuery> {
     let mut fields = BTreeMap::new();
     let mut require = |node: &str, property: &str| {
@@ -97,10 +98,10 @@ pub fn bind(
         let output = values.allocate(expression.data_type(&available, &values)?);
         groups.push(Assignment { output, expression });
         group_values.push(output);
-        outputs.push(match group {
+        outputs.push(Identifier::from(match group {
             InputGroupByKey::Node { node, .. } => redaction_id_column(node),
             InputGroupByKey::Property { .. } => group.output_name(),
-        });
+        }));
     }
 
     let mut measures = Vec::new();
@@ -134,7 +135,7 @@ pub fn bind(
             distinct: false,
             filter: None,
         });
-        outputs.push(metric.output_name());
+        outputs.push(metric.output_name().into());
     }
 
     let root = Node {

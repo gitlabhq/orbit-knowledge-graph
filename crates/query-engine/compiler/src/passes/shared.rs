@@ -376,7 +376,7 @@ pub fn dedup_subquery(
     (
         TableRef::Subquery {
             query: Box::new(query),
-            alias: alias.to_string(),
+            alias: alias.into(),
         },
         deleted_false(alias),
     )

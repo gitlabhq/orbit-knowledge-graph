@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use crate::ast::{Expr, Node, Op, SelectExpr};
+use crate::ast::{Expr, Identifier, Node, Op};
 use crate::input::{ColumnSelection, Input};
 use ontology::DataType;
 
@@ -17,14 +17,20 @@ pub fn apply_text_excerpts(
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
         / u64::from(input.fetch_limit().max(1))) as u32;
-    let columns: HashMap<String, HashSet<String>> = input
+    let columns: HashSet<String> = input
         .nodes
         .iter()
-        .filter_map(|node| {
-            let entity = model.entity(node.entity.as_deref()?)?;
+        .flat_map(|node| {
+            let Some(entity) = node
+                .entity
+                .as_deref()
+                .and_then(|entity| model.entity(entity))
+            else {
+                return Vec::new();
+            };
             let requested = match &node.columns {
                 Some(ColumnSelection::List(columns)) => columns,
-                _ => return None,
+                _ => return Vec::new(),
             };
             let mut excerpted: HashSet<String> = model
                 .graph()
@@ -47,33 +53,26 @@ pub fn apply_text_excerpts(
                 }
             }
             excerpted.retain(|column| requested.contains(column));
-            Some((node.id.clone(), excerpted))
+            excerpted
+                .into_iter()
+                .map(|column| format!("{}_{}", node.id, column))
+                .collect::<Vec<_>>()
         })
         .collect();
 
     for select in &mut query.select {
-        rewrite_select(select, &columns, max_chars);
+        if select
+            .alias
+            .as_ref()
+            .and_then(Identifier::name)
+            .is_some_and(|alias| columns.contains(alias))
+        {
+            select.expr = excerpt(select.expr.clone(), max_chars);
+        }
     }
 }
 
-fn rewrite_select(
-    select: &mut SelectExpr,
-    columns: &HashMap<String, HashSet<String>>,
-    max_chars: u32,
-) {
-    let Expr::Column { table, column } = &select.expr else {
-        return;
-    };
-    if columns
-        .get(table)
-        .is_some_and(|values| values.contains(column))
-    {
-        select.expr = excerpt(table, column, max_chars);
-    }
-}
-
-fn excerpt(alias: &str, column: &str, max_chars: u32) -> Expr {
-    let value = Expr::col(alias, column);
+pub(crate) fn excerpt(value: Expr, max_chars: u32) -> Expr {
     let excerpt = Expr::func(
         "substringUTF8",
         vec![value.clone(), Expr::lit(1), Expr::lit(max_chars)],

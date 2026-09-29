@@ -97,7 +97,7 @@ fn bind(input: Input, model: &impl QueryDataModel) -> Result<BoundQuery> {
             (
                 node.id.clone(),
                 node.id_property.clone(),
-                redaction_id_column(&node.id),
+                redaction_id_column(&node.id).into(),
             )
         })
         .collect::<Vec<_>>();

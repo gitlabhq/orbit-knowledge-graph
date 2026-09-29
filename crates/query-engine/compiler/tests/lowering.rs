@@ -13,6 +13,76 @@ use query_data_model::{ClickHouseDataModel, DuckDbDataModel, QueryDataModel};
 type Plan = Node<Read, Scalar, Infallible>;
 
 #[test]
+fn generated_names_avoid_public_columns_and_stored_names_across_nested_scopes() {
+    let connection = duckdb::Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch("CREATE TABLE _q0(_q1 BIGINT); INSERT INTO _q0 VALUES (7), (9);")
+        .unwrap();
+    let build = || {
+        let source = ast::Identifier::generated();
+        let column = ast::Identifier::generated();
+        let inner = ast::Identifier::generated();
+        let outer = ast::Identifier::generated();
+        ast::Node::Query(Box::new(ast::Query {
+            ctes: vec![ast::Cte::new(
+                &outer,
+                ast::Query {
+                    ctes: vec![ast::Cte::new(
+                        &inner,
+                        ast::Query {
+                            select: vec![ast::SelectExpr::new(
+                                ast::Expr::col(&source, "_q1"),
+                                &column,
+                            )],
+                            from: ast::TableRef::scan("_q0", &source),
+                            ..Default::default()
+                        },
+                    )],
+                    select: vec![ast::SelectExpr::new(
+                        ast::Expr::col(&inner, &column),
+                        &column,
+                    )],
+                    from: ast::TableRef::Reference {
+                        name: inner.clone(),
+                        alias: inner,
+                    },
+                    ..Default::default()
+                },
+            )],
+            select: vec![ast::SelectExpr::new(ast::Expr::col(&outer, &column), "_Q2")],
+            from: ast::TableRef::Reference {
+                name: outer.clone(),
+                alias: outer,
+            },
+            order_by: vec![ast::OrderExpr::asc(ast::Expr::ident("_Q2"))],
+            ..Default::default()
+        }))
+    };
+    let first = build();
+    let second = build();
+    let local = codegen::duckdb::codegen(&first, ResultContext::new()).unwrap();
+    assert_eq!(
+        local.sql,
+        codegen::duckdb::codegen(&second, ResultContext::new())
+            .unwrap()
+            .sql
+    );
+    assert_eq!(
+        compiler::emit_simple_query(&first).unwrap().0,
+        compiler::emit_simple_query(&second).unwrap().0
+    );
+
+    let mut statement = connection.prepare(&local.sql).unwrap();
+    let rows = statement
+        .query_map([], |row| row.get::<_, i64>(0))
+        .unwrap()
+        .collect::<duckdb::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(rows, vec![7, 9]);
+    assert_eq!(statement.column_names(), vec!["_Q2"]);
+}
+
+#[test]
 fn catalog_reads_bind_independent_values_and_emit_both_dialects() {
     let ontology = std::sync::Arc::new(compiler::Ontology::load_embedded().unwrap());
     let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();

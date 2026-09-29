@@ -9,7 +9,7 @@
 use serde_json::Value;
 
 use crate::ast::visit::visit_queries;
-use crate::ast::{Expr, Node, Op, Query};
+use crate::ast::{Expr, Identifier, Node, Op, Query};
 #[cfg(test)]
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
@@ -45,7 +45,7 @@ fn check_query(
                 &ctx.paths_at_least(role),
             ) {
                 return Err(QueryError::Security(format!(
-                    "post-check failed: alias '{alias}' missing valid traversal_path filter"
+                    "post-check failed: relation {alias:?} missing valid traversal_path filter"
                 )));
             }
         }
@@ -56,7 +56,7 @@ fn check_query(
 
 fn has_valid_path_filter(
     expr: Option<&Expr>,
-    alias: &str,
+    alias: &Identifier,
     path_column: &str,
     paths: &[&TraversalPath],
 ) -> bool {

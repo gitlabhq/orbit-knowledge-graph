@@ -8,10 +8,51 @@ use super::generic::{
     Assignment, Expr, Node, Op, Operation, Schema, SortKey, ValueId, ValueType, Values,
 };
 use super::physical::Scalar;
+use crate::ast::Identifier;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 
 pub type Plan = Node<Source, Scalar, Infallible>;
+
+pub(super) fn dynamic_edges(
+    kinds: &[String],
+    model: &impl QueryDataModel,
+    values: &mut Values,
+) -> Result<(Source, [ValueId; 5])> {
+    let fields = [
+        EdgeField::SourceId,
+        EdgeField::TargetId,
+        EdgeField::SourceKind,
+        EdgeField::TargetKind,
+        EdgeField::RelationshipKind,
+    ];
+    let edge = std::array::from_fn(|index| {
+        values.allocate(if index < 2 {
+            ValueType::Int64
+        } else {
+            ValueType::String
+        })
+    });
+    let relationships = kinds
+        .iter()
+        .filter(|name| name.as_str() != "*")
+        .map(|name| {
+            model
+                .graph()
+                .relationship_id(name)
+                .ok_or_else(|| QueryError::ReferenceError(format!("unknown relationship {name}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((
+        Source::Edge {
+            relationship: 0,
+            endpoints: None,
+            relationships,
+            fields: edge.into_iter().zip(fields).collect(),
+        },
+        edge,
+    ))
+}
 
 impl From<ontology::DataType> for ValueType {
     fn from(data_type: ontology::DataType) -> Self {
@@ -121,14 +162,14 @@ impl Source {
 pub struct BoundQuery {
     pub root: Plan,
     pub values: Values,
-    pub outputs: Vec<String>,
+    pub outputs: Vec<Identifier>,
     pub required: Vec<ValueId>,
 }
 
 pub fn traversal(
     input: &Input,
     model: &impl QueryDataModel,
-    required: &[(String, String)],
+    required: &[(String, Identifier)],
     limit: Option<u32>,
 ) -> Result<BoundQuery> {
     bind_node(input, model, required, limit, Values::default())
@@ -137,7 +178,7 @@ pub fn traversal(
 pub(super) fn bind_node(
     input: &Input,
     model: &impl QueryDataModel,
-    required: &[(String, String)],
+    required: &[(String, Identifier)],
     limit: Option<u32>,
     mut values: Values,
 ) -> Result<BoundQuery> {
@@ -312,7 +353,7 @@ pub(super) fn bind_node(
         .collect::<Result<_>>()?;
     let mut outputs: Vec<_> = selected
         .iter()
-        .map(|property| format!("{}_{}", node.id, property.name))
+        .map(|property| format!("{}_{}", node.id, property.name).into())
         .collect();
     let mut required_values = Vec::new();
 
@@ -391,6 +432,9 @@ pub(super) fn bind_filter(
         FilterOp::Gte => Scalar::GreaterEqual,
         FilterOp::Lt => Scalar::Less,
         FilterOp::Lte => Scalar::LessEqual,
+        FilterOp::Contains => Scalar::Contains,
+        FilterOp::StartsWith => Scalar::StartsWith,
+        FilterOp::EndsWith => Scalar::EndsWith,
         FilterOp::IsNull => return Ok(call(Scalar::IsNull, vec![Expr::Value(value)])),
         FilterOp::IsNotNull => return Ok(call(Scalar::IsNotNull, vec![Expr::Value(value)])),
         _ => {

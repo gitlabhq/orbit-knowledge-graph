@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::{Expr, Identifier, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -80,7 +80,7 @@ fn apply_to_query(
                 },
             ))
             .expect("scoped table has path columns");
-            match ctx.scope_proofs.get(alias) {
+            match alias.name().and_then(|name| ctx.scope_proofs.get(name)) {
                 Some(scope) if model.table_path_scopable(table) => {
                     Expr::and(broad, crate::scope::scope_predicate(scope, alias))
                 }
@@ -119,7 +119,7 @@ pub(crate) fn path_requirements(
     }
 }
 
-fn build_path_filter(alias: &str, column: &str, paths: &[&TraversalPath]) -> Expr {
+fn build_path_filter(alias: &Identifier, column: &str, paths: &[&TraversalPath]) -> Expr {
     let paths = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
     Expr::or_all(paths.iter().map(|path| {
         Some(Expr::func(
@@ -134,7 +134,7 @@ fn build_path_filter(alias: &str, column: &str, paths: &[&TraversalPath]) -> Exp
 pub(crate) fn collect_node_aliases(
     table_ref: &TableRef,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<String> {
+) -> Vec<Identifier> {
     collect_aliased_tables(table_ref, model)
         .into_iter()
         .map(|(a, _)| a)
@@ -147,7 +147,7 @@ pub(crate) fn collect_node_aliases(
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<(String, String)> {
+) -> Vec<(Identifier, String)> {
     let mut aliases = Vec::new();
     visit_relations(table_ref, &mut |relation| {
         if let TableRef::Scan { table, alias, .. } = relation
@@ -188,7 +188,7 @@ mod tests {
     use serde_json::Value;
 
     fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
-        super::build_path_filter(alias, TRAVERSAL_PATH_COLUMN, paths)
+        super::build_path_filter(&alias.into(), TRAVERSAL_PATH_COLUMN, paths)
     }
 
     fn apply(node: &mut Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
@@ -196,7 +196,7 @@ mod tests {
         apply_security_context(node, context, model.as_ref())
     }
 
-    fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
+    fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<Identifier> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
         collect_node_aliases(table, model.as_ref())
     }
