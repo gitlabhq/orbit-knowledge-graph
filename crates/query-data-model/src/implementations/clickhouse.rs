@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
     PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableLayout {
     pub name: String,
     pub columns: HashSet<String>,
@@ -19,6 +20,10 @@ pub struct TableLayout {
 }
 
 impl TableLayout {
+    pub fn current_row_key(&self) -> &[String] {
+        &self.sort_key
+    }
+
     pub fn deletion_column(&self) -> &str {
         ontology::constants::DELETED_COLUMN
     }
@@ -47,7 +52,7 @@ pub struct ClickHouseCatalog {
     relationships: Vec<Option<String>>,
     variants: Vec<Option<ForeignKey>>,
     property_facts: Vec<PropertyBackendFacts>,
-    tables: HashMap<String, TableLayout>,
+    tables: HashMap<String, Arc<TableLayout>>,
     denormalized: DenormalizedCatalog,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
     views: Vec<ViewMapping>,
@@ -71,7 +76,11 @@ impl ClickHouseCatalog {
     }
 
     pub fn table(&self, name: &str) -> Option<&TableLayout> {
-        self.tables.get(name)
+        self.tables.get(name).map(Arc::as_ref)
+    }
+
+    pub fn table_layout(&self, name: &str) -> Option<Arc<TableLayout>> {
+        self.tables.get(name).cloned()
     }
 
     pub fn table_for_entity(&self, entity: EntityId) -> Option<&TableLayout> {
@@ -80,7 +89,7 @@ impl ClickHouseCatalog {
     }
 
     pub fn tables(&self) -> impl Iterator<Item = &TableLayout> {
-        self.tables.values()
+        self.tables.values().map(Arc::as_ref)
     }
 
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
@@ -89,7 +98,7 @@ impl ClickHouseCatalog {
             .filter_map(Option::as_deref)
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .filter_map(|name| self.tables.get(name))
+            .filter_map(|name| self.table(name))
     }
 
     pub fn default_edge_table(&self) -> &str {
@@ -283,7 +292,7 @@ impl ClickHouseCatalog {
             });
             tables.insert(
                 node.destination_table.clone(),
-                TableLayout {
+                Arc::new(TableLayout {
                     name: node.destination_table.clone(),
                     columns: node
                         .storage
@@ -313,7 +322,7 @@ impl ClickHouseCatalog {
                         && !node.global
                         && node.sort_key.first().map(String::as_str)
                             == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
-                },
+                }),
             );
         }
 
@@ -338,7 +347,7 @@ impl ClickHouseCatalog {
                 .collect();
             tables.insert(
                 table_name.to_string(),
-                TableLayout {
+                Arc::new(TableLayout {
                     name: table_name.to_string(),
                     columns,
                     column_types,
@@ -349,7 +358,7 @@ impl ClickHouseCatalog {
                         entity: None,
                     }],
                     path_scopable: false,
-                },
+                }),
             );
         }
 
@@ -509,7 +518,7 @@ impl ClickHouseCatalog {
                 .collect();
             tables.insert(
                 join.table.clone(),
-                TableLayout {
+                Arc::new(TableLayout {
                     name: join.table.clone(),
                     columns,
                     column_types: HashMap::new(),
@@ -517,7 +526,7 @@ impl ClickHouseCatalog {
                     entity: None,
                     path_columns,
                     path_scopable: true,
-                },
+                }),
             );
         }
 

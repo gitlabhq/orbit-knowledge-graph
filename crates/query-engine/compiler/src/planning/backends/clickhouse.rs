@@ -1,4 +1,6 @@
+use query_data_model::implementations::TableLayout;
 use std::convert::Infallible;
+use std::sync::Arc;
 
 mod fusion;
 pub use fusion::fuse_holder;
@@ -20,17 +22,15 @@ use crate::planning::physical::{self, CurrentRows, Read, Scalar};
 #[derive(Clone, PartialEq)]
 pub struct Scan {
     read: Read,
-    deletion_column: String,
+    layout: Arc<TableLayout>,
     binding: Option<String>,
     relationship: Option<usize>,
-    unique_key: Option<Schema>,
-    replacement_key: Vec<String>,
     foreign_key: Option<ForeignKeySource>,
 }
 
 #[derive(Clone, PartialEq)]
 struct ForeignKeySource {
-    table: String,
+    layout: Arc<TableLayout>,
     identity: String,
     foreign_key: String,
     holder: Endpoint,
@@ -38,7 +38,6 @@ struct ForeignKeySource {
     target_kind: String,
     kind: String,
     fields: Vec<EdgeField>,
-    replacement_key: Vec<String>,
 }
 
 pub fn select(
@@ -77,7 +76,9 @@ pub fn select(
                         .graph()
                         .property_id(holder, &model.graph().property(key.referenced_key).name)?;
                     Some(ForeignKeySource {
-                        table: model.backend().entity_table(holder)?.into(),
+                        layout: model
+                            .backend()
+                            .table_layout(model.backend().entity_table(holder)?)?,
                         identity: model.property_column(identity)?.into(),
                         foreign_key: model.property_column(key.property)?.into(),
                         holder: key.holder,
@@ -85,7 +86,6 @@ pub fn select(
                         target_kind: model.graph().entity(*target).name.clone(),
                         kind: model.graph().relationship(relationships[0]).name.clone(),
                         fields: fields.iter().map(|(_, field)| *field).collect(),
-                        replacement_key: model.backend().table_for_entity(holder)?.sort_key.clone(),
                     })
                 })
         }
@@ -94,47 +94,15 @@ pub fn select(
     let plan = physical::select_source(source, model, CurrentRows::Final, values)?;
 
     plan.map_sources(&mut |read| {
-        let deletion_column = model
-            .backend()
-            .table(&read.table)
-            .map(|table| table.deletion_column())
-            .ok_or_else(|| {
-                QueryError::ReferenceError(format!(
-                    "{} has no current-row deletion column",
-                    read.table
-                ))
-            })?
-            .to_string();
-
-        let unique_key = model.backend().table(&read.table).and_then(|table| {
-            (!table.sort_key.is_empty())
-                .then(|| {
-                    table
-                        .sort_key
-                        .iter()
-                        .map(|column| {
-                            read.columns
-                                .iter()
-                                .find(|(_, name)| name == column)
-                                .map(|(value, _)| *value)
-                        })
-                        .collect::<Option<Vec<_>>>()
-                })
-                .flatten()
-        });
+        let layout = model.backend().table_layout(&read.table).ok_or_else(|| {
+            QueryError::ReferenceError(format!("{} has no current-row deletion column", read.table))
+        })?;
 
         Ok(Scan {
-            replacement_key: model
-                .backend()
-                .table(&read.table)
-                .expect("resolved table")
-                .sort_key
-                .clone(),
             read,
-            deletion_column,
+            layout,
             binding: binding.clone(),
             relationship,
-            unique_key,
             foreign_key: foreign_key.clone(),
         })
     })
@@ -185,18 +153,16 @@ pub fn realize_foreign_key(
         inputs: vec![Node {
             op: Op::Read(Scan {
                 read: Read {
-                    table: key.table.clone(),
+                    table: key.layout.name.clone(),
                     columns: vec![
                         (identity, key.identity.clone()),
                         (foreign_key, key.foreign_key.clone()),
                     ],
                     current_rows: CurrentRows::Final,
                 },
-                deletion_column: scan.deletion_column.clone(),
+                layout: Arc::clone(&key.layout),
                 binding: None,
                 relationship: scan.relationship,
-                unique_key: None,
-                replacement_key: key.replacement_key.clone(),
                 foreign_key: None,
             }),
             inputs: vec![],
@@ -214,7 +180,10 @@ impl Scan {
             "CurrentRows",
             [
                 self.read.explain(),
-                SExpression::node("Deleted", [SExpression::atom(&self.deletion_column)]),
+                SExpression::node(
+                    "Deleted",
+                    [SExpression::atom(self.layout.deletion_column())],
+                ),
                 SExpression::node("Binding", self.binding.iter().map(SExpression::atom)),
                 SExpression::node(
                     "Relationship",
@@ -244,27 +213,30 @@ impl Operation for Scan {
                 .filter_map(|((value, _), field)| required.contains(value).then_some(*field))
                 .collect();
         }
-        let changed = self.read.retain_outputs(required);
-        if self
-            .unique_key
-            .as_ref()
-            .is_some_and(|key| key.iter().any(|value| !required.contains(value)))
-        {
-            self.unique_key = None;
-        }
-
-        changed
+        self.read.retain_outputs(required)
     }
 
     fn map_values(&mut self, map: &mut impl FnMut(&mut crate::planning::generic::ValueId)) {
         self.read.map_values(map);
-        for value in self.unique_key.iter_mut().flatten() {
-            map(value);
-        }
     }
 
     fn unique_keys(&self) -> Vec<Schema> {
-        self.unique_key.iter().cloned().collect()
+        let key = self.layout.current_row_key();
+        if key.is_empty() {
+            return vec![];
+        }
+
+        key.iter()
+            .map(|column| {
+                self.read
+                    .columns
+                    .iter()
+                    .find(|(_, name)| name == column)
+                    .map(|(value, _)| *value)
+            })
+            .collect::<Option<Schema>>()
+            .into_iter()
+            .collect()
     }
 
     fn key_coverage(&self) -> crate::planning::generic::facts::KeyCoverage {
@@ -294,7 +266,7 @@ impl EmitOperation for Scan {
             query: Query {
                 from,
                 where_clause: Some(Expr::eq(
-                    Expr::col(&alias, &self.deletion_column),
+                    Expr::col(&alias, self.layout.deletion_column()),
                     Expr::lit(false),
                 )),
                 ..Default::default()

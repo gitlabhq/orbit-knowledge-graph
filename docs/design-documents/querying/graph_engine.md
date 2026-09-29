@@ -105,6 +105,14 @@ These choices preserve factorization. Each hop operates on a compact frontier an
 
 ### Row deduplication
 
+The query catalog exposes the complete current-row key for each ClickHouse table.
+Scans share the catalog layout and derive uniqueness from the key columns they export.
+An entity ID alone is not a general uniqueness proof for a namespaced scan.
+[Namespace moves](../indexing/namespace_deletion.md#reconciling-moved-entities) can leave live rows at both paths until reconciliation completes.
+Code IDs include project and branch inputs, but do not include traversal path.
+Fusion therefore requires equality of every current-row key column, directly or through exact conjunctive filters.
+The fused scan retains both sets of value bindings and predicates.
+
 Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
 
 | Scan type | Strategy | Rationale |

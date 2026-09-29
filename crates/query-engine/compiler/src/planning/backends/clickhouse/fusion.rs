@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::convert::Infallible;
 
 use super::Scan;
@@ -84,9 +83,8 @@ pub fn fuse_holder(
 
     if a.read.table != b.read.table
         || a.read.current_rows != b.read.current_rows
-        || a.deletion_column != b.deletion_column
-        || a.replacement_key.is_empty()
-        || a.replacement_key != b.replacement_key
+        || a.layout != b.layout
+        || a.layout.current_row_key().is_empty()
         || (a.binding.is_some() && b.binding.is_some() && a.binding != b.binding)
         || (a.relationship.is_some()
             && b.relationship.is_some()
@@ -100,7 +98,7 @@ pub fn fuse_holder(
     let exports: Vec<_> = left.exports.into_iter().chain(right.exports).collect();
     let condition = substitute(condition, &exports);
     let mut equalities = Vec::new();
-    fn conjuncts(expression: &Expr<Scalar>, equalities: &mut Vec<(ValueId, ValueId)>) {
+    fn conjuncts(expression: &Expr<Scalar>, equalities: &mut Vec<(Expr<Scalar>, Expr<Scalar>)>) {
         match expression {
             Expr::Call {
                 function: Scalar::And,
@@ -114,23 +112,64 @@ pub fn fuse_holder(
                 function: Scalar::Equal,
                 arguments,
             } => {
-                if let [Expr::Value(left), Expr::Value(right)] = arguments.as_slice() {
-                    equalities.push((*left, *right));
+                let term = |expression: &Expr<Scalar>| match expression {
+                    Expr::Value(_)
+                    | Expr::Bool(_)
+                    | Expr::Int64(_)
+                    | Expr::UInt64(_)
+                    | Expr::String(_) => true,
+                    Expr::Float64(value) => value.is_finite(),
+                    _ => false,
+                };
+                if let [left, right] = arguments.as_slice()
+                    && term(left)
+                    && term(right)
+                {
+                    equalities.push((left.clone(), right.clone()));
                 }
             }
             _ => {}
         }
     }
-    conjuncts(&condition, &mut equalities);
+    for predicate in left
+        .predicates
+        .iter()
+        .chain(&right.predicates)
+        .chain(std::iter::once(&condition))
+    {
+        conjuncts(predicate, &mut equalities);
+    }
 
-    let key_proven = a.replacement_key.iter().all(|column| {
-        equalities.iter().any(|(left, right)| {
-            let matches = |left, right| {
-                a.read.columns.contains(&(left, column.clone()))
-                    && b.read.columns.contains(&(right, column.clone()))
-            };
-            matches(*left, *right) || matches(*right, *left)
-        })
+    let equivalent = |left: ValueId, right: ValueId| {
+        let mut connected = vec![Expr::Value(left)];
+        let mut next = 0;
+
+        while next < connected.len() {
+            for (first, second) in &equalities {
+                for (from, to) in [(first, second), (second, first)] {
+                    if *from == connected[next] && !connected.contains(to) {
+                        connected.push(to.clone());
+                    }
+                }
+            }
+            next += 1;
+        }
+
+        connected.contains(&Expr::Value(right))
+    };
+
+    let key_proven = a.layout.current_row_key().iter().all(|column| {
+        a.read
+            .columns
+            .iter()
+            .filter(|(_, name)| name == column)
+            .any(|(left, _)| {
+                b.read
+                    .columns
+                    .iter()
+                    .filter(|(_, name)| name == column)
+                    .any(|(right, _)| equivalent(*left, *right))
+            })
     });
     if !key_proven {
         return Ok(vec![]);
@@ -139,24 +178,7 @@ pub fn fuse_holder(
     let mut scan = a.clone();
     scan.binding = a.binding.clone().or_else(|| b.binding.clone());
     scan.relationship = a.relationship.or(b.relationship);
-    let mut mapping = HashMap::new();
-    for (value, column) in &b.read.columns {
-        let selected = scan
-            .read
-            .columns
-            .iter()
-            .find(|(_, name)| name == column)
-            .map(|(value, _)| *value);
-        match selected {
-            Some(selected)
-                if candidate.values.data_type(selected)?
-                    == candidate.values.data_type(*value)? =>
-            {
-                mapping.insert(*value, selected);
-            }
-            _ => scan.read.columns.push((*value, column.clone())),
-        }
-    }
+    scan.read.columns.extend(b.read.columns.iter().cloned());
 
     let predicate = left
         .predicates
@@ -168,21 +190,9 @@ pub fn fuse_holder(
             arguments: vec![left, right],
         })
         .unwrap();
-    let mut predicate = predicate;
-    predicate.map_values(&mut |value| *value = mapping.get(value).copied().unwrap_or(*value));
-    let assignments = exports
-        .into_iter()
-        .map(|mut assignment| {
-            assignment
-                .expression
-                .map_values(&mut |value| *value = mapping.get(value).copied().unwrap_or(*value));
-            assignment
-        })
-        .collect();
-
     let mut rewritten = candidate.clone();
     rewritten.program.root = Node {
-        op: Op::Project(assignments),
+        op: Op::Project(exports),
         inputs: vec![Node {
             op: Op::Filter(predicate),
             inputs: vec![Node {

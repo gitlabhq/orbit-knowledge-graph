@@ -9,6 +9,30 @@ mod tests {
     use ontology::FieldSource;
 
     #[test]
+    fn current_row_keys_retain_namespace_and_code_snapshot_identity() {
+        let model =
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap();
+
+        for (entity, expected) in [
+            ("Project", vec!["traversal_path", "id"]),
+            (
+                "Definition",
+                vec!["traversal_path", "project_id", "branch", "id"],
+            ),
+            ("User", vec!["id"]),
+        ] {
+            let entity = model.graph().entity_id(entity).unwrap();
+            let layout = model.backend().table_for_entity(entity).unwrap();
+            assert_eq!(layout.current_row_key(), expected);
+
+            let first = model.backend().table_layout(&layout.name).unwrap();
+            let second = model.backend().table_layout(&layout.name).unwrap();
+            assert!(Arc::ptr_eq(&first, &second));
+        }
+    }
+
+    #[test]
     fn derives_remote_and_local_models_from_the_same_ontology() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();

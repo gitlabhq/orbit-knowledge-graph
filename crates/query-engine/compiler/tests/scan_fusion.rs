@@ -32,7 +32,14 @@ fn check_fusion(remote: bool) {
          INSERT INTO gl_project VALUES (1, '1/100/', 'match'), (1, '1/200/', 'other'), (2, '1/100/', 'other');"
     ).unwrap();
 
-    for full_key in [false, true] {
+    for (case, fused, expected) in [
+        ("id_only", false, vec!["1/100/", "1/200/"]),
+        ("full_key", true, vec!["1/100/"]),
+        ("equal_literals", true, vec!["1/100/"]),
+        ("left_literal_only", false, vec!["1/100/", "1/200/"]),
+        ("different_literals", false, vec!["1/200/"]),
+        ("literal_under_or", false, vec!["1/100/", "1/200/"]),
+    ] {
         let mut values = Values::default();
         let mut scan = || {
             let properties = ["id", "traversal_path", "name"]
@@ -61,18 +68,54 @@ fn check_fusion(remote: bool) {
             .unwrap();
             (node, ids)
         };
-        let (left, left_values) = scan();
-        let (right, right_values) = scan();
+        let (mut left, left_values) = scan();
+        let (mut right, right_values) = scan();
         let equality = |left, right| Expr::Call {
             function: Scalar::Equal,
             arguments: vec![Expr::Value(left), Expr::Value(right)],
         };
         let mut condition = equality(left_values[0], right_values[0]);
-        if full_key {
+        if case == "full_key" {
             condition = Expr::Call {
                 function: Scalar::And,
                 arguments: vec![condition, equality(left_values[1], right_values[1])],
             };
+        }
+
+        let pin = |path, literal: &str| Expr::Call {
+            function: Scalar::Equal,
+            arguments: vec![Expr::Value(path), Expr::String(literal.into())],
+        };
+
+        if matches!(
+            case,
+            "equal_literals" | "left_literal_only" | "different_literals" | "literal_under_or"
+        ) {
+            left = Node {
+                op: Op::Filter(pin(left_values[1], "1/100/")),
+                inputs: vec![left],
+            };
+
+            if case != "left_literal_only" {
+                let mut predicate = pin(
+                    right_values[1],
+                    if case == "different_literals" {
+                        "1/200/"
+                    } else {
+                        "1/100/"
+                    },
+                );
+                if case == "literal_under_or" {
+                    predicate = Expr::Call {
+                        function: Scalar::Or,
+                        arguments: vec![predicate, Expr::Bool(true)],
+                    };
+                }
+                right = Node {
+                    op: Op::Filter(predicate),
+                    inputs: vec![right],
+                };
+            }
         }
         let left = Node {
             op: Op::Filter(Expr::Call {
@@ -89,7 +132,7 @@ fn check_fusion(remote: bool) {
             inputs: vec![left, right],
         };
         let candidates = optimize::candidates(root, values, &[clickhouse::fuse_holder]).unwrap();
-        assert_eq!(candidates.len(), if full_key { 2 } else { 1 });
+        assert_eq!(candidates.len(), if fused { 2 } else { 1 }, "{case}");
 
         for candidate in candidates {
             let query = lower_program(
@@ -127,10 +170,7 @@ fn check_fusion(remote: bool) {
                      SELECT right_path FROM ({}) ORDER BY right_path FORMAT TSV;",
                     query.render(),
                 ));
-                assert_eq!(
-                    output.trim(),
-                    if full_key { "1/100/" } else { "1/100/\n1/200/" }
-                );
+                assert_eq!(output.trim(), expected.join("\n"), "{case}");
                 continue;
             }
 
@@ -144,14 +184,7 @@ fn check_fusion(remote: bool) {
                 .unwrap();
             rows.sort();
 
-            assert_eq!(
-                rows,
-                if full_key {
-                    vec!["1/100/"]
-                } else {
-                    vec!["1/100/", "1/200/"]
-                }
-            );
+            assert_eq!(rows, expected, "{case}");
         }
     }
 }

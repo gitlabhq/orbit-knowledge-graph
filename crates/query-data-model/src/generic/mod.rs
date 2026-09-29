@@ -34,7 +34,7 @@ pub struct TraversalPathLookup {
     pub property: PropertyId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
