@@ -1153,7 +1153,17 @@ impl Ontology {
                 }
                 let propagation = match (result.get(e.from).cloned(), result.get(e.to).cloned()) {
                     (Some(p), None) if !tainted.contains(e.to) => Some((e.to.to_string(), p)),
-                    (None, Some(p)) if !tainted.contains(e.from) => Some((e.from.to_string(), p)),
+                    (None, Some(p))
+                        if !tainted.contains(e.from)
+                            && e.types.iter().all(|kind| {
+                                self.edge_scope_for(kind, e.source_kind, e.target_kind)
+                                    .is_some_and(|scope| {
+                                        scope.propagates_to_source(kind, e.source_kind)
+                                    })
+                            }) =>
+                    {
+                        Some((e.from.to_string(), p))
+                    }
                     _ => None,
                 };
                 if let Some((alias, proof)) = propagation {
