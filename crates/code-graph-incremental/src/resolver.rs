@@ -1009,13 +1009,29 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
 }
 
 fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
-    let linked = ctx.extends_of.get(&(cls.fi(), cls.index()));
-    cls.children()
-        .filter(|s| s.is(C::SuperType))
-        .filter_map(|s| resolve_chain(ctx, s))
-        .map(|c| (c.fi(), c.index()))
-        .chain(linked.into_iter().flatten().copied())
+    std::iter::once(cls)
+        .chain(impl_blocks_of(ctx, cls))
+        .flat_map(|part| {
+            let linked = ctx.extends_of.get(&(part.fi(), part.index()));
+            part.children()
+                .filter(|s| s.is(C::SuperType))
+                .filter_map(|s| resolve_chain(ctx, s))
+                .map(|c| (c.fi(), c.index()))
+                .chain(linked.into_iter().flatten().copied())
+                .collect::<Vec<_>>()
+        })
         .collect()
+}
+
+/// The other same-named defs in the file when one side is an impl block:
+/// `struct Service` and its `impl Service` / `impl Runner for Service`.
+fn impl_blocks_of<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> impl Iterator<Item = Cursor<'a>> {
+    cls.child_sym(C::DefName)
+        .and_then(|n| ctx.defs_by_name[cls.fi() as usize].get(&n))
+        .into_iter()
+        .flatten()
+        .map(move |&n| cls.jump(cls.fi(), n))
+        .filter(move |d| d.index() != cls.index() && (d.has(C::ImplBlock) || cls.has(C::ImplBlock)))
 }
 
 fn lub<'a>(
@@ -1108,15 +1124,8 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
         .into_iter()
         .flatten()
         .map(|l| cls.jump(l.fi as u32, l.node));
-    let same_named = cls
-        .child_sym(C::DefName)
-        .and_then(|n| ctx.defs_by_name[cls.fi() as usize].get(&n))
-        .into_iter()
-        .flatten()
-        .map(|&n| cls.jump(cls.fi(), n))
-        .filter(|d| d.index() != cls.index() && (d.has(C::ImplBlock) || cls.has(C::ImplBlock)));
     std::iter::once(cls)
-        .chain(same_named)
+        .chain(impl_blocks_of(ctx, cls))
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
         .find_map(|b| find_method_in(b, name))
 }

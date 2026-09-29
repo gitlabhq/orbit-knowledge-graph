@@ -10,7 +10,7 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Cursor, Edge, EdgeKind, Tree, find_method_in, members_by_level};
+use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
 
 #[derive(Clone)]
 enum Linked {
@@ -194,17 +194,18 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_import(&mut self, c: Cursor<'t>) {
-        if self.config.inline_modules
-            && let Some(module) = self.inline_module(c)
-        {
-            return self.import_from_def(c, module);
-        }
+        let module = self.inline_module(c);
         for n in c.names() {
             let sym = n.sym();
             let local = n
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
+            if let Some(module) = module
+                && self.bind_from_def(module, n, local)
+            {
+                continue;
+            }
             if !self.config.imports_shadow_locals
                 && self
                     .lookup(local)
@@ -230,36 +231,51 @@ impl<'t> Fold<'t> {
         }
     }
 
-    /// The def an import path names when every segment is a def in this file:
-    /// `use crate::dep::Service` with `mod dep {}` above it.
+    /// The def an import path names when every segment is a def in this file
+    /// (`use crate::dep::Service` with `mod dep {}` above it); the file root
+    /// for an empty path (`use crate::dep as dep_mod`).
     fn inline_module(&mut self, import: Cursor<'t>) -> Option<Cursor<'t>> {
+        if !self.config.inline_modules {
+            return None;
+        }
         let path = self.syms.resolve(import.child_sym(C::SourcePath)?);
         let mut segments = path.split(PATH_SEP).filter(|s| !s.is_empty());
-        let first = self.syms.lookup(segments.next()?);
-        let mut module = self.lookup(first).into_iter().find_map(|r| match r {
-            Linked::Def(d) => Some(self.tree.cursor(d)),
-            _ => None,
-        })?;
+        let Some(first) = segments.next() else {
+            return Some(self.tree.root());
+        };
+        let mut module =
+            self.lookup(self.syms.lookup(first))
+                .into_iter()
+                .find_map(|r| match r {
+                    Linked::Def(d) => Some(self.tree.cursor(d)),
+                    _ => None,
+                })?;
         for segment in segments {
-            module = find_method_in(module, self.syms.lookup(segment))?;
+            module = child_def(module, self.syms.lookup(segment))?;
         }
         Some(module)
     }
 
-    fn import_from_def(&mut self, import: Cursor<'t>, module: Cursor<'t>) {
-        for n in import.names() {
-            let local = n.child_sym(C::Alias).unwrap_or(n.sym());
-            let targets: Vec<Cursor<'t>> = match n.sym() == self.wildcard {
-                true => module.children().filter(|d| d.is(C::Def)).collect(),
-                false => find_method_in(module, n.sym()).into_iter().collect(),
-            };
-            for target in targets {
-                let name = target.child_sym(C::DefName).unwrap_or(local);
-                let def_idx = self.def_index(target.index());
-                self.ssa
-                    .write_variable(name, self.cur, Value::LocalDef(def_idx));
-            }
+    /// Binds an imported name to the def of that name inside `module`, or
+    /// every def in it for a wildcard. False when there is no such def.
+    fn bind_from_def(&mut self, module: Cursor<'t>, name: Cursor<'t>, local: u32) -> bool {
+        let targets: Vec<(u32, u32)> = match name.sym() == self.wildcard {
+            true => module
+                .children()
+                .filter(|d| d.is(C::Def))
+                .filter_map(|d| Some((d.child_sym(C::DefName)?, d.index())))
+                .collect(),
+            false => child_def(module, name.sym())
+                .map(|d| (local, d.index()))
+                .into_iter()
+                .collect(),
+        };
+        for (bind_as, node) in &targets {
+            let def_idx = self.def_index(*node);
+            self.ssa
+                .write_variable(*bind_as, self.cur, Value::LocalDef(def_idx));
         }
+        !targets.is_empty()
     }
 
     fn def_index(&mut self, node: u32) -> u32 {
@@ -808,4 +824,10 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
     }
 
     Ok(f.edges)
+}
+
+fn child_def<'t>(module: Cursor<'t>, name: u32) -> Option<Cursor<'t>> {
+    module
+        .children()
+        .find(|d| d.is(C::Def) && d.child_sym(C::DefName) == Some(name))
 }

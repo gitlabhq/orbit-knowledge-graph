@@ -115,8 +115,6 @@ tests:
       - { row: { src: "src/cross_api.rs", tgt: "src/cross_service.rs", type: "Method" } }
 
   - name: "cross-file supertrait default methods still resolve to the defining trait item"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'cross_call_ping' AND callee.name = 'ping'

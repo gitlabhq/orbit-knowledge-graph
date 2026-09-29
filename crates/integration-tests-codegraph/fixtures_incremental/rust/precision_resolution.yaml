@@ -162,8 +162,6 @@ fixtures:
 
 tests:
   - name: "module aliases resolve callable paths"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'module_alias_call' AND callee.name = 'imported'
