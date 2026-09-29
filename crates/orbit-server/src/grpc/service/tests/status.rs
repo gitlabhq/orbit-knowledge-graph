@@ -11,9 +11,9 @@ async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
         .code()
 }
 
-async fn item_counts_error(paths: &[&str]) -> tonic::Code {
+async fn item_counts_error(path: &str) -> tonic::Code {
     let request = GetItemCountsRequest {
-        traversal_paths: paths.iter().map(|path| path.to_string()).collect(),
+        traversal_path: path.to_string(),
     };
     test_service()
         .get_item_counts(authed_request(request))
@@ -23,7 +23,7 @@ async fn item_counts_error(paths: &[&str]) -> tonic::Code {
 }
 
 #[tokio::test]
-async fn status_rpcs_reject_an_empty_or_oversized_path_list() {
+async fn indexing_status_rejects_an_empty_or_oversized_path_list() {
     let paths: Vec<String> = (0..=MAX_STATUS_PATHS)
         .map(|id| format!("1/{id}/"))
         .collect();
@@ -34,7 +34,6 @@ async fn status_rpcs_reject_an_empty_or_oversized_path_list() {
             indexing_status_error(paths).await,
             tonic::Code::InvalidArgument
         );
-        assert_eq!(item_counts_error(paths).await, tonic::Code::InvalidArgument);
     }
 }
 
@@ -47,7 +46,7 @@ async fn status_rpcs_reject_a_malformed_path() {
             "indexing status accepted {path:?}"
         );
         assert_eq!(
-            item_counts_error(&[path]).await,
+            item_counts_error(path).await,
             tonic::Code::InvalidArgument,
             "item counts accepted {path:?}"
         );
@@ -61,7 +60,7 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         tonic::Code::PermissionDenied
     );
     assert_eq!(
-        item_counts_error(&["1/22/"]).await,
+        item_counts_error("1/22/").await,
         tonic::Code::PermissionDenied
     );
 }

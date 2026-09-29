@@ -4005,10 +4005,10 @@ func (x *DomainIndexingStatus) GetProjects() *ProjectsStatus {
 }
 
 type GetItemCountsRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	TraversalPaths []string               `protobuf:"bytes,1,rep,name=traversal_paths,json=traversalPaths,proto3" json:"traversal_paths,omitempty"` // 1 to 100 group or project paths; each entity counts once
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TraversalPath string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"` // one group or project path (e.g. "1/2/")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetItemCountsRequest) Reset() {
@@ -4041,11 +4041,11 @@ func (*GetItemCountsRequest) Descriptor() ([]byte, []int) {
 	return file_orbit_proto_rawDescGZIP(), []int{56}
 }
 
-func (x *GetItemCountsRequest) GetTraversalPaths() []string {
+func (x *GetItemCountsRequest) GetTraversalPath() string {
 	if x != nil {
-		return x.TraversalPaths
+		return x.TraversalPath
 	}
-	return nil
+	return ""
 }
 
 type GetItemCountsResponse struct {
@@ -4462,9 +4462,9 @@ const file_orbit_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12-\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x17.orbit.v1.IndexingPhaseR\x05phase\x129\n" +
 	"\bprojects\x18\x03 \x01(\v2\x18.orbit.v1.ProjectsStatusH\x00R\bprojects\x88\x01\x01B\v\n" +
-	"\t_projects\"?\n" +
-	"\x14GetItemCountsRequest\x12'\n" +
-	"\x0ftraversal_paths\x18\x01 \x03(\tR\x0etraversalPaths\"L\n" +
+	"\t_projects\"=\n" +
+	"\x14GetItemCountsRequest\x12%\n" +
+	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\"L\n" +
 	"\x15GetItemCountsResponse\x123\n" +
 	"\adomains\x18\x01 \x03(\v2\x19.orbit.v1.DomainItemCountR\adomains\"\\\n" +
 	"\x0fDomainItemCount\x12\x12\n" +

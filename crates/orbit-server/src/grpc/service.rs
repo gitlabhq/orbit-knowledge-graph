@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::pin::Pin;
+use std::slice;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -749,15 +750,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
-        let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
+        let path = parse_authorized_path(&ctx.claims, &request.get_ref().traversal_path)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(path_count = paths.len(), "Fetching item counts for user");
+        info!(traversal_path = %path, "Fetching item counts for user");
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.ontology, &security_context, &paths)
+            .count_items(&schema.ontology, &security_context, slice::from_ref(&path))
             .await;
         Ok(Response::new(build_item_counts_response(
             &schema.ontology,
@@ -939,13 +940,15 @@ fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<Trave
 
     paths
         .iter()
-        .map(|path| {
-            let path = TraversalPath::new_unchecked(path.clone());
-            path.validate().map_err(Status::invalid_argument)?;
-            authorize_traversal_path(claims, &path)?;
-            Ok(path)
-        })
+        .map(|path| parse_authorized_path(claims, path))
         .collect()
+}
+
+fn parse_authorized_path(claims: &Claims, path: &str) -> Result<TraversalPath, Status> {
+    let path = TraversalPath::new_unchecked(path);
+    path.validate().map_err(Status::invalid_argument)?;
+    authorize_traversal_path(claims, &path)?;
+    Ok(path)
 }
 
 fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> Result<(), Status> {

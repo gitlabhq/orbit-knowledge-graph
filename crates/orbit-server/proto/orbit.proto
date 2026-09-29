@@ -574,7 +574,7 @@ message DomainIndexingStatus {
 // ---------------------------------------------------------------------------
 
 message GetItemCountsRequest {
-  repeated string traversal_paths = 1;  // 1 to 100 group or project paths; each entity counts once
+  string traversal_path = 1;  // one group or project path (e.g. "1/2/")
 }
 
 message GetItemCountsResponse {

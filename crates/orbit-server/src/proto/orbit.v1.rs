@@ -661,9 +661,9 @@ pub struct DomainIndexingStatus {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetItemCountsRequest {
-    /// 1 to 100 group or project paths; each entity counts once
-    #[prost(string, repeated, tag = "1")]
-    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// one group or project path (e.g. "1/2/")
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetItemCountsResponse {
