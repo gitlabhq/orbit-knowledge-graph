@@ -37,17 +37,20 @@ question. Two accepted ADRs constrain it:
 Measurements on a local stack support the design:
 
 - An unreadable center returns the same empty graph as a nonexistent ID, and
-  edges to unreadable neighbors are dropped. Per-type queries with `node_ids`
-  therefore leak nothing.
+  edges to unreadable neighbors are dropped from the node and edge lists. That
+  does not cover pagination metadata. Redacted rows still count toward the
+  query window. An unreadable neighbor at the limit boundary can change
+  `has_more`, `truncated`, and the row count. The Decision section
+  makes this a prerequisite.
 - The unchanged Workhorse `SendQuery.Inject` ran 2 to 40 concurrent streams
-  with its redaction loop, one redaction callback per stream. Five queries took
+  with its redaction loop, at most one redaction callback per stream. Five queries took
   0.4 s concurrently against 0.87 s sequentially.
-- A `neighbors` query over 20 merge requests returned 9.9 KB raw and 5.7 KB in
-  GOON, in 130 to 300 ms.
+- A `neighbors` query over 20 merge requests returned 10 KB raw and 5.7 KB in
+  GOON. Prototype queries ran in 130 to 300 ms.
 - `neighbors` can return stale `HAS_HEAD_PIPELINE` and `HAS_LATEST_DIFF` edges,
-  and its `LIMIT` counts duplicate version rows (for example 112 rows for 52
-  unique edges). This is a separate Orbit defect; the expansion design does not
-  depend on it.
+  and its `LIMIT` counts duplicate version rows. One hosted-graph example
+  returned 112 rows for 52 unique edges. This is a separate Orbit defect, and
+  the expansion design does not depend on it.
 
 The content of an expansion (which edges, which facets) is under active
 iteration by the Orbit team. This ADR does not fix it.
@@ -74,14 +77,20 @@ This ADR fixes the interface and the transport. It does not design the
 - Top-level `expand` defaults to `false`. A per-token value overrides it.
   Expansion adds latency and a GKG dependency, so it is opt-in.
 - Accepted token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs,
-  `path!iid` and `path#iid`. Group-level work items are in scope. Other types
-  return `unsupported_type`.
+  `path!iid` and `path#iid`. Group-level work items are in scope.
+- Supported types are `MergeRequest` and `WorkItem`. `Issue` is accepted as an
+  alias and resolves, is reported, and expands as `WorkItem`, so its graph is
+  under `expansions.WorkItem`. Other types return `unsupported_type`.
+- Resolution applies both the per-resource ability (for example
+  `read_work_item`) and the fine-grained token boundary. Group-level work items
+  pass their group as the boundary.
 
 ### Response, version 1.1.0
 
 Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
 `linked_merge_requests[]`). The response adds `resolved_token`,
-`namespace_path` and a top-level `expansions` object.
+a top-level `expansions` object, and `namespace_path` inside `summary`
+(`project_path` is `null` for group-level work items).
 
 ```json
 {"version": "1.1.0",
@@ -94,8 +103,9 @@ Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
 ```
 
 - `expansions` is always present (`{}` if nothing was requested) and holds one
-  deduplicated graph per entity type, not per entity. Edges identify the
-  center through `from_id` and `to_id`.
+  deduplicated graph per entity type, not per entity. A center is identified
+  by the edge endpoint pair (`from`, `from_id`) or (`to`, `to_id`), because ids
+  are per type.
 - A type appears only if a found record asked for expansion.
 - `expansions.<Type>.status` is `ok`, `no_expansion` (the type has no query) or
   `error` with `error.code`. It is the only outcome signal; entities carry no
@@ -103,15 +113,24 @@ Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
 
 ### Leak rules
 
+- Error codes are `invalid_token`, `unsupported_type`, and `not_found`.
+  `invalid_token` (unparseable token, other host) and `unsupported_type` are
+  decided from the token text alone, before any lookup.
+- Once a lookup starts, every failure returns the identical `not_found` with
+  no extra fields. This covers an unknown project or group, an unknown iid,
+  and an unreadable record. It also covers a namespace of the wrong kind, such
+  as `group!5` or a project path in a `/groups/` URL.
 - `resolved_token` appears only when `found` is `true`.
-- For URL and `path#iid` tokens, `id` is `null` when `found` is `false`. For
-  `Type[id]` and GID tokens, `id` only echoes what the caller sent. `type` is
-  `null` for every unfound token.
-- An unknown project or group, an unknown iid and an unreadable record all
-  return one identical `not_found` with no extra fields.
-- Expansion queries and payloads contain ids of found records only. Redaction
-  is the leak control; this rule is defense in depth and avoids cross-tenant
-  timing.
+- For every iid form (URL, `path!iid`, `path#iid`), `id` is `null` when `found`
+  is `false`. For `Type[id]` and GID tokens, `id` only echoes what the caller
+  sent. `type` is `null` for every unfound token.
+- `linked_issues[]`, `linked_merge_requests[]`, and reviewers include readable
+  records only.
+- Expansion queries and payloads contain ids of found records only. This saves
+  work and avoids cross-tenant timing on centers. It is defense in depth, not
+  the leak control.
+- Expansion results must not carry pagination metadata that depends on
+  redacted rows. See the prerequisite under Consequences.
 
 ### Client rule: `result` or `request`
 
@@ -120,13 +139,49 @@ For each `expansions.<Type>`: if `result` is present, use it. Otherwise, if
 from the reply. A client that follows this rule works unchanged when the
 server moves between transports below.
 
+Under (b), `status: ok` means the request is ready, not that the query
+succeeded. The outcome is the HTTP status of the follow-up call, which can be a
+429 because it shares the `orbit_query` budget. A (b) entry looks like this:
+
+```json
+"MergeRequest": {"status": "ok",
+  "request": {"method": "POST",
+              "path": "/api/v4/orbit/query/expand_merge_request",
+              "body": {"parameters": {"node_ids": [529482712]},
+                       "response_format": "raw"}}}
+```
+
+The example response above is abbreviated and shows the (e) shape.
+
+Each expansion graph is per type and cannot attribute truncation to an entity.
+The named query `limit` is global across all centers, and redacted rows use
+window slots. A center absent from a graph means "no readable neighbors" only
+when `pagination.truncated` is `false`. If it is `true`, the client must treat
+absent centers as unknown.
+
+### LLM format
+
+The client rule above applies to `response_format: raw`. With `llm`, the
+response is `text/plain`: the existing Rails summary text, then one GOON
+section per expanded type under (e). Under (b), the text lists per type the
+`POST` path and `node_ids` to run. The follow-up call with `llm` returns GOON
+text with no JSON wrapper, so there is no `.result` to read. Raw results
+carry `format_version`; GOON carries `goon_version`
+([ADR 012](012_goon_format.md)).
+
 ### Expansion queries
 
 Orbit owns one named query per entity type, each taking `node_ids` (1 to 20
 integers) and returning a normal graph response. The Orbit team decides what
-they contain and may change it without changing this contract. Rails keeps a
-static map from type to query name and treats an absent center as "no
-neighbors", never as an error.
+they contain. Rails keeps a static map from type to query name, and an absent
+center is never an error.
+
+The contract has one request per type, so the content is limited to what one
+named query can express. Today that means `neighbors`-style traversals. Typed
+facets such as a fresh head pipeline or diff files need per-facet queries or
+composite named queries, which do not exist yet. Composite named queries are the
+extension point on the Orbit side. Until they land, adding typed facets
+changes the contract.
 
 ### Transport
 
@@ -149,12 +204,14 @@ neighbors", never as an error.
 These apply to the Rails implementation that replaces the closed prototype:
 
 - Use `POST` with `tokens`/`token`, as above.
-- Rename `ref` to `token` and bump `version` to 1.1.0.
+- Use `token` and `version` 1.1.0. The prototype never merged, so nothing
+  ships as 1.0.0 on the default branch; 1.1.0 marks clients built against the
+  prototype contract.
 - Declare the `read_orbit` permission on `context`. Current master routes use
   `read_orbit`; the prototype predates the rename and used
   `read_knowledge_graph`.
-- Update the fine-grained token documentation and route configuration, which
-  list `GET /orbit/context`.
+- Add `POST /orbit/context` to the fine-grained token documentation and route
+  configuration.
 
 ## Consequences
 
@@ -184,9 +241,24 @@ These apply to the Rails implementation that replaces the closed prototype:
 - **MCP tool deferred.** An explicit MCP tool and an agent command are out of
   scope. The Rails service and resolver take plain values so the command
   interceptor can reuse them later.
+- **Prerequisite: authorization-safe pagination.** Redacted rows count toward
+  the query window, and the fallback `next_cursor` can anchor on a redacted
+  row. Expansion results must not carry pagination metadata (`has_more`,
+  `truncated`, cursors, row counts) that depends on redacted rows, in both raw
+  and GOON output. This is a prerequisite for the expansion path. A
+  confidential follow-up issue tracks it. The fix needs a test with a readable
+  center and an unreadable neighbor at the limit boundary. Until then the
+  timing and pagination of an expansion can reveal that a neighbor was
+  redacted, as with any Orbit query.
+- **Header size under (e).** The Rails body travels base64 in the send-data
+  header. Workhorse sets no explicit limit, so Go's default applies. That is
+  unmeasured for 20 entities and should be measured before (e) ships.
 - **Follow-up work.** Rails: resolver, group-level work items, the requirements
   above, `expand` plumbing behind a feature flag. Orbit: the per-type named
-  queries. Workhorse: fan-out under (e). CLI: `glab orbit remote context`.
+  queries. Workhorse: fan-out under (e). CLI: remote routing for the shared
+  `orbit context` verb (!2523) must move from `GET` with `refs[]` to `POST` with `tokens`. It must also use
+  the 1.1.0 envelope and this ADR's token forms. Whether `Type:ID` is an accepted token
+  form is open.
   Independent: the `neighbors` dedup and tombstone fix.
 - **Risk.** (e) needs an agreement outside this repository. Until then 19.6
   works through (b) alone, and (b) stands by itself if the follow-up slips.
