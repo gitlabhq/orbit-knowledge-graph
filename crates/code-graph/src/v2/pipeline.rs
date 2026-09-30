@@ -1761,7 +1761,7 @@ pub(crate) mod testing {
         let vfs = Vfs::default();
         let mut inputs = Vec::new();
         for (path, bytes) in files {
-            vfs.add(path, bytes.to_vec()).unwrap();
+            vfs.write(path, bytes.to_vec()).unwrap();
             if let Some(language) = detect_language_from_path(path) {
                 inputs.push(FamilyFileInput {
                     language,

@@ -1,8 +1,7 @@
 //! A Gitaly tar.gz. Inflating is one sequential stream, so that thread only
-//! reads: it checks each path, offers the file to the repository filesystem,
-//! and sends the bytes of every file the filesystem wants ahead through a
-//! bounded channel. Workers finish those offers with the bytes. Nothing
-//! touches the disk.
+//! reads: it checks each path, stats the file in the repository filesystem,
+//! and sends the bytes of every file the filesystem needs ahead through a
+//! bounded channel. Workers write them. Nothing touches the disk.
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -13,7 +12,7 @@ use flate2::read::GzDecoder;
 use rayon::prelude::*;
 use tracing::warn;
 
-use super::{Offer, SourceError, Vfs};
+use super::{Entry, SourceError, Vfs};
 
 /// How many files' bytes may wait for a worker; with the per-file size cap
 /// this bounds the bytes in flight.
@@ -40,7 +39,7 @@ pub fn extract<R: Read>(reader: R, vfs: &Vfs) -> Result<(), SourceError> {
 
 /// A file whose bytes came off the stream, waiting for a worker.
 struct Pending<'a> {
-    offer: Offer<'a>,
+    entry: Entry<'a>,
     bytes: Vec<u8>,
 }
 
@@ -48,7 +47,7 @@ fn settle(receiver: Receiver<Pending<'_>>) -> Result<(), SourceError> {
     receiver
         .into_iter()
         .par_bridge()
-        .try_for_each(|Pending { offer, bytes }| offer.with_bytes(bytes))
+        .try_for_each(|Pending { entry, bytes }| entry.write(bytes))
 }
 
 fn inflate<'a, R: Read>(
@@ -63,8 +62,8 @@ fn inflate<'a, R: Read>(
         .entries()
         .map_err(|e| SourceError::Io(std::io::Error::other(e)))?;
 
-    for entry in entries {
-        let mut entry = match entry {
+    for archived in entries {
+        let mut archived = match archived {
             Ok(e) => {
                 any_entry_seen = true;
                 e
@@ -76,7 +75,7 @@ fn inflate<'a, R: Read>(
             Err(e) => return Err(SourceError::Io(e)),
         };
 
-        let entry_type = entry.header().entry_type();
+        let entry_type = archived.header().entry_type();
         let is_symlink =
             entry_type == ::tar::EntryType::Symlink || entry_type == ::tar::EntryType::Link;
         // Directories exist because files are in them; other entry types
@@ -84,7 +83,7 @@ fn inflate<'a, R: Read>(
         if entry_type != ::tar::EntryType::Regular && !is_symlink {
             continue;
         }
-        let entry_path = entry.path().map_err(std::io::Error::other)?;
+        let entry_path = archived.path().map_err(std::io::Error::other)?;
         let entry_path_str = entry_path.to_string_lossy();
         if entry_path_str == "/" || entry_path_str == "." || entry_path_str.is_empty() {
             continue;
@@ -108,18 +107,18 @@ fn inflate<'a, R: Read>(
         }
         let path = relative_path.to_string_lossy();
 
-        let Some(offer) = vfs.offer(&path, entry.size(), is_symlink)? else {
+        let Some(entry) = vfs.stat(&path, archived.size(), is_symlink)? else {
             continue;
         };
         // A symlink is a node with no bytes of its own; so is a file the
         // header already settled, whose body is not worth inflating.
-        if is_symlink || !(offer.loads() || offer.wants_bytes()) {
-            offer.without_bytes();
+        if is_symlink || !(entry.loads() || entry.needs_bytes()) {
+            entry.list();
             continue;
         }
-        let mut bytes = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut bytes)?;
-        if workers.send(Pending { offer, bytes }).is_err() {
+        let mut bytes = Vec::with_capacity(archived.size() as usize);
+        archived.read_to_end(&mut bytes)?;
+        if workers.send(Pending { entry, bytes }).is_err() {
             return Ok(());
         }
     }

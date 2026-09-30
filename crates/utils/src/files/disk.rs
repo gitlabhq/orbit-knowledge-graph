@@ -1,6 +1,6 @@
 //! A checkout on disk. Listing is cheap and reading is not, so every file
-//! found is offered to the repository filesystem by where it is; the
-//! filesystem reads it now only if a pass asks, and links it either way.
+//! found is linked into the repository filesystem where it is; the
+//! filesystem reads it now only if a pass needs to, and links it either way.
 
 use std::path::Path;
 

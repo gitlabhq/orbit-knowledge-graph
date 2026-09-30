@@ -1,4 +1,4 @@
-//! Every file a repository offers, from a checkout on disk or a Gitaly tar,
+//! Every file a repository has, from a checkout on disk or a Gitaly tar,
 //! goes through one state machine inside the repository filesystem:
 //!
 //! ```text
@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Passes are policy (`CodeFilter`, a content classifier). Sources (`disk`,
-//! `tar`) only offer files to the `Vfs`. A `Pass` chains with `then`, and
+//! `tar`) only put files in the `Vfs`. A `Pass` chains with `then`, and
 //! every pass in the chain sees what the passes before it decided, so a
 //! later pass can refine an earlier one.
 
@@ -18,7 +18,7 @@ pub mod disk;
 pub mod tar;
 pub mod vfs;
 
-pub use vfs::{ContentId, DirEntry, Metadata, Offer, Unread, Vfs};
+pub use vfs::{ContentId, DirEntry, Entry, Metadata, Unread, Vfs};
 
 /// Why a file was not loaded. Snake_case for metric labels.
 #[derive(

@@ -60,7 +60,7 @@ fn graphed_files(ctx: &Arc<PipelineContext>) -> usize {
 }
 
 fn write(repo: &Vfs, relative: &str, language: Language, body: &str) -> FamilyFileInput {
-    repo.add(relative, body.as_bytes().to_vec())
+    repo.write(relative, body.as_bytes().to_vec())
         .expect("write fixture");
     FamilyFileInput {
         language,

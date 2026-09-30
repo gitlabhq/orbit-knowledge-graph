@@ -1,4 +1,4 @@
-//! The repository as a filesystem. A source offers files (`add`, `link`,
+//! The repository as a filesystem. A source puts files in (`write`, `link`,
 //! `list`); the passes decide per file whether it parses, loads, is only
 //! listed, or is dropped; the filesystem keeps a node for every file that
 //! stays and bytes only for those that load. Readers see `std::fs` verbs
@@ -134,9 +134,9 @@ impl Default for Vfs {
     }
 }
 
-/// Offering files. `offer` runs the header passes and hands back what they
-/// decided, so a source can tell whether the bytes are wanted before it pays
-/// to produce them; `add`, `link` and `list` are the one-call forms.
+/// Putting files in. `stat` runs the header passes and hands back the entry,
+/// so a source can tell whether the bytes are needed before it pays to
+/// produce them; `write`, `link` and `list` are the one-call forms.
 impl Vfs {
     /// `budget` caps the bytes kept in memory; `Some(0)` spills everything,
     /// `None` keeps everything.
@@ -151,14 +151,14 @@ impl Vfs {
         }
     }
 
-    /// A file the repository has; `None` if the passes dropped it or the
-    /// path climbs out of the repository.
-    pub fn offer(
+    /// The header passes' view of a file, before any bytes; `None` if they
+    /// dropped it or the path climbs out of the repository.
+    pub fn stat(
         &self,
         path: &str,
         size: u64,
         symlink: bool,
-    ) -> Result<Option<Offer<'_>>, SourceError> {
+    ) -> Result<Option<Entry<'_>>, SourceError> {
         let Some(key) = key(Path::new(path)) else {
             return Ok(None);
         };
@@ -167,7 +167,7 @@ impl Vfs {
             false => File::new(key, size),
         };
         let need = self.passes.header(&mut file)?;
-        Ok((file.decision != Decision::Drop).then_some(Offer {
+        Ok((file.decision != Decision::Drop).then_some(Entry {
             vfs: self,
             file,
             need,
@@ -175,9 +175,9 @@ impl Vfs {
     }
 
     /// A file whose bytes are in hand.
-    pub fn add(&self, path: &str, bytes: Vec<u8>) -> Result<(), SourceError> {
-        match self.offer(path, bytes.len() as u64, false)? {
-            Some(offer) => offer.with_bytes(bytes),
+    pub fn write(&self, path: &str, bytes: Vec<u8>) -> Result<(), SourceError> {
+        match self.stat(path, bytes.len() as u64, false)? {
+            Some(entry) => entry.write(bytes),
             None => Ok(()),
         }
     }
@@ -190,16 +190,16 @@ impl Vfs {
         on_disk: std::path::PathBuf,
         size: u64,
     ) -> Result<(), SourceError> {
-        match self.offer(path, size, false)? {
-            Some(offer) => offer.on_disk(on_disk),
+        match self.stat(path, size, false)? {
+            Some(entry) => entry.link(on_disk),
             None => Ok(()),
         }
     }
 
-    /// A file with no bytes to offer: a symlink, say. A node, nothing more.
+    /// A file with no bytes: a symlink, say. A node, nothing more.
     pub fn list(&self, path: &str, size: u64, symlink: bool) -> Result<(), SourceError> {
-        if let Some(offer) = self.offer(path, size, symlink)? {
-            offer.without_bytes();
+        if let Some(entry) = self.stat(path, size, symlink)? {
+            entry.list();
         }
         Ok(())
     }
@@ -265,27 +265,27 @@ impl Vfs {
     }
 }
 
-/// A file after the header passes, waiting for its source to finish it.
-pub struct Offer<'a> {
+/// A file after the header passes, before its bytes.
+pub struct Entry<'a> {
     vfs: &'a Vfs,
     file: File,
     need: Need,
 }
 
-impl Offer<'_> {
+impl Entry<'_> {
     /// Whether the file keeps its bytes at all.
     pub fn loads(&self) -> bool {
         self.file.loads()
     }
 
-    /// Whether a pass asked to see the bytes before deciding.
-    pub fn wants_bytes(&self) -> bool {
+    /// Whether a pass needs the bytes before deciding.
+    pub fn needs_bytes(&self) -> bool {
         self.need == Need::Bytes
     }
 
     /// The bytes, once: the content passes see them and the file is kept
     /// with them if it still loads.
-    pub fn with_bytes(mut self, bytes: Vec<u8>) -> Result<(), SourceError> {
+    pub fn write(mut self, bytes: Vec<u8>) -> Result<(), SourceError> {
         self.vfs.passes.content(&mut self.file, &bytes);
         let slot = match self.file.loads() {
             true => Some(Slot::Stored(self.vfs.store(bytes)?)),
@@ -298,12 +298,12 @@ impl Offer<'_> {
     /// The file stays on disk, where it already is storage. If a pass asked
     /// to see it, it is read now for the decision and the bytes are let go;
     /// otherwise the parser's first read decides.
-    pub fn on_disk(mut self, on_disk: std::path::PathBuf) -> Result<(), SourceError> {
+    pub fn link(mut self, on_disk: std::path::PathBuf) -> Result<(), SourceError> {
         if !self.loads() {
-            self.without_bytes();
+            self.list();
             return Ok(());
         }
-        if !self.wants_bytes() {
+        if !self.needs_bytes() {
             self.vfs.keep(self.file, Some(Slot::Linked(on_disk)), false);
             return Ok(());
         }
@@ -315,7 +315,7 @@ impl Offer<'_> {
     }
 
     /// No bytes: a node in the tree, nothing more.
-    pub fn without_bytes(mut self) {
+    pub fn list(mut self) {
         if self.file.loads() {
             self.file.decision = Decision::ListOnly;
         }
@@ -547,9 +547,10 @@ mod tests {
     #[test]
     fn behaves_like_a_filesystem_rooted_at_the_repository() {
         let vfs = Vfs::default();
-        vfs.add("src/main.rs", b"fn main() {}".to_vec()).unwrap();
-        vfs.add("/src/lib/mod.rs", b"pub mod a;".to_vec()).unwrap();
-        vfs.add("./README.md", b"# hi".to_vec()).unwrap();
+        vfs.write("src/main.rs", b"fn main() {}".to_vec()).unwrap();
+        vfs.write("/src/lib/mod.rs", b"pub mod a;".to_vec())
+            .unwrap();
+        vfs.write("./README.md", b"# hi".to_vec()).unwrap();
 
         assert_eq!(
             &*vfs.read(Path::new("src/main.rs")).unwrap(),
@@ -593,7 +594,7 @@ mod tests {
         );
     }
 
-    /// The passes settle every offered file; only files that load cost bytes,
+    /// The passes settle every file put in; only files that load cost bytes,
     /// the rest are nodes with a reason, and a dropped file leaves no trace.
     #[test]
     fn the_passes_decide_what_is_kept_and_what_is_only_listed() {
@@ -607,10 +608,11 @@ mod tests {
             }
         }
         let vfs = Vfs::new(TestFilter.then(DropLogs), None);
-        vfs.add("src/main.rs", b"fn main() {}".to_vec()).unwrap();
-        vfs.add("assets/logo.png", b"\x89PNG".to_vec()).unwrap();
-        vfs.add("model/weights.bin", b"\x00\x01".to_vec()).unwrap();
-        vfs.add("build.log", b"noise".to_vec()).unwrap();
+        vfs.write("src/main.rs", b"fn main() {}".to_vec()).unwrap();
+        vfs.write("assets/logo.png", b"\x89PNG".to_vec()).unwrap();
+        vfs.write("model/weights.bin", b"\x00\x01".to_vec())
+            .unwrap();
+        vfs.write("build.log", b"noise".to_vec()).unwrap();
         vfs.list("link.rs", 0, true).unwrap();
 
         let rows: Vec<(String, Decision)> = vfs
@@ -692,9 +694,9 @@ mod tests {
     fn identical_content_at_many_paths_is_stored_once_and_stays_many_files() {
         let vfs = Vfs::new((), Some(100));
         let body = vec![b'x'; 80];
-        vfs.add("a/one.js", body.clone()).unwrap();
-        vfs.add("b/two.js", body.clone()).unwrap();
-        vfs.add("c/three.js", body.clone()).unwrap();
+        vfs.write("a/one.js", body.clone()).unwrap();
+        vfs.write("b/two.js", body.clone()).unwrap();
+        vfs.write("c/three.js", body.clone()).unwrap();
 
         assert_eq!(vfs.len(), 3);
         assert_eq!(
@@ -712,9 +714,9 @@ mod tests {
     #[test]
     fn bytes_past_the_budget_spill_and_read_back_identically() {
         let vfs = Vfs::new((), Some(10));
-        vfs.add("small.rs", b"fits".to_vec()).unwrap();
-        vfs.add("big.rs", vec![b'b'; 64]).unwrap();
-        vfs.add("later.rs", b"also spilled".to_vec()).unwrap();
+        vfs.write("small.rs", b"fits".to_vec()).unwrap();
+        vfs.write("big.rs", vec![b'b'; 64]).unwrap();
+        vfs.write("later.rs", b"also spilled".to_vec()).unwrap();
 
         assert!(vfs.scratch.get().is_some());
         assert_eq!(&*vfs.read(Path::new("small.rs")).unwrap(), b"fits");
@@ -726,21 +728,21 @@ mod tests {
     #[test]
     fn a_zero_budget_spills_everything() {
         let vfs = Vfs::new((), Some(0));
-        vfs.add("a.rs", b"a".to_vec()).unwrap();
+        vfs.write("a.rs", b"a".to_vec()).unwrap();
         assert!(vfs.scratch.get().is_some());
         assert_eq!(&*vfs.read(Path::new("a.rs")).unwrap(), b"a");
     }
 
-    /// Eight workers adding the same 80 bytes at once must charge the budget
+    /// Eight workers writing the same 80 bytes at once must charge the budget
     /// once; a budget of 100 leaves no room for a double charge.
     #[test]
-    fn concurrent_adds_of_one_content_charge_the_budget_once() {
+    fn concurrent_writes_of_one_content_charge_the_budget_once() {
         let vfs = Vfs::new((), Some(100));
         let body = vec![b'x'; 80];
         std::thread::scope(|scope| {
             for worker in 0..8 {
                 let (vfs, body) = (&vfs, &body);
-                scope.spawn(move || vfs.add(&format!("w{worker}.js"), body.clone()).unwrap());
+                scope.spawn(move || vfs.write(&format!("w{worker}.js"), body.clone()).unwrap());
             }
         });
         assert_eq!(vfs.len(), 8);
@@ -759,7 +761,7 @@ mod tests {
                 scope.spawn(move || {
                     for i in 0..200 {
                         let body = format!("worker {worker} file {i}").repeat(4).into_bytes();
-                        vfs.add(&format!("w{worker}/f{i}.txt"), body).unwrap();
+                        vfs.write(&format!("w{worker}/f{i}.txt"), body).unwrap();
                     }
                 });
             }

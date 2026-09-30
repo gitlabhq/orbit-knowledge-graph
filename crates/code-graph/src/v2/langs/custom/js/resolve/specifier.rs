@@ -537,7 +537,7 @@ mod tests {
     fn repo(files: &[(&str, &[u8])]) -> RepoFileSystem {
         let vfs = Vfs::default();
         for (path, bytes) in files {
-            vfs.add(path, bytes.to_vec()).unwrap();
+            vfs.write(path, bytes.to_vec()).unwrap();
         }
         RepoFileSystem(Arc::new(vfs))
     }
