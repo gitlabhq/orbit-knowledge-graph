@@ -12,11 +12,12 @@ use crate::passes::shared::{
 };
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use super::{Hop, HydrationStrategy, NodePlan};
+use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
 
 pub struct FlatPlan {
     pub reads: Vec<EdgeRead>,
     pub narrowing: HashMap<String, PhysicalPlan>,
+    pub cascades: Vec<Option<PhysicalPlan>>,
 }
 
 impl FlatPlan {
@@ -25,6 +26,8 @@ impl FlatPlan {
         aggregate: bool,
         sort_keys: &HashMap<String, Vec<String>>,
         nodes: &HashMap<String, NodePlan>,
+        table_columns: &HashMap<String, HashSet<String>>,
+        denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     ) -> Result<Self> {
         let mut narrowing = HashMap::new();
         for alias in hops.iter().flat_map(|hop| [&hop.from_node, &hop.to_node]) {
@@ -67,6 +70,7 @@ impl FlatPlan {
         }
         Ok(Self {
             reads: edge_reads(hops, aggregate, sort_keys, nodes)?,
+            cascades: super::cascade::plan(hops, nodes, table_columns, denormalized, &narrowing),
             narrowing,
         })
     }
@@ -121,12 +125,19 @@ pub fn edge_reads(
         .collect()
 }
 
+#[derive(Clone)]
 pub struct PhysicalPlan {
     pub source: PhysicalSource,
     pub outputs: Vec<SelectExpr>,
 }
 
+#[derive(Clone)]
 pub enum PhysicalSource {
+    KeyFilter {
+        value: Expr,
+        keys: Box<PhysicalPlan>,
+        input: Box<Self>,
+    },
     Union {
         alias: String,
         arms: Vec<PhysicalPlan>,
@@ -136,6 +147,7 @@ pub enum PhysicalSource {
         table: String,
         alias: String,
         final_: bool,
+        relationship: Option<usize>,
     },
     Filter {
         predicate: Expr,
@@ -258,6 +270,7 @@ impl PhysicalPlan {
                 predicate: Expr::conjoin(latest_node_predicates(&node.alias, node))
                     .expect("current-row scan has a deletion predicate"),
                 input: Box::new(PhysicalSource::Scan {
+                    relationship: None,
                     table,
                     alias: node.alias.clone(),
                     final_: true,

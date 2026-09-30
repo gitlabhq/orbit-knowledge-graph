@@ -6,140 +6,16 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::helpers::{
-    NarrowSource, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
-    emit_node_ids_on_edge, emit_node_join_with_narrowing, node_id_pin_predicates,
-    push_edge_predicates,
+    NarrowSource, emit_filter_narrowing, emit_filter_subquery, emit_node_join_with_narrowing,
 };
 use super::{EmitOutput, NodeBinding};
+use crate::passes::plan::edge_predicates::{
+    node_id_pin_predicates, push_denorm_tags, push_edge_predicates, push_filtered_edge_predicates,
+};
 use crate::passes::plan::physical::{EdgeRead, FlatPlan, PhysicalSource};
 use crate::passes::plan::*;
 use crate::passes::shared::deleted_false;
 use crate::passes::shared::filter_to_expr;
-
-/// Build a cascade anchor subquery for hop `i`, recursing through the chain
-/// to nest each prior hop's anchor. Returns `None` when the hop shouldn't be
-/// anchored (first hop, or no selective upstream).
-///
-/// Terminates when a hop has no `cascade_anchor` (the chain root) or when
-/// `emit_node_ids_on_edge` / `_filter_<node>` CTEs supply the base selectivity.
-fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
-    let hop = &plan.hops[i];
-    let jc = hop.join_prev.as_ref()?;
-    if !hop.cascade_anchor {
-        return None;
-    }
-
-    let prev_idx = i.checked_sub(1).filter(|&idx| idx < plan.hops.len())?;
-    let prev_hop = &plan.hops[prev_idx];
-
-    let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
-        plan.nodes
-            .get(n.as_str())
-            .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
-    });
-    let has_filter_cte = [&prev_hop.from_node, &prev_hop.to_node]
-        .iter()
-        .any(|n| ctes.iter().any(|c| c.name == format!("_filter_{n}")));
-    let inner_anchor = build_cascade_anchor(plan, prev_idx, ctes);
-    if !has_pinned_ids && !has_filter_cte && inner_anchor.is_none() {
-        return None;
-    }
-
-    let prev_alias_inner = format!("{}p", jc.prev_alias);
-    let (prev_start, prev_end) = prev_hop.direction.edge_columns();
-
-    let mut prev_preds = Vec::new();
-    let mut anchor_tags = HashSet::new();
-    push_edge_predicates(
-        &mut prev_preds,
-        &prev_alias_inner,
-        prev_hop,
-        &plan.nodes,
-        &plan.table_columns,
-        false,
-    );
-    for (prop, filter) in &prev_hop.filters {
-        prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
-    }
-    emit_denorm_tags(
-        &mut prev_preds,
-        plan,
-        prev_hop,
-        &prev_alias_inner,
-        prev_start,
-        prev_end,
-        &mut anchor_tags,
-    );
-    emit_node_ids_on_edge(
-        &mut prev_preds,
-        &prev_alias_inner,
-        prev_hop,
-        &plan.nodes,
-        prev_start,
-        prev_end,
-    );
-    for (node_alias, id_col) in [
-        (&prev_hop.from_node, prev_start),
-        (&prev_hop.to_node, prev_end),
-    ] {
-        let cte_name = format!("_filter_{node_alias}");
-        if ctes.iter().any(|c| c.name == cte_name) {
-            prev_preds.push(Expr::InSubquery {
-                expr: Box::new(Expr::col(&prev_alias_inner, id_col)),
-                cte_name,
-                column: DEFAULT_PRIMARY_KEY.to_string(),
-            });
-        }
-    }
-
-    if let Some(inner_anchor) = inner_anchor {
-        let prev_jc = prev_hop.join_prev.as_ref().unwrap();
-        prev_preds.push(Expr::InSelect {
-            expr: Box::new(Expr::col(&prev_alias_inner, &prev_jc.curr_col)),
-            query: Box::new(inner_anchor),
-        });
-    }
-
-    Some(Query {
-        select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
-        from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner)
-            .with_relationship(prev_hop.input_index),
-        where_clause: Expr::conjoin(prev_preds),
-        ..Default::default()
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn collect_edge_predicates(
-    target: &mut Vec<Expr>,
-    alias: &str,
-    hop: &Hop,
-    plan: &Plan,
-    physical: &FlatPlan,
-    start_col: &str,
-    end_col: &str,
-    ctes: &mut Vec<Cte>,
-    tagged_nodes: &mut HashSet<(String, String)>,
-    narrowed_nodes: &mut HashSet<String>,
-) -> Result<()> {
-    push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
-    for (prop, filter) in &hop.filters {
-        target.push(filter_to_expr(alias, prop, filter));
-    }
-    emit_denorm_tags(target, plan, hop, alias, start_col, end_col, tagged_nodes);
-    emit_node_ids_on_edge(target, alias, hop, &plan.nodes, start_col, end_col);
-    emit_filter_narrowing(
-        target,
-        hop,
-        physical,
-        alias,
-        start_col,
-        end_col,
-        ctes,
-        narrowed_nodes,
-    );
-    Ok(())
-}
 
 pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOutput> {
     let reads = &physical.reads;
@@ -164,6 +40,7 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = matches!(read, EdgeRead::MultiHop(_));
         let scan = |final_| PhysicalSource::Scan {
+            relationship: Some(hop.input_index),
             table: hop.edge_table.clone(),
             alias: alias.clone(),
             final_,
@@ -171,18 +48,25 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
 
         if let EdgeRead::Latest { sort_key } = read {
             let mut inner_preds = Vec::new();
-            collect_edge_predicates(
+            push_filtered_edge_predicates(
                 &mut inner_preds,
                 &alias,
                 hop,
-                plan,
+                &plan.nodes,
+                &plan.table_columns,
+                &plan.denormalized,
+                &mut tagged_nodes,
+            );
+            emit_filter_narrowing(
+                &mut inner_preds,
+                hop,
                 physical,
+                &alias,
                 start_col,
                 end_col,
                 &mut ctes,
-                &mut tagged_nodes,
                 &mut narrowed_nodes,
-            )?;
+            );
 
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
 
@@ -194,11 +78,7 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
                     input: Box::new(scan(false)),
                 }),
             };
-            from = Some(
-                super::physical::emit_source(&source)
-                    .from
-                    .with_relationship(hop.input_index),
-            );
+            from = Some(super::physical::emit_source(&source).from);
         } else {
             let mut narrow_in: Vec<Expr> = Vec::new();
             emit_filter_narrowing(
@@ -234,14 +114,14 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
                 }
             }
 
-            if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+            if let Some(anchor) = &physical.cascades[i] {
                 let jc = hop
                     .join_prev
                     .as_ref()
                     .expect("cascade-anchored hop must have join_prev");
                 narrow_in.push(Expr::InSelect {
                     expr: Box::new(Expr::col(&alias, &jc.curr_col)),
-                    query: Box::new(anchor_query),
+                    query: Box::new(super::physical::query(anchor)),
                 });
             }
 
@@ -265,14 +145,10 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
                         input: Box::new(scan(true)),
                     }),
                 };
-                super::physical::emit_source(&source)
-                    .from
-                    .with_relationship(hop.input_index)
+                super::physical::emit_source(&source).from
             } else {
                 where_parts.extend(narrow_in);
-                super::physical::emit_source(&scan(false))
-                    .from
-                    .with_relationship(hop.input_index)
+                super::physical::emit_source(&scan(false)).from
             };
 
             if let Some(prev_from) = from.take() {
@@ -308,25 +184,17 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
                 where_parts.push(filter_to_expr(&alias, prop, filter));
             }
 
-            emit_denorm_tags(
+            push_denorm_tags(
                 &mut where_parts,
-                plan,
+                &plan.nodes,
+                &plan.denormalized,
                 hop,
                 &alias,
-                start_col,
-                end_col,
                 &mut tagged_nodes,
             );
             let used_dedup = dedup_edges && !is_multi_hop;
             if !used_dedup {
-                emit_node_ids_on_edge(
-                    &mut where_parts,
-                    &alias,
-                    hop,
-                    &plan.nodes,
-                    start_col,
-                    end_col,
-                );
+                where_parts.extend(node_id_pin_predicates(&alias, hop, &plan.nodes));
             }
         }
 
@@ -369,15 +237,15 @@ pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOu
                     &plan.table_columns,
                     false,
                 );
-                emit_node_ids_on_edge(&mut nw, &narrow_alias, hop, &plan.nodes, start_col, end_col);
-                if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                nw.extend(node_id_pin_predicates(&narrow_alias, hop, &plan.nodes));
+                if let Some(anchor) = &physical.cascades[i] {
                     let jc = hop
                         .join_prev
                         .as_ref()
                         .expect("cascade-anchored hop must have join_prev");
                     nw.push(Expr::InSelect {
                         expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
-                        query: Box::new(anchor_query),
+                        query: Box::new(super::physical::query(anchor)),
                     });
                 }
                 let narrow_query = Query {

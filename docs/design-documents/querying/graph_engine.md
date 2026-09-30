@@ -90,6 +90,8 @@ Authoritative filter CTEs reuse the physical node source and select only the ref
 Their names and references remain owned by the specialized chain emitters; their scan bodies use shared physical lowering.
 Flat plans also contain the selective joined-node narrowing definitions, including their key projection and sort key.
 Lowering emits each definition on first use and connects the hop's membership predicate without reselecting eligible nodes.
+Flat plans also contain cascade key scans with nested upstream membership filters and relationship provenance.
+Edge reads and node narrowing reuse these plans; lowering no longer reconstructs cascades from emitted CTE names.
 FK candidate prefilters also use physical key plans, with plain reads distinct from authoritative FINAL reads.
 Their consumers retain latest-row resolution and exact predicate rechecks.
 The selected FK-star plan owns candidate definitions in dependency order, the center membership predicate, and each joined target's narrowing source.

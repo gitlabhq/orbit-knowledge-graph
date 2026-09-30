@@ -62,11 +62,19 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             table,
             alias,
             final_,
+            relationship,
         } => EmitOutput {
-            from: if *final_ {
-                TableRef::scan_final(table, alias)
-            } else {
-                TableRef::scan(table, alias)
+            from: {
+                let scan = if *final_ {
+                    TableRef::scan_final(table, alias)
+                } else {
+                    TableRef::scan(table, alias)
+                };
+                if let Some(index) = relationship {
+                    scan.with_relationship(*index)
+                } else {
+                    scan
+                }
             },
             nodes: HashMap::from([(alias.clone(), NodeBinding::table(alias))]),
             edge_aliases: vec![],
@@ -78,6 +86,14 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
         PhysicalSource::Filter { predicate, input } => {
             let mut output = emit_source(input);
             output.where_parts.push(predicate.clone());
+            output
+        }
+        PhysicalSource::KeyFilter { value, keys, input } => {
+            let mut output = emit_source(input);
+            output.where_parts.push(Expr::InSelect {
+                expr: Box::new(value.clone()),
+                query: Box::new(query(keys)),
+            });
             output
         }
         PhysicalSource::Scope { alias, input } => {

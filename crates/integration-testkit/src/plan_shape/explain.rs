@@ -179,6 +179,28 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         [
             S::node("Strategy", [strategy]),
             S::node(
+                "Cascades",
+                match &plan.body {
+                    PlanBody::Traversal {
+                        strategy: Strategy::Flat(flat),
+                    }
+                    | PlanBody::Aggregation {
+                        strategy: Strategy::Flat(flat),
+                        ..
+                    } => flat
+                        .cascades
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, anchor)| {
+                            anchor.as_ref().map(|anchor| {
+                                S::node("Anchor", [S::atom(index), physical_tree(anchor)])
+                            })
+                        })
+                        .collect(),
+                    _ => vec![],
+                },
+            ),
+            S::node(
                 "Narrowing",
                 match &plan.body {
                     PlanBody::Traversal {
@@ -315,6 +337,7 @@ fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S
             table,
             alias,
             final_,
+            ..
         } => S::node(
             "Read",
             [
@@ -326,6 +349,14 @@ fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S
         PhysicalSource::Filter { predicate, input } => {
             S::node("Filter", [expression(predicate), physical_source(input)])
         }
+        PhysicalSource::KeyFilter { value, keys, input } => S::node(
+            "KeyFilter",
+            [
+                expression(value),
+                physical_tree(keys),
+                physical_source(input),
+            ],
+        ),
         PhysicalSource::Scope { alias, input } => {
             S::node("Scope", [S::atom(alias), physical_source(input)])
         }

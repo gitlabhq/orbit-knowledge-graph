@@ -46,6 +46,7 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
     let scan = |alias: &str| PhysicalSource::Scan {
+        relationship: None,
         table: hop.edge_table.clone(),
         alias: alias.into(),
         final_: false,
