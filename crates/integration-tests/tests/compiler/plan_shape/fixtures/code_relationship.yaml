@@ -1,0 +1,30 @@
+name: Code relationships retain endpoint filtering on both backends
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
+        {"id": "callee", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}]
+    }
+  gql: |
+    MATCH (caller:Definition {id: 1})-[:CALLS]->(callee:Definition)
+    RETURN caller.id, callee.id
+logical:
+  expect:
+    - (Node caller Definition (Ids 1) ...)
+    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1))
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (Flat))
+      - (Scan gl_code_edge e0 Plain)
+      - (= (Column e0 source_id) (Literal 1))
+  duckdb:
+    expect:
+      - (Strategy (Flat))
+      - (Scan gl_edge e0 Plain)
+      - (Node caller gl_definition Join)
+      - (Node callee gl_definition Join)

@@ -1,0 +1,27 @@
+name: Single node retains its filter and requested projection
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "f", "entity": "File", "columns": ["id", "path"], "filters": {"language": "rust"}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
+logical:
+  expect:
+    - '(Node f File (Ids) (Columns id path) (Filters (Predicate language eq "\"rust\"")))'
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (SingleNode))
+      - (Scan gl_file f Final)
+      - (Output f_path (Column f path))
+      - '(= (Column f language) (Literal "\"rust\""))'
+    reject: [(Join ...)]
+  duckdb:
+    expect:
+      - (Strategy (SingleNode))
+      - (Output f_path (Column f path))
+      - '(= (Column f language) (Literal "\"rust\""))'
+    reject: [(Join ...)]
