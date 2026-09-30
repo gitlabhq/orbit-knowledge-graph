@@ -234,7 +234,11 @@ pub mod get_query_dsl_response {
 }
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListSkillsRequest {}
+pub struct ListSkillsRequest {
+    /// Selects the query mode the served skills teach
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 /// Response listing every skill embedded in the deployed server.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListSkillsResponse {
@@ -263,6 +267,9 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
+    /// Selects the query mode the served skill teaches
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSkillResponse {

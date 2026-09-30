@@ -9,6 +9,13 @@ For inaccurate guidance, follow [Fix inaccurate guidance](../SKILL.md#fix-inaccu
 Keep `SKILL.md`, `references/`, and `scripts/` in sync, and use `opencode run`
 for meaningful behavior changes.
 
+## Query modes
+
+Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode; every other
+file is shared. Keep its front matter in step with `SKILL.md`, and set its
+version to the `SKILL.md` version plus `+gql` so caches never mix the two. The
+`orbit-server` skill tests fail if they drift.
+
 ## Syncing the query-language reference
 
 `references/query_language.md` is synced from

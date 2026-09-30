@@ -591,8 +591,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<ListSkillsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
 
-        let skills: Vec<SkillSummary> = list_skills()
+        let skills: Vec<SkillSummary> = list_skills(frontend)
             .into_iter()
             .map(|skill| SkillSummary {
                 name: skill.name,
@@ -621,9 +623,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
-        info!(skill_name = %req.name, metadata_only = req.metadata_only, "Fetching embedded skill");
+        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
+        info!(skill_name = %req.name, metadata_only = req.metadata_only, ?frontend, "Fetching embedded skill");
 
-        let skill = get_skill(&req.name, req.metadata_only)
+        let skill = get_skill(&req.name, frontend, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
         let files = skill
             .files

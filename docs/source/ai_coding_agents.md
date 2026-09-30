@@ -17,10 +17,11 @@ title: Set up AI coding agents with the GitLab Orbit skill
 The GitLab Orbit skill gives AI coding agents structured guidance for querying the
 GitLab Orbit graph. It includes:
 
-- **Query recipes** - paste-ready JSON bodies for common questions (blast
+- **Query recipes** - paste-ready queries for common questions (blast
   radius, pipeline history, contributor patterns).
-- **DSL reference** - the full query language so agents compose valid queries
-  on the first attempt.
+- **Query language reference** - the full query language so agents compose
+  valid queries on the first attempt. GitLab serves the JSON Query DSL or GQL
+  guidance, whichever query mode is enabled for you.
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
 - **Repository map helpers** - scripts that summarize codebase structure from
