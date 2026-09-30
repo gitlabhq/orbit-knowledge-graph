@@ -4,6 +4,7 @@
 
 use ontology::constants::*;
 
+use super::NodeBinding;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
@@ -23,7 +24,7 @@ pub fn emit_neighbors(
     edge: &EdgeTableConfig,
     has_non_denorm: bool,
     center_tp_lookup: Option<&(String, String)>,
-) -> Result<Node> {
+) -> Result<(Node, NodeBinding)> {
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -266,7 +267,7 @@ pub fn emit_neighbors(
         && center_uses_default_pk
         && edge_table.len() == 1;
 
-    if fused_both_eligible {
+    let query = if fused_both_eligible {
         let mut q = build_fused_both_arm(
             &center_id,
             &center_entity,
@@ -280,19 +281,34 @@ pub fn emit_neighbors(
         );
         q.order_by = order_by;
         q.limit = Some(input.limit);
-        Ok(Node::Query(Box::new(q)))
+        q
     } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
         outgoing.limit = Some(input.limit);
-        Ok(Node::Query(Box::new(outgoing)))
+        outgoing
     } else {
         let mut arm = build_arm(direction);
         arm.order_by = order_by;
         arm.limit = Some(input.limit);
-        Ok(Node::Query(Box::new(arm)))
-    }
+        arm
+    };
+    let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
+        query
+            .select
+            .iter()
+            .find(|select| {
+                select.alias.as_deref() == Some(redaction_id_column(center_alias).as_str())
+            })
+            .expect("neighbors emits its center identity")
+            .expr
+            .clone()
+    });
+    Ok((
+        Node::Query(Box::new(query)),
+        NodeBinding::Projected { role_identity },
+    ))
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

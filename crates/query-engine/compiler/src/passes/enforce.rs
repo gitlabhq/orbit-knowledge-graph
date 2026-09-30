@@ -204,10 +204,12 @@ pub fn enforce_role_scans(
         let Some(binding) = metadata.nodes.get(&input_node.id) else {
             continue;
         };
-        if binding.table_alias.is_some()
-            || !model
-                .entity_minimum_access_level(entity)
-                .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+        let Some(identity) = binding.role_identity() else {
+            continue;
+        };
+        if !model
+            .entity_minimum_access_level(entity)
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
         {
             continue;
         }
@@ -220,7 +222,7 @@ pub fn enforce_role_scans(
             std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
             TableRef::scan_final(table, &role_alias),
             Expr::eq(
-                binding.identity.clone(),
+                identity.clone(),
                 Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
             ),
         );
@@ -265,13 +267,18 @@ fn enforce_return_columns(
         let binding = bindings.get(&node.id).ok_or_else(|| {
             QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
         })?;
-        if binding.projected {
+        let NodeBinding::Values {
+            identity,
+            table_alias,
+            traversal_path,
+        } = binding
+        else {
             continue;
-        }
+        };
         let redaction_column = redaction_column(entity_id);
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
-            if binding.table_alias.is_none() {
+            if table_alias.is_none() {
                 let table = model.entity_table(entity).ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "node '{}' has no authorization table",
@@ -324,10 +331,7 @@ fn enforce_return_columns(
                     JoinType::Inner,
                     std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
                     scan,
-                    Expr::eq(
-                        binding.identity.clone(),
-                        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                    ),
+                    Expr::eq(identity.clone(), Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
                 );
                 if node.filters.is_empty() {
                     q.where_clause = Some(match q.where_clause.take() {
@@ -336,21 +340,17 @@ fn enforce_return_columns(
                     });
                 }
             }
-            Expr::col(
-                binding.table_alias.as_deref().unwrap_or(&node.id),
-                redaction_column,
-            )
+            Expr::col(table_alias.as_deref().unwrap_or(&node.id), redaction_column)
         } else {
-            binding.identity.clone()
+            identity.clone()
         };
 
         if needs_separate_pk {
             let name = primary_key_column(&node.id);
             if !q.selects_alias(&name) {
-                q.select
-                    .push(SelectExpr::new(binding.identity.clone(), name));
+                q.select.push(SelectExpr::new(identity.clone(), name));
             }
-            ensure_in_group_by(q, input.query_type, binding.identity.clone());
+            ensure_in_group_by(q, input.query_type, identity.clone());
         }
         if !q.selects_alias(&id_col) {
             q.select
@@ -369,7 +369,7 @@ fn enforce_return_columns(
         }
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
-            && let Some(path) = &binding.traversal_path
+            && let Some(path) = traversal_path
         {
             let name = traversal_path_column(&node.id);
             if !q.selects_alias(&name) {
