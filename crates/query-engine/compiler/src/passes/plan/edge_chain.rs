@@ -214,7 +214,7 @@ where
     let mut nodes = build_node_plans(input, model);
 
     let (mut hops, elided_fks) = if use_fk_elision {
-        elide_hops(hops, &mut nodes, input)
+        elide_hops(hops, &mut nodes, input, model)
     } else {
         (hops, Vec::new())
     };
@@ -423,6 +423,7 @@ fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
 ) -> (Vec<Hop>, Vec<(String, String, String)>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();
@@ -442,6 +443,27 @@ fn elide_hops(
                 return None;
             }
             let np = nodes.get(&fk.target_node)?;
+            let needs_role_scan = np.entity.as_deref().is_some_and(|entity| {
+                model
+                    .entity_minimum_access_level(entity)
+                    .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+            });
+            let needs_target_values = input.query_type != QueryType::Aggregation
+                || input
+                    .aggregation
+                    .group_by
+                    .iter()
+                    .any(|group| group.node() == fk.target_node)
+                || input.aggregation.metrics.iter().any(|metric| {
+                    metric.expr.node() == fk.target_node && metric.expr.property().is_some()
+                })
+                || input
+                    .order_by
+                    .as_ref()
+                    .is_some_and(|order| order.node == fk.target_node);
+            if needs_role_scan || (np.node_ids.len() > 1 && needs_target_values) {
+                return None;
+            }
             if np.selectivity == Selectivity::Pinned
                 && fk.referenced_column == DEFAULT_PRIMARY_KEY
                 && !np.node_ids.is_empty()
