@@ -159,6 +159,21 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalPlan {
+    pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Expr>) -> Result<Self> {
+        let mut plan = Self::filtered_keys(node, column)?;
+        let PhysicalSource::Filter { predicate, input } = &mut plan.source else {
+            unreachable!()
+        };
+        let PhysicalSource::Scan { final_, .. } = input.as_mut() else {
+            unreachable!()
+        };
+        *final_ = false;
+        for additional in extra {
+            *predicate = Expr::and(predicate.clone(), additional);
+        }
+        Ok(plan)
+    }
+
     pub fn filtered_keys(node: &NodePlan, column: &str) -> Result<Self> {
         let mut plan = Self::single_node(node)?;
         plan.outputs = vec![SelectExpr::new(

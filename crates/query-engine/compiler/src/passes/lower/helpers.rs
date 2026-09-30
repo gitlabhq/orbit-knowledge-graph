@@ -74,26 +74,6 @@ pub(super) fn emit_filter_subquery(
     }])
 }
 
-pub(super) fn node_values_from_candidate_scan(
-    alias: &str,
-    table: &str,
-    column: &str,
-    np: &NodePlan,
-    extra_predicates: Vec<Expr>,
-) -> Query {
-    let mut predicates = latest_node_predicates(alias, np);
-    predicates.extend(extra_predicates);
-    Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, column),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(predicates),
-        ..Default::default()
-    }
-}
-
 pub(super) fn push_edge_predicates(
     where_parts: &mut Vec<Expr>,
     alias: &str,

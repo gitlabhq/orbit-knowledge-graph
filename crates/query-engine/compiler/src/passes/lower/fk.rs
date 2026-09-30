@@ -13,9 +13,10 @@ use crate::input::Direction;
 
 use super::helpers::{
     NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing, latest_node_predicates,
-    node_select_columns, node_values_from_candidate_scan,
+    node_select_columns,
 };
 use super::{EmitOutput, NodeBinding};
+use crate::passes::plan::physical::PhysicalPlan;
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
 
@@ -84,16 +85,14 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         let cte_name = candidate_cte_name(center_alias);
         ctes.push(Cte::new(
             &cte_name,
-            node_values_from_candidate_scan(
-                center_alias,
-                center_table,
-                DEFAULT_PRIMARY_KEY,
+            super::physical::query(&PhysicalPlan::candidate_keys(
                 center_np,
+                DEFAULT_PRIMARY_KEY,
                 candidate_extra_predicates
                     .get(center_alias)
                     .cloned()
                     .unwrap_or_default(),
-            ),
+            )?),
         ));
         candidate_ctes.insert(center_alias.to_string(), cte_name.clone());
         center_where_parts.push(Expr::InSubquery {
@@ -177,16 +176,14 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 let narrow_name = format!("_narrow_{}", fk.target_node);
                 ctes.push(Cte::new(
                     &narrow_name,
-                    node_values_from_candidate_scan(
-                        center_alias,
-                        center_table,
-                        &fk.fk_column,
+                    super::physical::query(&PhysicalPlan::candidate_keys(
                         center_np,
+                        &fk.fk_column,
                         candidate_extra_predicates
                             .get(center_alias)
                             .cloned()
                             .unwrap_or_default(),
-                    ),
+                    )?),
                 ));
                 Some(NarrowSource::Cte(narrow_name))
             } else {
@@ -383,22 +380,17 @@ fn emit_join_target_candidate_ctes(
         if !candidate_selective(target_np, candidate_extra_predicates) {
             continue;
         }
-        let table = target_np.table.as_deref().ok_or_else(|| {
-            QueryError::Lowering(format!("FK target '{}' has no table", fk.target_node))
-        })?;
         let cte_name = candidate_cte_name(&fk.target_node);
         ctes.push(Cte::new(
             &cte_name,
-            node_values_from_candidate_scan(
-                &fk.target_node,
-                table,
-                &fk.referenced_column,
+            super::physical::query(&PhysicalPlan::candidate_keys(
                 target_np,
+                &fk.referenced_column,
                 candidate_extra_predicates
                     .get(&fk.target_node)
                     .cloned()
                     .unwrap_or_default(),
-            ),
+            )?),
         ));
         candidate_ctes.insert(fk.target_node.clone(), cte_name);
     }
