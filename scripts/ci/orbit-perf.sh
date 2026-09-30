@@ -38,7 +38,8 @@ wait_for_image() {
   [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
   # Log in like the other registry scripts, so an auth failure can't pass for "not pushed yet".
   if [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
-    echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null
+    echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null \
+      || log "     docker login failed, continuing without credentials (anonymous reads work)"
   fi
   log "     waiting for image ${GKG_IMAGE}:${GKG_IMAGE_TAG} (built by docker-build-mr)"
   local start=$SECONDS
