@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
+use super::flat::PlanningFacts;
 use super::physical::{ExecutionPlan, PhysicalPlan};
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -308,13 +309,15 @@ where
             input.query_type == QueryType::Traversal,
         )?)))
     } else {
-        Strategy::Flat(Box::new(ExecutionPlan::flat(
-            &hops,
+        Strategy::Flat(Box::new(super::flat::plan(
+            PlanningFacts {
+                hops: &hops,
+                nodes: &nodes,
+                sort_keys: &table_sort_keys,
+                table_columns: &table_columns,
+                denormalized: &denormalized,
+            },
             input.query_type == QueryType::Aggregation,
-            &table_sort_keys,
-            &nodes,
-            &table_columns,
-            &denormalized,
         )?))
     };
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);

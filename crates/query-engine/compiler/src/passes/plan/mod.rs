@@ -2,7 +2,6 @@
 //! query-type-specific data lives in the body variant. The Rust enum
 //! enforces that emit functions only access their own variant's data.
 
-mod cascade;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;

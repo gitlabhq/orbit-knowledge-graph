@@ -90,10 +90,13 @@ Flat and FK-star strategies share an execution plan: a source tree, ordered CTE 
 Cascade key scans live in that tree, with nested upstream membership filters and relationship provenance.
 Planning orders flat filter definitions by first use, with joined-node candidates before authoritative filter-only keys.
 Edge-derived node-narrowing definitions follow those filters and use each node's first hop and its cascade.
-Temporary candidate maps and per-hop filter lists are discarded after source construction.
+Flat construction borrows catalog facts through a short-lived builder and appends filter definitions on first use.
+It consumes each hop's membership predicates immediately, without a candidate-plan map or a stored list of per-hop filters.
+The node-join phase extends the execution plan and reuses the collected cascade frontiers.
 FK candidate prefilters also use physical key plans, with plain reads distinct from authoritative FINAL reads.
 Their consumers retain latest-row resolution and exact predicate rechecks.
 FK-star planning builds the center scan, target joins, filter references, bindings, and synthetic edge outputs.
+It appends candidate and narrowing definitions directly to the execution plan in dependency order.
 Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.

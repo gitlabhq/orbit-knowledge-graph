@@ -8,8 +8,7 @@ use crate::passes::shared::{
 };
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use super::edge_predicates::{node_id_pin_predicates, push_edge_predicates};
-use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
+use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
@@ -27,177 +26,11 @@ pub struct BindingSource {
     pub joined: bool,
 }
 
-impl ExecutionPlan {
-    pub fn flat(
-        hops: &[Hop],
-        aggregate: bool,
-        sort_keys: &HashMap<String, Vec<String>>,
-        nodes: &HashMap<String, NodePlan>,
-        table_columns: &HashMap<String, HashSet<String>>,
-        denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-    ) -> Result<Self> {
-        let mut narrowing = HashMap::new();
-        for alias in hops.iter().flat_map(|hop| [&hop.from_node, &hop.to_node]) {
-            let Some(node) = nodes.get(alias) else {
-                continue;
-            };
-            if node.hydration == HydrationStrategy::FilterOnly && hops.len() >= 2 {
-                if !narrowing.contains_key(alias) {
-                    narrowing.insert(
-                        alias.clone(),
-                        PhysicalPlan::filtered_keys(node, DEFAULT_PRIMARY_KEY)?,
-                    );
-                }
-                continue;
-            }
-            if node.hydration != HydrationStrategy::Join
-                || !node.has_selective_filters()
-                || narrowing.contains_key(alias)
-            {
-                continue;
-            }
-            let table = node
-                .table
-                .as_deref()
-                .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
-            let sort_key = sort_keys
-                .get(table)
-                .filter(|key| !key.is_empty())
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!(
-                        "no sort key for node table '{table}'; cannot plan narrowing"
-                    ))
-                })?;
-            let mut keys = PhysicalPlan::candidate_keys(node, DEFAULT_PRIMARY_KEY, vec![])?;
-            keys.source = PhysicalSource::Latest {
-                alias: alias.clone(),
-                sort_key: sort_key.clone(),
-                input: Box::new(keys.source),
-            };
-            narrowing.insert(alias.clone(), keys);
-        }
-        let cascades = super::cascade::plan(hops, nodes, table_columns, denormalized, &narrowing);
-        let mut emitted = HashSet::new();
-        let mut definitions = Vec::new();
-        let filters: Vec<_> = hops
-            .iter()
-            .enumerate()
-            .map(|(index, hop)| {
-                let mut predicates = Vec::new();
-                let (start, end) = hop.direction.edge_columns();
-                for filter_only in [false, true] {
-                    for (alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
-                        if !narrowing.contains_key(alias)
-                            || (nodes[alias].hydration == HydrationStrategy::FilterOnly)
-                                != filter_only
-                        {
-                            continue;
-                        }
-                        let first_use = emitted.insert(alias.clone());
-                        if first_use {
-                            definitions
-                                .push((format!("_filter_{alias}"), narrowing[alias].clone()));
-                        }
-                        if first_use || !filter_only {
-                            predicates.push(Expr::InSubquery {
-                                expr: Box::new(Expr::col(format!("e{index}"), column)),
-                                cte_name: format!("_filter_{alias}"),
-                                column: DEFAULT_PRIMARY_KEY.into(),
-                            });
-                        }
-                    }
-                }
-                predicates
-            })
-            .collect();
-        let (mut source, edge_if_predicates) = super::flat::edge_source(
-            hops,
-            aggregate,
-            sort_keys,
-            nodes,
-            table_columns,
-            denormalized,
-            &filters,
-            &cascades,
-        )?;
-        let mut outputs = Vec::new();
-        let mut bindings = Vec::new();
-        let mut visited = HashSet::new();
-        for (index, hop) in hops.iter().enumerate() {
-            let (start, end) = hop.direction.edge_columns();
-            for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
-                let Some(node) = nodes.get(node_alias).filter(|_| visited.insert(node_alias))
-                else {
-                    continue;
-                };
-                let edge = format!("e{index}");
-                let joined = node.hydration != HydrationStrategy::Skip
-                    && !(node.hydration == HydrationStrategy::FilterOnly
-                        && narrowing.contains_key(node_alias));
-                bindings.push(BindingSource {
-                    node: node_alias.clone(),
-                    alias: edge.clone(),
-                    column: column.into(),
-                    joined,
-                });
-                if !joined {
-                    continue;
-                }
-                let membership = if node.hydration == HydrationStrategy::Join && node.use_narrowing
-                {
-                    let alias = format!("e{index}n");
-                    let mut predicates = Vec::new();
-                    push_edge_predicates(&mut predicates, &alias, hop, nodes, table_columns, false);
-                    predicates.extend(node_id_pin_predicates(&alias, hop, nodes));
-                    let source = PhysicalSource::edge_keys(
-                        hop,
-                        &alias,
-                        predicates,
-                        cascades[index].as_ref(),
-                    );
-                    let outputs = vec![SelectExpr::new(
-                        Expr::col(&alias, column),
-                        DEFAULT_PRIMARY_KEY,
-                    )];
-                    definitions.push((
-                        format!("_narrow_{node_alias}"),
-                        PhysicalPlan { source, outputs },
-                    ));
-                    Some(Expr::InSubquery {
-                        expr: Box::new(Expr::col(node_alias, DEFAULT_PRIMARY_KEY)),
-                        cte_name: format!("_narrow_{node_alias}"),
-                        column: DEFAULT_PRIMARY_KEY.into(),
-                    })
-                } else {
-                    None
-                };
-                let table = node.table.as_ref().ok_or_else(|| {
-                    QueryError::Lowering(format!("node '{node_alias}' has no table"))
-                })?;
-                let sort_key = sort_keys.get(table).ok_or_else(|| {
-                    QueryError::Lowering(format!("no sort key for node table '{table}'"))
-                })?;
-                let scan = PhysicalPlan::node_scan(node, membership, sort_key)?;
-                outputs.extend(scan.outputs);
-                source = PhysicalSource::Join {
-                    kind: JoinType::Inner,
-                    condition: Expr::eq(
-                        Expr::col(node_alias, DEFAULT_PRIMARY_KEY),
-                        Expr::col(&edge, column),
-                    ),
-                    left: Box::new(source),
-                    right: Box::new(scan.source),
-                };
-            }
-        }
-        Ok(Self {
-            source,
-            edge_if_predicates,
-            definitions,
-            outputs,
-            bindings,
-            edge_aliases: (0..hops.len()).map(|index| format!("e{index}")).collect(),
-        })
+pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Expr {
+    Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, column)),
+        cte_name: name,
+        column: DEFAULT_PRIMARY_KEY.into(),
     }
 }
 
