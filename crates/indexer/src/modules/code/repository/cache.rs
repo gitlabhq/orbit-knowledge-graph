@@ -179,10 +179,7 @@ mod tests {
         let second = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
 
         let first = cache.extract_archive(archive_stream(first)).await.unwrap();
-        let second = cache
-            .extract_archive(archive_stream(second))
-            .await
-            .unwrap();
+        let second = cache.extract_archive(archive_stream(second)).await.unwrap();
 
         assert!(first.files.exists(Path::new("old_file.rs")));
         assert!(!first.files.exists(Path::new("new_file.rs")));

@@ -315,9 +315,7 @@ mod tests {
         encoder.finish().unwrap()
     }
 
-    fn create_resolver(
-        service: Arc<ScriptedRepositoryService>,
-    ) -> RepositoryResolver {
+    fn create_resolver(service: Arc<ScriptedRepositoryService>) -> RepositoryResolver {
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             u64::MAX,
             0,
@@ -387,7 +385,10 @@ mod tests {
 
         let repo1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
         assert_eq!(
-            repo1.files.read_to_string(Path::new("src/main.rs")).unwrap(),
+            repo1
+                .files
+                .read_to_string(Path::new("src/main.rs"))
+                .unwrap(),
             "v1"
         );
         drop(repo1);
@@ -395,7 +396,10 @@ mod tests {
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
         let repo2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
         assert_eq!(
-            repo2.files.read_to_string(Path::new("src/main.rs")).unwrap(),
+            repo2
+                .files
+                .read_to_string(Path::new("src/main.rs"))
+                .unwrap(),
             "v2"
         );
     }

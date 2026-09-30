@@ -80,7 +80,9 @@ pub async fn register_handlers(
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
         code_indexing_task_config.pipeline.max_file_size_bytes,
         code_indexing_task_config.pipeline.max_total_bytes,
-        code_indexing_task_config.pipeline.source_memory_budget_bytes,
+        code_indexing_task_config
+            .pipeline
+            .source_memory_budget_bytes,
         metrics.clone(),
     ));
 

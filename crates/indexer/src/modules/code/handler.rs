@@ -465,13 +465,9 @@ mod tests {
                     .expect("code tables must resolve"),
             );
 
-            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
-                Arc::new(LocalRepositoryCache::new(
-                    u64::MAX,
-                    0,
-                    u64::MAX,
-                    metrics.clone(),
-                ));
+            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> = Arc::new(
+                LocalRepositoryCache::new(u64::MAX, 0, u64::MAX, metrics.clone()),
+            );
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
             let pipeline = Arc::new(CodeIndexer::new(
