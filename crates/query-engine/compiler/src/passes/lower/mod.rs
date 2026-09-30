@@ -28,6 +28,7 @@ pub struct LoweredMetadata {
 
 #[derive(Clone)]
 pub enum NodeBinding {
+    Filtered,
     Values {
         identity: Expr,
         table_alias: Option<String>,
@@ -51,16 +52,21 @@ impl NodeBinding {
         Self::source(alias, DEFAULT_PRIMARY_KEY, Some(alias.into()))
     }
 
-    pub fn role_identity(&self) -> Option<&Expr> {
-        match self {
+    pub fn role_identity(&self) -> Result<Option<&Expr>> {
+        Ok(match self {
             Self::Values {
                 identity,
                 table_alias: None,
                 ..
             } => Some(identity),
             Self::Projected { role_identity } => role_identity.as_ref(),
+            Self::Filtered => {
+                return Err(QueryError::Lowering(
+                    "protected filtered node requires a visible identity".into(),
+                ));
+            }
             _ => None,
-        }
+        })
     }
 
     fn identity(&self) -> &Expr {
@@ -158,6 +164,15 @@ impl EmitOutput {
                     table_alias: None,
                     traversal_path: None,
                 },
+                _ if input.query_type == QueryType::Aggregation
+                    && plan.nodes.get(&source.0).is_some_and(|holder| {
+                        holder.hydration == super::plan::HydrationStrategy::FilterOnly
+                    })
+                    && !node_group_ids(&input.aggregation.group_by)
+                        .any(|alias| alias == node.id) =>
+                {
+                    NodeBinding::Filtered
+                }
                 _ => {
                     return Err(QueryError::Lowering(format!(
                         "node '{}' has no emitted identity",

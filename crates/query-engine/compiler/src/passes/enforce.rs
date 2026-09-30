@@ -204,15 +204,15 @@ pub fn enforce_role_scans(
         let Some(binding) = metadata.nodes.get(&input_node.id) else {
             continue;
         };
-        let Some(identity) = binding.role_identity() else {
-            continue;
-        };
         if !model
             .entity_minimum_access_level(entity)
             .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
         {
             continue;
         }
+        let Some(identity) = binding.role_identity()? else {
+            continue;
+        };
         let table = model.entity_table(entity).ok_or_else(|| {
             QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
         })?;
@@ -267,6 +267,12 @@ fn enforce_return_columns(
         let binding = bindings.get(&node.id).ok_or_else(|| {
             QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
         })?;
+        if matches!(binding, NodeBinding::Filtered) {
+            return Err(QueryError::Enforcement(format!(
+                "node '{}' has no result identity",
+                node.id
+            )));
+        }
         let NodeBinding::Values {
             identity,
             table_alias,
