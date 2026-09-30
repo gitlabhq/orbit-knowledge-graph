@@ -59,6 +59,7 @@ fn workset(
         manifest_names.iter().any(|pf| pf.name == name)
     };
     let mut manifests = Vec::new();
+    let mut unread_manifests = Vec::new();
     let mut candidates = FxHashMap::default();
     let mut items = Vec::new();
     for file in repo.files() {
@@ -67,11 +68,14 @@ fn workset(
         if file.decision == Decision::Parse && in_family && !manifest {
             candidates.insert(file.path.clone(), file.size);
             items.push(file.path);
-        } else if manifest && let Ok(content) = repo.read_to_string(Path::new(&file.path)) {
-            manifests.push(SourceFile {
-                path: file.path,
-                content,
-            });
+        } else if manifest {
+            match repo.read_to_string(Path::new(&file.path)) {
+                Ok(content) => manifests.push(SourceFile {
+                    path: file.path,
+                    content,
+                }),
+                Err(_) => unread_manifests.push((file.path, file.size)),
+            }
         }
     }
     // A candidate is read once, here, by the worker that parses it; the
@@ -90,6 +94,7 @@ fn workset(
         listed: Listed {
             repo,
             manifests,
+            unread_manifests,
             candidates,
         },
     }
@@ -366,6 +371,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
         let Listed {
             repo,
             manifests,
+            unread_manifests,
             mut candidates,
         } = listed;
         for manifest in manifests {
@@ -373,7 +379,14 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             state.configs.push(manifest);
         }
         let lang = &context.env.lang;
-        let parsed: FxHashSet<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        let mut parsed: FxHashSet<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        for (path, size) in unread_manifests {
+            let reason = FileReason::Fault(FileFault::FileRead);
+            state
+                .trees
+                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
+            parsed.insert(path);
+        }
         // Every file the repository holds gets a row; a parse candidate that
         // never became a tree is either still a candidate (killed or
         // unreadable, below) or was turned down on its read and says why.

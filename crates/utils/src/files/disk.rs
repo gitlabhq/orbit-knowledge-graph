@@ -6,6 +6,7 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 use rayon::prelude::*;
+use tracing::warn;
 
 use super::{SourceError, Vfs};
 
@@ -41,7 +42,15 @@ pub fn discover(root: &Path, vfs: &Vfs) -> Result<(), SourceError> {
 pub fn discover_paths(root: &Path, paths: Vec<String>, vfs: &Vfs) -> Result<(), SourceError> {
     paths.into_par_iter().try_for_each(|path| {
         let on_disk = root.join(&path);
-        let metadata = on_disk.symlink_metadata()?;
+        // A live checkout moves under us; a file gone between the listing
+        // and here is not a file of the repository, not a failed run.
+        let metadata = match on_disk.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                warn!(path, error = %e, "skipping a file that vanished during discovery");
+                return Ok(());
+            }
+        };
         match metadata.is_symlink() {
             true => vfs.list(&path, metadata.len(), true),
             false => vfs.link(&path, on_disk, metadata.len()),
@@ -171,7 +180,8 @@ mod tests {
         write(root, "untouched.rs", b"fn u() {}");
 
         let vfs = Vfs::new(TestFilter, None);
-        discover_paths(root, vec!["b.png".into(), "a.rs".into()], &vfs).unwrap();
+        let paths = vec!["b.png".into(), "a.rs".into(), "vanished.rs".into()];
+        discover_paths(root, paths, &vfs).unwrap();
 
         let listed: Vec<(String, Decision)> = vfs
             .files()

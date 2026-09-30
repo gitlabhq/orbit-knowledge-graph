@@ -43,6 +43,9 @@ pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
 pub struct Listed {
     pub(super) repo: Arc<Vfs>,
     pub(super) manifests: Vec<SourceFile>,
+    /// Manifests the repository lists but could not read; they get a row
+    /// that says so.
+    pub(super) unread_manifests: Vec<(String, u64)>,
     pub(super) candidates: FxHashMap<String, u64>,
 }
 

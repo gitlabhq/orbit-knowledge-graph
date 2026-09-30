@@ -970,7 +970,7 @@ fn normalize_joined_path(method: &str, parts: Vec<String>) -> String {
     normalize_path(path).to_string_lossy().to_string()
 }
 
-fn normalize_path(path: PathBuf) -> PathBuf {
+pub(super) fn normalize_path(path: PathBuf) -> PathBuf {
     let mut normalized = PathBuf::new();
 
     for component in path.components() {

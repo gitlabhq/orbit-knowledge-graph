@@ -1,4 +1,5 @@
 use crate::utils::Range;
+use crate::v2::pipeline::VIRTUAL_ROOT;
 use orbit_utils::files::Vfs;
 use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
 use rayon::prelude::*;
@@ -75,8 +76,11 @@ impl FileSystem for RepoFileSystem {
         Err(io::Error::new(io::ErrorKind::NotFound, "the repository has no symlinks").into())
     }
 
+    /// One spelling per file: absolute under `/`, no `.` or `..`. There are
+    /// no symlinks to follow.
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        self.0.metadata(path).map(|_| path.to_path_buf())
+        let canonical = super::evaluator::normalize_path(Path::new(VIRTUAL_ROOT).join(path));
+        self.0.metadata(&canonical).map(|_| canonical)
     }
 }
 
@@ -579,9 +583,17 @@ mod tests {
             "export const ok = true;"
         );
         assert!(fs.metadata(Path::new("/src")).unwrap().is_dir());
-        assert_eq!(
-            fs.canonicalize(Path::new("/src/index.js")).unwrap(),
-            Path::new("/src/index.js")
-        );
+        for spelling in [
+            "/src/index.js",
+            "src/index.js",
+            "/src/./index.js",
+            "/lib/../src/index.js",
+        ] {
+            assert_eq!(
+                fs.canonicalize(Path::new(spelling)).unwrap(),
+                Path::new("/src/index.js"),
+                "{spelling}"
+            );
+        }
     }
 }

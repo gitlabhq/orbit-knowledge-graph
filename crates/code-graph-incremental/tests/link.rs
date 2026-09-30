@@ -23,6 +23,7 @@ def run():
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     for (path, content) in files {
+        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         std::fs::write(root.join(path), content).unwrap();
     }
 }
@@ -135,6 +136,44 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
     assert_eq!(rows[3].0, "main.py");
     assert!(rows[3].1 > 0);
     assert_eq!(graph.dirty.len(), 1, "only the parsed file needs resolving");
+}
+
+/// A manifest the repository lists but cannot read when the resolver wants
+/// it (gone from a live checkout) keeps a row that says so.
+#[test]
+fn an_unreadable_manifest_keeps_a_row_tagged_with_the_fault() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[
+            ("src/lib.rs", b"pub fn f() {}\n"),
+            ("Cargo.toml", b"[package]\nname = \"x\"\n"),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+    let files = inventory::walk(repo.path()).unwrap();
+    std::fs::remove_file(repo.path().join("Cargo.toml")).unwrap();
+
+    let graph = Pipeline::new(Context::new(&env), files)
+        .then(Prepare)
+        .unwrap()
+        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
+        .unwrap()
+        .then(Insert)
+        .unwrap()
+        .into_value();
+
+    let reason_key = env.lang.syms.lookup("reason");
+    let manifest = graph
+        .state
+        .trees
+        .iter()
+        .find(|t| t.label == "Cargo.toml")
+        .expect("the manifest keeps its row");
+    assert_eq!(
+        manifest.get_tag(0, reason_key).map(|v| env.lang.syms.resolve(v)),
+        Some("fault_file_read")
+    );
 }
 
 #[test]
