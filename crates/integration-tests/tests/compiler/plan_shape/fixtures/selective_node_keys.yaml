@@ -1,0 +1,29 @@
+name: Selective joined nodes plan narrowing keys before lowering
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [{"type": "CALLS", "from": "a", "to": "b"}],
+      "order_by": "a.id"
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)
+    RETURN a.id, b.id ORDER BY a.id
+logical:
+  expect:
+    - (Node a Definition (Ids 1) ...)
+    - (OrderBy (Asc a id))
+physical:
+  clickhouse:
+    expect:
+      - (Narrowing (Keys a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key traversal_path project_id branch id) (Filter _ (Read gl_definition a Plain))))))
+      - (Cte _filter_a (Query ... (LimitBy 1 (Column a traversal_path) (Column a project_id) (Column a branch) (Column a id))))
+      - (InCte (Column e0 source_id) _filter_a id)
+  duckdb:
+    expect:
+      - (Narrowing (Keys a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key ...) (Filter _ (Read gl_definition a Plain))))))
+      - (InCte (Column e0 source_id) _filter_a id)

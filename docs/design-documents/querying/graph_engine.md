@@ -83,6 +83,13 @@ It also selects whether narrowing predicates belong inside a FINAL scan from the
 Flat-chain lowering constructs its specialized predicates and executes the selected single-hop reads through the shared physical emitter.
 Bounded traversal hops are planned as physical unions of depth arms with explicit joins and outputs.
 The union carries the original relationship index so scope predicates still reach each underlying scan.
+Joined node reads use the same physical source builder for broad FINAL scans and narrowed latest-row scans.
+Narrowing and sort-key predicates run inside the latest-row scan; mutable-field and deletion predicates run outside it.
+The specialized join emitters still supply narrowing references while their CTE construction remains unmigrated.
+Authoritative filter CTEs reuse the physical node source and select only the referenced key.
+Their names and references remain owned by the specialized chain emitters; their scan bodies use shared physical lowering.
+Flat plans also contain the selective joined-node narrowing definitions, including their key projection and sort key.
+Lowering emits each definition on first use and connects the hop's membership predicate without reselecting eligible nodes.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 

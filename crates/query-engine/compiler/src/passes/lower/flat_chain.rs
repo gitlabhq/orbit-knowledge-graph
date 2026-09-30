@@ -11,7 +11,7 @@ use super::helpers::{
     push_edge_predicates,
 };
 use super::{EmitOutput, NodeBinding};
-use crate::passes::plan::physical::{EdgeRead, PhysicalSource};
+use crate::passes::plan::physical::{EdgeRead, FlatPlan, PhysicalSource};
 use crate::passes::plan::*;
 use crate::passes::shared::deleted_false;
 use crate::passes::shared::filter_to_expr;
@@ -115,6 +115,7 @@ fn collect_edge_predicates(
     alias: &str,
     hop: &Hop,
     plan: &Plan,
+    physical: &FlatPlan,
     start_col: &str,
     end_col: &str,
     ctes: &mut Vec<Cte>,
@@ -130,18 +131,18 @@ fn collect_edge_predicates(
     emit_filter_narrowing(
         target,
         hop,
-        &plan.nodes,
+        physical,
         alias,
         start_col,
         end_col,
         ctes,
         narrowed_nodes,
-        &plan.table_sort_keys,
-    )?;
+    );
     Ok(())
 }
 
-pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOutput> {
+pub(super) fn emit_flat_chain(plan: &Plan, physical: &FlatPlan) -> Result<EmitOutput> {
+    let reads = &physical.reads;
     if reads.len() != plan.hops.len() {
         return Err(QueryError::Lowering(
             "each flat-chain hop requires a planned read".into(),
@@ -175,6 +176,7 @@ pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOut
                 &alias,
                 hop,
                 plan,
+                physical,
                 start_col,
                 end_col,
                 &mut ctes,
@@ -202,14 +204,13 @@ pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOut
             emit_filter_narrowing(
                 &mut narrow_in,
                 hop,
-                &plan.nodes,
+                physical,
                 &alias,
                 start_col,
                 end_col,
                 &mut ctes,
                 &mut narrowed_nodes,
-                &plan.table_sort_keys,
-            )?;
+            );
             // For multi-hop dedup queries, FilterOnly nodes still use
             // CTEs so their IN-subqueries can be pushed inside the edge
             // dedup scan for PK pruning. Single-hop queries handle

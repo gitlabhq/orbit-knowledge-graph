@@ -4,34 +4,14 @@ use std::collections::HashSet;
 use ontology::constants::*;
 
 use crate::ast::*;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 
 use crate::passes::plan::*;
 use crate::passes::shared::latest_row_dedup;
 use crate::passes::shared::{
-    deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
-    rel_kind_filter,
+    deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, rel_kind_filter,
 };
 pub(super) use crate::passes::shared::{latest_node_predicates, node_select_columns};
-
-fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<Expr> {
-    let in_sort_key = |column: &str| sort_key.iter().any(|key| key == column);
-    let mut predicates: Vec<Expr> = np
-        .filters
-        .iter()
-        .filter(|(prop, filter)| in_sort_key(prop) && filter.filter.rhs_column.is_none())
-        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
-        .collect();
-    if in_sort_key(DEFAULT_PRIMARY_KEY) {
-        if !np.node_ids.is_empty() {
-            predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-        }
-        if let Some(ref range) = np.id_range {
-            predicates.push(id_range_predicate(alias, range));
-        }
-    }
-    predicates
-}
 
 /// Narrowing source for a node's latest-row scan: a `_narrow_*` CTE referenced
 /// by the node scan's WHERE clause.
@@ -48,10 +28,6 @@ pub(super) fn emit_node_join_with_narrowing(
     narrow: Option<NarrowSource>,
     sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    let table = np
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
     let in_predicate = narrow.map(|NarrowSource::Cte(cte_name)| Expr::InSubquery {
@@ -60,43 +36,25 @@ pub(super) fn emit_node_join_with_narrowing(
         column: DEFAULT_PRIMARY_KEY.to_string(),
     });
 
-    let selects = node_select_columns(alias, np);
-    let scan = match in_predicate {
-        Some(predicate) => limit_by_scan(
-            table,
-            alias,
-            vec![SelectExpr::star()],
-            sort_key,
-            std::iter::once(predicate)
-                .chain(sort_key_predicates(alias, np, sort_key))
-                .collect(),
-        ),
-        None => TableRef::scan_final(table, alias),
-    };
-    let node_scan = TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: scan,
-            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
-            ..Default::default()
-        },
-        alias,
-    );
+    let scan = super::physical::emit(&physical::PhysicalPlan::node_scan(
+        np,
+        in_predicate,
+        sort_key,
+    )?)?;
 
     let joined = TableRef::join(
         JoinType::Inner,
         from,
-        node_scan,
+        scan.from,
         Expr::eq(
             Expr::col(alias, node_column),
             Expr::col(edge_alias, edge_col),
         ),
     );
 
-    Ok((joined, selects, vec![]))
+    Ok((joined, scan.select, vec![]))
 }
 
-// Authoritative filter: dedup with FINAL before filtering so a stale matching version can't resurrect a row.
 pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
@@ -104,53 +62,16 @@ pub(super) fn emit_filter_subquery(
     node_column: &str,
     ctes: &mut Vec<Cte>,
 ) -> Result<Vec<Expr>> {
-    let table = np
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
-
-    ctes.push(Cte::new(
-        &cte_name,
-        Query {
-            select: vec![SelectExpr::new(
-                Expr::col(alias, node_column),
-                DEFAULT_PRIMARY_KEY,
-            )],
-            from: TableRef::scan_final(table, alias),
-            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
-            ..Default::default()
-        },
-    ));
+    let keys = physical::PhysicalPlan::filtered_keys(np, node_column)?;
+    ctes.push(Cte::new(&cte_name, super::physical::query(&keys)));
 
     Ok(vec![Expr::InSubquery {
         expr: Box::new(Expr::col(edge_alias, edge_col)),
         cte_name,
         column: DEFAULT_PRIMARY_KEY.to_string(),
     }])
-}
-
-fn node_ids_dedup_scan(
-    alias: &str,
-    table: &str,
-    np: &NodePlan,
-    sort_key: &[String],
-) -> Result<Query> {
-    if sort_key.is_empty() {
-        return Err(QueryError::Lowering(format!(
-            "no sort key for node table '{table}'; cannot emit LIMIT BY dedup"
-        )));
-    }
-    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-    Ok(Query {
-        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
-        order_by,
-        limit_by,
-        ..Default::default()
-    })
 }
 
 pub(super) fn node_values_from_candidate_scan(
@@ -364,51 +285,24 @@ pub(super) fn emit_node_ids_on_edge(
     }
 }
 
-/// Narrow edge scan via node filter CTEs.
-/// For FilterOnly nodes, the `_filter_*` CTE is created later in the node
-/// processing phase — we just reference it here. For Join nodes with property
-/// filters, we create a lightweight narrowing CTE on the spot.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_filter_narrowing(
     where_parts: &mut Vec<Expr>,
     hop: &Hop,
-    nodes: &HashMap<String, NodePlan>,
+    plan: &physical::FlatPlan,
     edge_alias: &str,
     start_col: &str,
     end_col: &str,
     ctes: &mut Vec<Cte>,
     narrowed: &mut HashSet<String>,
-    table_sort_keys: &HashMap<String, Vec<String>>,
-) -> Result<()> {
+) {
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-        let Some(np) = nodes.get(node_alias) else {
+        let Some(keys) = plan.narrowing.get(node_alias) else {
             continue;
         };
-        let has_point_selectivity = !np.node_ids.is_empty() || np.id_range.is_some();
-        let has_selective_filters = np
-            .filters
-            .iter()
-            .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High);
-        let selective = has_point_selectivity || has_selective_filters;
-        let should_narrow = match np.hydration {
-            HydrationStrategy::FilterOnly => false,
-            HydrationStrategy::Join => selective,
-            HydrationStrategy::Skip => false,
-        };
-        if !should_narrow {
-            continue;
-        }
         let cte_name = format!("_filter_{node_alias}");
-        if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
-            let table = np.table.as_deref().unwrap_or("");
-            let sort_key = table_sort_keys
-                .get(table)
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            ctes.push(Cte::new(
-                &cte_name,
-                node_ids_dedup_scan(node_alias, table, np, sort_key)?,
-            ));
+        if narrowed.insert(node_alias.clone()) {
+            ctes.push(Cte::new(&cte_name, super::physical::query(keys)));
         }
         where_parts.push(Expr::InSubquery {
             expr: Box::new(Expr::col(edge_alias, id_col)),
@@ -416,5 +310,4 @@ pub(super) fn emit_filter_narrowing(
             column: "id".to_string(),
         });
     }
-    Ok(())
 }

@@ -13,6 +13,33 @@ pub(super) fn emit(plan: &PhysicalPlan) -> Result<EmitOutput> {
     Ok(output)
 }
 
+pub(super) fn query(plan: &PhysicalPlan) -> Query {
+    if let PhysicalSource::Latest {
+        alias,
+        sort_key,
+        input,
+    } = &plan.source
+    {
+        let output = emit_source(input);
+        let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+        return Query {
+            select: plan.outputs.clone(),
+            from: output.from,
+            where_clause: Expr::conjoin(output.where_parts),
+            order_by,
+            limit_by,
+            ..Default::default()
+        };
+    }
+    let output = emit_source(&plan.source);
+    Query {
+        select: plan.outputs.clone(),
+        from: output.from,
+        where_clause: Expr::conjoin(output.where_parts),
+        ..Default::default()
+    }
+}
+
 pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
     match plan {
         PhysicalSource::Union {
@@ -20,18 +47,7 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             arms,
             relationship,
         } => {
-            let queries = arms
-                .iter()
-                .map(|arm| {
-                    let output = emit_source(&arm.source);
-                    Query {
-                        select: arm.outputs.clone(),
-                        from: output.from,
-                        where_clause: Expr::conjoin(output.where_parts),
-                        ..Default::default()
-                    }
-                })
-                .collect();
+            let queries = arms.iter().map(query).collect();
             EmitOutput {
                 from: TableRef::union_all(queries, alias).with_relationship(*relationship),
                 nodes: HashMap::new(),

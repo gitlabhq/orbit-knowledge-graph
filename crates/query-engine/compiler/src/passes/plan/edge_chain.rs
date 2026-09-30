@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::physical::{EdgeRead, PhysicalPlan, edge_reads};
+use super::physical::{FlatPlan, PhysicalPlan};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -184,7 +184,7 @@ pub enum HydrationStrategy {
 
 pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
-    Flat(Vec<EdgeRead>),
+    Flat(FlatPlan),
     SingleNode(Box<PhysicalPlan>),
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
@@ -299,7 +299,7 @@ where
             input.query_type == QueryType::Traversal,
         )?)))
     } else {
-        Strategy::Flat(edge_reads(
+        Strategy::Flat(FlatPlan::new(
             &hops,
             input.query_type == QueryType::Aggregation,
             &table_sort_keys,

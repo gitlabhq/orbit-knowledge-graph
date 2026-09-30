@@ -147,9 +147,9 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
         {
             Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
-            Strategy::Flat(reads) => S::node(
+            Strategy::Flat(flat) => S::node(
                 "Flat",
-                reads.iter().map(|read| {
+                flat.reads.iter().map(|read| {
                     use compiler::passes::plan::physical::EdgeRead;
                     match read {
                         EdgeRead::Plain => S::node("Plain", []),
@@ -178,6 +178,28 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         "Physical",
         [
             S::node("Strategy", [strategy]),
+            S::node(
+                "Narrowing",
+                match &plan.body {
+                    PlanBody::Traversal {
+                        strategy: Strategy::Flat(flat),
+                    }
+                    | PlanBody::Aggregation {
+                        strategy: Strategy::Flat(flat),
+                        ..
+                    } => {
+                        let mut definitions: Vec<_> = flat.narrowing.iter().collect();
+                        definitions.sort_by_key(|(alias, _)| *alias);
+                        definitions
+                            .into_iter()
+                            .map(|(alias, keys)| {
+                                S::node("Keys", [S::atom(alias), physical_tree(keys)])
+                            })
+                            .collect()
+                    }
+                    _ => vec![],
+                },
+            ),
             S::node(
                 "Nodes",
                 nodes.into_iter().map(|node| {
