@@ -1024,11 +1024,9 @@ mod tests {
             iat: now,
             exp: now + 3600,
             user_id,
+            source_type,
             ..test_claims()
         };
-        // `SourceType` serializes as its variant name but the wire format is snake_case.
-        let mut claims = serde_json::to_value(&claims).unwrap();
-        claims["source_type"] = <&str>::from(source_type).into();
         let token = encode(
             &Header::new(Algorithm::HS256),
             &claims,

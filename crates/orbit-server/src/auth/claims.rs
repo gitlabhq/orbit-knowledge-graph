@@ -81,7 +81,8 @@ pub struct Claims {
 
 /// Source type of the request, matching the Iglu `orbit_query` enum.
 /// Unknown JWT values deserialize to `Rest` (the catch-all).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr, strum::EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum SourceType {
@@ -119,15 +120,6 @@ mod tests {
 
     fn parse(raw: &str) -> SourceType {
         deserialize_source_type(Value::String(raw.into())).unwrap()
-    }
-
-    #[test]
-    fn code_intelligence_round_trips() {
-        assert_eq!(parse("code_intelligence"), SourceType::CodeIntelligence);
-        assert_eq!(
-            <&str>::from(SourceType::CodeIntelligence),
-            "code_intelligence"
-        );
     }
 
     #[test]
