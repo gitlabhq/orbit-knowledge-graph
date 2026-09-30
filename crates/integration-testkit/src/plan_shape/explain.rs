@@ -148,7 +148,10 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         {
             Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
             Strategy::Flat(flat) => S::node("Flat", [physical_source(&flat.source)]),
-            Strategy::Fk(FkShape::Star { center, .. }) => S::node("FkStar", [S::atom(center)]),
+            Strategy::Fk(FkShape::Star { center, execution }) => S::node(
+                "FkStar",
+                [S::atom(center), physical_source(&execution.source)],
+            ),
             Strategy::Fk(FkShape::Chain(root)) => S::node("FkChain", [physical_tree(root)]),
         },
         PlanBody::Neighbors { .. } => S::node("Neighbors", []),
@@ -162,117 +165,21 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         [
             S::node("Strategy", [strategy]),
             S::node(
-                "Cascades",
+                "Definitions",
                 match &plan.body {
                     PlanBody::Traversal {
-                        strategy: Strategy::Flat(flat),
+                        strategy:
+                            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }),
                     }
                     | PlanBody::Aggregation {
-                        strategy: Strategy::Flat(flat),
+                        strategy:
+                            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }),
                         ..
-                    } => flat
-                        .cascades
+                    } => execution
+                        .definitions
                         .iter()
-                        .enumerate()
-                        .filter_map(|(index, anchor)| {
-                            anchor.as_ref().map(|anchor| {
-                                S::node("Anchor", [S::atom(index), physical_tree(anchor)])
-                            })
-                        })
+                        .map(|(name, keys)| S::node("Keys", [S::atom(name), physical_tree(keys)]))
                         .collect(),
-                    _ => vec![],
-                },
-            ),
-            S::node(
-                "Narrowing",
-                match &plan.body {
-                    PlanBody::Traversal {
-                        strategy: Strategy::Flat(flat),
-                    }
-                    | PlanBody::Aggregation {
-                        strategy: Strategy::Flat(flat),
-                        ..
-                    } => {
-                        let mut definitions: Vec<_> = flat
-                            .narrowing
-                            .iter()
-                            .map(|(alias, keys)| ("Keys", alias, keys))
-                            .chain(
-                                flat.node_narrowing
-                                    .iter()
-                                    .map(|(alias, keys)| ("NodeKeys", alias, keys)),
-                            )
-                            .collect();
-                        definitions.sort_by_key(|(kind, alias, _)| (*kind, *alias));
-                        definitions
-                            .into_iter()
-                            .map(|(kind, alias, keys)| {
-                                S::node(kind, [S::atom(alias), physical_tree(keys)])
-                            })
-                            .chain(std::iter::once(S::node(
-                                "FilterSteps",
-                                flat.filters.iter().enumerate().map(|(index, filters)| {
-                                    S::node(
-                                        "Hop",
-                                        [
-                                            S::atom(index),
-                                            S::node(
-                                                "Definitions",
-                                                filters.definitions.iter().map(S::atom),
-                                            ),
-                                            S::node(
-                                                "Predicates",
-                                                filters.predicates.iter().map(expression),
-                                            ),
-                                        ],
-                                    )
-                                }),
-                            )))
-                            .collect()
-                    }
-                    PlanBody::Traversal {
-                        strategy: Strategy::Fk(FkShape::Star { candidates, .. }),
-                    }
-                    | PlanBody::Aggregation {
-                        strategy: Strategy::Fk(FkShape::Star { candidates, .. }),
-                        ..
-                    } => {
-                        use compiler::passes::plan::fk::TargetNarrowing;
-                        let mut targets: Vec<_> = candidates.targets.iter().collect();
-                        targets.sort_by_key(|(alias, _)| *alias);
-                        vec![
-                            S::node(
-                                "Definitions",
-                                candidates.definitions.iter().map(|(name, keys)| {
-                                    S::node("Keys", [S::atom(name), physical_tree(keys)])
-                                }),
-                            ),
-                            S::node(
-                                "CenterFilter",
-                                candidates.center_filter.iter().map(expression),
-                            ),
-                            S::node(
-                                "Targets",
-                                targets.into_iter().map(|(alias, target)| {
-                                    S::node(
-                                        "Target",
-                                        [
-                                            S::atom(alias),
-                                            match target {
-                                                TargetNarrowing::Reference(name) => {
-                                                    S::node("Reference", [S::atom(name)])
-                                                }
-                                                TargetNarrowing::Define { name, keys } => S::node(
-                                                    "Define",
-                                                    [S::atom(name), physical_tree(keys)],
-                                                ),
-                                            },
-                                        ],
-                                    )
-                                }),
-                            ),
-                        ]
-                    }
                     _ => vec![],
                 },
             ),

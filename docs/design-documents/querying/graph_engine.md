@@ -74,32 +74,27 @@ Single-node planning selects an executable scan/filter source tree and a list of
 The single-node emitter renders those operations without choosing the scan or predicates again.
 This tree supplies the source fragment; aggregation, ordering, and pagination still build on that fragment in their existing phases.
 The output list does not hide source columns from those phases or create another SQL scope.
-Other traversal strategies and graph families retain their specialized emitters.
 FK-chain planning also uses the physical source tree, with explicit joins and scoped node scans.
 Each scoped scan resolves current rows and applies its predicates inside the derived table before joining.
-The shared emitter renders those joins and scopes; FK-star candidate narrowing remains specialized.
 Flat-chain planning builds an executable edge-source tree with scans, filters, cascade key membership, and joins.
 It places narrowing predicates inside or outside FINAL scans using the leading sort-key columns.
 Single-edge aggregation plans a latest-row scan and retains the same predicates for conditional counting.
-Shared physical lowering renders the edge tree; the specialized flat emitter still adds node joins and result bindings.
+Flat planning also composes node joins and outputs, retaining each node's first edge identity and traversal path in explicit binding sources.
+Shared physical lowering renders the complete source tree and converts those binding sources to result bindings.
 Bounded traversal hops are planned as physical unions of depth arms with explicit joins and outputs.
 The union carries the original relationship index so scope predicates still reach each underlying scan.
 Joined node reads use the same physical source builder for broad FINAL scans and narrowed latest-row scans.
 Narrowing and sort-key predicates run inside the latest-row scan; mutable-field and deletion predicates run outside it.
-The specialized join emitters still supply narrowing references while their CTE construction remains unmigrated.
 Authoritative filter CTEs reuse the physical node source and select only the referenced key.
-FK-star filter CTE names and references remain in its specialized emitter; their scan bodies use shared physical lowering.
-Flat plans also contain the selective joined-node narrowing definitions, including their key projection and sort key.
-Each flat-plan hop owns its first-use filter definitions and membership predicates, with joined-node candidates before authoritative filter-only keys.
-Lowering renders these steps without selecting eligible nodes or tracking which filter definitions it has emitted.
-Flat plans also contain cascade key scans with nested upstream membership filters and relationship provenance.
-Edge reads and node narrowing reuse these plans; lowering no longer reconstructs cascades from emitted CTE names.
-Edge-derived node-narrowing definitions also live in the flat plan, using each node's first hop and its cascade.
-Lowering emits these key definitions when joining the node, preserving CTE dependency order.
+Flat and FK-star strategies share an execution plan: a source tree, ordered CTE definitions, outputs, binding sources, and edge aliases.
+Cascade key scans live in that tree, with nested upstream membership filters and relationship provenance.
+Planning orders flat filter definitions by first use, with joined-node candidates before authoritative filter-only keys.
+Edge-derived node-narrowing definitions follow those filters and use each node's first hop and its cascade.
+Temporary candidate maps and per-hop filter lists are discarded after source construction.
 FK candidate prefilters also use physical key plans, with plain reads distinct from authoritative FINAL reads.
 Their consumers retain latest-row resolution and exact predicate rechecks.
-The selected FK-star plan owns candidate definitions in dependency order, the center membership predicate, and each joined target's narrowing source.
-Lowering renders those definitions and references without repeating candidate eligibility decisions.
+FK-star planning builds the center scan, target joins, filter references, bindings, and synthetic edge outputs.
+Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 

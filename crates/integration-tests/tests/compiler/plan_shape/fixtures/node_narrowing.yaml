@@ -25,9 +25,10 @@ physical:
   clickhouse:
     expect:
       - (Node a gl_definition FilterOnly)
-      - (Keys a (SourceFragment _ (Filter _ (Read gl_definition a Final))))
-      - (FilterSteps (Hop 0 (Definitions a) (Predicates (InCte (Column e0 source_id) _filter_a id))) (Hop 1 (Definitions) (Predicates)))
-      - (NodeKeys c (SourceFragment (Outputs (Output id (Column e1n target_id))) (KeyFilter (Column e1n source_id) _ (Filter _ (Read gl_code_edge e1n Plain)))))
+      - (Strategy (Flat (Join INNER (= (Column c id) (Column e1 target_id)) _ (Scope c (Filter _ (Latest c (Key traversal_path project_id branch id) (Filter (InCte (Column c id) _narrow_c id) (Read gl_definition c Plain))))))))
+      - (Keys _filter_a (SourceFragment _ (Filter _ (Read gl_definition a Final))))
+      - (Definitions (Keys _filter_a _) (Keys _narrow_c _))
+      - (Keys _narrow_c (SourceFragment (Outputs (Output id (Column e1n target_id))) (KeyFilter (Column e1n source_id) _ (Filter _ (Read gl_code_edge e1n Plain)))))
       - (Cte _narrow_c (Query ... (Scan gl_code_edge e1n Plain) ...))
       - (InCte (Column c id) _narrow_c id)
       - (InCte (Column e0p source_id) _filter_a id)
@@ -35,4 +36,4 @@ physical:
     expect:
       - (Node c gl_definition Join)
     reject:
-      - (NodeKeys ...)
+      - (Keys _narrow_c ...)

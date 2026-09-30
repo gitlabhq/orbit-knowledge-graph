@@ -7,7 +7,7 @@ use crate::passes::shared::{deleted_false, filter_to_expr};
 use super::edge_predicates::{
     node_id_pin_predicates, push_denorm_tags, push_edge_predicates, push_filtered_edge_predicates,
 };
-use super::physical::{HopFilters, PhysicalPlan, PhysicalSource};
+use super::physical::{PhysicalPlan, PhysicalSource};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan};
 
 #[allow(clippy::too_many_arguments)]
@@ -18,7 +18,7 @@ pub(super) fn edge_source(
     nodes: &HashMap<String, NodePlan>,
     table_columns: &HashMap<String, HashSet<String>>,
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-    filters: &[HopFilters],
+    filters: &[Vec<Expr>],
     cascades: &[Option<PhysicalPlan>],
 ) -> Result<(PhysicalSource, Option<Expr>)> {
     let mut source = None;
@@ -33,7 +33,7 @@ pub(super) fn edge_source(
             relationship: Some(hop.input_index),
         };
         let multi_hop = hop.max_hops > 1;
-        let membership = &filters[index].predicates;
+        let membership = &filters[index];
         let cascade = cascades[index].as_ref();
         if !multi_hop && !dedup && aggregate {
             let sort_key = sort_keys

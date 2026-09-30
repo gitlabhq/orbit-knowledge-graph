@@ -20,11 +20,11 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Keys a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key traversal_path project_id branch id) (Filter _ (Read gl_definition a Plain)))))
-      - (FilterSteps (Hop 0 (Definitions a) (Predicates (InCte (Column e0 source_id) _filter_a id))))
+      - (Keys _filter_a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key traversal_path project_id branch id) (Filter _ (Read gl_definition a Plain)))))
+      - (Definitions (Keys _filter_a _))
       - (Cte _filter_a (Query ... (LimitBy 1 (Column a traversal_path) (Column a project_id) (Column a branch) (Column a id))))
       - (InCte (Column e0 source_id) _filter_a id)
   duckdb:
     expect:
-      - (Keys a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key ...) (Filter _ (Read gl_definition a Plain)))))
+      - (Keys _filter_a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key ...) (Filter _ (Read gl_definition a Plain)))))
       - (InCte (Column e0 source_id) _filter_a id)

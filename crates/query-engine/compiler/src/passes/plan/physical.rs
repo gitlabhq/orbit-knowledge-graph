@@ -1,11 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Expr, JoinType, SelectExpr};
-use crate::constants::{
-    EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX, EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX,
-};
 use crate::error::{QueryError, Result};
-use crate::input::Direction;
 use crate::passes::shared::{
     filter_to_expr, id_list_predicate, id_range_predicate, latest_node_predicates,
     node_select_columns,
@@ -15,22 +11,24 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 use super::edge_predicates::{node_id_pin_predicates, push_edge_predicates};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
 
-pub struct FlatPlan {
+pub struct ExecutionPlan {
     pub source: PhysicalSource,
     pub edge_if_predicates: Option<Expr>,
-    pub narrowing: HashMap<String, PhysicalPlan>,
-    pub node_narrowing: HashMap<String, PhysicalPlan>,
-    pub cascades: Vec<Option<PhysicalPlan>>,
-    pub filters: Vec<HopFilters>,
+    pub definitions: Vec<(String, PhysicalPlan)>,
+    pub outputs: Vec<SelectExpr>,
+    pub bindings: Vec<BindingSource>,
+    pub edge_aliases: Vec<String>,
 }
 
-pub struct HopFilters {
-    pub definitions: Vec<String>,
-    pub predicates: Vec<Expr>,
+pub struct BindingSource {
+    pub node: String,
+    pub alias: String,
+    pub column: String,
+    pub joined: bool,
 }
 
-impl FlatPlan {
-    pub fn new(
+impl ExecutionPlan {
+    pub fn flat(
         hops: &[Hop],
         aggregate: bool,
         sort_keys: &HashMap<String, Vec<String>>,
@@ -80,11 +78,11 @@ impl FlatPlan {
         }
         let cascades = super::cascade::plan(hops, nodes, table_columns, denormalized, &narrowing);
         let mut emitted = HashSet::new();
+        let mut definitions = Vec::new();
         let filters: Vec<_> = hops
             .iter()
             .enumerate()
             .map(|(index, hop)| {
-                let mut definitions = Vec::new();
                 let mut predicates = Vec::new();
                 let (start, end) = hop.direction.edge_columns();
                 for filter_only in [false, true] {
@@ -97,7 +95,8 @@ impl FlatPlan {
                         }
                         let first_use = emitted.insert(alias.clone());
                         if first_use {
-                            definitions.push(alias.clone());
+                            definitions
+                                .push((format!("_filter_{alias}"), narrowing[alias].clone()));
                         }
                         if first_use || !filter_only {
                             predicates.push(Expr::InSubquery {
@@ -108,36 +107,10 @@ impl FlatPlan {
                         }
                     }
                 }
-                HopFilters {
-                    definitions,
-                    predicates,
-                }
+                predicates
             })
             .collect();
-        let mut node_narrowing = HashMap::new();
-        for (index, hop) in hops.iter().enumerate() {
-            let (start, end) = hop.direction.edge_columns();
-            for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
-                if !nodes.get(node_alias).is_some_and(|node| {
-                    node.hydration == HydrationStrategy::Join && node.use_narrowing
-                }) || node_narrowing.contains_key(node_alias)
-                {
-                    continue;
-                }
-                let alias = format!("e{index}n");
-                let mut predicates = Vec::new();
-                push_edge_predicates(&mut predicates, &alias, hop, nodes, table_columns, false);
-                predicates.extend(node_id_pin_predicates(&alias, hop, nodes));
-                let source =
-                    PhysicalSource::edge_keys(hop, &alias, predicates, cascades[index].as_ref());
-                let outputs = vec![SelectExpr::new(
-                    Expr::col(&alias, column),
-                    DEFAULT_PRIMARY_KEY,
-                )];
-                node_narrowing.insert(node_alias.clone(), PhysicalPlan { source, outputs });
-            }
-        }
-        let (source, edge_if_predicates) = super::flat::edge_source(
+        let (mut source, edge_if_predicates) = super::flat::edge_source(
             hops,
             aggregate,
             sort_keys,
@@ -147,13 +120,83 @@ impl FlatPlan {
             &filters,
             &cascades,
         )?;
+        let mut outputs = Vec::new();
+        let mut bindings = Vec::new();
+        let mut visited = HashSet::new();
+        for (index, hop) in hops.iter().enumerate() {
+            let (start, end) = hop.direction.edge_columns();
+            for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
+                let Some(node) = nodes.get(node_alias).filter(|_| visited.insert(node_alias))
+                else {
+                    continue;
+                };
+                let edge = format!("e{index}");
+                let joined = node.hydration != HydrationStrategy::Skip
+                    && !(node.hydration == HydrationStrategy::FilterOnly
+                        && narrowing.contains_key(node_alias));
+                bindings.push(BindingSource {
+                    node: node_alias.clone(),
+                    alias: edge.clone(),
+                    column: column.into(),
+                    joined,
+                });
+                if !joined {
+                    continue;
+                }
+                let membership = if node.hydration == HydrationStrategy::Join && node.use_narrowing
+                {
+                    let alias = format!("e{index}n");
+                    let mut predicates = Vec::new();
+                    push_edge_predicates(&mut predicates, &alias, hop, nodes, table_columns, false);
+                    predicates.extend(node_id_pin_predicates(&alias, hop, nodes));
+                    let source = PhysicalSource::edge_keys(
+                        hop,
+                        &alias,
+                        predicates,
+                        cascades[index].as_ref(),
+                    );
+                    let outputs = vec![SelectExpr::new(
+                        Expr::col(&alias, column),
+                        DEFAULT_PRIMARY_KEY,
+                    )];
+                    definitions.push((
+                        format!("_narrow_{node_alias}"),
+                        PhysicalPlan { source, outputs },
+                    ));
+                    Some(Expr::InSubquery {
+                        expr: Box::new(Expr::col(node_alias, DEFAULT_PRIMARY_KEY)),
+                        cte_name: format!("_narrow_{node_alias}"),
+                        column: DEFAULT_PRIMARY_KEY.into(),
+                    })
+                } else {
+                    None
+                };
+                let table = node.table.as_ref().ok_or_else(|| {
+                    QueryError::Lowering(format!("node '{node_alias}' has no table"))
+                })?;
+                let sort_key = sort_keys.get(table).ok_or_else(|| {
+                    QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                })?;
+                let scan = PhysicalPlan::node_scan(node, membership, sort_key)?;
+                outputs.extend(scan.outputs);
+                source = PhysicalSource::Join {
+                    kind: JoinType::Inner,
+                    condition: Expr::eq(
+                        Expr::col(node_alias, DEFAULT_PRIMARY_KEY),
+                        Expr::col(&edge, column),
+                    ),
+                    left: Box::new(source),
+                    right: Box::new(scan.source),
+                };
+            }
+        }
         Ok(Self {
             source,
             edge_if_predicates,
-            cascades,
-            narrowing,
-            node_narrowing,
-            filters,
+            definitions,
+            outputs,
+            bindings,
+            edge_aliases: (0..hops.len()).map(|index| format!("e{index}")).collect(),
         })
     }
 }
@@ -395,30 +438,13 @@ impl PhysicalPlan {
             reached.insert(hop.from_node.as_str());
             reached.insert(hop.to_node.as_str());
             if project_edges {
-                let (source, target) = match hop.direction {
-                    Direction::Incoming => (&hop.to_node, &hop.from_node),
-                    Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
-                };
-                let fields = [
-                    (
-                        EDGE_TYPE_SUFFIX,
-                        Expr::string(hop.rel_types.first().map(String::as_str).unwrap_or("")),
-                    ),
-                    (EDGE_SRC_SUFFIX, Expr::col(source, DEFAULT_PRIMARY_KEY)),
-                    (
-                        EDGE_SRC_TYPE_SUFFIX,
-                        Expr::string(node(source)?.entity.as_deref().unwrap_or("")),
-                    ),
-                    (EDGE_DST_SUFFIX, Expr::col(target, DEFAULT_PRIMARY_KEY)),
-                    (
-                        EDGE_DST_TYPE_SUFFIX,
-                        Expr::string(node(target)?.entity.as_deref().unwrap_or("")),
-                    ),
-                ];
-                plan.outputs
-                    .extend(fields.into_iter().map(|(suffix, expression)| {
-                        SelectExpr::new(expression, format!("e{index}_{suffix}"))
-                    }));
+                plan.outputs.extend(super::fk::edge_outputs(
+                    hop,
+                    index,
+                    nodes,
+                    Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
+                    Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+                ));
             }
         }
         Ok(plan)

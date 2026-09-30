@@ -25,7 +25,7 @@ physical:
       - (= (Column e0 source_id) (Literal 1))
   duckdb:
     expect:
-      - (Strategy (Flat (Filter ...)))
+      - (Strategy (Flat (Join INNER (= (Column callee id) (Column e0 target_id)) _ (Scope callee _))))
       - (Read gl_edge e0 Plain)
       - (Scan gl_edge e0 Plain)
       - (Node caller gl_definition Join)

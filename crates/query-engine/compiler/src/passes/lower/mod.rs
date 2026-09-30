@@ -1,8 +1,6 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
-mod fk;
-mod flat_chain;
 mod helpers;
 pub mod hydration;
 pub mod neighbors;
@@ -112,11 +110,12 @@ pub struct LoweredQuery {
 }
 
 impl Strategy {
-    fn emit(&self, plan: &Plan) -> Result<EmitOutput> {
+    fn emit(&self) -> EmitOutput {
         match self {
             Strategy::SingleNode(root) => physical::emit(root),
-            Strategy::Fk(shape) => fk::emit_fk(plan, shape),
-            Strategy::Flat(reads) => flat_chain::emit_flat_chain(plan, reads),
+            Strategy::Fk(super::plan::FkShape::Chain(root)) => physical::emit(root),
+            Strategy::Fk(super::plan::FkShape::Star { execution, .. })
+            | Strategy::Flat(execution) => physical::execute(execution),
         }
     }
 }
@@ -210,7 +209,7 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match &plan.body {
         PlanBody::Traversal { strategy } => {
-            let mut output = strategy.emit(plan)?;
+            let mut output = strategy.emit();
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(plan, input, output)
         }
@@ -219,7 +218,7 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             aggregations,
             agg_sort,
         } => {
-            let mut output = strategy.emit(plan)?;
+            let mut output = strategy.emit();
             nodes = output.take_bindings(plan, input)?;
             aggregation::emit_aggregation(
                 plan,

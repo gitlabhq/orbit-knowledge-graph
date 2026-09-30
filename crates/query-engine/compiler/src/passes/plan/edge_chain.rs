@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::physical::{FlatPlan, PhysicalPlan};
+use super::physical::{ExecutionPlan, PhysicalPlan};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
@@ -184,7 +184,7 @@ pub enum HydrationStrategy {
 
 pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
-    Flat(FlatPlan),
+    Flat(Box<ExecutionPlan>),
     SingleNode(Box<PhysicalPlan>),
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
@@ -198,7 +198,7 @@ pub enum FkShape {
     /// single scan; other nodes JOIN via the center's FK columns.
     Star {
         center: String,
-        candidates: super::fk::StarCandidates,
+        execution: Box<ExecutionPlan>,
     },
     /// Every hop is FK-derived and consecutive hops share a node. The node
     /// tables are joined on their FK columns; the edges are a materialization
@@ -294,13 +294,17 @@ where
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
         Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?))
     } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
-        let candidates = super::fk::StarCandidates::plan(
+        let execution = super::fk::star(
             &center,
             &hops,
             &nodes,
             input.query_type == QueryType::Traversal,
+            &table_sort_keys,
         )?;
-        Strategy::Fk(FkShape::Star { center, candidates })
+        Strategy::Fk(FkShape::Star {
+            center,
+            execution: Box::new(execution),
+        })
     } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
         Strategy::Fk(FkShape::Chain(Box::new(PhysicalPlan::fk_chain(
             &hops,
@@ -308,14 +312,14 @@ where
             input.query_type == QueryType::Traversal,
         )?)))
     } else {
-        Strategy::Flat(FlatPlan::new(
+        Strategy::Flat(Box::new(ExecutionPlan::flat(
             &hops,
             input.query_type == QueryType::Aggregation,
             &table_sort_keys,
             &nodes,
             &table_columns,
             &denormalized,
-        )?)
+        )?))
     };
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
     let body = if input.query_type == QueryType::Aggregation {

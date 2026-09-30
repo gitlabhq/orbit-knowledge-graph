@@ -2,22 +2,185 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::ast::Expr;
+use crate::ast::{Expr, JoinType, SelectExpr};
+use crate::constants::*;
 use crate::error::{QueryError, Result};
+use crate::input::Direction;
 use crate::passes::shared::id_list_predicate;
 
-use super::physical::PhysicalPlan;
-use super::{Hop, NodePlan};
+use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource};
+use super::{Hop, HydrationStrategy, NodePlan};
 
-pub struct StarCandidates {
+struct StarCandidates {
     pub definitions: Vec<(String, PhysicalPlan)>,
     pub center_filter: Option<Expr>,
     pub targets: HashMap<String, TargetNarrowing>,
 }
 
-pub enum TargetNarrowing {
+enum TargetNarrowing {
     Reference(String),
     Define { name: String, keys: PhysicalPlan },
+}
+
+pub(super) fn star(
+    center: &str,
+    hops: &[Hop],
+    nodes: &HashMap<String, NodePlan>,
+    traversal: bool,
+    sort_keys: &HashMap<String, Vec<String>>,
+) -> Result<ExecutionPlan> {
+    let candidates = StarCandidates::plan(center, hops, nodes, traversal)?;
+    let mut definitions = candidates.definitions;
+    let mut root = PhysicalPlan::single_node(&nodes[center])?;
+    let mut center_predicates: Vec<_> = candidates.center_filter.into_iter().collect();
+    for hop in hops {
+        let fk = hop.fk.as_ref().expect("validated FK star hop");
+        let target = &nodes[&fk.target_node];
+        if fk.fk_node == center
+            && !target.node_ids.is_empty()
+            && fk.referenced_column == DEFAULT_PRIMARY_KEY
+        {
+            center_predicates.push(id_list_predicate(center, &fk.fk_column, &target.node_ids));
+        }
+    }
+    root.source = PhysicalSource::Scope {
+        alias: center.into(),
+        input: Box::new(root.source.filter(center_predicates)),
+    };
+    let mut bindings = vec![BindingSource {
+        node: center.into(),
+        alias: center.into(),
+        column: DEFAULT_PRIMARY_KEY.into(),
+        joined: true,
+    }];
+    for hop in hops {
+        let fk = hop.fk.as_ref().expect("validated FK star hop");
+        let target = &nodes[&fk.target_node];
+        if fk.fk_node != center
+            && !target.node_ids.is_empty()
+            && fk.referenced_column == DEFAULT_PRIMARY_KEY
+        {
+            root.source = root.source.filter(vec![id_list_predicate(
+                &fk.fk_node,
+                &fk.fk_column,
+                &target.node_ids,
+            )]);
+        }
+        if target.fk_needs_join {
+            let membership = candidates.targets.get(&fk.target_node).map(|narrowing| {
+                let name = match narrowing {
+                    TargetNarrowing::Reference(name) => name,
+                    TargetNarrowing::Define { name, keys } => {
+                        definitions.push((name.clone(), keys.clone()));
+                        name
+                    }
+                };
+                Expr::InSubquery {
+                    expr: Box::new(Expr::col(&target.alias, &fk.referenced_column)),
+                    cte_name: name.clone(),
+                    column: DEFAULT_PRIMARY_KEY.into(),
+                }
+            });
+            let table = target.table.as_ref().ok_or_else(|| {
+                QueryError::Lowering(format!("node '{}' has no table", target.alias))
+            })?;
+            let sort_key = sort_keys.get(table).ok_or_else(|| {
+                QueryError::Lowering(format!("no sort key for node table '{table}'"))
+            })?;
+            let scan = PhysicalPlan::node_scan(target, membership, sort_key)?;
+            root.source = PhysicalSource::Join {
+                kind: JoinType::Inner,
+                condition: Expr::eq(
+                    Expr::col(&target.alias, &fk.referenced_column),
+                    Expr::col(&fk.fk_node, &fk.fk_column),
+                ),
+                left: Box::new(root.source),
+                right: Box::new(scan.source),
+            };
+            root.outputs.extend(scan.outputs);
+        } else if target.hydration == HydrationStrategy::FilterOnly {
+            let name = format!("_filter_{}", target.alias);
+            definitions.push((
+                name.clone(),
+                PhysicalPlan::filtered_keys(target, &fk.referenced_column)?,
+            ));
+            root.source = root.source.filter(vec![Expr::InSubquery {
+                expr: Box::new(Expr::col(&fk.fk_node, &fk.fk_column)),
+                cte_name: name,
+                column: DEFAULT_PRIMARY_KEY.into(),
+            }]);
+        }
+        let (alias, column) = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+            (fk.fk_node.clone(), fk.fk_column.clone())
+        } else {
+            (fk.target_node.clone(), DEFAULT_PRIMARY_KEY.into())
+        };
+        bindings.push(BindingSource {
+            node: fk.target_node.clone(),
+            alias,
+            column,
+            joined: target.fk_needs_join,
+        });
+    }
+    let mut edge_aliases = Vec::new();
+    if traversal {
+        for (index, hop) in hops.iter().enumerate() {
+            let fk = hop.fk.as_ref().expect("validated FK star hop");
+            let target_id = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+                Expr::col(center, &fk.fk_column)
+            } else {
+                Expr::col(&fk.target_node, DEFAULT_PRIMARY_KEY)
+            };
+            let center_id = Expr::col(center, DEFAULT_PRIMARY_KEY);
+            let (from_id, to_id) = if fk.fk_node == hop.from_node {
+                (center_id, target_id)
+            } else {
+                (target_id, center_id)
+            };
+            let edge = format!("e{index}");
+            root.outputs
+                .extend(edge_outputs(hop, index, nodes, from_id, to_id));
+            edge_aliases.push(edge);
+        }
+    }
+    Ok(ExecutionPlan {
+        source: root.source,
+        outputs: root.outputs,
+        definitions,
+        bindings,
+        edge_aliases,
+        edge_if_predicates: None,
+    })
+}
+
+pub(super) fn edge_outputs(
+    hop: &Hop,
+    index: usize,
+    nodes: &HashMap<String, NodePlan>,
+    from_id: Expr,
+    to_id: Expr,
+) -> [SelectExpr; 5] {
+    let (source, source_id, target, target_id) = match hop.direction {
+        Direction::Incoming => (&hop.to_node, to_id, &hop.from_node, from_id),
+        Direction::Outgoing | Direction::Both => (&hop.from_node, from_id, &hop.to_node, to_id),
+    };
+    [
+        (
+            EDGE_TYPE_SUFFIX,
+            Expr::string(hop.rel_types.first().map(String::as_str).unwrap_or("")),
+        ),
+        (EDGE_SRC_SUFFIX, source_id),
+        (
+            EDGE_SRC_TYPE_SUFFIX,
+            Expr::string(nodes[source].entity.as_deref().unwrap_or("")),
+        ),
+        (EDGE_DST_SUFFIX, target_id),
+        (
+            EDGE_DST_TYPE_SUFFIX,
+            Expr::string(nodes[target].entity.as_deref().unwrap_or("")),
+        ),
+    ]
+    .map(|(suffix, value)| SelectExpr::new(value, format!("e{index}_{suffix}")))
 }
 
 impl StarCandidates {

@@ -22,9 +22,10 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Keys b (SourceFragment _ (Filter _ (Read gl_definition b Final))))
-      - (FilterSteps (Hop 0 (Definitions b) (Predicates (InCte (Column e0 target_id) _filter_b id))) (Hop 1 (Definitions) (Predicates)))
+      - (Keys _filter_b (SourceFragment _ (Filter _ (Read gl_definition b Final))))
+      - (Definitions (Keys _filter_b _))
       - (InCte (Column e0p target_id) _filter_b id)
   duckdb:
     expect:
-      - (FilterSteps (Hop 0 (Definitions a b) (Predicates ...)) (Hop 1 (Definitions) (Predicates (InCte (Column e1 source_id) _filter_b id))))
+      - (Definitions (Keys _filter_a _) (Keys _filter_b _))
+      - (InCte (Column e1 source_id) _filter_b id)

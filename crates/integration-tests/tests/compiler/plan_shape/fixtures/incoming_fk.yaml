@@ -18,7 +18,7 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (FkStar canceled))
+      - (Strategy (FkStar canceled _))
       - (Column canceled auto_canceled_by_id)
       - (Scan gl_pipeline canceled Final)
     reject:

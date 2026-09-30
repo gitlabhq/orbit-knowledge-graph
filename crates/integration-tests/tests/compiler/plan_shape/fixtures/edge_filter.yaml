@@ -22,5 +22,5 @@ physical:
       - (= (Column e0 target_id) (Literal 2))
   duckdb:
     expect:
-      - (Strategy (Flat (Filter ...)))
+      - (Strategy (Flat (Join INNER (= (Column callee id) (Column e0 target_id)) _ (Scope callee _))))
       - (= (Column e0 target_id) (Literal 2))

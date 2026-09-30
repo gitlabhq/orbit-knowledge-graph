@@ -1,41 +1,63 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, Query, SelectExpr, TableRef};
-use crate::error::Result;
-use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
+use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use crate::passes::shared::latest_row_dedup;
 
 use super::{EmitOutput, NodeBinding};
 
-pub(super) fn emit(plan: &PhysicalPlan) -> Result<EmitOutput> {
+pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
     let mut output = emit_source(&plan.source);
     output.select = plan.outputs.clone();
-    Ok(output)
+    output.edge_aliases = plan.edge_aliases.clone();
+    output.edge_if_predicates = plan.edge_if_predicates.clone();
+    output.ctes = plan
+        .definitions
+        .iter()
+        .map(|(name, keys)| Cte::new(name, query(keys)))
+        .collect();
+    output.nodes = plan
+        .bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.node.clone(),
+                NodeBinding::source(
+                    &binding.alias,
+                    &binding.column,
+                    binding.joined.then(|| binding.node.clone()),
+                ),
+            )
+        })
+        .collect();
+    output
+}
+
+pub(super) fn emit(plan: &PhysicalPlan) -> EmitOutput {
+    let mut output = emit_source(&plan.source);
+    output.select = plan.outputs.clone();
+    output
 }
 
 pub(super) fn query(plan: &PhysicalPlan) -> Query {
-    if let PhysicalSource::Latest {
-        alias,
-        sort_key,
-        input,
-    } = &plan.source
-    {
-        let output = emit_source(input);
-        let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-        return Query {
-            select: plan.outputs.clone(),
-            from: output.from,
-            where_clause: Expr::conjoin(output.where_parts),
-            order_by,
-            limit_by,
-            ..Default::default()
-        };
-    }
-    let output = emit_source(&plan.source);
+    let (source, order_by, limit_by) = match &plan.source {
+        PhysicalSource::Latest {
+            alias,
+            sort_key,
+            input,
+        } => {
+            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+            (input.as_ref(), order_by, limit_by)
+        }
+        source => (source, vec![], None),
+    };
+    let output = emit_source(source);
     Query {
         select: plan.outputs.clone(),
         from: output.from,
         where_clause: Expr::conjoin(output.where_parts),
+        order_by,
+        limit_by,
         ..Default::default()
     }
 }
@@ -90,13 +112,19 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             });
             output
         }
-        PhysicalSource::Scope { alias, input } => {
+        PhysicalSource::Scope { alias, input } | PhysicalSource::Latest { alias, input, .. } => {
             let mut output = emit_source(input);
+            let (order_by, limit_by) = match plan {
+                PhysicalSource::Latest { sort_key, .. } => latest_row_dedup(alias, sort_key),
+                _ => (vec![], None),
+            };
             output.from = TableRef::subquery(
                 Query {
                     select: vec![SelectExpr::star()],
                     from: output.from,
                     where_clause: Expr::conjoin(std::mem::take(&mut output.where_parts)),
+                    order_by,
+                    limit_by,
                     ..Default::default()
                 },
                 alias,
@@ -115,26 +143,6 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             left.where_parts.extend(right.where_parts);
             left.nodes.extend(right.nodes);
             left
-        }
-        PhysicalSource::Latest {
-            sort_key,
-            alias,
-            input,
-        } => {
-            let mut output = emit_source(input);
-            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-            output.from = TableRef::subquery(
-                Query {
-                    select: vec![SelectExpr::star()],
-                    from: output.from,
-                    where_clause: Expr::conjoin(std::mem::take(&mut output.where_parts)),
-                    order_by,
-                    limit_by,
-                    ..Default::default()
-                },
-                alias,
-            );
-            output
         }
     }
 }

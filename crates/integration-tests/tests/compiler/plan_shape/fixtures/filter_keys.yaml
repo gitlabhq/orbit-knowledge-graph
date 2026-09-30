@@ -20,7 +20,7 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (FkStar mr))
+      - (Strategy (FkStar mr _))
       - '(Cte _filter_u (Query (Ctes) (Select (Output id (Column u id))) (Scan gl_user u Final) (Where (AND (= (Column u username) (Literal "\"alice\"")) (= (Column u _deleted) (Literal false)))) ...))'
       - (InCte (Column mr author_id) _filter_u id)
     reject:
