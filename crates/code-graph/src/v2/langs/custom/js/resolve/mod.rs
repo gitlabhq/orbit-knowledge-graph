@@ -764,28 +764,17 @@ mod tests {
     use super::*;
     use crate::v2::langs::custom::js::JsModuleGraphBuilder;
     use crate::v2::langs::custom::js::extract::analyze_files;
+    use crate::v2::pipeline::{VIRTUAL_ROOT, testing};
     use std::sync::Arc;
 
     #[test]
     fn an_armed_kill_flag_stops_local_call_resolution() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let root = temp.path();
-        std::fs::write(
-            root.join("a.js"),
-            "function target() { return 1; }\nexport function caller() { return target(); }\n",
-        )
-        .unwrap();
-
-        let files = vec!["a.js".to_string()];
-        let root_path = root.to_str().expect("utf8 root path");
-        let (analyzed, _) = analyze_files(
-            &files,
-            root_path,
-            None,
-            &Default::default(),
-            &crate::v2::pipeline::SilentProgress,
-        );
-        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let (ctx, files) = testing::repo(&[(
+            "a.js",
+            b"function target() { return 1; }\nexport function caller() { return target(); }\n",
+        )]);
+        let (analyzed, _) = analyze_files(&files, &ctx, None, &crate::v2::pipeline::SilentProgress);
+        let mut builder = JsModuleGraphBuilder::new(VIRTUAL_ROOT.to_string());
         let mut infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved = Vec::new();
         for file in analyzed {

@@ -3,10 +3,11 @@
 //! for resolvers, or is only recorded, and why.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 pub use code_graph::v2::error::{AbortPhase, FileFault, FileReason, FileSkip};
-use orbit_utils::files::{Inventory, SourceError, disk};
+use orbit_utils::files::{Inventory, SourceError, Vfs, disk};
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -14,14 +15,19 @@ pub fn code_filter() -> CodeFilter {
     CodeFilter::new(Some(MAX_FILE_BYTES), None, detect_language_from_path)
 }
 
-/// Every file of a repository on disk, honouring `.gitignore`.
-pub fn walk(root: &Path) -> Result<Inventory, SourceError> {
-    disk::discover(root, &code_filter())
+/// Every file of a repository on disk, honouring `.gitignore`, and the
+/// filesystem its loadable files are reachable through.
+pub fn walk(root: &Path) -> Result<(Arc<Vfs>, Inventory), SourceError> {
+    let repo = Vfs::default();
+    let inventory = disk::discover(root, &code_filter(), &repo)?;
+    Ok((Arc::new(repo), inventory))
 }
 
 /// The named files under `root`; for a change set, where a walk is not wanted.
-pub fn classify(root: &Path, paths: Vec<String>) -> Result<Inventory, SourceError> {
-    disk::discover_paths(root, paths, &code_filter())
+pub fn classify(root: &Path, paths: Vec<String>) -> Result<(Arc<Vfs>, Inventory), SourceError> {
+    let repo = Vfs::default();
+    let inventory = disk::discover_paths(root, paths, &code_filter(), &repo)?;
+    Ok((Arc::new(repo), inventory))
 }
 
 /// The reason a file that overran a budget carries, in production's labels.

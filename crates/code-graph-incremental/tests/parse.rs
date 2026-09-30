@@ -15,10 +15,10 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
-    let entries = inventory::walk(root).unwrap().into_inner();
+    let (repo, entries) = inventory::walk(root).unwrap();
     let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
+        repo,
+        entries: entries.into_inner(),
     };
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)
@@ -45,7 +45,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let path = format!("a.{}", entry.extensions()[0]);
         write_all(repo.path(), &[(&path, b"x")]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let classified = inventory::walk(repo.path()).unwrap().into_inner()[0].decision;
+        let classified = inventory::walk(repo.path()).unwrap().1[0].decision;
 
         let parsed = parse_repo(&env, repo.path());
 
@@ -117,10 +117,11 @@ fn classify_agrees_with_walk() {
     write_all(repo.path(), &files);
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
-    let walked = inventory::walk(repo.path()).unwrap().into_inner();
+    let walked = inventory::walk(repo.path()).unwrap().1.into_inner();
     let paths = walked.iter().map(|e| e.path.clone()).collect();
     let classified = inventory::classify(repo.path(), paths)
         .unwrap()
+        .1
         .into_inner();
 
     assert_eq!(walked.len(), files.len() + 1);

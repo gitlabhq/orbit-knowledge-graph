@@ -20,8 +20,6 @@ struct EmbeddedSysrootAssets;
 
 pub(super) struct EmbeddedSysroot {
     _tempdir: TempDir,
-    #[cfg(test)]
-    root_path: PathBuf,
     root: AbsPathBuf,
     project_json: ProjectJson,
     cached_sysroot: OnceLock<Sysroot>,
@@ -31,8 +29,6 @@ impl EmbeddedSysroot {
     pub(super) fn materialize() -> Result<Self> {
         let tempdir = tempfile::tempdir().context("failed to create embedded Rust sysroot dir")?;
         write_assets(tempdir.path())?;
-        #[cfg(test)]
-        let root_path = canonical_path(tempdir.path());
         let root = utf8_abs_path(tempdir.path())?;
         let project_json = load_project_json(&root)?;
         tracing::debug!(
@@ -42,8 +38,6 @@ impl EmbeddedSysroot {
 
         Ok(Self {
             _tempdir: tempdir,
-            #[cfg(test)]
-            root_path,
             root,
             project_json,
             cached_sysroot: OnceLock::new(),
@@ -74,9 +68,9 @@ impl EmbeddedSysroot {
         Ok(sysroot)
     }
 
-    #[cfg(test)]
+    /// Where the assets are on disk, as rust-analyzer will name them.
     pub(super) fn root_path(&self) -> &Path {
-        &self.root_path
+        self.root.as_ref()
     }
 }
 

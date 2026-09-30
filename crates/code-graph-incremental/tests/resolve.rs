@@ -38,10 +38,10 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
+    let (repo, entries) = inventory::walk(root).unwrap();
     let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
+        repo,
+        entries: entries.into_inner(),
     };
     let (context, resolved) = Pipeline::new(Context::new(env), sources)
         .then(Prepare)

@@ -28,10 +28,10 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    let entries = inventory::walk(root).unwrap().into_inner();
+    let (repo, entries) = inventory::walk(root).unwrap();
     let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
+        repo,
+        entries: entries.into_inner(),
     };
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)

@@ -1,9 +1,9 @@
 //! Named workflows. Each one composes phases and nothing else; callers
 //! compose their own when they need to stop somewhere in between.
 
-use std::path::Path;
+use std::sync::Arc;
 
-use orbit_utils::files::File;
+use orbit_utils::files::{File, Vfs};
 
 use crate::error::Error;
 use crate::pipeline::{
@@ -16,14 +16,14 @@ use crate::pipeline::{
 /// carrying the reason it was not parsed.
 pub fn index<'e, S>(
     context: Context<'e>,
-    root: &Path,
+    repo: Arc<Vfs>,
     inventory: S,
 ) -> Result<Pipeline<'e, Resolved>, Error>
 where
     S: IntoIterator<Item = File>,
 {
     let sources = Sources {
-        root: root.to_path_buf(),
+        repo,
         entries: inventory.into_iter().collect(),
     };
     Pipeline::new(context, sources)
@@ -38,12 +38,12 @@ where
 pub fn reindex<'e>(
     context: Context<'e>,
     state: State,
-    root: &Path,
+    repo: Arc<Vfs>,
     changes: Changes,
 ) -> Result<Pipeline<'e, Resolved>, Error> {
     let input = ReindexInput {
         state,
-        root: root.to_path_buf(),
+        repo,
         changes,
     };
     Pipeline::new(context, input)

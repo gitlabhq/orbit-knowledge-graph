@@ -1,5 +1,5 @@
 use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
-use crate::v2::error::FileReason;
+use crate::v2::error::{FaultedFile, FileFault, FileReason, FileSkip, SkippedFile};
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
 use petgraph::graph::NodeIndex;
@@ -27,9 +27,11 @@ pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
 
 pub type FileInput = String;
 
+#[derive(Debug, Clone)]
 pub struct FamilyFileInput {
     pub language: Language,
     pub path: FileInput,
+    pub size: u64,
     /// Whether the content passes already ran on this file; if not, its
     /// parser runs them on the bytes it reads.
     pub checked: bool,
@@ -65,6 +67,7 @@ fn group_parseable_inventory(
             .push(FamilyFileInput {
                 language: lang,
                 path: entry.path.clone(),
+                size: entry.size,
                 checked: entry.checked,
             });
     }
@@ -73,12 +76,11 @@ fn group_parseable_inventory(
 }
 
 fn build_file_inventory_graph(
-    root: &Path,
     inventory: &[File],
     parsed_file_languages: &FxHashMap<String, Language>,
     reasons: &FxHashMap<&str, FileReason>,
 ) -> CodeGraph {
-    let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
+    let mut graph = CodeGraph::new_with_root(VIRTUAL_ROOT.to_string());
     for entry in inventory {
         let language = parsed_file_languages.get(&entry.path).copied();
         let reason = reasons
@@ -259,10 +261,14 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
 /// Max file timing entries retained (top-N by total_ms).
 const MAX_FILE_TIMINGS: usize = 100;
 
+/// Every path the pipeline hands a parser or resolver is repository-relative;
+/// the repository root is `/`.
+pub const VIRTUAL_ROOT: &str = "/";
+
 pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
-    pub root_path: String,
+    pub vfs: Arc<Vfs>,
     /// Per-file benign skips. Surface under
     /// `gkg.indexer.code.files.skipped{reason}`.
     pub skipped: std::sync::Mutex<Vec<crate::v2::error::SkippedFile>>,
@@ -274,10 +280,45 @@ pub struct PipelineContext {
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
 }
 
+/// Why a file yielded no source: turned down by policy, or unreadable.
+pub enum Unread {
+    Skip(FileSkip, String),
+    Fault(FileFault, String),
+}
+
 impl PipelineContext {
+    pub fn new(vfs: Arc<Vfs>, config: PipelineConfig, tracer: Tracer) -> Self {
+        Self {
+            config,
+            tracer,
+            vfs,
+            skipped: std::sync::Mutex::new(Vec::new()),
+            faults: std::sync::Mutex::new(Vec::new()),
+            file_timings: std::sync::Mutex::new(Vec::new()),
+            language_timings: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.config.cancel.is_cancelled()
+    }
+
+    /// The one read of a file to parse. Runs the content passes on the
+    /// bytes if the source left that to us; they may still turn it down.
+    pub fn read_source(&self, input: &FamilyFileInput) -> Result<Arc<[u8]>, Unread> {
+        let source = self
+            .vfs
+            .read(Path::new(&input.path))
+            .map_err(|e| Unread::Fault(FileFault::FileRead, e.to_string()))?;
+        if !input.checked {
+            let mut file = File::new(input.path.clone(), source.len() as u64);
+            orbit_utils::files::check(&self.config.passes, &mut file, &source);
+            if let Some(reason) = file.label.skip {
+                return Err(Unread::Skip(FileSkip::Filter(reason), String::new()));
+            }
+        }
+        Ok(source)
     }
 
     pub fn record_skip(
@@ -373,7 +414,12 @@ impl LanguageContext {
 
     #[inline]
     pub fn root_path(&self) -> &str {
-        &self.pipeline.root_path
+        VIRTUAL_ROOT
+    }
+
+    #[inline]
+    pub fn vfs(&self) -> &Vfs {
+        &self.pipeline.vfs
     }
 
     #[inline]
@@ -535,7 +581,7 @@ fn write_graph_direct(
 
 pub trait LanguagePipeline {
     fn process_files(
-        files: &[FileInput],
+        files: &[FamilyFileInput],
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>>;
@@ -609,7 +655,7 @@ impl Default for PipelineConfig {
     }
 }
 
-pub use orbit_utils::files::{Decision, File, Inventory, Pass};
+pub use orbit_utils::files::{Decision, File, Inventory, Pass, Vfs};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -733,14 +779,14 @@ pub struct Pipeline;
 
 impl Pipeline {
     pub fn run(
-        root: &Path,
+        vfs: Arc<Vfs>,
         file_inventory: Arc<Inventory>,
         config: PipelineConfig,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
         Self::run_with_tracer(
-            root,
+            vfs,
             file_inventory,
             config,
             Tracer::new(false),
@@ -751,14 +797,13 @@ impl Pipeline {
 
     /// Blocks until all languages finish processing.
     pub fn run_with_tracer(
-        root: &Path,
+        vfs: Arc<Vfs>,
         file_inventory: Arc<Inventory>,
         mut config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
-        let root_str = root.to_string_lossy().to_string();
         config.emit_file_inventory_graph = true;
         let t_pipeline = std::time::Instant::now();
 
@@ -783,15 +828,7 @@ impl Pipeline {
             .progress
             .discovery_finished(total_files, parsable_files, &files_per_family);
 
-        let ctx = Arc::new(PipelineContext {
-            config,
-            tracer,
-            root_path: root_str,
-            skipped: std::sync::Mutex::new(Vec::new()),
-            faults: std::sync::Mutex::new(Vec::new()),
-            file_timings: std::sync::Mutex::new(Vec::new()),
-            language_timings: std::sync::Mutex::new(Vec::new()),
-        });
+        let ctx = Arc::new(PipelineContext::new(vfs, config, tracer));
 
         // 2. Process languages with bounded concurrency. At most
         //    max_concurrent_languages run at once (default 2), each
@@ -1018,7 +1055,7 @@ impl Pipeline {
                 reasons.insert(f.path.as_str(), FileReason::Fault(f.kind));
             }
             let structural_graph =
-                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages, &reasons);
+                build_file_inventory_graph(&file_inventory, &parsed_file_languages, &reasons);
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -1098,25 +1135,23 @@ where
     }
 
     fn process_files(
-        files: &[FileInput],
+        files: &[FamilyFileInput],
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
-        let language = P::language();
         let lctx = Self::lang_ctx(ctx).expect("GenericPipeline must provide lang_ctx");
         let mut member_ctxs = rustc_hash::FxHashMap::default();
-        member_ctxs.insert(language, lctx);
-
-        let family_files: Vec<FamilyFileInput> = files
+        member_ctxs.insert(P::language(), lctx);
+        // Dispatched by pipeline, every file parses as this language whatever
+        // its extension says.
+        let files: Vec<FamilyFileInput> = files
             .iter()
-            .map(|path| FamilyFileInput {
-                language,
-                path: path.clone(),
-                checked: true,
+            .map(|f| FamilyFileInput {
+                language: P::language(),
+                ..f.clone()
             })
             .collect();
-
-        FamilyPipeline::run(&family_files, &member_ctxs, ctx, btx)
+        FamilyPipeline::run(&files, &member_ctxs, ctx, btx)
     }
 }
 
@@ -1136,7 +1171,6 @@ impl FamilyPipeline {
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
         let file_count = files.len();
-        let root_path = ctx.root_path.clone();
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
@@ -1190,7 +1224,6 @@ impl FamilyPipeline {
         let progress = ctx.config.progress.as_ref();
 
         use crate::v2::dsl::engine::ParseFullResult;
-        use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
@@ -1227,10 +1260,8 @@ impl FamilyPipeline {
                     return None;
                 }
                 let lctx = &member_ctxs[&f.language];
-                let abs_path = format!("{root_path}/{}", f.path);
                 if let Some(limit) = parser_max_file_size(f.language)
-                    && let Ok(metadata) = std::fs::metadata(&abs_path)
-                    && metadata.len() > limit
+                    && f.size > limit
                 {
                     progress.files_advanced(ProgressPhase::Parse, 1);
                     return Some(ParseOutcome::Skip(SkippedFile {
@@ -1238,36 +1269,28 @@ impl FamilyPipeline {
                         kind: FileSkip::ParserOversize,
                         detail: format!(
                             "{} file is {} bytes, parser limit is {} bytes",
-                            f.language,
-                            metadata.len(),
-                            limit
+                            f.language, f.size, limit
                         ),
                     }));
                 }
-                let source = match std::fs::read(&abs_path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::debug!(path = f.path, error = %e, "failed to read file");
+                let source = match ctx.read_source(f) {
+                    Ok(source) => source,
+                    Err(unread) => {
                         progress.files_advanced(ProgressPhase::Parse, 1);
-                        return Some(ParseOutcome::Err(FaultedFile {
-                            path: f.path.to_string(),
-                            kind: FileFault::FileRead,
-                            detail: e.to_string(),
-                        }));
+                        return Some(match unread {
+                            Unread::Skip(kind, detail) => ParseOutcome::Skip(SkippedFile {
+                                path: f.path.clone(),
+                                kind,
+                                detail,
+                            }),
+                            Unread::Fault(kind, detail) => ParseOutcome::Err(FaultedFile {
+                                path: f.path.clone(),
+                                kind,
+                                detail,
+                            }),
+                        });
                     }
                 };
-                if !f.checked {
-                    let mut file = File::new(f.path.clone(), source.len() as u64);
-                    orbit_utils::files::check(&ctx.config.passes, &mut file, &source);
-                    if let Some(reason) = file.label.skip {
-                        progress.files_advanced(ProgressPhase::Parse, 1);
-                        return Some(ParseOutcome::Skip(SkippedFile {
-                            path: f.path.clone(),
-                            kind: FileSkip::Filter(reason),
-                            detail: String::new(),
-                        }));
-                    }
-                }
 
                 breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
@@ -1380,7 +1403,8 @@ impl FamilyPipeline {
             file_size: u64,
         }
 
-        let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
+        let mut graph =
+            CodeGraph::new_with_root(VIRTUAL_ROOT.to_string()).with_rules(primary_rules);
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -1714,14 +1738,7 @@ impl FamilyPipeline {
 
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
-        let total_bytes: u64 = files
-            .iter()
-            .map(|f| {
-                std::fs::metadata(format!("{root_path}/{}", f.path))
-                    .map(|m| m.len())
-                    .unwrap_or(0)
-            })
-            .sum();
+        let total_bytes: u64 = files.iter().map(|f| f.size).sum();
 
         ctx.record_language_timing(LanguageTimings {
             language: format!(
@@ -1748,6 +1765,32 @@ impl FamilyPipeline {
 
         btx.send_graph(graph);
         Ok(())
+    }
+}
+
+/// An in-memory repository for tests: every file goes in the filesystem,
+/// every file with a known language becomes a parse input.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+
+    pub(crate) fn repo(files: &[(&str, &[u8])]) -> (Arc<PipelineContext>, Vec<FamilyFileInput>) {
+        let vfs = Vfs::default();
+        let mut inputs = Vec::new();
+        for (path, bytes) in files {
+            vfs.write(path, bytes.to_vec()).unwrap();
+            if let Some(language) = detect_language_from_path(path) {
+                inputs.push(FamilyFileInput {
+                    language,
+                    path: path.to_string(),
+                    size: bytes.len() as u64,
+                    checked: true,
+                });
+            }
+        }
+        let ctx =
+            PipelineContext::new(Arc::new(vfs), PipelineConfig::default(), Tracer::new(false));
+        (Arc::new(ctx), inputs)
     }
 }
 
@@ -1812,16 +1855,43 @@ mod tests {
         format!("{manifest}/../../fixtures/code/{relative}")
     }
 
+    /// A checkout's files, linked where they are, run through the pipeline.
+    fn run_linked(
+        root: &Path,
+        inventory: Inventory,
+        config: PipelineConfig,
+        tracer: Tracer,
+        converter: Arc<dyn GraphConverter>,
+        on_batch: Arc<OnBatch>,
+    ) -> PipelineResult {
+        let vfs = Arc::new(Vfs::default());
+        for file in inventory.iter() {
+            vfs.link(&file.path, root.join(&file.path), file.size);
+        }
+        Pipeline::run_with_tracer(
+            vfs,
+            Arc::new(inventory),
+            config,
+            tracer,
+            converter,
+            on_batch,
+        )
+    }
+
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let ctx = Arc::new(PipelineContext {
-            config: PipelineConfig::default(),
-            tracer: crate::v2::trace::Tracer::new(false),
-            root_path: "/".to_string(),
-            skipped: std::sync::Mutex::new(Vec::new()),
-            faults: std::sync::Mutex::new(Vec::new()),
-            file_timings: std::sync::Mutex::new(Vec::new()),
-            language_timings: std::sync::Mutex::new(Vec::new()),
-        });
+        let vfs = Vfs::default();
+        let name = Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let size = std::fs::metadata(path).unwrap().len();
+        vfs.link(&name, Path::new(path).to_path_buf(), size);
+        let ctx = Arc::new(PipelineContext::new(
+            Arc::new(vfs),
+            PipelineConfig::default(),
+            Tracer::new(false),
+        ));
         let capture = Arc::new(TestCapture::new());
         let noop = |_: &str, _: RecordBatch| Ok(());
         let null_batch: &OnBatch = &noop;
@@ -1837,7 +1907,13 @@ mod tests {
             &errors,
             GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
         );
-        crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
+        let input = FamilyFileInput {
+            language,
+            path: name,
+            size,
+            checked: true,
+        };
+        crate::v2::registry::dispatch_language(language, &[input], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         let mut graphs = capture.take();
@@ -1867,16 +1943,16 @@ mod tests {
         let file = std::fs::File::create(&path).unwrap();
         file.set_len(GO_PARSER_MAX_FILE_SIZE + 1).unwrap();
 
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
@@ -1900,16 +1976,16 @@ mod tests {
         let file = std::fs::File::create(&path).unwrap();
         file.set_len(YAML_PARSER_MAX_FILE_SIZE + 1).unwrap();
 
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "openapi_v3.yaml".into(),
                 size: YAML_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
@@ -1932,16 +2008,16 @@ mod tests {
         let source = "def f(x):\n    return x + 1\n";
         std::fs::write(root.join("main.py"), source).unwrap();
 
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "main.py".into(),
                 size: source.len() as u64,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
                 per_file_walk_timeout: Some(std::time::Duration::ZERO),
@@ -1975,9 +2051,9 @@ mod tests {
 
         let calls = Arc::new(AtomicUsize::new(0));
         let calls_cb = calls.clone();
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![
+            Inventory::new(vec![
                 File {
                     path: "a.py".into(),
                     size: 22,
@@ -1994,7 +2070,7 @@ mod tests {
                     symlink: false,
                     checked: true,
                 },
-            ])),
+            ]),
             PipelineConfig {
                 on_phase_cpu: Some(Arc::new(move |_lang, _cpu| {
                     calls_cb.fetch_add(1, Ordering::Relaxed);
@@ -2020,16 +2096,16 @@ mod tests {
         let root = tmp.path();
         std::fs::write(root.join("main.go"), "package main\nfunc main() {}\n").unwrap();
 
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
@@ -2059,16 +2135,16 @@ mod tests {
         let root = tmp.path();
         std::fs::write(root.join("main.go"), "package main\nfunc main() {}\n").unwrap();
 
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
@@ -2137,9 +2213,9 @@ mod tests {
         ]);
 
         let capture = Arc::new(TestCapture::new());
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(inventory),
+            inventory,
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2182,16 +2258,16 @@ mod tests {
         std::fs::write(root.join("unlisted.py"), "def unlisted(): pass\n").unwrap();
 
         let capture = Arc::new(TestCapture::new());
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![File {
+            Inventory::new(vec![File {
                 path: "listed.py".into(),
                 size: 19,
                 decision: Decision::Parse,
                 label: Default::default(),
                 symlink: false,
                 checked: true,
-            }])),
+            }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2356,9 +2432,9 @@ namespace MyApp {
         .unwrap();
 
         let capture = Arc::new(TestCapture::new());
-        let result = Pipeline::run_with_tracer(
+        let result = run_linked(
             root,
-            Arc::new(Inventory::new(vec![
+            Inventory::new(vec![
                 File {
                     path: "app.py".into(),
                     size: 0,
@@ -2391,7 +2467,7 @@ namespace MyApp {
                     symlink: false,
                     checked: true,
                 },
-            ])),
+            ]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2446,15 +2522,11 @@ namespace MyApp {
 
     #[test]
     fn record_skip_and_fault_route_to_distinct_collections() {
-        let ctx = Arc::new(PipelineContext {
-            config: PipelineConfig::default(),
-            tracer: crate::v2::trace::Tracer::new(false),
-            root_path: "/".to_string(),
-            skipped: std::sync::Mutex::new(Vec::new()),
-            faults: std::sync::Mutex::new(Vec::new()),
-            file_timings: std::sync::Mutex::new(Vec::new()),
-            language_timings: std::sync::Mutex::new(Vec::new()),
-        });
+        let ctx = Arc::new(PipelineContext::new(
+            Arc::new(Vfs::default()),
+            PipelineConfig::default(),
+            Tracer::new(false),
+        ));
         ctx.record_skip(
             "src/slow.rs",
             crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Ssa),
@@ -2531,9 +2603,9 @@ namespace MyApp {
             .collect();
         let progress = Arc::new(RecordingProgress::default());
 
-        Pipeline::run_with_tracer(
+        run_linked(
             root,
-            Arc::new(Inventory::new(inventory)),
+            Inventory::new(inventory),
             PipelineConfig {
                 progress: progress.clone(),
                 ..Default::default()

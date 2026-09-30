@@ -25,8 +25,8 @@ use crate::v2::langs::generic::zig::{ZigDsl, ZigRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
-    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
-    PipelineContext, PipelineError,
+    BatchTx, FamilyFileInput, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext,
+    PipelineError,
 };
 
 /// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics.
@@ -45,7 +45,7 @@ macro_rules! register_v2_pipelines {
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_language(
             language: Language,
-            files: &[FileInput],
+            files: &[FamilyFileInput],
             ctx: &Arc<PipelineContext>,
             btx: &BatchTx<'_>,
         ) -> Option<Result<(), Vec<PipelineError>>> {
@@ -73,7 +73,7 @@ macro_rules! register_v2_pipelines {
     (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_by_tag(
             tag: &str,
-            files: &[FileInput],
+            files: &[FamilyFileInput],
             ctx: &Arc<PipelineContext>,
             btx: &BatchTx<'_>,
         ) -> Option<Result<(), Vec<PipelineError>>> {
@@ -131,8 +131,7 @@ pub fn dispatch_family(
     // Avoids building the family machinery for the common single-language case.
     if languages.len() == 1 {
         let lang = *languages.iter().next().unwrap();
-        let paths: Vec<FileInput> = files.iter().map(|f| f.path.clone()).collect();
-        return dispatch_language(lang, &paths, ctx, btx);
+        return dispatch_language(lang, files, ctx, btx);
     }
 
     let mut member_ctxs: rustc_hash::FxHashMap<Language, Arc<LanguageContext>> =
@@ -150,10 +149,10 @@ pub fn dispatch_family(
     }
 
     if has_custom {
-        let mut by_lang: rustc_hash::FxHashMap<Language, Vec<FileInput>> =
+        let mut by_lang: rustc_hash::FxHashMap<Language, Vec<FamilyFileInput>> =
             rustc_hash::FxHashMap::default();
         for f in files {
-            by_lang.entry(f.language).or_default().push(f.path.clone());
+            by_lang.entry(f.language).or_default().push(f.clone());
         }
         let mut all_errors: Vec<PipelineError> = Vec::new();
         let mut any_matched = false;
@@ -204,15 +203,11 @@ mod tests {
     }
 
     fn test_ctx() -> Arc<PipelineContext> {
-        Arc::new(PipelineContext {
-            config: PipelineConfig::default(),
-            tracer: crate::v2::trace::Tracer::new(false),
-            root_path: "/".to_string(),
-            skipped: std::sync::Mutex::new(Vec::new()),
-            faults: std::sync::Mutex::new(Vec::new()),
-            file_timings: std::sync::Mutex::new(Vec::new()),
-            language_timings: std::sync::Mutex::new(Vec::new()),
-        })
+        Arc::new(PipelineContext::new(
+            Arc::new(orbit_utils::files::Vfs::default()),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+        ))
     }
 
     fn noop_on_batch()

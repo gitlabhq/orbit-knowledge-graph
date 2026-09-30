@@ -1,6 +1,5 @@
 //! A job that outruns its budget cancels the run; the work it started must stop.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -8,8 +7,8 @@ use std::time::Duration;
 
 use code_graph::v2::config::Language;
 use code_graph::v2::{
-    BatchTx, CancellationToken, GraphConverter, GraphStatsCounters, PipelineConfig,
-    PipelineContext, dispatch_language,
+    BatchTx, CancellationToken, FamilyFileInput, GraphConverter, GraphStatsCounters,
+    PipelineConfig, PipelineContext, Vfs, dispatch_language,
 };
 
 struct NoopConverter;
@@ -23,23 +22,19 @@ impl GraphConverter for NoopConverter {
     }
 }
 
-fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
-    Arc::new(PipelineContext {
-        config: PipelineConfig {
+fn context(repo: Vfs, cancel: CancellationToken) -> Arc<PipelineContext> {
+    Arc::new(PipelineContext::new(
+        Arc::new(repo),
+        PipelineConfig {
             cancel,
             ..Default::default()
         },
-        tracer: code_graph::v2::trace::Tracer::new(false),
-        root_path: root.to_string_lossy().into_owned(),
-        skipped: Mutex::new(Vec::new()),
-        faults: Mutex::new(Vec::new()),
-        file_timings: Mutex::new(Vec::new()),
-        language_timings: Mutex::new(Vec::new()),
-    })
+        code_graph::v2::trace::Tracer::new(false),
+    ))
 }
 
 /// Bypasses the orchestrator's pre-spawn cancellation check.
-fn dispatch(language: Language, ctx: &Arc<PipelineContext>, files: &[String]) -> usize {
+fn dispatch(language: Language, ctx: &Arc<PipelineContext>, files: &[FamilyFileInput]) -> usize {
     let converter = NoopConverter;
     let on_batch = |_: &str, _: arrow::record_batch::RecordBatch| Ok(());
     let directories = AtomicUsize::new(0);
@@ -64,15 +59,19 @@ fn graphed_files(ctx: &Arc<PipelineContext>) -> usize {
     ctx.file_timings.lock().unwrap().len()
 }
 
-fn write(root: &Path, relative: &str, body: &str) -> String {
-    let path = root.join(relative);
-    std::fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
-    std::fs::write(&path, body).expect("write fixture");
-    relative.to_string()
+fn write(repo: &Vfs, relative: &str, language: Language, body: &str) -> FamilyFileInput {
+    repo.write(relative, body.as_bytes().to_vec())
+        .expect("write fixture");
+    FamilyFileInput {
+        language,
+        path: relative.to_string(),
+        size: body.len() as u64,
+        checked: true,
+    }
 }
 
 /// Each file is costly enough to graph that one loop iteration dwarfs the watcher's poll.
-fn many_definitions_fixture(root: &Path, files: usize) -> Vec<String> {
+fn many_definitions_fixture(repo: &Vfs, files: usize) -> Vec<FamilyFileInput> {
     let mut body = String::new();
     for symbol in 0..400 {
         body.push_str(&format!(
@@ -80,7 +79,14 @@ fn many_definitions_fixture(root: &Path, files: usize) -> Vec<String> {
         ));
     }
     (0..files)
-        .map(|file| write(root, &format!("packages/mod{file}/gen.js"), &body))
+        .map(|file| {
+            write(
+                repo,
+                &format!("packages/mod{file}/gen.js"),
+                Language::JavaScript,
+                &body,
+            )
+        })
         .collect()
 }
 
@@ -105,12 +111,11 @@ fn cancel_at_progress(
 }
 
 fn run_cancelled_at(at_files: usize, files_in_repo: usize) -> (Arc<PipelineContext>, usize) {
-    let tmp = tempfile::tempdir().expect("temp dir");
-    let root = tmp.path();
-    let files = many_definitions_fixture(root, files_in_repo);
+    let repo = Vfs::default();
+    let files = many_definitions_fixture(&repo, files_in_repo);
 
     let cancel = CancellationToken::new();
-    let ctx = context(root, cancel.clone());
+    let ctx = context(repo, cancel.clone());
     let (finished, watcher) = cancel_at_progress(&ctx, cancel, at_files);
 
     let definitions = dispatch(Language::JavaScript, &ctx, &files);
@@ -149,13 +154,17 @@ fn cancelling_after_the_last_file_stops_javascript_resolution() {
 
 #[test]
 fn a_cancelled_rust_run_builds_no_graph() {
-    let tmp = tempfile::tempdir().expect("temp dir");
-    let root = tmp.path();
-    let files = vec![write(root, "a.rs", "pub fn a() -> u32 { 1 }\n")];
+    let repo = Vfs::default();
+    let files = vec![write(
+        &repo,
+        "a.rs",
+        Language::Rust,
+        "pub fn a() -> u32 { 1 }\n",
+    )];
 
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let ctx = context(root, cancel);
+    let ctx = context(repo, cancel);
     let definitions = dispatch(Language::Rust, &ctx, &files);
 
     assert!(

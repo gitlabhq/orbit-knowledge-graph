@@ -22,10 +22,10 @@ def run():
 ";
 
 fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Canonical>, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
+    let (repo, entries) = inventory::walk(root).unwrap();
     let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
+        repo,
+        entries: entries.into_inner(),
     };
     let (context, workset) = Pipeline::new(Context::new(env), sources)
         .then(Prepare)

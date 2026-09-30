@@ -1,22 +1,20 @@
 //! What flows through the pipeline. Each artifact is a checkpoint: holding
 //! one says which phases may follow.
 
-use std::path::PathBuf;
-
 use std::sync::{Arc, Mutex};
 
 use crate::inventory::FileReason;
 use arrow::record_batch::RecordBatch;
-use orbit_utils::files::File;
+use orbit_utils::files::{File, Vfs};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{SourceFile, State};
 use crate::tree::{Edge, Tree};
 
-/// A repository's classified files; parse entries are read from `root` as
+/// A repository's classified files; parse entries are read from `repo` as
 /// workers take them.
 pub struct Sources {
-    pub root: PathBuf,
+    pub repo: Arc<Vfs>,
     pub entries: Vec<File>,
 }
 
@@ -28,7 +26,7 @@ pub struct Changes {
 
 pub struct ReindexInput {
     pub state: State,
-    pub root: PathBuf,
+    pub repo: Arc<Vfs>,
     pub changes: Changes,
 }
 

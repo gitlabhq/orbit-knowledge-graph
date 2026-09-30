@@ -161,6 +161,11 @@ impl Vfs {
         lock(&self.paths).len()
     }
 
+    /// Every file path, repository-relative, in no particular order.
+    pub fn paths(&self) -> Vec<String> {
+        lock(&self.paths).keys().cloned().collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

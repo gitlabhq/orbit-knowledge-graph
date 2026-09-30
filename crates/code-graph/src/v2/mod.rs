@@ -20,7 +20,7 @@ pub use pipeline::{
     BatchTx, CancellationToken, Decision, FamilyFileCount, FamilyFileInput, FamilyPipeline, File,
     FileInput, FileTimingEntry, GenericPipeline, GraphStatsCounters, Inventory, LanguageContext,
     LanguagePipeline, LanguageTimings, PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig,
-    PipelineContext, PipelineResult, ProgressObserver, ProgressPhase, SilentProgress,
+    PipelineContext, PipelineResult, ProgressObserver, ProgressPhase, SilentProgress, Vfs,
 };
 pub use registry::{dispatch_by_tag, dispatch_family, dispatch_language};
 pub use sink::{GraphConverter, OnBatch, SinkError};

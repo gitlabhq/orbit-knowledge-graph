@@ -21,8 +21,8 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    let inventory = inventory::walk(repo).unwrap().to_vec();
-    templates::index(Context::new(env), repo, inventory)
+    let (files, inventory) = inventory::walk(repo).unwrap();
+    templates::index(Context::new(env), files, inventory.into_inner())
         .unwrap()
         .into_value()
         .state
@@ -32,13 +32,13 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
     for path in removed {
         std::fs::remove_file(repo.join(path)).unwrap();
     }
+    let (files, changed_files) =
+        inventory::classify(repo, changed).expect("classify changed files");
     let changes = Changes {
-        changed: inventory::classify(repo, changed)
-            .expect("classify changed files")
-            .into_inner(),
+        changed: changed_files.into_inner(),
         removed: removed.iter().map(|s| s.to_string()).collect(),
     };
-    templates::reindex(Context::new(env), state, repo, changes)
+    templates::reindex(Context::new(env), state, files, changes)
         .unwrap()
         .into_value()
         .state

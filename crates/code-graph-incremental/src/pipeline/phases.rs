@@ -1,9 +1,10 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::Path;
+use std::sync::Arc;
 
-use orbit_utils::files::{Decision, File, disk};
+use orbit_utils::files::{Decision, File, Vfs, disk};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -34,11 +35,11 @@ impl Phase<Sources> for Prepare {
     }
 
     fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
-        let Sources { root, entries } = sources;
+        let Sources { repo, entries } = sources;
         Ok(workset(
             context.env,
             State::new(context.env),
-            root,
+            repo,
             entries,
             FxHashSet::default(),
         ))
@@ -46,12 +47,12 @@ impl Phase<Sources> for Prepare {
 }
 
 /// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them. Everything else is listed now:
+/// from `repo` when a worker takes them. Everything else is listed now:
 /// manifests for the resolver, and every file as a `File` row.
 fn workset(
     env: &Env,
     state: State,
-    root: PathBuf,
+    repo: Arc<Vfs>,
     entries: Vec<File>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
@@ -71,7 +72,7 @@ fn workset(
             continue;
         }
         let content = manifest
-            .then(|| std::fs::read_to_string(root.join(&file.path)).ok())
+            .then(|| repo.read_to_string(Path::new(&file.path)).ok())
             .flatten();
         let reason = match (file.decision, file.label.skip) {
             (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
@@ -91,14 +92,14 @@ fn workset(
     let passes = crate::inventory::code_filter();
     let rejected = listed.rejected.clone();
     let items = candidates.into_iter().filter_map(move |mut file| {
-        let bytes = disk::load(&root, &mut file, &passes).ok()?;
+        let bytes = disk::load(&repo, &mut file, &passes).ok()?;
         let Some(bytes) = bytes else {
             let reason = file.label.skip.map_or(FileReason::None, FileReason::Filter);
             let mut rejected = rejected.lock().unwrap_or_else(|e| e.into_inner());
             rejected.push((file.path, file.size, reason));
             return None;
         };
-        let content = String::from_utf8(bytes).ok()?;
+        let content = String::from_utf8(bytes.to_vec()).ok()?;
         Some(SourceFile {
             path: file.path,
             content,
@@ -127,7 +128,7 @@ impl Phase<ReindexInput> for Remap {
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
         let ReindexInput {
             mut state,
-            root,
+            repo,
             changes,
         } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
@@ -141,7 +142,7 @@ impl Phase<ReindexInput> for Remap {
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        Ok(workset(context.env, state, root, changes.changed, dirty))
+        Ok(workset(context.env, state, repo, changes.changed, dirty))
     }
 }
 
