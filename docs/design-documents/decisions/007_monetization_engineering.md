@@ -392,6 +392,8 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 | `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
 | `metadata` | pipeline context | `query_type` plus execution metrics (compile and execute ms, rows) |
 
+Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting, bounded by a 10-second deadline that fits inside the pod's 30-second termination grace period. Events waiting for a retry are dropped rather than retried, and anything still unsent when the deadline passes is lost.
+
 **Indexer events (planned for GB-based deployments).** Emitted per indexing batch from the existing `EngineMetrics` at `crates/indexer/src/metrics.rs`:
 
 | Field | Source | Example |
