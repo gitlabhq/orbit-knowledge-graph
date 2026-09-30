@@ -6,7 +6,37 @@ use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::BoundFilter;
+use crate::passes::plan::{BoundFilter, NodePlan};
+
+pub(crate) fn latest_node_predicates(alias: &str, node: &NodePlan) -> Vec<Expr> {
+    let mut predicates: Vec<_> = node
+        .filters
+        .iter()
+        .map(|(property, filter)| filter_to_expr(alias, property, filter))
+        .collect();
+    if !node.node_ids.is_empty() {
+        predicates.push(id_list_predicate(
+            alias,
+            DEFAULT_PRIMARY_KEY,
+            &node.node_ids,
+        ));
+    }
+    if let Some(range) = &node.id_range {
+        predicates.push(id_range_predicate(alias, range));
+    }
+    predicates.push(deleted_false(alias));
+    predicates
+}
+
+pub(crate) fn node_select_columns(alias: &str, node: &NodePlan) -> Vec<SelectExpr> {
+    if !node.emit_select {
+        return vec![];
+    }
+    requested_columns(&node.columns)
+        .into_iter()
+        .map(|column| SelectExpr::new(Expr::col(alias, &column), format!("{alias}_{column}")))
+        .collect()
+}
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),

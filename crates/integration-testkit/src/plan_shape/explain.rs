@@ -75,7 +75,8 @@ pub fn logical(input: &Input) -> S {
 
 pub fn physical(plan: &Plan, ast: &Node) -> S {
     let strategy = match &plan.strategy {
-        Strategy::SingleNode => S::node("SingleNode", []),
+        Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
+        Strategy::Family => S::node("Family", []),
         Strategy::Flat => S::node("Flat", []),
         Strategy::Fk(FkShape::Star { center }) => S::node("FkStar", [S::atom(center)]),
         Strategy::Fk(FkShape::Chain) => S::node("FkChain", []),
@@ -124,6 +125,45 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
             },
         ],
     )
+}
+
+fn physical_tree(plan: &compiler::passes::plan::physical::PhysicalPlan) -> S {
+    use compiler::passes::plan::physical::PhysicalPlan;
+    match plan {
+        PhysicalPlan::Scan {
+            table,
+            alias,
+            final_,
+        } => S::node(
+            "Read",
+            [
+                S::atom(table),
+                S::atom(alias),
+                S::atom(if *final_ { "Final" } else { "Plain" }),
+            ],
+        ),
+        PhysicalPlan::Filter { predicate, input } => {
+            S::node("Filter", [expression(predicate), physical_tree(input)])
+        }
+        PhysicalPlan::Project { columns, input } => S::node(
+            "Project",
+            [
+                S::node(
+                    "Outputs",
+                    columns.iter().map(|column| {
+                        S::node(
+                            "Output",
+                            [
+                                S::atom(column.alias.as_deref().unwrap_or("Unaliased")),
+                                expression(&column.expr),
+                            ],
+                        )
+                    }),
+                ),
+                physical_tree(input),
+            ],
+        ),
+    }
 }
 
 fn expression(value: &Expr) -> S {

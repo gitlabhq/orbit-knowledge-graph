@@ -1,0 +1,29 @@
+name: Property aggregation keeps grouping and measure inputs off the node projection
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1, 2]}],
+      "group_by": ["d.name"],
+      "aggregations": [{"count": "d", "as": "n"}],
+      "limit": 5
+    }
+  gql: |
+    MATCH (d:Definition) WHERE d.id IN [1, 2]
+    RETURN d.name, count(d) AS n LIMIT 5
+logical:
+  expect:
+    - (Node d Definition (Ids 1 2) ...)
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (SingleNode (Project (Outputs) (Filter _ (Read gl_definition d Final)))))
+      - (Output d_name (Column d name))
+      - (Output n (Call COUNT))
+      - (GroupBy (Column d name))
+  duckdb:
+    expect:
+      - (Strategy (SingleNode (Project (Outputs) (Filter _ (Read gl_definition d Final)))))
+      - (Output d_name (Column d name))
+      - (Output n (Call COUNT))
+      - (GroupBy (Column d name))

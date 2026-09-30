@@ -13,23 +13,7 @@ use crate::passes::shared::{
     deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
     rel_kind_filter, rel_kind_filter_values,
 };
-
-/// The candidate-id prefilter runs these before dedup, so it may over-select
-/// stale rows; the target scan re-applies them after latest-row dedup.
-pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = Vec::new();
-    for (prop, filter) in &np.filters {
-        predicates.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        predicates.push(id_range_predicate(alias, range));
-    }
-    predicates.push(deleted_false(alias));
-    predicates
-}
+pub(super) use crate::passes::shared::{latest_node_predicates, node_select_columns};
 
 fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<Expr> {
     let in_sort_key = |column: &str| sort_key.iter().any(|key| key == column);
@@ -48,18 +32,6 @@ fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<E
         }
     }
     predicates
-}
-
-/// Columns aliased as `{alias}_{col}` for the graph formatter. Only for
-/// non-aggregation queries (aggregation builds its own SELECT).
-pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
-    if !np.emit_select {
-        return vec![];
-    }
-    crate::passes::shared::requested_columns(&np.columns)
-        .into_iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
-        .collect()
 }
 
 /// Narrowing source for a node's latest-row scan: a `_narrow_*` CTE referenced

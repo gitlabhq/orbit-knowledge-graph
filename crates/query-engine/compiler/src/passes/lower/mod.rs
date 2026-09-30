@@ -7,7 +7,7 @@ mod helpers;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
-mod single_node;
+mod physical;
 pub mod traversal;
 
 use crate::ast::*;
@@ -114,7 +114,10 @@ pub struct LoweredQuery {
 impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
         match self.strategy {
-            Strategy::SingleNode => single_node::emit_single_node(self),
+            Strategy::SingleNode(ref plan) => physical::emit(plan),
+            Strategy::Family => Err(QueryError::Lowering(
+                "graph family requires its own emitter".into(),
+            )),
             Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
             Strategy::Flat => flat_chain::emit_flat_chain(self),
         }

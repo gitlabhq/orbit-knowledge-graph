@@ -3,6 +3,8 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
+use super::physical::PhysicalPlan;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use super::{
@@ -183,7 +185,8 @@ pub enum HydrationStrategy {
 pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
     Flat,
-    SingleNode,
+    SingleNode(Box<PhysicalPlan>),
+    Family,
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
     /// nodes are joined; both shapes share one emit path (`lower::fk`).
@@ -206,7 +209,7 @@ pub fn plan<M>(
     model: &M,
     use_fk_elision: bool,
     table_scans: &HashSet<String>,
-) -> Plan
+) -> Result<Plan>
 where
     M: QueryDataModel + ?Sized,
 {
@@ -238,9 +241,7 @@ where
         }
     }
 
-    let strategy = if hops.is_empty() {
-        Strategy::SingleNode
-    } else if use_fk_elision && let Some(shape) = detect_fk(&hops, &nodes) {
+    let mut strategy = if use_fk_elision && let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
         Strategy::Flat
@@ -301,7 +302,14 @@ where
                 .map(|sort_key| (table.clone(), sort_key.to_vec()))
         })
         .collect();
-    Plan {
+    if hops.is_empty() {
+        let node = nodes
+            .values()
+            .next()
+            .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
+        strategy = Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?));
+    }
+    Ok(Plan {
         nodes,
         hops,
         strategy,
@@ -310,7 +318,7 @@ where
         table_columns,
         table_sort_keys,
         body,
-    }
+    })
 }
 
 fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>

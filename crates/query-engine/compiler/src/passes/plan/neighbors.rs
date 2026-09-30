@@ -88,7 +88,7 @@ where
     Ok(Plan {
         nodes,
         hops: vec![],
-        strategy: Strategy::SingleNode,
+        strategy: Strategy::Family,
         node_edge_mappings,
         denormalized,
         table_columns: HashMap::new(),

@@ -6,6 +6,7 @@ pub mod edge_chain;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
+pub mod physical;
 
 use std::collections::{HashMap, HashSet};
 
@@ -196,7 +197,7 @@ where
 {
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            Ok(edge_chain::plan(input, model, use_fk_elision, table_scans))
+            edge_chain::plan(input, model, use_fk_elision, table_scans)
         }
         QueryType::Neighbors => neighbors::plan_neighbors(input, model),
         QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),
