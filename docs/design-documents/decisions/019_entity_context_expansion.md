@@ -46,8 +46,8 @@ This ADR fixes the interface and the transport. It does not design the
 strings or `{token, expand}` objects. Top-level `expand` defaults to `false`,
 and a per-token value overrides it. The response is version 1.1.0. It carries
 the PostgreSQL summaries as before, plus `expansions`. That holds one
-deduplicated graph per entity type, each with a `status` and either a `result`
-or an `error`. An
+deduplicated graph per entity type, each with a `status`. `ok` adds a `result`,
+`error` adds an `error` object, and `no_expansion` adds neither. An
 expansion failure never fails the summaries.
 
 **Transport: Workhorse fan-out.** Rails resolves and authorizes the tokens and
@@ -56,15 +56,17 @@ body (or the LLM text) and a list of `{key, named query}`. Workhorse opens one
 ordinary `ExecuteQuery` stream per key, in parallel. Each stream runs the
 unchanged redaction loop. Workhorse then fills in
 `expansions.<Type>.{status, result | error}` and writes the body. GKG only ever
-sees ordinary named queries. The client makes one call. We aim for 19.6. Until
-this ships, clients can call `expand_merge_request` and `expand_work_item`
-directly through `/api/v4/orbit/query/:name`.
+sees ordinary named queries. The client makes one call. We aim for 19.6. `expand`
+stays behind a feature flag until fan-out ships. Once Orbit ships
+`expand_merge_request` and `expand_work_item`, clients can call them directly
+through `/api/v4/orbit/query/:name`.
 
 **Expansion queries.** Orbit owns one named query per entity type. It takes
-`node_ids` (1 to 20) and returns a normal graph response. One request per type
-limits the content to what one named query can express. Fresh typed facets
-need either several queries per type (a contract change) or composite named
-queries (not built yet). Examples are a head pipeline and diff files.
+`node_ids` (1 to 20 integers) and returns a normal graph response. One request
+per type limits the content to what one named query can express. Fresh typed
+facets, such as a head pipeline or diff files, need one of two things. Either
+several queries per type (a contract change) or composite named queries (not
+built yet).
 Rails keeps a static map from type to query name. An absent center is never an
 error.
 
@@ -84,6 +86,7 @@ command are deferred.
 <summary>Request and response fields</summary>
 
 - `tokens` is always an array. There is no object keyed by token.
+- `response_format` is `raw` or `llm`, and defaults to `raw`.
 - Token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs, `path!iid`
   and `path#iid`. Group-level work items are in scope.
 - Supported types are `MergeRequest` and `WorkItem`. `Issue` is an alias that
@@ -93,7 +96,8 @@ command are deferred.
   `read_work_item`) and the fine-grained token boundary. Group-level work items
   pass their group as the boundary.
 - Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
-  `linked_merge_requests[]`). The response adds `resolved_token`,
+  `linked_merge_requests[]`), and the prototype's `invalid_ref` becomes
+  `invalid_token`. The response adds `resolved_token`,
   `expansions`, and `namespace_path` inside `summary`. `project_path` is `null`
   for group-level work items.
 - `expansions` is always present (`{}` if nothing was requested). A type appears
@@ -101,8 +105,8 @@ command are deferred.
   edge endpoint pair (`from`, `from_id`) or (`to`, `to_id`), because IDs are per
   type.
 - `expansions.<Type>.status` is `ok`, `no_expansion` (the type has no query) or
-  `error` with `error.code`. It is the only outcome signal. Entities carry no
-  expansion status.
+  `error` with `error.code`. In raw, it is the only outcome signal. Entities
+  carry no expansion status.
 
 ```json
 {"version": "1.1.0",
@@ -115,7 +119,9 @@ command are deferred.
 ```
 
 With `response_format: llm`, the response is `text/plain`: the Rails summary
-text, then one GOON section per expanded type. Raw results carry
+text, then one labeled section for every type that a found record asked for.
+A section holds either the GOON graph or a one-line status, `error <code>` or
+`no_expansion`. Raw results carry
 `format_version`. GOON carries `goon_version`
 ([ADR 012](012_goon_format.md)).
 
@@ -146,15 +152,16 @@ text, then one GOON section per expanded type. Raw results carry
 <details>
 <summary>Workhorse mechanics</summary>
 
-- Today `SendQuery` reports failures as plain-text 502 or 504 bodies, and a
-  deadline during the redaction callback is a 502. Filling
-  `expansions.<Type>.status` needs typed returns from the failure paths.
-- `maxStreamMessages` is 10 per stream. Each stream needs a request, one
+- Today `SendQuery` reports transport failures as plain-text 502 or 504 bodies,
+  and a deadline during the redaction callback is a 502. GKG in-band errors are
+  already JSON. Filling `expansions.<Type>.status` needs typed returns from the
+  transport failure paths.
+- `maxStreamMessages` is 10 per stream. Each stream needs a request, at most one
   redaction round, and a result, so the cap stays unchanged.
 - Workhorse has a 30 s default deadline and a 120 s maximum. Per-key timeouts
   must stay below them.
 - The Rails body travels base64 in the send-data header. Workhorse sets no
-  explicit limit, so Go's default applies. This is unmeasured for 20 entities
+  explicit limit, so Go's default `MaxResponseHeaderBytes` of 10 MiB applies. This is unmeasured for 20 entities
   and should be measured before shipping.
 - We estimate about 150 to 250 lines in Workhorse, 3 to 5 Workhorse days, and 2
   Rails days. These are not measured.
@@ -163,18 +170,22 @@ text, then one GOON section per expanded type. Raw results carry
 
 ## Consequences
 
-- Puma serves one `context` request plus one redaction callback per expanded
-  type. Expansion costs one `orbit_query` hit (60 per minute per user), not one
-  per type. The named-query route checks the limit before the enabled-namespace
-  check, so 403 responses also use budget.
+- Puma serves one `context` request plus at most one redaction callback per
+  expanded type.
+- Rate limit and billing are separate meters. `orbit_query` (60 per minute per
+  user) counts once per `context` request, however many types expand. Billing
+  and analytics events are emitted per sub-query, which matches usage. The
+  billing owner should confirm this.
+- Both the `context` route and the named-query route check the rate limit
+  before the enabled-namespace check, so 403 responses also use budget. We
+  accept this for v1.
 - Workhorse gains merge logic and typed errors. Rails and Workhorse ship
-  together, so version 1.1.0 covers the whole body and no new GKG pin is needed.
-  The raw (5.0.3) and GOON (4.0.3) pins do not move.
-- Billing and analytics events are emitted per sub-query, which matches usage.
-  The billing owner should confirm this.
+  together once fan-out lands, so version 1.1.0 covers the whole body and no new
+  GKG pin is needed. This ADR moves neither the raw nor the GOON pin.
 - A confidential issue tracks authorization-safe pagination (`has_more`,
   `truncated`, and cursors computed after redaction). It does not block this
-  ADR. The fix must keep `truncated`, because the truncation rule above relies
+  ADR, because `expand` runs only named queries a caller can already run
+  through `/orbit/query/:name`. The fix must keep `truncated`, because the truncation rule above relies
   on it.
 - The Rails implementation that replaces the closed prototype must:
   - Use `POST` with `tokens`/`token`, and version 1.1.0. The prototype never
