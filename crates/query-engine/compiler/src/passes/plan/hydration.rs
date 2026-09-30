@@ -80,8 +80,6 @@ pub fn plan_hydration(
         hops: vec![],
         node_edge_mappings: HashMap::new(),
         denormalized: HashMap::new(),
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
         body: PlanBody::Hydration {
             nodes: hydration_nodes,
             options,

@@ -90,8 +90,6 @@ where
         hops: vec![],
         node_edge_mappings,
         denormalized,
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
         body: PlanBody::Neighbors {
             center: center_alias,
             direction: config.direction,

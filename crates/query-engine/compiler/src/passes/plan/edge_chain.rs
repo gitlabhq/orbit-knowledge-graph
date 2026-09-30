@@ -183,12 +183,8 @@ pub enum HydrationStrategy {
 }
 
 pub enum Strategy {
-    /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
     Flat(Box<ExecutionPlan>),
     SingleNode(Box<PhysicalPlan>),
-    /// FK-derived traversal answered by joining node tables on their FK
-    /// columns, with zero edge-table scans. The [`FkShape`] selects how the
-    /// nodes are joined; both shapes share one emit path (`lower::fk`).
     Fk(FkShape),
 }
 
@@ -336,8 +332,6 @@ where
         hops,
         node_edge_mappings,
         denormalized,
-        table_columns,
-        table_sort_keys,
         body,
     })
 }

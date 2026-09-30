@@ -41,12 +41,6 @@ pub struct Plan {
     pub hops: Vec<Hop>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
-    /// Per-table column sets from the ontology. Used by the lowerer to
-    /// push node-level filters (e.g. project_id, branch) down to edge
-    /// scans when the edge table has those columns.
-    pub table_columns: HashMap<String, HashSet<String>>,
-    /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
-    pub table_sort_keys: HashMap<String, Vec<String>>,
     pub body: PlanBody,
 }
 

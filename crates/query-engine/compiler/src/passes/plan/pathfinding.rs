@@ -59,8 +59,6 @@ where
         hops: vec![],
         node_edge_mappings: HashMap::new(),
         denormalized: HashMap::new(),
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
         body: PlanBody::PathFinding(PathFindingBody {
             start: start_alias,
             end: end_alias,
