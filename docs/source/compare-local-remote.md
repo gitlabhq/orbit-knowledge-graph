@@ -61,7 +61,7 @@ For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_in
 | GitLab instance required | {{< no >}} | {{< yes >}} |
 
 Choose GitLab Orbit Local when the network is unavailable, or when the code must not leave your
-machine. You still need a network connection to:
+machine. You still need a network connection to complete the following setup tasks and actions for GitLab Orbit:
 
 - Install or update the binary.
 - Install the GitLab Orbit skill.
@@ -70,10 +70,9 @@ machine. You still need a network connection to:
 After you install the GitLab Orbit binary, index and query commands are entirely local, and no request leaves your
 computer to build or read the graph.
 
-GitLab Orbit Remote:
+GitLab Orbit Remote has the following deployment requirements:
 
-- Runs in a separate Kubernetes cluster from your GitLab instance, so the two do
-not share compute or memory.
+- Runs in a separate Kubernetes cluster from your GitLab instance. This ensures that compute and memory usage remains separate.
 - Is read-only. It reads changes from GitLab and never writes back.
 
 ## Authentication and authorization
@@ -95,7 +94,7 @@ Programmatic access to GitLab Orbit Remote uses your existing GitLab authenticat
 
 For more information, see [GitLab Orbit Remote security](remote/security.md).
 
-## What data GitLab Orbit indexes
+## Indexed data
 
 GitLab Orbit Local and Remote index different types of data.
 The following sections list what each feature indexes.
