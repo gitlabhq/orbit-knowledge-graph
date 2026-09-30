@@ -152,6 +152,12 @@ GKG emits billable events as Snowplow structured events through `labkit-rs` (the
 
 The tracker's authentication is selected by `billing.auth_mode`. On GitLab.com (SaaS) it authenticates to the collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. On Self-Managed / Dedicated there is no workload identity. GKG instead pulls the Cloud Connector instance token (a CustomersDot-minted JWT held in the Rails DB) from a Rails internal route. It caches the token in memory and presents it as the collector `Authorization` header. The pull-and-cache design (rather than a per-request JWT claim) is required because indexer-path emission is CDC/cron-driven with no request JWT.
 
+The token cache (`crates/gitlab-client/src/cc_token.rs`) refreshes inline on the send path:
+
+- It schedules the next refresh 30 minutes (plus up to 30 seconds of jitter) before the token's `exp`. The synced token lives for days, so each pod usually calls Rails about once per token lifetime.
+- A fetch can fail with an HTTP error, a non-200 status, or a malformed JWT. If a cached token already exists, a failure keeps serving it and blocks further Rails calls for 60 seconds. The same 60-second limit applies to a token Rails returns already close to expiry, so it doesn't cause a fetch per event. Before any token has ever been fetched, there is nothing to rate-limit around, so every call retries immediately.
+- If the cached token has expired and Rails still cannot supply a new one, the cache sends the expired token anyway. The GitLab-hosted collector rejects it with `401`, so the error is visible on GitLab's hosted collector instead of failing silently on the customer's instance.
+
 For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
 
 The collector path is OIDC-authenticated rather than IP-allowlisted because GKG has no static egress IPs.
