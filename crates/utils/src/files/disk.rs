@@ -1,20 +1,22 @@
 //! A checkout on disk. Listing is cheap and reading is not, so discovery
-//! applies the header passes to every file and reads only the files those
-//! passes asked to see; a file that will be parsed is read once, later, by
+//! applies the header passes to every file, reads only the files those passes
+//! asked to see, and links every file that loads into the repository
+//! filesystem where it is. A file that will be parsed is read once, later, by
 //! `load`, which runs the content passes on the same bytes it hands out.
 
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 
-use super::{File, Inventory, Need, Pass, SourceError, check};
+use super::{File, FileSystem, Inventory, Need, Pass, SourceError, Vfs, check};
 
 /// Every file below `root` with git's listing semantics: .gitignore,
 /// .git/info/exclude and dotfiles honored, ripgrep .ignore and ancestor
 /// ignores not, `.git` itself never.
-pub fn discover(root: &Path, passes: &impl Pass) -> Result<Inventory, SourceError> {
+pub fn discover(root: &Path, passes: &impl Pass, vfs: &Vfs) -> Result<Inventory, SourceError> {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -36,7 +38,7 @@ pub fn discover(root: &Path, passes: &impl Pass) -> Result<Inventory, SourceErro
             paths.push(path.to_string_lossy().into_owned());
         }
     }
-    discover_paths(root, paths, passes)
+    discover_paths(root, paths, passes, vfs)
 }
 
 /// The named files below `root`: a change set, where a walk is not wanted.
@@ -44,23 +46,33 @@ pub fn discover_paths(
     root: &Path,
     paths: Vec<String>,
     passes: &impl Pass,
+    vfs: &Vfs,
 ) -> Result<Inventory, SourceError> {
     let files = paths
         .into_par_iter()
-        .map(|path| settle_header(root, path, passes))
+        .map(|path| settle_header(root, path, passes, vfs))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Inventory::new(files))
 }
 
-fn settle_header(root: &Path, path: String, passes: &impl Pass) -> Result<File, SourceError> {
-    let metadata = root.join(&path).symlink_metadata()?;
+fn settle_header(
+    root: &Path,
+    path: String,
+    passes: &impl Pass,
+    vfs: &Vfs,
+) -> Result<File, SourceError> {
+    let on_disk = root.join(&path);
+    let metadata = on_disk.symlink_metadata()?;
     let mut file = match metadata.is_symlink() {
         true => File::symlink(path, metadata.len()),
         false => File::new(path, metadata.len()),
     };
     if passes.header(&mut file)? == Need::Bytes && !file.symlink {
-        let bytes = read(root, &file)?;
+        let bytes = read(&on_disk, file.size)?;
         check(passes, &mut file, &bytes);
+    }
+    if file.loads() && !file.symlink {
+        vfs.link(&file.path, on_disk, file.size);
     }
     Ok(file)
 }
@@ -68,20 +80,24 @@ fn settle_header(root: &Path, path: String, passes: &impl Pass) -> Result<File, 
 /// The bytes of a file that loads, read once. Runs the content passes first
 /// if nothing has yet; they may decide against the file, in which case there
 /// are no bytes to hand out.
-pub fn load(root: &Path, file: &mut File, passes: &impl Pass) -> std::io::Result<Option<Vec<u8>>> {
+pub fn load(
+    vfs: &impl FileSystem,
+    file: &mut File,
+    passes: &impl Pass,
+) -> std::io::Result<Option<Arc<[u8]>>> {
     if !file.loads() {
         return Ok(None);
     }
-    let bytes = read(root, file)?;
+    let bytes = vfs.read(Path::new(&file.path))?;
     if !file.checked {
         check(passes, file, &bytes);
     }
     Ok(file.loads().then_some(bytes))
 }
 
-fn read(root: &Path, file: &File) -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(file.size as usize);
-    std::fs::File::open(root.join(&file.path))?.read_to_end(&mut bytes)?;
+fn read(on_disk: &Path, size: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(size as usize);
+    std::fs::File::open(on_disk)?.read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
@@ -126,7 +142,7 @@ mod tests {
         write(root, "notes/x.rs", b"note\n");
         write(root, ".env", b"secret\n");
 
-        let inv = discover(root, &()).unwrap();
+        let inv = discover(root, &(), &Vfs::default()).unwrap();
         let has = |p: &str| inv.iter().any(|e| e.path == p);
 
         assert!(
@@ -160,7 +176,8 @@ mod tests {
         write(root, "ignored/secret.rs", b"fn secret() {}");
         std::os::unix::fs::symlink("src/main.rs", root.join("link.rs")).unwrap();
 
-        let mut inv = discover(root, &TestFilter).unwrap().into_inner();
+        let vfs = Vfs::default();
+        let mut inv = discover(root, &TestFilter, &vfs).unwrap().into_inner();
         let decision = |inv: &[File], p: &str| inv.iter().find(|e| e.path == p).unwrap().decision;
 
         assert!(!inv.iter().any(|e| e.path == "ignored/secret.rs"));
@@ -168,9 +185,12 @@ mod tests {
         assert_eq!(decision(&inv, "link.rs"), Decision::ListOnly);
         assert_eq!(decision(&inv, "model/weights.bin"), Decision::Parse);
         assert!(inv.iter().all(|e| !e.checked));
+        assert!(vfs.is_file(Path::new("src/main.rs")));
+        assert!(!vfs.exists(Path::new("assets/logo.png")));
+        assert!(!vfs.exists(Path::new("link.rs")));
 
         for file in inv.iter_mut() {
-            let bytes = load(root, file, &TestFilter).unwrap();
+            let bytes = load(&vfs, file, &TestFilter).unwrap();
             assert_eq!(
                 bytes.is_some(),
                 file.decision == Decision::Parse,
@@ -196,7 +216,9 @@ mod tests {
         write(root, "b.png", b"\x89PNG");
         write(root, "untouched.rs", b"fn u() {}");
 
-        let inv = discover_paths(root, vec!["b.png".into(), "a.rs".into()], &TestFilter).unwrap();
+        let vfs = Vfs::default();
+        let inv =
+            discover_paths(root, vec!["b.png".into(), "a.rs".into()], &TestFilter, &vfs).unwrap();
 
         let listed: Vec<_> = inv.iter().map(|f| (f.path.as_str(), f.decision)).collect();
         assert_eq!(

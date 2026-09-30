@@ -1,11 +1,12 @@
 //! A Gitaly tar.gz. Inflating is one sequential stream, so that thread only
 //! reads: it checks each path, applies the header passes, and sends the bytes
 //! of every file that needs them ahead through a bounded channel. Workers run
-//! the content passes on those bytes, write the files that load to `target`,
-//! and hand back the settled `File`.
+//! the content passes on those bytes, store the files that load in the
+//! repository filesystem, and hand back the settled `File`. Nothing touches
+//! the disk.
 
 use std::ffi::OsString;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
@@ -13,7 +14,7 @@ use flate2::read::GzDecoder;
 use rayon::prelude::*;
 use tracing::warn;
 
-use super::{Decision, File, Inventory, Need, Pass, SourceError, check};
+use super::{Decision, File, Inventory, Need, Pass, SourceError, Vfs, check};
 
 /// How many files' bytes may wait for a worker; with the per-file size cap
 /// this bounds the bytes in flight.
@@ -21,116 +22,62 @@ const LOOKAHEAD: usize = 64;
 
 pub fn extract<R: Read>(
     reader: R,
-    target_dir: &Path,
     passes: &impl Pass,
+    vfs: &Vfs,
 ) -> Result<Inventory, SourceError> {
-    std::fs::create_dir_all(target_dir)?;
-    let target = target_dir.canonicalize()?;
     let (sender, receiver) = sync_channel::<Pending>(LOOKAHEAD);
-
     let (inflated, settled) = std::thread::scope(|scope| {
-        let workers = scope.spawn(|| settle(receiver, &target, passes));
-        let inflated = inflate(reader, &target, passes, &sender);
+        let workers = scope.spawn(|| settle(receiver, passes, vfs));
+        let inflated = inflate(reader, passes, &sender);
         drop(sender);
         (inflated, workers.join().expect("tar workers panicked"))
     });
     // A failure on either side closes the channel and ends the other; the
     // side that failed on its own has the error worth reporting.
-    let (mut files, symlinks) = match (inflated, settled) {
+    let mut files = match (inflated, settled) {
         (Err(inflate_error), Err(_)) => return Err(inflate_error),
         (inflated, settled) => {
-            let Inflated {
-                mut files,
-                symlinks,
-            } = inflated?;
+            let mut files = inflated?;
             files.extend(settled?);
-            (files, symlinks)
+            files
         }
     };
-
-    for (link_path, link_target) in symlinks {
-        crate::fs::safe_create_dir_all(&link_path, &target).map_err(std::io::Error::other)?;
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&link_target, &link_path)?;
-    }
-    let removed = crate::fs::validate_symlinks(&target).map_err(std::io::Error::other)?;
-    if !removed.is_empty() {
-        let removed: std::collections::HashSet<String> = removed
-            .iter()
-            .map(|r| r.relative_path.to_string_lossy().into_owned())
-            .collect();
-        files.retain(|file| !removed.contains(&file.path));
-    }
+    files.retain(|file| file.decision != Decision::Drop);
     Ok(Inventory::new(files))
 }
 
 /// A file whose bytes came off the stream, waiting for a worker.
 struct Pending {
     file: File,
-    dest: PathBuf,
     bytes: Vec<u8>,
 }
 
 fn settle(
     receiver: Receiver<Pending>,
-    target: &Path,
     passes: &impl Pass,
+    vfs: &Vfs,
 ) -> Result<Vec<File>, SourceError> {
     receiver
         .into_iter()
         .par_bridge()
-        .map(|pending| pending.settle(target, passes))
-        .filter_map(Result::transpose)
-        .collect()
-}
-
-impl Pending {
-    fn settle(self, target: &Path, passes: &impl Pass) -> Result<Option<File>, SourceError> {
-        let Pending {
-            mut file,
-            dest,
-            bytes,
-        } = self;
-        check(passes, &mut file, &bytes);
-        match file.decision {
-            Decision::Drop => Ok(None),
-            Decision::ListOnly => Ok(Some(file)),
-            Decision::Parse | Decision::Load => {
-                let written = crate::fs::resolve_dest_within(target, &dest)
-                    .and_then(std::fs::File::create)
-                    .and_then(|mut out| out.write_all(&bytes));
-                match written {
-                    Ok(()) => Ok(Some(file)),
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        Err(SourceError::Io(e))
-                    }
-                    Err(e) => {
-                        warn!(entry = %file.path, error = %e, "skipping archive entry that could not be written");
-                        Ok(None)
-                    }
-                }
+        .map(|Pending { mut file, bytes }| {
+            check(passes, &mut file, &bytes);
+            if file.loads() {
+                vfs.write(&file.path, bytes)?;
             }
-        }
-    }
-}
-
-/// What the inflating thread settled itself, and the symlinks to create once
-/// every regular file exists so none can redirect a write outside `target`.
-#[derive(Default)]
-struct Inflated {
-    files: Vec<File>,
-    symlinks: Vec<(PathBuf, PathBuf)>,
+            Ok(file)
+        })
+        .collect()
 }
 
 fn inflate<R: Read>(
     reader: R,
-    target: &Path,
     passes: &impl Pass,
     workers: &SyncSender<Pending>,
-) -> Result<Inflated, SourceError> {
+) -> Result<Vec<File>, SourceError> {
     let mut archive = ::tar::Archive::new(GzDecoder::new(reader));
     let mut archive_root: Option<OsString> = None;
-    let mut inflated = Inflated::default();
+    let mut files = Vec::new();
     let mut any_entry_seen = false;
     let entries = archive
         .entries()
@@ -150,8 +97,11 @@ fn inflate<R: Read>(
         };
 
         let entry_type = entry.header().entry_type();
-        if entry_type == ::tar::EntryType::XGlobalHeader || entry_type == ::tar::EntryType::XHeader
-        {
+        let is_symlink =
+            entry_type == ::tar::EntryType::Symlink || entry_type == ::tar::EntryType::Link;
+        // Directories exist because files are in them; other entry types
+        // (PAX headers, devices, fifos) have no place in a checkout.
+        if entry_type != ::tar::EntryType::Regular && !is_symlink {
             continue;
         }
         let entry_path = entry.path().map_err(std::io::Error::other)?;
@@ -176,43 +126,31 @@ fn inflate<R: Read>(
                 relative_path.display()
             ))));
         }
-        let dest = target.join(&relative_path);
         let path = relative_path.to_string_lossy().into_owned();
 
-        if entry_type == ::tar::EntryType::Symlink || entry_type == ::tar::EntryType::Link {
+        // A symlink is a node in the tree with no bytes of its own.
+        if is_symlink {
             let mut file = File::symlink(path, entry.size());
             passes.header(&mut file)?;
             if file.decision != Decision::Drop {
-                let link_target = entry
-                    .link_name()
-                    .map_err(std::io::Error::other)?
-                    .map(|cow| cow.into_owned())
-                    .unwrap_or_default();
-                inflated.symlinks.push((dest, link_target));
-                inflated.files.push(file);
+                file.decision = Decision::ListOnly;
             }
-            continue;
-        }
-        // Directories exist because files are written into them; other
-        // entry types have no place in a checkout.
-        if entry_type != ::tar::EntryType::Regular {
+            files.push(file);
             continue;
         }
         let mut file = File::new(path, entry.size());
         let need = passes.header(&mut file)?;
         if need == Need::Nothing && !file.loads() {
-            if file.decision != Decision::Drop {
-                inflated.files.push(file);
-            }
+            files.push(file);
             continue;
         }
         let mut bytes = Vec::with_capacity(entry.size() as usize);
         entry.read_to_end(&mut bytes)?;
-        if workers.send(Pending { file, dest, bytes }).is_err() {
-            return Ok(inflated);
+        if workers.send(Pending { file, bytes }).is_err() {
+            return Ok(files);
         }
     }
-    Ok(inflated)
+    Ok(files)
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records
@@ -243,9 +181,10 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::CapExceeded;
+    use crate::files::{CapExceeded, FileSystem};
     use flate2::Compression;
     use flate2::write::GzEncoder;
+    use std::io::Write;
 
     struct ParseAll;
     impl Pass for ParseAll {}
@@ -305,22 +244,22 @@ mod tests {
 
     #[test]
     fn extracts_and_strips_archive_root() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let data = build_archive(&[
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
-        extract(&data[..], dir.path(), &ParseAll).unwrap();
+        extract(&data[..], &ParseAll, &vfs).unwrap();
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
+            vfs.read_to_string(Path::new("src/main.rs")).unwrap(),
             "fn main() {}"
         );
-        assert!(!dir.path().join("project-main").exists());
+        assert!(!vfs.exists(Path::new("project-main")));
     }
 
     #[test]
     fn skips_pax_global_and_per_file_headers() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let mut tb = tar::Builder::new(Vec::new());
         for (ty, name, body) in [
             (
@@ -353,54 +292,47 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        extract(&data[..], dir.path(), &ParseAll).unwrap();
+        extract(&data[..], &ParseAll, &vfs).unwrap();
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
+            vfs.read_to_string(Path::new("src/main.rs")).unwrap(),
             "fn main() {}"
         );
     }
 
     #[test]
     fn skips_entry_outside_archive_root_and_keeps_the_rest() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let data = build_archive(&[
             Entry::File("root-a/file1.rs", b"a"),
             Entry::File("root-b/file2.rs", b"b"),
         ]);
-        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
+        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
         assert_eq!(paths(&inv), vec!["file1.rs"]);
-        assert!(dir.path().join("file1.rs").exists());
+        assert!(vfs.exists(Path::new("file1.rs")));
     }
 
+    /// Git allows names longer than a filesystem would; without a disk in
+    /// the way, so do we.
     #[test]
-    fn skips_entry_whose_name_is_too_long_and_keeps_the_rest() {
-        let dir = tempfile::tempdir().unwrap();
-        let long_name = "z".repeat(500);
+    fn names_too_long_for_a_disk_are_ordinary_names_here() {
+        let vfs = Vfs::default();
+        let long = format!("root/{}/{}.rs", "d".repeat(300), "f".repeat(300));
         let data = build_archive(&[
-            Entry::File("project-main/src/main.rs", b"fn main() {}"),
-            Entry::File(&format!("project-main/{long_name}.rs"), b"unwritable"),
+            Entry::File("root/src/main.rs", b"fn main() {}"),
+            Entry::File(&long, b"fn f() {}"),
         ]);
-        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
-        assert_eq!(paths(&inv), vec!["src/main.rs"]);
-        assert!(dir.path().join("src/main.rs").exists());
-    }
-
-    #[test]
-    fn skips_entry_whose_directory_name_is_too_long_and_keeps_the_rest() {
-        let dir = tempfile::tempdir().unwrap();
-        let long_dir = "z".repeat(500);
-        let data = build_archive(&[
-            Entry::File("project-main/src/main.rs", b"fn main() {}"),
-            Entry::File(&format!("project-main/{long_dir}/f.rs"), b"unwritable"),
-        ]);
-        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
-        assert_eq!(paths(&inv), vec!["src/main.rs"]);
-        assert!(dir.path().join("src/main.rs").exists());
+        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
+        assert_eq!(inv.len(), 2);
+        assert_eq!(
+            vfs.read_to_string(Path::new(&long["root/".len()..]))
+                .unwrap(),
+            "fn f() {}"
+        );
     }
 
     #[test]
     fn rejects_path_traversal() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let mut tb = tar::Builder::new(Vec::new());
         let content = b"malicious";
         let mut h = tar::Header::new_gnu();
@@ -417,76 +349,58 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        let err = extract(&data[..], dir.path(), &ParseAll).unwrap_err();
+        let err = extract(&data[..], &ParseAll, &vfs).unwrap_err();
         assert!(err.to_string().contains("path traversal"), "got: {err}");
     }
 
+    /// A symlink is a node in the tree with no bytes, wherever it points; there
+    /// is no disk for it to escape.
     #[test]
-    fn skips_symlink_escaping_target_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let data = build_archive(&[
-            Entry::File("root/legit.txt", b"hello"),
-            Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
-        ]);
-        extract(&data[..], dir.path(), &ParseAll).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
-            "hello"
-        );
-        assert!(!dir.path().join("escape").exists());
-    }
-
-    #[test]
-    fn removes_skipped_symlinks_from_inventory() {
-        let dir = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let data = build_archive(&[
-            Entry::File("root/legit.txt", b"hello"),
-            Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
-        ]);
-        let inv = extract(&data[..], dir.path(), &ParseAll).unwrap();
-        assert_eq!(paths(&inv), vec!["legit.txt"]);
-    }
-
-    #[test]
-    fn allows_valid_internal_symlink() {
-        let dir = tempfile::tempdir().unwrap();
+    fn symlinks_are_listed_and_never_read() {
+        let vfs = Vfs::default();
         let data = build_archive(&[
             Entry::File("root/src/lib.rs", b"real content"),
             Entry::Symlink("root/bin/run", "../src/lib.rs"),
+            Entry::Symlink("root/escape", "/etc/passwd"),
         ]);
-        extract(&data[..], dir.path(), &ParseAll).unwrap();
+        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
+
+        assert_eq!(paths(&inv), vec!["bin/run", "escape", "src/lib.rs"]);
+        let decision = |p: &str| inv.iter().find(|f| f.path == p).unwrap().decision;
+        assert_eq!(decision("bin/run"), Decision::ListOnly);
+        assert_eq!(decision("escape"), Decision::ListOnly);
+        assert!(!vfs.exists(Path::new("bin/run")));
+        assert!(!vfs.exists(Path::new("escape")));
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("bin/run")).unwrap(),
+            vfs.read_to_string(Path::new("src/lib.rs")).unwrap(),
             "real content"
         );
     }
 
     #[test]
     fn empty_and_truncated_bodies_are_classified_empty() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         assert!(matches!(
-            extract(&[][..], dir.path(), &ParseAll),
+            extract(&[][..], &ParseAll, &vfs),
             Err(SourceError::Empty)
         ));
         let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
         let truncated = &full[..full.len() / 2];
         assert!(matches!(
-            extract(truncated, dir.path(), &ParseAll),
+            extract(truncated, &ParseAll, &vfs),
             Err(SourceError::Empty)
         ));
     }
 
     #[test]
     fn list_only_files_are_recorded_but_not_written() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let data = build_archive(&[
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/assets/logo.png", b"\x89PNGdata"),
             Entry::File("project-main/model/weights.onnx", b"\x00\x01\x02blob"),
         ]);
-        let inv = extract(&data[..], dir.path(), &TestFilter).unwrap();
+        let inv = extract(&data[..], &TestFilter, &vfs).unwrap();
 
         assert_eq!(
             paths(&inv),
@@ -513,18 +427,18 @@ mod tests {
                 .decision,
             Decision::ListOnly
         );
-        assert!(dir.path().join("src/main.rs").exists());
-        assert!(!dir.path().join("assets/logo.png").exists());
-        assert!(!dir.path().join("model/weights.onnx").exists());
+        assert!(vfs.exists(Path::new("src/main.rs")));
+        assert!(!vfs.exists(Path::new("assets/logo.png")));
+        assert!(!vfs.exists(Path::new("model/weights.onnx")));
     }
 
     #[test]
     fn text_file_larger_than_sniff_window_is_written_in_full() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
-        extract(&data[..], dir.path(), &ParseAll).unwrap();
-        assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
+        extract(&data[..], &ParseAll, &vfs).unwrap();
+        assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), &body[..]);
     }
 
     /// Skips files above a byte limit, so the test can observe which size the
@@ -544,7 +458,7 @@ mod tests {
     /// the file is read into memory before anything can reject it.
     #[test]
     fn oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let body = vec![b'a'; 4096];
 
         let mut tb = tar::Builder::new(Vec::new());
@@ -565,12 +479,12 @@ mod tests {
         enc.write_all(&tb.into_inner().unwrap()).unwrap();
         let data = enc.finish().unwrap();
 
-        let inv = extract(&data[..], dir.path(), &MaxSize(64)).unwrap();
+        let inv = extract(&data[..], &MaxSize(64), &vfs).unwrap();
 
         assert_eq!(paths(&inv), vec!["big.txt"]);
         assert_eq!(inv[0].size, 4096);
         assert_eq!(inv[0].decision, Decision::ListOnly);
-        assert!(!dir.path().join("big.txt").exists());
+        assert!(!vfs.exists(Path::new("big.txt")));
     }
 }
 
@@ -578,6 +492,7 @@ mod tests {
 mod backpressure {
     use super::*;
     use crate::files::CapExceeded;
+    use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Counts files whose bytes are off the stream but not yet settled by a
@@ -603,7 +518,7 @@ mod backpressure {
     /// channel instead of inflating the whole archive into memory.
     #[test]
     fn inflating_never_runs_more_than_the_lookahead_ahead_of_the_workers() {
-        let dir = tempfile::tempdir().unwrap();
+        let vfs = Vfs::default();
         let mut tb = tar::Builder::new(Vec::new());
         for i in 0..2_000 {
             let mut h = tar::Header::new_gnu();
@@ -618,7 +533,7 @@ mod backpressure {
         let data = gz.finish().unwrap();
         let pass = SlowSettle::default();
 
-        let inv = extract(&data[..], dir.path(), &pass).unwrap();
+        let inv = extract(&data[..], &pass, &vfs).unwrap();
 
         assert_eq!(inv.len(), 2_000);
         let ceiling = LOOKAHEAD + rayon::current_num_threads() + 1;
