@@ -14,13 +14,15 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN count(b) AS n
 logical:
   expect:
-    - (Measures (Measure count b Node n))
+    - (Aggregate COUNT(b) AS n (_))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (Flat (Latest e0 (Key ...) (Filter ...))))
-      - (Scan gl_code_edge e0 Plain)
-      - (LimitBy 1 ...)
-      - (Output n (Call countIf ...))
-    reject:
-      - (Scan gl_code_edge e0 Final)
+    planned:
+      expect:
+        - (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS e0))))
+      reject:
+        - (Deduplicate Final (Scan Table(gl_code_edge) AS e0))
+    emitted:
+      expect:
+        - (Deduplicate LimitBy 1 BY ... (_))
+        - (Aggregate countIf((e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)) AS n (_))

@@ -13,19 +13,23 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS*2]->(b:Definition) RETURN a.id, b.id
 logical:
   expect:
-    - (Relationship a b Outgoing (Kinds CALLS) (Hops 2 2) (Filters))
+    - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
 physical:
   clickhouse:
-    expect:
-      - (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _))
-      - (Join INNER (AND (AND (= (Column e1 target_id) (Column e2 source_id)) _) _) _ _)
-    reject:
-      - (Output depth (Literal 1))
-      - (Output depth (Literal 3))
+    planned:
+      expect:
+        - (Union ALL AS e0 (Project 2 AS depth, ... (_)))
+        - (Join ON (e1.target_id = e2.source_id) AND (e2._deleted = false) AND (e2.relationship_kind = 'CALLS') (_) (_))
+      reject:
+        - (Project 1 AS depth, ... (_))
+        - (Project 3 AS depth, ... (_))
+      occurrences:
+        - pattern: (Union ALL AS e0 (_))
+          count: 1
   duckdb:
-    expect:
-      - (Union e0 _)
-      - (Output depth (Literal 2))
-    reject:
-      - (Output depth (Literal 1))
-      - (Output depth (Literal 3))
+    planned:
+      expect:
+        - (Union ALL AS e0 (Project 2 AS depth, ... (_)))
+      reject:
+        - (Project 1 AS depth, ... (_))
+        - (Project 3 AS depth, ... (_))

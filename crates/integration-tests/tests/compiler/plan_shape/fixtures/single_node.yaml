@@ -10,18 +10,20 @@ query:
     MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
 logical:
   expect:
-    - '(Node f File (Ids) (Columns id path) (Filters (Predicate language eq "\"rust\"")))'
+    - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
-      - (Scan gl_file f Final)
-      - (Output f_path (Column f path))
-      - '(= (Column f language) (Literal "\"rust\""))'
-    reject: [(Join ...)]
+    planned:
+      exact: |
+        (Project f.id AS f_id, f.path AS f_path
+          (Filter f.language = 'rust', f._deleted = false
+            (Deduplicate Final (Scan Table(gl_file) AS f))))
+    emitted:
+      expect:
+        - (Project f.id AS f_id, f.path AS f_path (Filter f.language = 'rust', f._deleted = false (Deduplicate Final (Scan Table(gl_file) AS f))))
   duckdb:
-    expect:
-      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
-      - (Output f_path (Column f path))
-      - '(= (Column f language) (Literal "\"rust\""))'
-    reject: [(Join ...)]
+    planned:
+      exact: |
+        (Project f.id AS f_id, f.path AS f_path
+          (Filter f.language = 'rust', f._deleted = false
+            (Deduplicate Final (Scan Table(gl_file) AS f))))

@@ -14,13 +14,17 @@ query:
     RETURN caller.id, callee.id
 logical:
   expect:
-    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1) (Filters (Predicate target_id eq 2)))
+    - (Filter e0.target_id = 2 (EdgeScan CALLS caller->callee AS e0))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (Flat (Filter ...)))
-      - (= (Column e0 target_id) (Literal 2))
+    planned:
+      expect:
+        - (Filter e0.target_id = 2, ... (_))
+    emitted:
+      expect:
+        - (Filter e0.target_id = 2, ... (_))
   duckdb:
-    expect:
-      - (Strategy (Flat (Join INNER (= (Column callee id) (Column e0 target_id)) _ (Scope callee _))))
-      - (= (Column e0 target_id) (Literal 2))
+    planned:
+      expect:
+        - (Join ON callee.id = e0.target_id (_) (Bind callee (_)))
+        - (Filter e0.target_id = 2, ... (_))

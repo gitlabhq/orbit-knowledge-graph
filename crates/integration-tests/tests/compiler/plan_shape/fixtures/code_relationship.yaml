@@ -14,19 +14,17 @@ query:
     RETURN caller.id, callee.id
 logical:
   expect:
-    - (Node caller Definition (Ids 1) ...)
-    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
+    - (Filter caller.id IN [1] (NodeScan Definition AS caller))
+    - (EdgeScan CALLS caller->callee AS e0)
 physical:
   clickhouse:
-    expect:
-      - (Strategy (Flat (Filter ...)))
-      - (Read gl_code_edge e0 Plain)
-      - (Scan gl_code_edge e0 Plain)
-      - (= (Column e0 source_id) (Literal 1))
+    planned:
+      expect:
+        - (Scan Table(gl_code_edge) AS e0)
+        - (Filter e0.source_id = 1, ... (_))
   duckdb:
-    expect:
-      - (Strategy (Flat (Join INNER (= (Column callee id) (Column e0 target_id)) _ (Scope callee _))))
-      - (Read gl_edge e0 Plain)
-      - (Scan gl_edge e0 Plain)
-      - (Node caller gl_definition Join)
-      - (Node callee gl_definition Join)
+    planned:
+      expect:
+        - (Join ON callee.id = e0.target_id (_) (Bind callee (_)))
+        - (Join ON caller.id = e0.source_id (_) (Bind caller (_)))
+        - (Scan Table(gl_edge) AS e0)

@@ -18,14 +18,21 @@ query:
     RETURN p.name, count(mr) AS c
 logical:
   expect:
-    - (Node p Project ... (Filters (Predicate star_count eq 1)))
+    - (Filter p.star_count = 1 (NodeScan Project AS p))
 physical:
   clickhouse:
-    expect:
-      - (Definitions (Keys _candidate_p _) (Keys _candidate_mr _))
-      - (InCte (Column mr id) _candidate_mr id)
-      - (InCte (Column p id) _candidate_p id)
-      - (Cte _candidate_p (Query ... (Scan gl_project p Plain) (Where (AND (= (Column p star_count) (Literal 1)) (= (Column p _deleted) (Literal false)))) ...))
-      - (Subquery p (Query (Ctes) (Select (Output Unaliased Star)) (Subquery p (Query ... (Scan gl_project p Plain) (Where (InCte (Column p id) _candidate_p id)) ... (LimitBy 1 (Column p traversal_path) (Column p id)))) (Where (AND (= (Column p star_count) (Literal 1)) (= (Column p _deleted) (Literal false)))) ...))
-    reject:
-      - (Scan gl_edge ...)
+    planned:
+      bind:
+        - (CTE $projects (Project p.id AS id (Filter p.star_count = 1, p._deleted = false (Scan Table(gl_project) AS p))))
+        - (CTE $requests (Project mr.id AS id (_)))
+      definition_order: [$projects, $requests]
+      expect:
+        - (Filter mr.id IN $requests.id, ... (_))
+        - |
+          (Bind p
+            (Filter p.star_count = 1, p._deleted = false
+              (Deduplicate LimitBy p.traversal_path, p.id
+                (Filter p.id IN $projects.id
+                  (Scan Table(gl_project) AS p)))))
+      reject:
+        - (Scan Table(gl_edge) ...)

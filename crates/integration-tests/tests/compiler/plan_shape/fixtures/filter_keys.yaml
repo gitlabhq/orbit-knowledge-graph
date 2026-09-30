@@ -15,14 +15,18 @@ query:
     RETURN count(mr) AS n
 logical:
   expect:
-    - '(Node u User ... (Filters (Predicate username eq "\"alice\"")))'
-    - (Measures (Measure count mr Node n))
+    - (Filter u.username = 'alice' (NodeScan User AS u))
+    - (Aggregate COUNT(mr) AS n (_))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (FkStar mr _))
-      - '(Cte _filter_u (Query (Ctes) (Select (Output id (Column u id))) (Scan gl_user u Final) (Where (AND (= (Column u username) (Literal "\"alice\"")) (= (Column u _deleted) (Literal false)))) ...))'
-      - (InCte (Column mr author_id) _filter_u id)
-    reject:
-      - (Scan gl_edge ...)
-      - (Scan gl_user u Plain)
+    planned:
+      bind:
+        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+      expect:
+        - (Filter mr.author_id IN $users.id, ... (_))
+      occurrences:
+        - pattern: (CTE $users (_))
+          count: 1
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))

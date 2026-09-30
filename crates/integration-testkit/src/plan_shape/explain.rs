@@ -1,432 +1,508 @@
-use compiler::ast::{Expr, Node, Query, TableRef};
-use compiler::input::{ColumnSelection, Input, InputFilter, OrderDirection};
-use compiler::passes::plan::{FkShape, HydrationStrategy, Plan, Strategy};
+use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
+use compiler::input::{AggFunction, ColumnSelection, Input, InputFilter, OrderDirection};
+use compiler::passes::plan::physical::{PhysicalPlan, PhysicalSource};
+use compiler::passes::plan::{FkShape, Plan, PlanBody, Strategy};
+use query_engine::compiler;
 use std::collections::HashMap;
 
-use super::pattern::Expression as S;
+use super::pattern::Expression as Tree;
 
-pub fn logical(input: &Input) -> S {
-    S::node(
-        "Logical",
-        std::iter::once(S::atom(input.query_type))
-            .chain(input.nodes.iter().map(|node| {
-                S::node(
-                    "Node",
-                    [
-                        S::atom(&node.id),
-                        S::atom(node.entity.as_deref().unwrap_or("Unresolved")),
-                        S::node("Ids", node.node_ids.iter().map(S::atom)),
-                        S::node(
-                            "Columns",
-                            match &node.columns {
-                                Some(ColumnSelection::List(columns)) => {
-                                    columns.iter().map(S::atom).collect()
-                                }
-                                Some(ColumnSelection::All) => vec![S::atom("*")],
-                                None => vec![],
-                            },
-                        ),
-                        filters(&node.filters),
-                    ],
-                )
-            }))
-            .chain(input.relationships.iter().map(|edge| {
-                let (source, target, direction) = match edge.direction {
-                    compiler::input::Direction::Incoming => (&edge.to, &edge.from, "Outgoing"),
-                    compiler::input::Direction::Outgoing => (&edge.from, &edge.to, "Outgoing"),
-                    compiler::input::Direction::Both => (&edge.from, &edge.to, "Both"),
-                };
-                S::node(
-                    "Relationship",
-                    [
-                        S::atom(source),
-                        S::atom(target),
-                        S::atom(direction),
-                        S::node("Kinds", edge.types.iter().map(S::atom)),
-                        S::node("Hops", [S::atom(edge.hops.min), S::atom(edge.hops.max)]),
-                        filters(&edge.filters),
-                    ],
-                )
-            }))
-            .chain([
-                S::node(
-                    "Groups",
-                    input.aggregation.group_by.iter().map(|group| {
-                        S::node(
-                            "Group",
-                            [
-                                S::atom(group.node()),
-                                S::atom(group.property().unwrap_or("Node")),
-                                S::atom(group.truncate().map_or("None", |unit| unit.name())),
-                                S::atom(group.output_name()),
-                            ],
-                        )
-                    }),
-                ),
-                S::node(
-                    "Measures",
-                    input.aggregation.metrics.iter().map(|metric| {
-                        S::node(
-                            "Measure",
-                            [
-                                S::atom(metric.expr.function()),
-                                S::atom(metric.expr.node()),
-                                S::atom(metric.expr.property().unwrap_or("Node")),
-                                S::atom(metric.output_name()),
-                            ],
-                        )
-                    }),
-                ),
-                S::node(
-                    "OrderBy",
-                    input.order_by.iter().map(|order| {
-                        S::node(
-                            if order.direction == OrderDirection::Desc {
-                                "Desc"
-                            } else {
-                                "Asc"
-                            },
-                            [S::atom(&order.node), S::atom(&order.property)],
-                        )
-                    }),
-                ),
-                S::node(
-                    "AggregateOrder",
-                    input.aggregation.sort.iter().map(|order| {
-                        S::node(
-                            if order.direction == OrderDirection::Desc {
-                                "Desc"
-                            } else {
-                                "Asc"
-                            },
-                            [S::atom(&order.column)],
-                        )
-                    }),
-                ),
-                S::node("Limit", [S::atom(input.limit)]),
-            ]),
-    )
+fn leaf(label: &str, text: impl Into<String>) -> Tree {
+    Tree::node(label, text, vec![])
 }
 
-fn filters(filters: &HashMap<String, Vec<InputFilter>>) -> S {
+fn filter(predicates: Vec<String>, input: Tree) -> Tree {
+    if predicates.is_empty() {
+        return input;
+    }
+    let mut predicates = predicates;
+    let children = if input.label == "Filter" {
+        predicates.extend(input.items);
+        input.children
+    } else {
+        vec![input]
+    };
+    Tree::node("Filter", predicates.join(", "), children)
+}
+
+pub fn logical(input: &Input) -> Tree {
+    let mut children: Vec<_> = input
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut predicates = input_filters(&node.id, &node.filters);
+            if !node.node_ids.is_empty() {
+                predicates.push(format!("{}.id IN {:?}", node.id, node.node_ids));
+            }
+            if let Some(range) = &node.id_range {
+                predicates.extend([
+                    format!("{}.id >= {}", node.id, range.start),
+                    format!("{}.id <= {}", node.id, range.end),
+                ]);
+            }
+            let scan = filter(
+                predicates,
+                leaf(
+                    "NodeScan",
+                    format!(
+                        "{} AS {}",
+                        node.entity.as_deref().unwrap_or("Unresolved"),
+                        node.id
+                    ),
+                ),
+            );
+            match &node.columns {
+                Some(ColumnSelection::List(columns)) => Tree::node(
+                    "Project",
+                    columns
+                        .iter()
+                        .map(|column| format!("{}.{column}", node.id))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    vec![scan],
+                ),
+                Some(ColumnSelection::All) => {
+                    Tree::node("Project", format!("{}.*", node.id), vec![scan])
+                }
+                None => scan,
+            }
+        })
+        .collect();
+    children.extend(input.relationships.iter().enumerate().map(|(index, edge)| {
+        let (source, target, arrow) = match edge.direction {
+            compiler::input::Direction::Incoming => (&edge.to, &edge.from, "->"),
+            compiler::input::Direction::Outgoing => (&edge.from, &edge.to, "->"),
+            compiler::input::Direction::Both => (&edge.from, &edge.to, "--"),
+        };
+        let alias = format!("e{index}");
+        let depth = if edge.hops.min == 1 && edge.hops.max == 1 {
+            String::new()
+        } else {
+            format!(" HOPS {}..{}", edge.hops.min, edge.hops.max)
+        };
+        filter(
+            input_filters(&alias, &edge.filters),
+            leaf(
+                "EdgeScan",
+                format!(
+                    "{} {source}{arrow}{target} AS {alias}{depth}",
+                    edge.types.join("|")
+                ),
+            ),
+        )
+    }));
+    let mut tree = Tree::node("Input", input.query_type.to_string(), children);
+    if !input.aggregation.metrics.is_empty() || !input.aggregation.group_by.is_empty() {
+        let groups = input.aggregation.group_by.iter().map(|group| {
+            let value = group.property().map_or_else(
+                || group.node().into(),
+                |property| format!("{}.{property}", group.node()),
+            );
+            let value = group.truncate().map_or_else(
+                || value.clone(),
+                |unit| format!("date_trunc({}, {value})", unit.name()),
+            );
+            format!("group {value} AS {}", group.output_name())
+        });
+        let metrics = input.aggregation.metrics.iter().map(|metric| {
+            let argument = metric.expr.property().map_or_else(
+                || metric.expr.node().into(),
+                |property| format!("{}.{property}", metric.expr.node()),
+            );
+            format!(
+                "{}({argument}) AS {}",
+                metric.expr.function().to_string().to_uppercase(),
+                metric.output_name()
+            )
+        });
+        tree = Tree::node(
+            "Aggregate",
+            groups.chain(metrics).collect::<Vec<_>>().join(", "),
+            vec![tree],
+        );
+    }
+    if let Some(order) = &input.order_by {
+        tree = Tree::node(
+            "Sort",
+            format!(
+                "{}.{}{}",
+                order.node,
+                order.property,
+                if order.direction == OrderDirection::Desc {
+                    " DESC"
+                } else {
+                    ""
+                }
+            ),
+            vec![tree],
+        );
+    }
+    if let Some(order) = &input.aggregation.sort {
+        tree = Tree::node(
+            "Sort",
+            format!(
+                "{}{}",
+                order.column,
+                if order.direction == OrderDirection::Desc {
+                    " DESC"
+                } else {
+                    ""
+                }
+            ),
+            vec![tree],
+        );
+    }
+    Tree::node("Limit", input.limit.to_string(), vec![tree])
+}
+
+fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {
     let mut ordered: Vec<_> = filters.iter().collect();
     ordered.sort_by_key(|(property, _)| *property);
-    S::node(
-        "Filters",
-        ordered.into_iter().flat_map(|(property, filters)| {
+    ordered
+        .into_iter()
+        .flat_map(|(property, filters)| {
             filters.iter().map(move |filter| {
-                let value = match &filter.rhs_column {
-                    Some((node, column)) => S::node("Column", [S::atom(node), S::atom(column)]),
-                    None => S::atom(
-                        filter
-                            .value
-                            .as_ref()
-                            .map_or("null".into(), ToString::to_string),
-                    ),
+                let value = filter.rhs_column.as_ref().map_or_else(
+                    || literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null)),
+                    |(node, column)| format!("{node}.{column}"),
+                );
+                let operator = filter
+                    .op
+                    .map_or_else(|| "eq".into(), |op| op.as_ref().to_string());
+                let operator = match operator.as_str() {
+                    "eq" => "=",
+                    "ne" => "!=",
+                    "gt" => ">",
+                    "gte" => ">=",
+                    "lt" => "<",
+                    "lte" => "<=",
+                    "in" => "IN",
+                    other => other,
                 };
-                S::node(
-                    "Predicate",
-                    [
-                        S::atom(property),
-                        S::atom(
-                            filter
-                                .op
-                                .map_or_else(|| "eq".into(), |op| op.as_ref().to_string()),
-                        ),
-                        value,
-                    ],
-                )
+                format!("{alias}.{property} {operator} {value}")
             })
-        }),
-    )
+        })
+        .collect()
 }
 
-pub fn physical(plan: &Plan, ast: &Node) -> S {
-    use compiler::passes::plan::PlanBody;
-    let strategy = match &plan.body {
+pub fn physical(plan: &Plan, ast: &Node) -> (Tree, Tree) {
+    let planned = match &plan.body {
         PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
         {
-            Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
-            Strategy::Flat(flat) => S::node("Flat", [physical_source(&flat.source)]),
-            Strategy::Fk(FkShape::Star { center, execution }) => S::node(
-                "FkStar",
-                [S::atom(center), physical_source(&execution.source)],
-            ),
-            Strategy::Fk(FkShape::Chain(root)) => S::node("FkChain", [physical_tree(root)]),
+            Strategy::SingleNode(root) | Strategy::Fk(FkShape::Chain(root)) => physical_tree(root),
+            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }) => {
+                let source = Tree::node(
+                    "Project",
+                    projections(&execution.outputs),
+                    vec![physical_source(&execution.source)],
+                );
+                if execution.definitions.is_empty() {
+                    source
+                } else {
+                    Tree::node(
+                        "With",
+                        "",
+                        execution
+                            .definitions
+                            .iter()
+                            .map(|(name, keys)| Tree::node("CTE", name, vec![physical_tree(keys)]))
+                            .chain([source])
+                            .collect(),
+                    )
+                }
+            }
         },
-        PlanBody::Neighbors { .. } => S::node("Neighbors", []),
-        PlanBody::PathFinding(_) => S::node("PathFinding", []),
-        PlanBody::Hydration { .. } => S::node("Hydration", []),
+        PlanBody::Neighbors { .. } => leaf("Neighbors", ""),
+        PlanBody::PathFinding(_) => leaf("PathFinding", ""),
+        PlanBody::Hydration { .. } => leaf("Hydration", ""),
     };
-    let mut nodes: Vec<_> = plan.nodes.values().collect();
-    nodes.sort_by_key(|node| &node.alias);
-    S::node(
-        "Physical",
-        [
-            S::node("Strategy", [strategy]),
-            S::node(
-                "Definitions",
-                match &plan.body {
-                    PlanBody::Traversal {
-                        strategy:
-                            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }),
-                    }
-                    | PlanBody::Aggregation {
-                        strategy:
-                            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }),
-                        ..
-                    } => execution
-                        .definitions
-                        .iter()
-                        .map(|(name, keys)| S::node("Keys", [S::atom(name), physical_tree(keys)]))
-                        .collect(),
-                    _ => vec![],
-                },
-            ),
-            S::node(
-                "Nodes",
-                nodes.into_iter().map(|node| {
-                    S::node(
-                        "Node",
-                        [
-                            S::atom(&node.alias),
-                            S::atom(node.table.as_deref().unwrap_or("Unavailable")),
-                            S::atom(match node.hydration {
-                                HydrationStrategy::Join => "Join",
-                                HydrationStrategy::FilterOnly => "FilterOnly",
-                                HydrationStrategy::Skip => "Skip",
-                            }),
-                        ],
-                    )
-                }),
-            ),
-            S::node(
-                "Hops",
-                plan.hops.iter().map(|hop| {
-                    S::node(
-                        "Hop",
-                        [
-                            S::atom(&hop.from_node),
-                            S::atom(&hop.to_node),
-                            S::atom(&hop.edge_table),
-                            S::node("Depth", [S::atom(hop.min_hops), S::atom(hop.max_hops)]),
-                            S::node("Cascade", [S::atom(hop.cascade_anchor)]),
-                        ],
-                    )
-                }),
-            ),
-            match ast {
-                Node::Query(value) => query(value),
-                Node::Insert(_) => S::node("Insert", []),
-            },
-        ],
+    let emitted = match ast {
+        Node::Query(value) => query(value),
+        Node::Insert(_) => leaf("Insert", ""),
+    };
+    (planned, emitted)
+}
+
+fn physical_tree(plan: &PhysicalPlan) -> Tree {
+    Tree::node(
+        "Project",
+        projections(&plan.outputs),
+        vec![physical_source(&plan.source)],
     )
 }
 
-fn physical_tree(plan: &compiler::passes::plan::physical::PhysicalPlan) -> S {
-    S::node(
-        "SourceFragment",
-        [
-            S::node(
-                "Outputs",
-                plan.outputs.iter().map(|column| {
-                    S::node(
-                        "Output",
-                        [
-                            S::atom(column.alias.as_deref().unwrap_or("Unaliased")),
-                            expression(&column.expr),
-                        ],
-                    )
-                }),
-            ),
-            physical_source(&plan.source),
-        ],
-    )
-}
-
-fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S {
-    use compiler::passes::plan::physical::PhysicalSource;
+fn physical_source(plan: &PhysicalSource) -> Tree {
     match plan {
-        PhysicalSource::Union { alias, arms, .. } => S::node(
+        PhysicalSource::Union { alias, arms, .. } => Tree::node(
             "Union",
-            std::iter::once(S::atom(alias)).chain(arms.iter().map(physical_tree)),
+            format!("ALL AS {alias}"),
+            arms.iter().map(physical_tree).collect(),
         ),
         PhysicalSource::Scan {
             table,
             alias,
             final_,
             ..
-        } => S::node(
-            "Read",
-            [
-                S::atom(table),
-                S::atom(alias),
-                S::atom(if *final_ { "Final" } else { "Plain" }),
-            ],
-        ),
+        } => scan(table, alias, *final_),
         PhysicalSource::Filter { predicate, input } => {
-            S::node("Filter", [expression(predicate), physical_source(input)])
+            filter(conjuncts(predicate), physical_source(input))
         }
-        PhysicalSource::KeyFilter { value, keys, input } => S::node(
-            "KeyFilter",
-            [
-                expression(value),
-                physical_tree(keys),
-                physical_source(input),
-            ],
+        PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
+            "SemiJoin",
+            format!("{} IN subquery", expression(value)),
+            vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {
-            S::node("Scope", [S::atom(alias), physical_source(input)])
+            Tree::node("Bind", alias, vec![physical_source(input)])
         }
         PhysicalSource::Latest {
             alias,
             sort_key,
             input,
-        } => S::node(
-            "Latest",
-            [
-                S::atom(alias),
-                S::node("Key", sort_key.iter().map(S::atom)),
-                physical_source(input),
-            ],
+        } => Tree::node(
+            "Deduplicate",
+            format!(
+                "LimitBy {}",
+                sort_key
+                    .iter()
+                    .map(|column| format!("{alias}.{column}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            vec![physical_source(input)],
         ),
         PhysicalSource::Join {
             kind,
             condition,
             left,
             right,
-        } => S::node(
+        } => Tree::node(
             "Join",
-            [
-                S::atom(kind),
-                expression(condition),
-                physical_source(left),
-                physical_source(right),
-            ],
+            join_head(&kind.to_string(), condition),
+            vec![physical_source(left), physical_source(right)],
         ),
     }
 }
 
-fn expression(value: &Expr) -> S {
+fn scan(table: &str, alias: &str, final_: bool) -> Tree {
+    let scan = leaf("Scan", format!("Table({table}) AS {alias}"));
+    if final_ {
+        Tree::node("Deduplicate", "Final", vec![scan])
+    } else {
+        scan
+    }
+}
+
+fn join_head(kind: &str, condition: &Expr) -> String {
+    format!(
+        "{}ON {}",
+        if kind == "INNER" {
+            String::new()
+        } else {
+            format!("{kind} ")
+        },
+        expression(condition)
+    )
+}
+
+fn literal(value: &serde_json::Value) -> String {
     match value {
-        Expr::Column { table, column } => S::node("Column", [S::atom(table), S::atom(column)]),
-        Expr::Identifier(name) => S::node("Identifier", [S::atom(name)]),
-        Expr::Literal(value) | Expr::Param { value, .. } => S::node("Literal", [S::atom(value)]),
-        Expr::FuncCall { name, args } => S::node(
-            "Call",
-            std::iter::once(S::atom(name)).chain(args.iter().map(expression)),
+        serde_json::Value::String(value) => {
+            format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+        }
+        serde_json::Value::Array(values) => format!(
+            "[{}]",
+            values.iter().map(literal).collect::<Vec<_>>().join(", ")
+        ),
+        value => value.to_string(),
+    }
+}
+
+fn expression(value: &Expr) -> String {
+    match value {
+        Expr::Column { table, column } => format!("{table}.{column}"),
+        Expr::Identifier(name) => name.clone(),
+        Expr::Literal(value) | Expr::Param { value, .. } => literal(value),
+        Expr::FuncCall { name, args } => format!(
+            "{name}({})",
+            args.iter().map(expression).collect::<Vec<_>>().join(", ")
         ),
         Expr::BinaryOp { op, left, right } => {
-            S::node(&op.to_string(), [expression(left), expression(right)])
+            let operand = |value: &Expr| {
+                let text = expression(value);
+                if matches!(value, Expr::BinaryOp { op: child, .. } if child != op || !matches!(op, Op::And | Op::Or))
+                {
+                    format!("({text})")
+                } else {
+                    text
+                }
+            };
+            format!("{} {op} {}", operand(left), operand(right))
         }
-        Expr::UnaryOp { op, expr } => S::node(&op.to_string(), [expression(expr)]),
-        Expr::Lambda { param, body } => S::node("Lambda", [S::atom(param), expression(body)]),
+        Expr::UnaryOp { op, expr } => format!("{op}({})", expression(expr)),
+        Expr::Lambda { param, body } => format!("{param} -> {}", expression(body)),
         Expr::InSubquery {
             expr,
             cte_name,
             column,
-        } => S::node(
-            "InCte",
-            [expression(expr), S::atom(cte_name), S::atom(column)],
-        ),
-        Expr::InSelect { expr, query: inner } => {
-            S::node("InQuery", [expression(expr), query(inner)])
-        }
-        Expr::Scalar(inner) => S::node("Scalar", [query(inner)]),
-        Expr::Star => S::atom("Star"),
+        } => format!("{} IN {cte_name}.{column}", expression(expr)),
+        Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
+        Expr::Scalar(_) => "scalar(subquery)".into(),
+        Expr::Star => "*".into(),
     }
 }
 
-fn relation(value: &TableRef) -> S {
+fn conjuncts(value: &Expr) -> Vec<String> {
+    match value {
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => conjuncts(left)
+            .into_iter()
+            .chain(conjuncts(right))
+            .collect(),
+        _ => vec![expression(value)],
+    }
+}
+
+fn query_filter(predicate: &Expr, input: Tree) -> Tree {
+    match predicate {
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => query_filter(right, query_filter(left, input)),
+        Expr::InSelect { expr, query: keys } => Tree::node(
+            "SemiJoin",
+            format!("{} IN subquery", expression(expr)),
+            vec![input, query(keys)],
+        ),
+        _ => filter(vec![expression(predicate)], input),
+    }
+}
+
+fn projections(values: &[SelectExpr]) -> String {
+    values
+        .iter()
+        .map(|value| {
+            value.alias.as_ref().map_or_else(
+                || expression(&value.expr),
+                |alias| format!("{} AS {alias}", expression(&value.expr)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn relation(value: &TableRef) -> Tree {
     match value {
         TableRef::Scan {
             table,
             alias,
             final_,
             ..
-        } => S::node(
-            "Scan",
-            [
-                S::atom(table),
-                S::atom(alias),
-                S::atom(if *final_ { "Final" } else { "Plain" }),
-            ],
-        ),
+        } => scan(table, alias, *final_),
         TableRef::Join {
             join_type,
             left,
             right,
             on,
-        } => S::node(
+        } => Tree::node(
             "Join",
-            [
-                S::atom(join_type),
-                expression(on),
-                relation(left),
-                relation(right),
-            ],
+            join_head(&join_type.to_string(), on),
+            vec![relation(left), relation(right)],
         ),
         TableRef::Subquery {
             query: inner,
             alias,
-        } => S::node("Subquery", [S::atom(alias), query(inner)]),
-        TableRef::Union { queries, alias } => S::node(
+        } => Tree::node("Bind", alias, vec![query(inner)]),
+        TableRef::Union { queries, alias } => Tree::node(
             "Union",
-            std::iter::once(S::atom(alias)).chain(queries.iter().map(query)),
+            format!("ALL AS {alias}"),
+            queries.iter().map(query).collect(),
         ),
     }
 }
 
-fn query(value: &Query) -> S {
-    let mut parts = vec![
-        S::node(
-            "Ctes",
+fn query(value: &Query) -> Tree {
+    let mut tree = relation(&value.from);
+    if let Some(predicate) = &value.where_clause {
+        tree = query_filter(predicate, tree);
+    }
+    let projection = projections(&value.select);
+    let aggregate = !value.group_by.is_empty() || value.select.iter().any(|value| {
+        matches!(&value.expr, Expr::FuncCall { name, .. } if [AggFunction::Count, AggFunction::Sum, AggFunction::Avg, AggFunction::Min, AggFunction::Max, AggFunction::Collect].iter().any(|function| name == function.as_sql() || name == function.as_sql_if()))
+    });
+    if !aggregate {
+        tree = Tree::node("Project", projection, vec![tree]);
+    } else {
+        let items = value
+            .group_by
+            .iter()
+            .map(|key| format!("group {}", expression(key)))
+            .chain([projection])
+            .collect::<Vec<_>>()
+            .join(", ");
+        tree = Tree::node("Aggregate", items, vec![tree]);
+    }
+    if let Some(predicate) = &value.having {
+        tree = query_filter(predicate, tree);
+    }
+    if value.distinct {
+        tree = Tree::node("Distinct", "", vec![tree]);
+    }
+    if !value.order_by.is_empty() {
+        tree = Tree::node(
+            "Sort",
+            value
+                .order_by
+                .iter()
+                .map(|order| {
+                    format!(
+                        "{}{}",
+                        expression(&order.expr),
+                        if order.desc { " DESC" } else { "" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            vec![tree],
+        );
+    }
+    if let Some((limit, keys)) = &value.limit_by {
+        tree = Tree::node(
+            "Deduplicate",
+            format!(
+                "LimitBy {limit} BY {}",
+                keys.iter().map(expression).collect::<Vec<_>>().join(", ")
+            ),
+            vec![tree],
+        );
+    }
+    if !value.union_all.is_empty() {
+        tree = Tree::node(
+            "Union",
+            "ALL",
+            std::iter::once(tree)
+                .chain(value.union_all.iter().map(query))
+                .collect(),
+        );
+    }
+    if let Some(limit) = value.limit {
+        tree = Tree::node("Limit", limit.to_string(), vec![tree]);
+    }
+    if !value.ctes.is_empty() {
+        tree = Tree::node(
+            "With",
+            "",
             value
                 .ctes
                 .iter()
-                .map(|cte| S::node("Cte", [S::atom(&cte.name), query(&cte.query)])),
-        ),
-        S::node(
-            "Select",
-            value.select.iter().map(|select| {
-                S::node(
-                    "Output",
-                    [
-                        S::atom(select.alias.as_deref().unwrap_or("Unaliased")),
-                        expression(&select.expr),
-                    ],
-                )
-            }),
-        ),
-        relation(&value.from),
-        S::node("Where", value.where_clause.iter().map(expression)),
-        S::node("GroupBy", value.group_by.iter().map(expression)),
-        S::node("Having", value.having.iter().map(expression)),
-        S::node(
-            "OrderBy",
-            value.order_by.iter().map(|order| {
-                S::node(
-                    if order.desc { "Desc" } else { "Asc" },
-                    [expression(&order.expr)],
-                )
-            }),
-        ),
-    ];
-    if value.distinct {
-        parts.push(S::node("Distinct", []));
+                .map(|cte| Tree::node("CTE", &cte.name, vec![query(&cte.query)]))
+                .chain([tree])
+                .collect(),
+        );
     }
-    if let Some(limit) = value.limit {
-        parts.push(S::node("Limit", [S::atom(limit)]));
-    }
-    if let Some((limit, keys)) = &value.limit_by {
-        parts.push(S::node(
-            "LimitBy",
-            std::iter::once(S::atom(limit)).chain(keys.iter().map(expression)),
-        ));
-    }
-    if !value.union_all.is_empty() {
-        parts.push(S::node("UnionAll", value.union_all.iter().map(query)));
-    }
-    S::node("Query", parts)
+    tree
 }
-use query_engine::compiler;

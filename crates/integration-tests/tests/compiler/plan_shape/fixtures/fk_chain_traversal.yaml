@@ -21,17 +21,14 @@ query:
     RETURN u.id, mr.id, pipe.id, j.id
 logical:
   expect:
-    - (Relationship u mr Outgoing (Kinds AUTHORED) (Hops 1 1) (Filters))
+    - (EdgeScan AUTHORED u->mr AS e0)
 physical:
   clickhouse:
-    expect:
-      - (Strategy (FkChain (SourceFragment (Outputs ...) (Join ...))))
-      - (Output e0_src (Column u id))
-      - (Output e0_dst (Column mr id))
-      - (Output e2_src (Column pipe id))
-      - (Output e2_dst (Column j id))
-      - (Scope u (Filter _ (Read gl_user u Final)))
-      - (Scope j (Filter _ (Read gl_job j Final)))
-    reject:
-      - (Scan gl_edge ...)
-      - (Scan gl_ci_edge ...)
+    planned:
+      expect:
+        - (Project u.id AS e0_src, mr.id AS e0_dst, pipe.id AS e2_src, j.id AS e2_dst, ... (_))
+        - (Bind u (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u))))
+        - (Bind j (Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j))))
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)

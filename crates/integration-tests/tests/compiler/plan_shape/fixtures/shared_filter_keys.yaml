@@ -18,14 +18,22 @@ query:
     RETURN a.id, b.id, c.id
 logical:
   expect:
-    - (Node a Definition (Ids 12000) ...)
+    - (Filter a.id IN [12000] (NodeScan Definition AS a))
 physical:
   clickhouse:
-    expect:
-      - (Keys _filter_b (SourceFragment _ (Filter _ (Read gl_definition b Final))))
-      - (Definitions (Keys _filter_b _))
-      - (InCte (Column e0p target_id) _filter_b id)
+    planned:
+      bind:
+        - (CTE $shared (Project b.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))
+      definition_order: [$shared]
+      expect:
+        - (Filter e0p.target_id IN $shared.id, ... (_))
+      occurrences:
+        - pattern: (CTE $shared (_))
+          count: 1
+      reject:
+        - (Filter e1.source_id IN $shared.id, ... (_))
   duckdb:
-    expect:
-      - (Definitions (Keys _filter_a _) (Keys _filter_b _))
-      - (InCte (Column e1 source_id) _filter_b id)
+    planned:
+      definition_order: [_filter_a, _filter_b]
+      expect:
+        - (Filter e1.source_id IN _filter_b.id, ... (_))

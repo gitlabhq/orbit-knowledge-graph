@@ -20,26 +20,42 @@ query:
     RETURN a.id, b.id, c.id, d.id
 logical:
   expect:
-    - (Node a Definition (Ids 1) ...)
-    - (Relationship a b Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
-    - (Relationship b c Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
+    - (Filter a.id IN [1] (NodeScan Definition AS a))
+    - (EdgeScan CALLS a->b AS e0)
+    - (EdgeScan CALLS b->c AS e1)
 physical:
   clickhouse:
-    expect:
-      - (Strategy (Flat (Join INNER (= (Column e1 target_id) (Column e2 source_id)) (Join ...) _)))
-      - (KeyFilter (Column e1 source_id) _ (Scope e1 (Filter (= (Column e1 _deleted) (Literal false)) (Read gl_code_edge e1 Final))))
-      - (KeyFilter (Column e1p source_id) (SourceFragment (Outputs (Output target_id (Column e0p target_id))) (Filter _ (Read gl_code_edge e0p Plain))) (Filter _ (Read gl_code_edge e1p Plain)))
-      - (Hop b c gl_code_edge (Depth 1 1) (Cascade true))
-      - (Join INNER (= (Column e0 target_id) (Column e1 source_id)) _ _)
-      - (Scan gl_code_edge e0 Final)
-      - (Scan gl_code_edge e1 Final)
-      - (InQuery (Column e1 source_id) (Query ... (Scan gl_code_edge e0p Plain) ...))
-      - (InQuery (Column e2 source_id) (Query ... (Scan gl_code_edge e1p Plain) (Where (AND _ (InQuery (Column e1p source_id) (Query ... (Scan gl_code_edge e0p Plain) ...)))) ...))
+    planned:
+      expect:
+        - (Join ON e1.target_id = e2.source_id (Join ON e0.target_id = e1.source_id (_) (_)) (_))
+        - |
+          (SemiJoin e1.source_id IN subquery
+            (Bind e1 (Filter e1._deleted = false (Deduplicate Final (Scan Table(gl_code_edge) AS e1))))
+            (Project e0p.target_id AS target_id (Filter e0p.source_id = 1, ... (Scan Table(gl_code_edge) AS e0p))))
+        - |
+          (SemiJoin e2.source_id IN subquery
+            (_)
+            (Project e1p.target_id AS target_id
+              (SemiJoin e1p.source_id IN subquery
+                (Filter ... (Scan Table(gl_code_edge) AS e1p))
+                (Project e0p.target_id AS target_id (Filter ... (Scan Table(gl_code_edge) AS e0p))))))
+        - (Deduplicate Final (Scan Table(gl_code_edge) AS e0))
+    emitted:
+      expect:
+        - |
+          (SemiJoin e2.source_id IN subquery
+            (_)
+            (Project e1p.target_id AS target_id
+              (SemiJoin e1p.source_id IN subquery
+                (Filter ... (Scan Table(gl_code_edge) AS e1p))
+                (Project e0p.target_id AS target_id
+                  (Filter e0p.source_id = 1, ... (Scan Table(gl_code_edge) AS e0p))))))
   duckdb:
-    expect:
-      - (Strategy (Flat (Join INNER (= (Column d id) (Column e2 target_id)) _ (Scope d _))))
-      - (KeyFilter (Column e2 source_id) _ _)
-      - (Join INNER (= (Column e0 target_id) (Column e1 source_id)) _ _)
-      - (Node a gl_definition Join)
-      - (Node b gl_definition Join)
-      - (Node c gl_definition Join)
+    planned:
+      expect:
+        - (Join ON d.id = e2.target_id (_) (Bind d (_)))
+        - (SemiJoin e2.source_id IN subquery (_) (_))
+        - (Join ON e0.target_id = e1.source_id (_) (_))
+        - (Join ON a.id = e0.source_id (_) (_))
+        - (Join ON b.id = e0.target_id (_) (_))
+        - (Join ON c.id = e1.target_id (_) (_))

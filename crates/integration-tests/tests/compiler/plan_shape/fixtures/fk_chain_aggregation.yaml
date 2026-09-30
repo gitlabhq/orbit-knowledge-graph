@@ -24,19 +24,20 @@ query:
     RETURN f.old_path, count(f) AS appearances LIMIT 60
 logical:
   expect:
-    - (Groups (Group f old_path None f_old_path))
-    - (Measures (Measure count f Node appearances))
+    - (Aggregate group f.old_path AS f_old_path, COUNT(f) AS appearances (_))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (FkChain (SourceFragment (Outputs) (Join ...))))
-      - (Join INNER (= (Column pl merge_request_id) (Column mr id)) _ _)
-      - (Join INNER (= (Column mr latest_merge_request_diff_id) (Column d id)) _ _)
-      - (Join INNER (= (Column f merge_request_diff_id) (Column d id)) _ _)
-      - (Scope pl (Filter _ (Read gl_pipeline pl Final)))
-      - (Scope mr (Filter _ (Read gl_merge_request mr Final)))
-      - (GroupBy (Column f old_path))
-    reject:
-      - (Scan gl_edge ...)
-      - (Scan gl_ci_edge ...)
-      - (Output e0_type ...)
+    planned:
+      expect:
+        - (Project (Join ON f.merge_request_diff_id = d.id (_) (_)))
+        - (Join ON pl.merge_request_id = mr.id (_) (_))
+        - (Join ON mr.latest_merge_request_diff_id = d.id (_) (_))
+        - (Bind pl (Filter ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl))))
+        - (Bind mr (Filter ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr))))
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)
+        - (Project 'TRIGGERED' AS e0_type, ... (_))
+    emitted:
+      expect:
+        - (Aggregate group f.old_path, ... (_))

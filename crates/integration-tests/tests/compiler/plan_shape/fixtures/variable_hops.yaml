@@ -13,16 +13,21 @@ query:
     MATCH (a:Definition {id: 1})-[:CALLS*1..3]->(b:Definition) RETURN a.id, b.id
 logical:
   expect:
-    - (Relationship a b Outgoing (Kinds CALLS) (Hops 1 3) (Filters))
+    - (EdgeScan CALLS a->b AS e0 HOPS 1..3)
 physical:
   clickhouse:
-    expect:
-      - (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 1)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 3)) ...) _))
-      - (Output source_tags (Column e1 source_tags))
-      - (Output target_tags (Column e3 target_tags))
-      - (Output hop_e0_path_nodes (Column e0 path_nodes))
+    planned:
+      expect:
+        - (Union ALL AS e0 (Project 1 AS depth, ... (_)) (Project 2 AS depth, ... (_)) (Project 3 AS depth, ... (_)))
+        - (Project e1.source_tags AS source_tags, e3.target_tags AS target_tags, ... (_))
+    emitted:
+      expect:
+        - (Project e0.path_nodes AS hop_e0_path_nodes, ... (_))
   duckdb:
-    expect:
-      - (Union e0 _ _ _)
-      - (Output depth (Literal 3))
-      - (Output hop_e0_path_nodes (Column e0 path_nodes))
+    planned:
+      expect:
+        - (Union ALL AS e0 (_) (_) (_))
+        - (Project 3 AS depth, ... (_))
+    emitted:
+      expect:
+        - (Project e0.path_nodes AS hop_e0_path_nodes, ... (_))

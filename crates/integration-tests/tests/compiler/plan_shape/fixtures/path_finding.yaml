@@ -13,21 +13,21 @@ query:
     MATCH p = ANY SHORTEST (a:Definition {id: 1})-[:CALLS*1..2]->(b:Definition {id: 2}) RETURN p
 logical:
   expect:
-    - (Logical path_finding ...)
-    - (Node a Definition (Ids 1) ...)
-    - (Node b Definition (Ids 2) ...)
+    - (Input path_finding (...))
+    - (Filter a.id IN [1] (NodeScan Definition AS a))
+    - (Filter b.id IN [2] (NodeScan Definition AS b))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (PathFinding))
-      - (Cte _ _)
-      - (Scan gl_code_edge ...)
-    reject:
-      - (SingleNode ...)
+    planned:
+      exact: (PathFinding)
+    emitted:
+      expect:
+        - (CTE _ (_))
+        - (Scan Table(gl_code_edge) ...)
   duckdb:
-    expect:
-      - (Strategy (PathFinding))
-      - (Cte _ _)
-      - (Scan gl_edge ...)
-    reject:
-      - (SingleNode ...)
+    planned:
+      exact: (PathFinding)
+    emitted:
+      expect:
+        - (CTE _ (_))
+        - (Scan Table(gl_edge) ...)

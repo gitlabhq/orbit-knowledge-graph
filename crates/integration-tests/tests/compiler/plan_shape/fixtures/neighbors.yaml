@@ -10,18 +10,18 @@ query:
     MATCH (d:Definition {id: 1})-[:CALLS]-(neighbor) RETURN d, neighbor
 logical:
   expect:
-    - (Logical neighbors ...)
-    - (Node d Definition (Ids 1) ...)
+    - (Input neighbors (...))
+    - (Filter d.id IN [1] (NodeScan Definition AS d))
 physical:
   clickhouse:
-    expect:
-      - (Strategy (Neighbors))
-      - (Scan gl_code_edge ...)
-    reject:
-      - (SingleNode ...)
+    planned:
+      exact: (Neighbors)
+    emitted:
+      expect:
+        - (Scan Table(gl_code_edge) ...)
   duckdb:
-    expect:
-      - (Strategy (Neighbors))
-      - (Scan gl_edge ...)
-    reject:
-      - (SingleNode ...)
+    planned:
+      exact: (Neighbors)
+    emitted:
+      expect:
+        - (Scan Table(gl_edge) ...)

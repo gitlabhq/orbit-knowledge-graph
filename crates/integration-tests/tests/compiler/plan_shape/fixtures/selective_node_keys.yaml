@@ -15,16 +15,20 @@ query:
     RETURN a.id, b.id ORDER BY a.id
 logical:
   expect:
-    - (Node a Definition (Ids 1) ...)
-    - (OrderBy (Asc a id))
+    - (Filter a.id IN [1] (NodeScan Definition AS a))
+    - (Sort a.id (_))
 physical:
   clickhouse:
-    expect:
-      - (Keys _filter_a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key traversal_path project_id branch id) (Filter _ (Read gl_definition a Plain)))))
-      - (Definitions (Keys _filter_a _))
-      - (Cte _filter_a (Query ... (LimitBy 1 (Column a traversal_path) (Column a project_id) (Column a branch) (Column a id))))
-      - (InCte (Column e0 source_id) _filter_a id)
+    planned:
+      definition_order: [_filter_a]
+      expect:
+        - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy a.traversal_path, a.project_id, a.branch, a.id (Filter ... (Scan Table(gl_definition) AS a)))))
+        - (Filter e0.source_id IN _filter_a.id, ... (_))
+    emitted:
+      expect:
+        - (CTE _filter_a (Deduplicate LimitBy 1 BY a.traversal_path, a.project_id, a.branch, a.id (_)))
   duckdb:
-    expect:
-      - (Keys _filter_a (SourceFragment (Outputs (Output id (Column a id))) (Latest a (Key ...) (Filter _ (Read gl_definition a Plain)))))
-      - (InCte (Column e0 source_id) _filter_a id)
+    planned:
+      expect:
+        - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_definition) AS a)))))
+        - (Filter e0.source_id IN _filter_a.id, ... (_))
