@@ -1011,6 +1011,10 @@ docker-build-mr:
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
   rules:
+    # Automatic when orbit-perf:mr runs automatically, since it tests this image.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID
+      changes: !reference [.orbit-perf-query-path-changes, changes]
+      allow_failure: true
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
