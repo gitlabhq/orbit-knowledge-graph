@@ -579,7 +579,6 @@ fn index_repo(
     mut pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
-    let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -588,8 +587,9 @@ fn index_repo(
         None,
         code_graph::v2::config::detect_language_from_path,
     ));
+    let files = std::sync::Arc::new(code_graph::v2::Vfs::default());
     let file_inventory = std::sync::Arc::new(
-        orbit_utils::files::disk::discover(&git.repo_path, &filter)
+        orbit_utils::files::disk::discover(&git.repo_path, &filter, &files)
             .context("failed to walk repository files")?,
     );
     pipeline_config.passes = filter;
@@ -621,7 +621,7 @@ fn index_repo(
 
     let cancel = pipeline_config.cancel.clone();
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
-        std::path::Path::new(&root_path),
+        files.clone(),
         file_inventory,
         pipeline_config,
         tracer,
@@ -661,7 +661,7 @@ fn index_repo(
         &client,
         &doc_table,
         ontology,
-        &git.repo_path,
+        &files,
         git.project_id,
         &git.commit_sha,
     )
