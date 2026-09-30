@@ -80,6 +80,9 @@ Neighbors emits direction-specific redaction columns in its own query arms.
 Its projected binding carries only an identity needed for an additional role scan, when required.
 Property comparisons and cursor identities reuse the resolved node bindings.
 Lowering rejects identities that have neither a visible source nor an elided pinned value.
+FK hop elision retains elevated-role targets for authorization scans.
+It also retains multi-ID targets when projection, grouping, property aggregation, or ordering needs their values.
+Ungrouped aggregations can still elide targets used only as filters.
 
 | # | Pass | Responsibility |
 |---|---|---|
