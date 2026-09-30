@@ -40,8 +40,8 @@ Measurements on a local stack support the design:
   edges to unreadable neighbors are dropped from the node and edge lists. That
   does not cover pagination metadata. Redacted rows still count toward the
   query window. An unreadable neighbor at the limit boundary can change
-  `has_more`, `truncated`, and the row count. The Consequences section makes
-  the fix a prerequisite.
+  `has_more`, `truncated`, and the row count. The Consequences section
+  records the fix as a dependency.
 - The unchanged Workhorse `SendQuery.Inject` ran 2 to 40 concurrent streams
   with its redaction loop, making at most one redaction callback per stream.
   Five queries took 0.4 s concurrently against 0.87 s sequentially.
@@ -129,8 +129,8 @@ a top-level `expansions` object, and `namespace_path` inside `summary`
 - Expansion queries and payloads contain ids of found records only. This saves
   work and avoids cross-tenant timing on centers. It is defense in depth, not
   the leak control.
-- Expansion results must not carry pagination metadata that depends on
-  redacted rows. See the prerequisite under Consequences.
+- Expansion pagination metadata has the same redaction exposure as any graph
+  query. See the dependency under Consequences.
 
 ### Client rule: `result` or `request`
 
@@ -241,18 +241,16 @@ These apply to the Rails implementation that replaces the closed prototype:
 - **MCP tool deferred.** An explicit MCP tool and an agent command are out of
   scope. The Rails service and resolver take plain values so the command
   interceptor can reuse them later.
-- **Prerequisite: authorization-safe pagination.** Redacted rows count toward
-  the query window, and the fallback `next_cursor` can anchor on a redacted
-  row. Expansion results must not carry pagination metadata (`has_more`,
-  `truncated`, cursors, row counts) that depends on redacted rows, in both raw
-  and GOON output. The fix must keep `truncated` and compute it from authorized
-  rows instead of dropping it, because the client rule relies on it. A
-  confidential follow-up issue tracks the work. The Rails `expand` feature flag
-  stays off until it lands. Ordinary `query/<name>` calls are not gated by it.
-  The fix needs a test with a readable center and an unreadable neighbor at the
-  limit boundary. It covers pagination metadata only. Until it lands, the
-  pagination of an expansion can reveal that a neighbor was redacted, as with
-  any Orbit query. Timing is a separate channel that this fix does not close.
+- **Dependency: authorization-safe pagination.** Redacted rows count toward
+  the query window. The fallback `next_cursor` can anchor on a redacted row, so
+  `has_more`/`truncated`/cursors can reveal that a neighbor was redacted.
+  This affects every graph query today and is not introduced by this ADR; a
+  confidential issue tracks the GKG-side fix. The fix must keep `truncated` and
+  compute it from authorized rows, because the client rule relies on it. The
+  fix needs a test with a readable center and an unreadable neighbor at the
+  limit boundary. It covers pagination metadata only; timing is a separate
+  channel. `expand` does not wait for it: under (b) it reaches only routes that
+  are already callable.
 - **Header size under (e).** The Rails body travels base64 in the send-data
   header. Workhorse sets no explicit limit, so Go's default applies. That is
   unmeasured for 20 entities and should be measured before (e) ships.
