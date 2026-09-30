@@ -1,9 +1,8 @@
 //! A Gitaly tar.gz. Inflating is one sequential stream, so that thread only
-//! reads: it checks each path, applies the header passes, and sends the bytes
-//! of every file that needs them ahead through a bounded channel. Workers run
-//! the content passes on those bytes, store the files that load in the
-//! repository filesystem, and hand back the settled `File`. Nothing touches
-//! the disk.
+//! reads: it checks each path, offers the file to the repository filesystem,
+//! and sends the bytes of every file the filesystem wants ahead through a
+//! bounded channel. Workers finish those offers with the bytes. Nothing
+//! touches the disk.
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -14,70 +13,51 @@ use flate2::read::GzDecoder;
 use rayon::prelude::*;
 use tracing::warn;
 
-use super::{Decision, File, Inventory, Need, Pass, SourceError, Vfs, check};
+use super::{Offer, SourceError, Vfs};
 
 /// How many files' bytes may wait for a worker; with the per-file size cap
 /// this bounds the bytes in flight.
 const LOOKAHEAD: usize = 64;
 
-pub fn extract<R: Read>(
-    reader: R,
-    passes: &impl Pass,
-    vfs: &Vfs,
-) -> Result<Inventory, SourceError> {
-    let (sender, receiver) = sync_channel::<Pending>(LOOKAHEAD);
+pub fn extract<R: Read>(reader: R, vfs: &Vfs) -> Result<(), SourceError> {
+    let (sender, receiver) = sync_channel::<Pending<'_>>(LOOKAHEAD);
     let (inflated, settled) = std::thread::scope(|scope| {
-        let workers = scope.spawn(|| settle(receiver, passes, vfs));
-        let inflated = inflate(reader, passes, &sender);
+        let workers = scope.spawn(|| settle(receiver));
+        let inflated = inflate(reader, vfs, &sender);
         drop(sender);
         (inflated, workers.join().expect("tar workers panicked"))
     });
     // A failure on either side closes the channel and ends the other; the
     // side that failed on its own has the error worth reporting.
-    let mut files = match (inflated, settled) {
-        (Err(inflate_error), Err(_)) => return Err(inflate_error),
+    match (inflated, settled) {
+        (Err(inflate_error), Err(_)) => Err(inflate_error),
         (inflated, settled) => {
-            let mut files = inflated?;
-            files.extend(settled?);
-            files
+            inflated?;
+            settled
         }
-    };
-    files.retain(|file| file.decision != Decision::Drop);
-    Ok(Inventory::new(files))
+    }
 }
 
 /// A file whose bytes came off the stream, waiting for a worker.
-struct Pending {
-    file: File,
+struct Pending<'a> {
+    offer: Offer<'a>,
     bytes: Vec<u8>,
 }
 
-fn settle(
-    receiver: Receiver<Pending>,
-    passes: &impl Pass,
-    vfs: &Vfs,
-) -> Result<Vec<File>, SourceError> {
+fn settle(receiver: Receiver<Pending<'_>>) -> Result<(), SourceError> {
     receiver
         .into_iter()
         .par_bridge()
-        .map(|Pending { mut file, bytes }| {
-            check(passes, &mut file, &bytes);
-            if file.loads() {
-                vfs.write(&file.path, bytes)?;
-            }
-            Ok(file)
-        })
-        .collect()
+        .try_for_each(|Pending { offer, bytes }| offer.with_bytes(bytes))
 }
 
-fn inflate<R: Read>(
+fn inflate<'a, R: Read>(
     reader: R,
-    passes: &impl Pass,
-    workers: &SyncSender<Pending>,
-) -> Result<Vec<File>, SourceError> {
+    vfs: &'a Vfs,
+    workers: &SyncSender<Pending<'a>>,
+) -> Result<(), SourceError> {
     let mut archive = ::tar::Archive::new(GzDecoder::new(reader));
     let mut archive_root: Option<OsString> = None;
-    let mut files = Vec::new();
     let mut any_entry_seen = false;
     let entries = archive
         .entries()
@@ -126,31 +106,24 @@ fn inflate<R: Read>(
                 relative_path.display()
             ))));
         }
-        let path = relative_path.to_string_lossy().into_owned();
+        let path = relative_path.to_string_lossy();
 
-        // A symlink is a node in the tree with no bytes of its own.
-        if is_symlink {
-            let mut file = File::symlink(path, entry.size());
-            passes.header(&mut file)?;
-            if file.decision != Decision::Drop {
-                file.decision = Decision::ListOnly;
-            }
-            files.push(file);
+        let Some(offer) = vfs.offer(&path, entry.size(), is_symlink)? else {
             continue;
-        }
-        let mut file = File::new(path, entry.size());
-        let need = passes.header(&mut file)?;
-        if need == Need::Nothing && !file.loads() {
-            files.push(file);
+        };
+        // A symlink is a node with no bytes of its own; so is a file the
+        // header already settled, whose body is not worth inflating.
+        if is_symlink || !(offer.loads() || offer.wants_bytes()) {
+            offer.without_bytes();
             continue;
         }
         let mut bytes = Vec::with_capacity(entry.size() as usize);
         entry.read_to_end(&mut bytes)?;
-        if workers.send(Pending { file, bytes }).is_err() {
-            return Ok(files);
+        if workers.send(Pending { offer, bytes }).is_err() {
+            return Ok(());
         }
     }
-    Ok(files)
+    Ok(())
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records
@@ -181,7 +154,7 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::CapExceeded;
+    use crate::files::{CapExceeded, Decision, File, Need, Pass};
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use std::io::Write;
@@ -238,18 +211,24 @@ mod tests {
         enc.finish().unwrap()
     }
 
-    fn paths(inv: &[File]) -> Vec<&str> {
-        inv.iter().map(|e| e.path.as_str()).collect()
+    /// A node the repository lists but keeps no bytes for.
+    fn listed_only(vfs: &Vfs, path: &str) -> bool {
+        vfs.exists(Path::new(path))
+            && vfs.read(Path::new(path)).unwrap_err().kind() == std::io::ErrorKind::Unsupported
+    }
+
+    fn paths(vfs: &Vfs) -> Vec<String> {
+        vfs.files().into_iter().map(|e| e.path).collect()
     }
 
     #[test]
     fn extracts_and_strips_archive_root() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let data = build_archive(&[
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
-        extract(&data[..], &ParseAll, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
         assert_eq!(
             vfs.read_to_string(Path::new("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -259,7 +238,7 @@ mod tests {
 
     #[test]
     fn skips_pax_global_and_per_file_headers() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let mut tb = tar::Builder::new(Vec::new());
         for (ty, name, body) in [
             (
@@ -292,7 +271,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        extract(&data[..], &ParseAll, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
         assert_eq!(
             vfs.read_to_string(Path::new("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -301,13 +280,13 @@ mod tests {
 
     #[test]
     fn skips_entry_outside_archive_root_and_keeps_the_rest() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let data = build_archive(&[
             Entry::File("root-a/file1.rs", b"a"),
             Entry::File("root-b/file2.rs", b"b"),
         ]);
-        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
-        assert_eq!(paths(&inv), vec!["file1.rs"]);
+        extract(&data[..], &vfs).unwrap();
+        assert_eq!(paths(&vfs), vec!["file1.rs"]);
         assert!(vfs.exists(Path::new("file1.rs")));
     }
 
@@ -315,14 +294,14 @@ mod tests {
     /// the way, so do we.
     #[test]
     fn names_too_long_for_a_disk_are_ordinary_names_here() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let long = format!("root/{}/{}.rs", "d".repeat(300), "f".repeat(300));
         let data = build_archive(&[
             Entry::File("root/src/main.rs", b"fn main() {}"),
             Entry::File(&long, b"fn f() {}"),
         ]);
-        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
-        assert_eq!(inv.len(), 2);
+        extract(&data[..], &vfs).unwrap();
+        assert_eq!(vfs.len(), 2);
         assert_eq!(
             vfs.read_to_string(Path::new(&long["root/".len()..]))
                 .unwrap(),
@@ -332,7 +311,7 @@ mod tests {
 
     #[test]
     fn rejects_path_traversal() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let mut tb = tar::Builder::new(Vec::new());
         let content = b"malicious";
         let mut h = tar::Header::new_gnu();
@@ -349,7 +328,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        let err = extract(&data[..], &ParseAll, &vfs).unwrap_err();
+        let err = extract(&data[..], &vfs).unwrap_err();
         assert!(err.to_string().contains("path traversal"), "got: {err}");
     }
 
@@ -357,20 +336,20 @@ mod tests {
     /// is no disk for it to escape.
     #[test]
     fn symlinks_are_listed_and_never_read() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let data = build_archive(&[
             Entry::File("root/src/lib.rs", b"real content"),
             Entry::Symlink("root/bin/run", "../src/lib.rs"),
             Entry::Symlink("root/escape", "/etc/passwd"),
         ]);
-        let inv = extract(&data[..], &ParseAll, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
 
-        assert_eq!(paths(&inv), vec!["bin/run", "escape", "src/lib.rs"]);
-        let decision = |p: &str| inv.iter().find(|f| f.path == p).unwrap().decision;
+        assert_eq!(paths(&vfs), vec!["bin/run", "escape", "src/lib.rs"]);
+        let decision = |p: &str| vfs.file(Path::new(p)).unwrap().decision;
         assert_eq!(decision("bin/run"), Decision::ListOnly);
         assert_eq!(decision("escape"), Decision::ListOnly);
-        assert!(!vfs.exists(Path::new("bin/run")));
-        assert!(!vfs.exists(Path::new("escape")));
+        assert!(listed_only(&vfs, "bin/run"));
+        assert!(listed_only(&vfs, "escape"));
         assert_eq!(
             vfs.read_to_string(Path::new("src/lib.rs")).unwrap(),
             "real content"
@@ -379,65 +358,50 @@ mod tests {
 
     #[test]
     fn empty_and_truncated_bodies_are_classified_empty() {
-        let vfs = Vfs::default();
-        assert!(matches!(
-            extract(&[][..], &ParseAll, &vfs),
-            Err(SourceError::Empty)
-        ));
+        let vfs = Vfs::new(ParseAll, None);
+        assert!(matches!(extract(&[][..], &vfs), Err(SourceError::Empty)));
         let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
         let truncated = &full[..full.len() / 2];
-        assert!(matches!(
-            extract(truncated, &ParseAll, &vfs),
-            Err(SourceError::Empty)
-        ));
+        assert!(matches!(extract(truncated, &vfs), Err(SourceError::Empty)));
     }
 
     #[test]
     fn list_only_files_are_recorded_but_not_written() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(TestFilter, None);
         let data = build_archive(&[
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/assets/logo.png", b"\x89PNGdata"),
             Entry::File("project-main/model/weights.onnx", b"\x00\x01\x02blob"),
         ]);
-        let inv = extract(&data[..], &TestFilter, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
 
         assert_eq!(
-            paths(&inv),
+            paths(&vfs),
             vec!["assets/logo.png", "model/weights.onnx", "src/main.rs"]
         );
         assert_eq!(
-            inv.iter()
-                .find(|e| e.path == "src/main.rs")
-                .unwrap()
-                .decision,
+            vfs.file(Path::new("src/main.rs")).unwrap().decision,
             Decision::Parse
         );
         assert_eq!(
-            inv.iter()
-                .find(|e| e.path == "assets/logo.png")
-                .unwrap()
-                .decision,
+            vfs.file(Path::new("assets/logo.png")).unwrap().decision,
             Decision::ListOnly
         );
         assert_eq!(
-            inv.iter()
-                .find(|e| e.path == "model/weights.onnx")
-                .unwrap()
-                .decision,
+            vfs.file(Path::new("model/weights.onnx")).unwrap().decision,
             Decision::ListOnly
         );
-        assert!(vfs.exists(Path::new("src/main.rs")));
-        assert!(!vfs.exists(Path::new("assets/logo.png")));
-        assert!(!vfs.exists(Path::new("model/weights.onnx")));
+        assert!(vfs.read(Path::new("src/main.rs")).is_ok());
+        assert!(listed_only(&vfs, "assets/logo.png"));
+        assert!(listed_only(&vfs, "model/weights.onnx"));
     }
 
     #[test]
     fn text_file_larger_than_sniff_window_is_written_in_full() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(ParseAll, None);
         let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
-        extract(&data[..], &ParseAll, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
         assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), &body[..]);
     }
 
@@ -458,7 +422,7 @@ mod tests {
     /// the file is read into memory before anything can reject it.
     #[test]
     fn oversize_entry_is_filtered_when_the_size_comes_from_a_pax_record() {
-        let vfs = Vfs::default();
+        let vfs = Vfs::new(MaxSize(64), None);
         let body = vec![b'a'; 4096];
 
         let mut tb = tar::Builder::new(Vec::new());
@@ -479,20 +443,21 @@ mod tests {
         enc.write_all(&tb.into_inner().unwrap()).unwrap();
         let data = enc.finish().unwrap();
 
-        let inv = extract(&data[..], &MaxSize(64), &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
 
-        assert_eq!(paths(&inv), vec!["big.txt"]);
-        assert_eq!(inv[0].size, 4096);
-        assert_eq!(inv[0].decision, Decision::ListOnly);
-        assert!(!vfs.exists(Path::new("big.txt")));
+        assert_eq!(paths(&vfs), vec!["big.txt"]);
+        let big = vfs.file(Path::new("big.txt")).unwrap();
+        assert_eq!((big.size, big.decision), (4096, Decision::ListOnly));
+        assert!(listed_only(&vfs, "big.txt"));
     }
 }
 
 #[cfg(test)]
 mod backpressure {
     use super::*;
-    use crate::files::CapExceeded;
+    use crate::files::{CapExceeded, File, Need, Pass};
     use std::io::Write;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Counts files whose bytes are off the stream but not yet settled by a
@@ -500,7 +465,7 @@ mod backpressure {
     #[derive(Default)]
     struct SlowSettle {
         in_flight: AtomicUsize,
-        peak: AtomicUsize,
+        peak: Arc<AtomicUsize>,
     }
     impl Pass for SlowSettle {
         fn header(&self, _: &mut File) -> Result<Need, CapExceeded> {
@@ -518,7 +483,14 @@ mod backpressure {
     /// channel instead of inflating the whole archive into memory.
     #[test]
     fn inflating_never_runs_more_than_the_lookahead_ahead_of_the_workers() {
-        let vfs = Vfs::default();
+        let peak = Arc::new(AtomicUsize::new(0));
+        let vfs = Vfs::new(
+            SlowSettle {
+                in_flight: AtomicUsize::new(0),
+                peak: peak.clone(),
+            },
+            None,
+        );
         let mut tb = tar::Builder::new(Vec::new());
         for i in 0..2_000 {
             let mut h = tar::Header::new_gnu();
@@ -531,13 +503,12 @@ mod backpressure {
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         gz.write_all(&tb.into_inner().unwrap()).unwrap();
         let data = gz.finish().unwrap();
-        let pass = SlowSettle::default();
 
-        let inv = extract(&data[..], &pass, &vfs).unwrap();
+        extract(&data[..], &vfs).unwrap();
 
-        assert_eq!(inv.len(), 2_000);
+        assert_eq!(vfs.len(), 2_000);
         let ceiling = LOOKAHEAD + rayon::current_num_threads() + 1;
-        let peak = pass.peak.load(Ordering::SeqCst);
+        let peak = peak.load(Ordering::SeqCst);
         assert!(peak <= ceiling, "peak in flight {peak} exceeds {ceiling}");
         assert!(peak > 1, "workers must run alongside the inflating thread");
     }
