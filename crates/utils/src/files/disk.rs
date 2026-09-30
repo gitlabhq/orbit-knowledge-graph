@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 
-use super::{File, FileSystem, Inventory, Need, Pass, SourceError, Vfs, check};
+use super::{File, Inventory, Need, Pass, SourceError, Vfs, check};
 
 /// Every file below `root` with git's listing semantics: .gitignore,
 /// .git/info/exclude and dotfiles honored, ripgrep .ignore and ancestor
@@ -80,11 +80,7 @@ fn settle_header(
 /// The bytes of a file that loads, read once. Runs the content passes first
 /// if nothing has yet; they may decide against the file, in which case there
 /// are no bytes to hand out.
-pub fn load(
-    vfs: &impl FileSystem,
-    file: &mut File,
-    passes: &impl Pass,
-) -> std::io::Result<Option<Arc<[u8]>>> {
+pub fn load(vfs: &Vfs, file: &mut File, passes: &impl Pass) -> std::io::Result<Option<Arc<[u8]>>> {
     if !file.loads() {
         return Ok(None);
     }

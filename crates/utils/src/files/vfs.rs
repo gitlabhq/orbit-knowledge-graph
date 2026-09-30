@@ -15,34 +15,6 @@ use sha2::{Digest, Sha256};
 
 use super::Counter;
 
-/// What indexing asks of a filesystem. Semantics follow `std::fs`: a missing
-/// path is `NotFound`, reading a directory is an error, `read_dir` lists
-/// direct children in no particular order.
-pub trait FileSystem: Send + Sync {
-    fn read(&self, path: &Path) -> io::Result<Arc<[u8]>>;
-    fn metadata(&self, path: &Path) -> io::Result<Metadata>;
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
-
-    fn read_to_string(&self, path: &Path) -> io::Result<String> {
-        let bytes = self.read(path)?;
-        std::str::from_utf8(&bytes)
-            .map(str::to_owned)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    fn exists(&self, path: &Path) -> bool {
-        self.metadata(path).is_ok()
-    }
-
-    fn is_file(&self, path: &Path) -> bool {
-        self.metadata(path).is_ok_and(|m| !m.is_dir)
-    }
-
-    fn is_dir(&self, path: &Path) -> bool {
-        self.metadata(path).is_ok_and(|m| m.is_dir)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Metadata {
     pub len: u64,
@@ -223,8 +195,11 @@ impl Vfs {
     }
 }
 
-impl FileSystem for Vfs {
-    fn read(&self, path: &Path) -> io::Result<Arc<[u8]>> {
+/// Reading, with `std::fs` semantics: a missing path is `NotFound`, reading
+/// a directory is an error, `read_dir` lists direct children in no
+/// particular order.
+impl Vfs {
+    pub fn read(&self, path: &Path) -> io::Result<Arc<[u8]>> {
         let key = key(path).ok_or_else(not_found)?;
         let slot = lock(&self.paths).get(&key).cloned();
         match slot {
@@ -245,7 +220,7 @@ impl FileSystem for Vfs {
         }
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<Metadata> {
+    pub fn metadata(&self, path: &Path) -> io::Result<Metadata> {
         let key = key(path).ok_or_else(not_found)?;
         if let Some(slot) = lock(&self.paths).get(&key) {
             let len = match slot {
@@ -267,7 +242,7 @@ impl FileSystem for Vfs {
         Err(not_found())
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    pub fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let key = key(path).ok_or_else(not_found)?;
         match lock(&self.children).get(&key) {
             Some(children) => Ok(children
@@ -284,33 +259,24 @@ impl FileSystem for Vfs {
             None => Err(not_found()),
         }
     }
-}
 
-impl<F: FileSystem + ?Sized> FileSystem for Arc<F> {
-    fn read(&self, path: &Path) -> io::Result<Arc<[u8]>> {
-        (**self).read(path)
+    pub fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        let bytes = self.read(path)?;
+        std::str::from_utf8(&bytes)
+            .map(str::to_owned)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        (**self).metadata(path)
+    pub fn exists(&self, path: &Path) -> bool {
+        self.metadata(path).is_ok()
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
-        (**self).read_dir(path)
-    }
-}
-
-impl<F: FileSystem + ?Sized> FileSystem for &F {
-    fn read(&self, path: &Path) -> io::Result<Arc<[u8]>> {
-        (**self).read(path)
+    pub fn is_file(&self, path: &Path) -> bool {
+        self.metadata(path).is_ok_and(|m| !m.is_dir)
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        (**self).metadata(path)
-    }
-
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
-        (**self).read_dir(path)
+    pub fn is_dir(&self, path: &Path) -> bool {
+        self.metadata(path).is_ok_and(|m| m.is_dir)
     }
 }
 

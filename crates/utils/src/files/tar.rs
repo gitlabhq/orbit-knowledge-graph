@@ -181,7 +181,7 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::{CapExceeded, FileSystem};
+    use crate::files::CapExceeded;
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use std::io::Write;
