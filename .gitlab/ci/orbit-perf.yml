@@ -74,15 +74,9 @@ orbit-perf:
     - when: manual
       allow_failure: true
 
-# Builds the MR's gkg image; docker-build-mr itself stays manual.
-orbit-perf:mr-image:
-  extends: docker-build-mr
-  interruptible: true
-  rules: !reference [.orbit-perf-mr-rules, rules]
-
 orbit-perf:mr:
   extends: .orbit-perf-base
-  # No needs on orbit-perf:mr-image: the script waits for the image in the
+  # No needs on docker-build-mr: the script waits for its image in the
   # background so the build overlaps compile and data generation.
   needs: []
   interruptible: true

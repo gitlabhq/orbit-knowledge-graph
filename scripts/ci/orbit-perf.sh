@@ -33,19 +33,26 @@ if [ -n "${GKG_IMAGE_TAG:-}" ]; then
   sed -i "s|^  tag: .*|  tag: \"${GKG_IMAGE_TAG}\"|" "$CAPRONI_DIR/values/gkg.yaml"
   log "     gkg image tag: ${GKG_IMAGE_TAG}"
 fi
-# Blocks until the MR image is pushed (built in parallel by orbit-perf:mr-image).
+# Blocks until the MR image is pushed (built in parallel by docker-build-mr).
 wait_for_image() {
   [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
-  for _ in $(seq 1 90); do
-    mise -C "$CAPRONI_DIR" exec -- docker manifest inspect "${GKG_IMAGE}:${GKG_IMAGE_TAG}" >/dev/null 2>&1 && return 0
+  log "     waiting for image ${GKG_IMAGE}:${GKG_IMAGE_TAG} (built by docker-build-mr)"
+  for i in $(seq 1 90); do
+    if mise -C "$CAPRONI_DIR" exec -- docker manifest inspect "${GKG_IMAGE}:${GKG_IMAGE_TAG}" >/dev/null 2>&1; then
+      log "     image ready after $(( (i - 1) * 10 ))s"
+      return 0
+    fi
+    [ $(( i % 6 )) -eq 0 ] && log "     still waiting for image ($(( i * 10 ))s)"
     sleep 10
   done
-  echo "image ${GKG_IMAGE}:${GKG_IMAGE_TAG} not pushed after 15 min; did orbit-perf:mr-image fail?" >&2
+  log "     image not pushed after 15 min; did docker-build-mr fail or was it not played?"
   return 1
 }
 UP_LOG="$ROOT/caproni-up.log"
+# fd 3 keeps the image-wait messages in the live job log; the rest goes to UP_LOG.
+exec 3>&2
 (
-  wait_for_image
+  wait_for_image 2>&3
   cap --debug up
   kc wait -n gitlab --for=condition=Ready pod \
     -l app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver --timeout=600s
