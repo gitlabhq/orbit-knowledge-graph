@@ -58,8 +58,7 @@ async fn serve(service: OrbitServiceImpl) -> OrbitServiceClient<tonic::transport
         .unwrap()
 }
 
-// `Claims` never serializes the checksum, and serializes `source_type` in a form its own
-// deserializer does not read back, so both are set in the raw JSON the way Rails signs it.
+// `Claims` never serializes the checksum, so it is set in the raw JSON the way Rails signs it.
 fn self_managed_token_with_license_checksum() -> String {
     let now = chrono::Utc::now().timestamp();
     let mut claims = serde_json::to_value(Claims {
@@ -69,10 +68,10 @@ fn self_managed_token_with_license_checksum() -> String {
         instance_id: Some("inst-1".into()),
         unique_instance_id: Some("uniq-1".into()),
         instance_version: Some("19.5.0".into()),
+        source_type: SourceType::Mcp,
         ..test_claims()
     })
     .unwrap();
-    claims["source_type"] = "mcp".into();
     claims["license_checksum"] = CHECKSUM.into();
     encode(
         &Header::new(Algorithm::HS256),
