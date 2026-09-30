@@ -1,0 +1,41 @@
+description: A multi-ID FK target keeps the relationship that supplies its result identity
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "filters": {"username": "alice"}},
+        {"id": "g", "entity": "Group", "node_ids": [100]},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "p", "entity": "Project", "node_ids": [1000, 1001]}
+      ],
+      "relationships": [
+        {"type": "MEMBER_OF", "from": "u", "to": "g"},
+        {"type": "AUTHORED", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+      ]
+    }
+  gql: |
+    MATCH (u:User {username: 'alice'})-[:MEMBER_OF]->(g:Group {id: 100})
+    MATCH (u)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+    WHERE p.id IN [1000, 1001]
+    RETURN u, g, mr, p
+
+expect:
+  node_count: 5
+  referential_integrity: true
+  nodes:
+    User:
+      ids: [1]
+      filters: {username: alice}
+    Group:
+      ids: [100]
+    MergeRequest:
+      ids: [2000, 2001]
+    Project:
+      ids: [1000]
+  edges:
+    MEMBER_OF: [[1, 100]]
+    AUTHORED: [[1, 2000], [1, 2001]]
+    IN_PROJECT: [[2000, 1000], [2001, 1000]]
