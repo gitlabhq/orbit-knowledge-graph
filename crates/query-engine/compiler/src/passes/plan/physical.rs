@@ -80,6 +80,24 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
+    fn node(node: &NodePlan, final_: bool) -> Result<Self> {
+        Ok(Self::Scan {
+            table: node.table.clone().ok_or_else(|| {
+                QueryError::Lowering(format!("node '{}' has no table", node.alias))
+            })?,
+            alias: node.alias.clone(),
+            final_,
+            relationship: None,
+        })
+    }
+
+    fn where_all(self, predicates: Vec<Expr>) -> Self {
+        Self::Filter {
+            predicate: Expr::conjoin(predicates).expect("node scan predicates"),
+            input: Box::new(self),
+        }
+    }
+
     pub(crate) fn filter(self, predicates: Vec<Expr>) -> Self {
         predicates
             .into_iter()
@@ -124,27 +142,23 @@ impl PhysicalSource {
 
 impl PhysicalPlan {
     pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Expr>) -> Result<Self> {
-        let mut plan = Self::filtered_keys(node, column)?;
-        let PhysicalSource::Filter { predicate, input } = &mut plan.source else {
-            unreachable!()
-        };
-        let PhysicalSource::Scan { final_, .. } = input.as_mut() else {
-            unreachable!()
-        };
-        *final_ = false;
-        for additional in extra {
-            *predicate = Expr::and(predicate.clone(), additional);
-        }
-        Ok(plan)
+        Self::keys(node, column, false, extra)
     }
 
     pub fn filtered_keys(node: &NodePlan, column: &str) -> Result<Self> {
-        let mut plan = Self::single_node(node)?;
-        plan.outputs = vec![SelectExpr::new(
-            Expr::col(&node.alias, column),
-            DEFAULT_PRIMARY_KEY,
-        )];
-        Ok(plan)
+        Self::keys(node, column, true, vec![])
+    }
+
+    fn keys(node: &NodePlan, column: &str, final_: bool, extra: Vec<Expr>) -> Result<Self> {
+        let mut predicates = latest_node_predicates(&node.alias, node);
+        predicates.extend(extra);
+        Ok(Self {
+            source: PhysicalSource::node(node, final_)?.where_all(predicates),
+            outputs: vec![SelectExpr::new(
+                Expr::col(&node.alias, column),
+                DEFAULT_PRIMARY_KEY,
+            )],
+        })
     }
 
     pub fn node_scan(
@@ -152,7 +166,7 @@ impl PhysicalPlan {
         narrowing: Option<Expr>,
         sort_key: &[String],
     ) -> Result<Self> {
-        let mut plan = Self::single_node(node)?;
+        let mut source = PhysicalSource::node(node, narrowing.is_none())?;
         if let Some(narrowing) = narrowing {
             if sort_key.is_empty() {
                 return Err(QueryError::Lowering(format!(
@@ -181,53 +195,26 @@ impl PhysicalPlan {
                     predicates.push(id_range_predicate(&node.alias, range));
                 }
             }
-            let PhysicalSource::Filter {
-                predicate,
-                mut input,
-            } = plan.source
-            else {
-                unreachable!()
-            };
-            let PhysicalSource::Scan { final_, .. } = input.as_mut() else {
-                unreachable!()
-            };
-            *final_ = false;
-            plan.source = PhysicalSource::Filter {
-                predicate,
-                input: Box::new(PhysicalSource::Latest {
-                    sort_key: sort_key.to_vec(),
-                    alias: node.alias.clone(),
-                    input: Box::new(PhysicalSource::Filter {
-                        predicate: Expr::conjoin(predicates).expect("narrowing predicate"),
-                        input,
-                    }),
-                }),
+            source = PhysicalSource::Latest {
+                sort_key: sort_key.to_vec(),
+                alias: node.alias.clone(),
+                input: Box::new(source.where_all(predicates)),
             };
         }
-        plan.source = PhysicalSource::Scope {
-            alias: node.alias.clone(),
-            input: Box::new(plan.source),
-        };
-        Ok(plan)
+        Ok(Self {
+            source: PhysicalSource::Scope {
+                alias: node.alias.clone(),
+                input: Box::new(source.where_all(latest_node_predicates(&node.alias, node))),
+            },
+            outputs: node_select_columns(&node.alias, node),
+        })
     }
 
     pub fn single_node(node: &NodePlan) -> Result<Self> {
-        let table = node
-            .table
-            .clone()
-            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
         Ok(Self {
             outputs: node_select_columns(&node.alias, node),
-            source: PhysicalSource::Filter {
-                predicate: Expr::conjoin(latest_node_predicates(&node.alias, node))
-                    .expect("current-row scan has a deletion predicate"),
-                input: Box::new(PhysicalSource::Scan {
-                    relationship: None,
-                    table,
-                    alias: node.alias.clone(),
-                    final_: true,
-                }),
-            },
+            source: PhysicalSource::node(node, true)?
+                .where_all(latest_node_predicates(&node.alias, node)),
         })
     }
 
