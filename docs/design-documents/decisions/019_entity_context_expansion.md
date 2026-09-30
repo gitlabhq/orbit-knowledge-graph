@@ -22,8 +22,8 @@ Today that takes one Rails lookup plus one graph query per related thing.
 tracks a Rails `context` endpoint that resolves tokens and returns PostgreSQL
 summaries. The prototype,
 [`gitlab-org/gitlab!254189`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189),
-is closed and motivated this ADR. The design moves here before any further
-implementation.
+is closed and motivated this ADR. The design now lives here, ahead of any
+further implementation.
 
 The endpoint must optionally attach graph data, which raises a transport
 question. Two accepted ADRs constrain it:
@@ -40,11 +40,11 @@ Measurements on a local stack support the design:
   edges to unreadable neighbors are dropped from the node and edge lists. That
   does not cover pagination metadata. Redacted rows still count toward the
   query window. An unreadable neighbor at the limit boundary can change
-  `has_more`, `truncated`, and the row count. The Decision section
-  makes this a prerequisite.
+  `has_more`, `truncated`, and the row count. The Consequences section makes
+  the fix a prerequisite.
 - The unchanged Workhorse `SendQuery.Inject` ran 2 to 40 concurrent streams
-  with its redaction loop, at most one redaction callback per stream. Five queries took
-  0.4 s concurrently against 0.87 s sequentially.
+  with its redaction loop, making at most one redaction callback per stream.
+  Five queries took 0.4 s concurrently against 0.87 s sequentially.
 - A `neighbors` query over 20 merge requests returned 10 KB raw and 5.7 KB in
   GOON. Prototype queries ran in 130 to 300 ms.
 - `neighbors` can return stale `HAS_HEAD_PIPELINE` and `HAS_LATEST_DIFF` edges,
@@ -154,7 +154,7 @@ succeeded. The outcome is the HTTP status of the follow-up call, which can be a
 The example response above is abbreviated and shows the (e) shape.
 
 Each expansion graph is per type and cannot attribute truncation to an entity.
-The named query `limit` is global across all centers, and redacted rows use
+The named query `limit` is global across all centers, and redacted rows take up
 window slots. A center absent from a graph means "no readable neighbors" only
 when `pagination.truncated` is `false`. If it is `true`, the client must treat
 absent centers as unknown.
@@ -178,10 +178,10 @@ center is never an error.
 
 The contract has one request per type, so the content is limited to what one
 named query can express. Today that means `neighbors`-style traversals. Typed
-facets such as a fresh head pipeline or diff files need per-facet queries or
-composite named queries, which do not exist yet. Composite named queries are the
-extension point on the Orbit side. Until they land, adding typed facets
-changes the contract.
+facets such as a fresh head pipeline or diff files need one of two things.
+Either several queries per type, which is a contract change, or composite named
+queries, which are not built yet. Composite named queries are the extension point on the Orbit side.
+Until they land, adding typed facets changes the contract.
 
 ### Transport
 
@@ -192,8 +192,8 @@ changes the contract.
   header with its body and a list of named queries. Workhorse opens one
   ordinary `ExecuteQuery` stream per query in parallel and runs the existing
   redaction loop on each. It then writes the body with `expansions.<Type>`
-  filled with `result` or `error`. GKG sees only ordinary named queries. The client
-  makes one call and the server emits `result` only.
+  filled with `result` or `error`. GKG sees only ordinary named queries. The
+  client makes one call and the server emits `result` only.
 - **(e) depends on the Workhorse maintainers accepting merge logic.** If they
   object, fall back to option (c): GKG batch multiplexing, in which one
   `named` request carries several sub-queries and GKG merges the results. The
@@ -205,8 +205,8 @@ These apply to the Rails implementation that replaces the closed prototype:
 
 - Use `POST` with `tokens`/`token`, as above.
 - Use `token` and `version` 1.1.0. The prototype never merged, so nothing
-  ships as 1.0.0 on the default branch; 1.1.0 marks clients built against the
-  prototype contract.
+  ships as 1.0.0 on the default branch. Version 1.1.0 lets clients built against
+  the prototype detect that the contract changed.
 - Declare the `read_orbit` permission on `context`. Current master routes use
   `read_orbit`; the prototype predates the rename and used
   `read_knowledge_graph`.
@@ -227,7 +227,7 @@ These apply to the Rails implementation that replaces the closed prototype:
   failure paths. The stream message cap of 10 is per stream and stays
   unchanged under (e).
 - **Pins.** The raw (5.0.3) and GOON (4.0.3) output pins do not move. Each
-  `result` keeps its own `format_version`. Under (e) there is no new GKG pin:
+  raw `result` keeps its own `format_version`. Under (e) there is no new GKG pin:
   Rails and Workhorse ship together and `version` 1.1.0 covers the body. Under
   (c) GKG would own a merged-body shape and add a `context_output_format` pin.
 - **Billing.** Billing and analytics events are emitted per sub-query, which
@@ -245,21 +245,24 @@ These apply to the Rails implementation that replaces the closed prototype:
   the query window, and the fallback `next_cursor` can anchor on a redacted
   row. Expansion results must not carry pagination metadata (`has_more`,
   `truncated`, cursors, row counts) that depends on redacted rows, in both raw
-  and GOON output. This is a prerequisite for the expansion path. A
-  confidential follow-up issue tracks it. The fix needs a test with a readable
-  center and an unreadable neighbor at the limit boundary. Until then the
-  timing and pagination of an expansion can reveal that a neighbor was
-  redacted, as with any Orbit query.
+  and GOON output. The fix must keep `truncated` and compute it from authorized
+  rows instead of dropping it, because the client rule relies on it. A
+  confidential follow-up issue tracks the work. The Rails `expand` feature flag
+  stays off until it lands. Ordinary `query/<name>` calls are not gated by it.
+  The fix needs a test with a readable center and an unreadable neighbor at the
+  limit boundary. It covers pagination metadata only. Until it lands, the
+  pagination of an expansion can reveal that a neighbor was redacted, as with
+  any Orbit query. Timing is a separate channel that this fix does not close.
 - **Header size under (e).** The Rails body travels base64 in the send-data
   header. Workhorse sets no explicit limit, so Go's default applies. That is
   unmeasured for 20 entities and should be measured before (e) ships.
 - **Follow-up work.** Rails: resolver, group-level work items, the requirements
   above, `expand` plumbing behind a feature flag. Orbit: the per-type named
   queries. Workhorse: fan-out under (e). CLI: remote routing for the shared
-  `orbit context` verb (!2523) must move from `GET` with `refs[]` to `POST` with `tokens`. It must also use
-  the 1.1.0 envelope and this ADR's token forms. Whether `Type:ID` is an accepted token
-  form is open.
-  Independent: the `neighbors` dedup and tombstone fix.
+  `orbit context` verb (!2523) must move from `GET` with `refs[]` to `POST`
+  with `tokens`. It must also use the 1.1.0 envelope and this ADR's token
+  forms. Whether `Type:ID` is an accepted token form is open. Independent: the
+  `neighbors` dedup and tombstone fix.
 - **Risk.** (e) needs an agreement outside this repository. Until then 19.6
   works through (b) alone, and (b) stands by itself if the follow-up slips.
 
@@ -299,8 +302,8 @@ collapses duplicate tokens. Array-only `tokens` is unambiguous.
 ### Client-side composition
 
 Leave `context` with summaries only and let agents compose expansion queries.
-This keeps every agent re-deriving which queries suit which type and keeps the
-cost of one query per related thing. Option (b) is the compatible middle
+Every agent would then work out which queries suit which type, and the cost
+of one query per related thing stays. Option (b) is the compatible middle
 ground: the server names the query and the client only runs it.
 
 ## References
