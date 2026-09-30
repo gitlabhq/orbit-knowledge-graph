@@ -1,0 +1,48 @@
+name: "Rust: a workspace member's crate name changes under an untouched file"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/shared"]
+  - path: crates/shared/Cargo.toml
+    content: |
+      [package]
+      name = "shared-lib"
+  - path: crates/shared/src/lib.rs
+    content: |
+      pub mod util;
+  - path: crates/shared/src/util.rs
+    content: |
+      pub fn helper() {}
+
+tests:
+  - name: the definition is crate-qualified
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'helper' RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "shared_lib::util::helper" } }
+
+steps:
+  - name: rename the crate without touching its sources
+    snapshot: true
+    modify:
+      - path: crates/shared/Cargo.toml
+        content: |
+          [package]
+          name = "renamed-lib"
+    tests:
+      - name: the untouched file takes the new crate name
+        query: |
+          MATCH (d:Definition) WHERE d.name = 'helper' RETURN d.fqn AS fqn
+        assert:
+          - { row: { fqn: "renamed_lib::util::helper" } }
+
+  - name: drop the manifest so the directory is no longer a crate
+    snapshot: true
+    remove: [crates/shared/Cargo.toml]
+    tests:
+      - name: the stale crate name is gone
+        query: |
+          MATCH (d:Definition) WHERE d.name = 'helper' RETURN d.fqn AS fqn
+        assert:
+          - { row: { fqn: "util::helper" } }

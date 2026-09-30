@@ -2,7 +2,7 @@
 //!
 //! Runs every query in `fixtures/queries/corpus/` through the **same pipeline
 //! stages the webserver runs** (`QueryPipelineService::run_query`): Security ->
-//! PathResolution -> Compilation -> ClickHouseExecutor -> Extraction ->
+//! Compilation -> ClickHouseExecutor -> Extraction ->
 //! Authorization -> Redaction -> Hydration -> Output, against a real ClickHouse
 //! seeded with the data-correctness fixture.
 //!
@@ -20,16 +20,16 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
-use compiler::parse_input;
+use crate::common::{
+    DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
+    load_ontology,
+};
+use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use integration_testkit::load_seed;
-use ontology::Ontology;
 use orbit_server::auth::Claims;
-use orbit_server::pipeline::{
-    ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
-};
+use orbit_server::pipeline::{ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage};
 use orbit_server::redaction::ResourceAuthorization;
 use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
@@ -64,6 +64,7 @@ struct SmokeCase {
     key: String,
     query: String,
     expects_error: bool,
+    frontend: Frontend,
 }
 
 /// Stand-in for the real `AuthorizationStage`, which authorizes resources via
@@ -83,7 +84,7 @@ impl PipelineStage for AuthorizeAllStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
         let authorizations = input
             .query_result
@@ -99,7 +100,7 @@ impl PipelineStage for AuthorizeAllStage {
             })
             .collect();
         Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
+            query_result: input.query_result,
             authorizations,
         })
     }
@@ -188,6 +189,7 @@ fn load_corpus() -> Vec<SmokeCase> {
                 key: format!("{file}::{key}"),
                 query: entry.query,
                 expects_error,
+                frontend: Frontend::JsonDsl,
             });
         }
     }
@@ -200,14 +202,21 @@ fn load_named_queries() -> Vec<SmokeCase> {
             .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
     let values = named_queries::BindingValues { current_user_id: 1 };
+    let spellings = [
+        (named_queries::Language::Json, Frontend::JsonDsl),
+        (named_queries::Language::Gql, Frontend::Gql),
+    ];
     queries
         .iter()
-        .map(|query| SmokeCase {
-            key: format!("named_query::{}", query.name),
-            query: query
-                .render(&values, &query.example_parameters())
-                .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
-            expects_error: false,
+        .flat_map(|query| {
+            spellings.map(|(language, frontend)| SmokeCase {
+                key: format!("named_query::{}::{language:?}", query.name),
+                query: query
+                    .render_language(language, &values, &query.example_parameters())
+                    .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+                expects_error: false,
+                frontend,
+            })
         })
         .collect()
 }
@@ -316,6 +325,7 @@ fn handle_doc_code_block(
                     key: format!("{path_label}:{line}"),
                     query,
                     expects_error: false,
+                    frontend: Frontend::JsonDsl,
                 });
             }
             Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
@@ -396,20 +406,23 @@ fn relative_path(path: &Path) -> String {
 async fn run_pipeline(
     db: &TestContext,
     json: &str,
-    ontology: &Arc<Ontology>,
+    frontend: Frontend,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     claims: &Claims,
 ) -> Result<(), PipelineError> {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::new(db.create_client()));
+    server_extensions.insert(Arc::clone(data_model));
     server_extensions.insert(claims.clone());
     let mut registry = ColumnResolverRegistry::new();
     registry.register("gitaly", Arc::new(MockColumnResolver));
     server_extensions.insert(registry);
 
     let mut ctx = QueryPipelineContext {
+        frontend,
         query_json: json.to_string(),
         compiled: None,
-        ontology: Arc::clone(ontology),
+        ontology: Arc::clone(data_model.ontology()),
         security_context: None,
         server_extensions,
         phases: TypeMap::default(),
@@ -418,8 +431,6 @@ async fn run_pipeline(
 
     PipelineRunner::start(&mut ctx, &mut obs)
         .then(&SecurityStage)
-        .await?
-        .then(&PathResolutionStage)
         .await?
         .then(&CompilationStage)
         .await?
@@ -448,7 +459,7 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let ontology = Arc::new(load_ontology());
+    let data_model = derive_clickhouse_data_model(&load_ontology());
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
@@ -465,7 +476,11 @@ async fn corpus_smoke() {
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
-        let json = match resolve_placeholders(&case.query) {
+        let json = match case.frontend {
+            Frontend::Gql => Ok(case.query.clone()),
+            Frontend::JsonDsl => resolve_placeholders(&case.query),
+        };
+        let json = match json {
             Ok(j) => j,
             Err(e) => {
                 if !case.expects_error {
@@ -475,7 +490,7 @@ async fn corpus_smoke() {
             }
         };
 
-        let outcome = run_pipeline(&ctx, &json, &ontology, &claims).await;
+        let outcome = run_pipeline(&ctx, &json, case.frontend, &data_model, &claims).await;
 
         match (case.expects_error, outcome) {
             (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),

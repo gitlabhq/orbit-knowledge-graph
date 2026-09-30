@@ -10,6 +10,8 @@ query:
                  "filters": {"name": "Public Group"}}],
         "limit": 10
     }
+  gql: |
+    MATCH (g:Group) WHERE g.name = 'Public Group' RETURN g.name, g.traversal_path LIMIT 10
 
 expect:
   node_count: 1

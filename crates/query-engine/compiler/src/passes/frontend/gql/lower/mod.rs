@@ -1,7 +1,7 @@
 mod predicates;
 mod projections;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::input::{
     Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
@@ -13,7 +13,7 @@ use crate::{Input, InputNode, QueryError, Result};
 use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
 use super::{QueryParser, Rule, invalid};
 
-pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
+pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
     let mut lowering = Lowering {
         input: Input::default(),
         edges: HashMap::new(),
@@ -36,14 +36,14 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<Input> {
             lowering.input.cursor = Some(InputCursor {
                 page_size: size,
                 after,
-                seek: None,
             });
-            lowering.input.compiler.query_hash = statement_hash(source, span);
+            lowering.input.options.include_debug_sql = query.debug;
+            return Ok((lowering.input, statement_hash(source, span)));
         }
         None => {}
-    }
+    };
     lowering.input.options.include_debug_sql = query.debug;
-    Ok(lowering.input)
+    Ok((lowering.input, 0))
 }
 
 fn statement_hash(source: &str, page: pest::Span<'_>) -> u64 {
@@ -68,37 +68,74 @@ struct Lowering {
 
 impl Lowering {
     fn pattern(&mut self, pattern: Pattern<'_>) -> Result<()> {
-        let element = match pattern {
-            Pattern::Element(element) => element,
+        let elements = match pattern {
+            Pattern::Elements(elements) => elements,
             Pattern::Shortest { variable, element } => {
                 self.path = Some(variable.value);
-                element
+                vec![*element]
             }
         };
-        let PatternElement { head, chain } = element;
-        self.node(head)?;
-        for (relationship, node) in chain {
-            let from = self.input.nodes.last().expect("previous node").id.clone();
-            self.node(node)?;
-            let to = self.input.nodes.last().expect("next node").id.clone();
-            self.edge(relationship, from, to)?;
+        for PatternElement { head, chain } in elements {
+            let mut from = self.node(head)?;
+            for (relationship, node) in chain {
+                let to = self.node(node)?;
+                self.edge(relationship, from, to.clone())?;
+                from = to;
+            }
+        }
+        self.check_connected_pattern()
+    }
+
+    fn check_connected_pattern(&self) -> Result<()> {
+        let mut reached = HashSet::new();
+        for edge in &self.input.relationships {
+            if edge.from == edge.to
+                || (!reached.is_empty()
+                    && reached.contains(&edge.from) == reached.contains(&edge.to))
+            {
+                return Err(QueryError::Validation(
+                    "each relationship must connect one new node to the preceding pattern; disconnected hops and cycles are unsupported".into(),
+                ));
+            }
+            reached.insert(&edge.from);
+            reached.insert(&edge.to);
+        }
+        if self.input.nodes.len() > 1 && reached.len() != self.input.nodes.len() {
+            return Err(QueryError::Validation(
+                "all declared nodes must belong to one connected pattern".into(),
+            ));
         }
         Ok(())
     }
 
-    fn node(&mut self, pattern: NodePattern<'_>) -> Result<()> {
+    fn node(&mut self, pattern: NodePattern<'_>) -> Result<String> {
         let id = pattern.variable.value;
-        if self.input.nodes.iter().any(|n| n.id == id)
-            || self.edges.contains_key(&id)
-            || self.path.as_ref() == Some(&id)
-        {
+        if self.edges.contains_key(&id) || self.path.as_ref() == Some(&id) {
             return Err(invalid(
                 pattern.span,
-                "variables must be unique; repeated nodes and cycles are unsupported",
+                "node, relationship, and path variables must be distinct",
             ));
         }
+        if let Some(node) = self.input.nodes.iter().find(|node| node.id == id) {
+            if pattern
+                .label
+                .is_some_and(|label| node.entity.as_deref() != Some(&label.value))
+            {
+                return Err(invalid(
+                    pattern.span,
+                    "a repeated node must keep its original label",
+                ));
+            }
+            if !pattern.properties.is_empty() {
+                return Err(invalid(
+                    pattern.span,
+                    "declare a node's properties once or use WHERE predicates",
+                ));
+            }
+            return Ok(id);
+        }
         let mut node = InputNode {
-            id,
+            id: id.clone(),
             entity: pattern.label.map(|label| label.value),
             ..Default::default()
         };
@@ -111,7 +148,7 @@ impl Lowering {
             node.filters.remove("id");
         }
         self.input.nodes.push(node);
-        Ok(())
+        Ok(id)
     }
 
     fn edge(&mut self, relationship: Relationship<'_>, from: String, to: String) -> Result<()> {
@@ -122,10 +159,19 @@ impl Lowering {
             direction: relationship.direction,
             hops: HopRange::default(),
             filters: HashMap::new(),
-            fk_column: None,
-            scope_prefix: None,
-            scope_preserving: false,
         };
+        if relationship.types.is_empty()
+            && let Some(alias) = &relationship.variable
+            && is_type_shaped(&alias.value)
+        {
+            return Err(invalid(
+                alias.span,
+                &format!(
+                    "[{0}] declares a variable, not a relationship type; write [:{0}] for the type, or use a lowercase variable",
+                    alias.value
+                ),
+            ));
+        }
         if let Some(alias) = relationship.variable
             && (self.input.nodes.iter().any(|n| n.id == alias.value)
                 || self.path.as_ref() == Some(&alias.value)
@@ -160,12 +206,27 @@ impl Lowering {
     }
 
     fn classify(&mut self) -> Result<()> {
+        if self.path.is_none()
+            && self.input.nodes.len() == 2
+            && self.input.relationships.len() == 1
+            && self.input.nodes[0].entity.is_none()
+            && self.input.nodes[1].entity.is_some()
+        {
+            self.input.nodes.swap(0, 1);
+            let edge = &mut self.input.relationships[0];
+            std::mem::swap(&mut edge.from, &mut edge.to);
+            edge.direction = match edge.direction {
+                Direction::Outgoing => Direction::Incoming,
+                Direction::Incoming => Direction::Outgoing,
+                Direction::Both => Direction::Both,
+            };
+        }
         if self.path.is_some() {
             if self.input.relationships.len() != 1
                 || self.input.nodes.iter().any(|n| n.entity.is_none())
             {
                 return Err(QueryError::Validation(
-                    "shortestPath requires one bounded relationship between two labeled nodes"
+                    "a shortest path requires one bounded relationship between two labeled nodes"
                         .into(),
                 ));
             }
@@ -187,8 +248,6 @@ impl Lowering {
                 to: edge.to,
                 max_depth: edge.hops.max,
                 rel_types: edge.types,
-                forward_first_hop_rel_types: Vec::new(),
-                backward_first_hop_rel_types: Vec::new(),
             });
         } else if self.input.nodes.len() == 2 && self.input.nodes[1].entity.is_none() {
             let far = self.input.nodes.pop().expect("neighbor endpoint");
@@ -248,10 +307,18 @@ fn hop_range(range: Range<'_>) -> Result<HopRange> {
     Ok(HopRange { min, max })
 }
 
+fn is_type_shaped(name: &str) -> bool {
+    name.len() > 1
+        && name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
 #[cfg(test)]
 mod tests {
     fn hash(query: &str) -> u64 {
-        super::super::parse(query).unwrap().compiler.query_hash
+        super::super::parse_with_hash(query).unwrap().1
     }
 
     #[test]

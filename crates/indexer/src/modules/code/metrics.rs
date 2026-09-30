@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use code_graph::v2::config::detect_language_from_path;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
@@ -117,14 +118,24 @@ impl CodeMetrics {
             .add(count, &[KeyValue::new(code::labels::KIND, kind.to_owned())]);
     }
 
-    pub(in crate::modules::code) fn record_file_skipped(&self, reason: &'static str) {
-        self.files_skipped
-            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    pub(in crate::modules::code) fn record_file_skipped(&self, reason: &'static str, path: &str) {
+        self.files_skipped.add(
+            1,
+            &[
+                KeyValue::new(code::labels::REASON, reason),
+                KeyValue::new(code::labels::LANGUAGE, file_language(path)),
+            ],
+        );
     }
 
-    pub(in crate::modules::code) fn record_file_fault(&self, kind: &'static str) {
-        self.file_faults
-            .add(1, &[KeyValue::new(code::labels::KIND, kind)]);
+    pub(in crate::modules::code) fn record_file_fault(&self, kind: &'static str, path: &str) {
+        self.file_faults.add(
+            1,
+            &[
+                KeyValue::new(code::labels::KIND, kind),
+                KeyValue::new(code::labels::LANGUAGE, file_language(path)),
+            ],
+        );
     }
 
     pub(in crate::modules::code) fn record_archive_entry_skipped(
@@ -246,5 +257,35 @@ impl<T> RecordStageError<T> for Result<T, HandlerError> {
             metrics.record_stage_error(stage);
         }
         self
+    }
+}
+
+/// Path-based because files skip or fault before parsing. `.ts` is `type_script` here but `java_script` in the timing metrics.
+fn file_language(path: &str) -> String {
+    detect_language_from_path(path).map_or_else(|| "unknown".to_string(), |l| l.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_language_renders_the_snake_case_display_name() {
+        use code_graph::v2::config::Language;
+
+        assert_eq!(
+            file_language("app/models/user.rb"),
+            Language::Ruby.to_string()
+        );
+        assert_eq!(
+            file_language("src/index.ts"),
+            Language::TypeScript.to_string()
+        );
+    }
+
+    #[test]
+    fn file_language_is_unknown_without_an_indexed_extension() {
+        assert_eq!(file_language("Makefile"), "unknown");
+        assert_eq!(file_language("assets/logo.png"), "unknown");
     }
 }

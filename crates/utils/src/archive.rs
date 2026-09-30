@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use tracing::warn;
 
-use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
+use crate::fs_walk::{
+    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step,
+};
 
 /// Extract a gzipped tar from `reader` into `target_dir`, running every regular
 /// file through `hooks`. Loaded files are written to disk; every non-dropped
@@ -18,7 +20,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     reader: R,
     target_dir: &Path,
     hooks: &mut H,
-) -> Result<Vec<FileInventoryEntry>, StreamError> {
+) -> Result<FileInventory, StreamError> {
     std::fs::create_dir_all(target_dir)?;
 
     let mut archive = tar::Archive::new(GzDecoder::new(reader));
@@ -94,8 +96,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.size(),
                 decision: Decision::ListOnly,
+                label: Default::default(),
             };
-            meta.decision = hooks.on_non_regular(&meta);
+            let (decision, label) = hooks.on_non_regular(&meta);
+            meta.decision = decision;
+            meta.label = label;
             if meta.decision != Decision::Drop {
                 let link_target = entry
                     .link_name()
@@ -113,10 +118,13 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.size(),
                 decision: Decision::Parse,
+                label: Default::default(),
             };
-            meta.decision = step(hooks, &meta, &mut content, |buf| {
+            let (decision, label) = step(hooks, &meta, &mut content, |buf| {
                 entry.read_to_end(buf).map(|_| ())
             })?;
+            meta.decision = decision;
+            meta.label = label;
             match meta.decision {
                 Decision::Drop => continue,
                 Decision::ListOnly => inventory.push(meta),
@@ -175,7 +183,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         inventory.retain(|entry| !removed.contains(&entry.path));
     }
 
-    Ok(crate::fs_stream::canonicalize_inventory(inventory))
+    Ok(FileInventory::new(inventory))
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
@@ -206,6 +214,7 @@ fn strip_archive_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_walk::FileLabel;
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -216,15 +225,15 @@ mod tests {
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
             (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
-                .then_some(Decision::ListOnly)
+                .then_some((Decision::ListOnly, FileLabel::default()))
         }
-        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
+        fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
             if content.contains(&0) {
-                Decision::ListOnly
+                (Decision::ListOnly, FileLabel::default())
             } else {
-                Decision::Parse
+                (Decision::Parse, FileLabel::default())
             }
         }
     }
@@ -493,8 +502,8 @@ mod tests {
     /// guard was handed.
     struct MaxSize(u64);
     impl FileStreamHooks for MaxSize {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
-            (f.size > self.0).then_some(Decision::ListOnly)
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<(Decision, FileLabel)> {
+            (f.size > self.0).then_some((Decision::ListOnly, FileLabel::default()))
         }
     }
 

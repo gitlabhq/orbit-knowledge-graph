@@ -33,8 +33,8 @@ tests:
 
   - name: main.ts imports resolve through re-export to original defs
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'run' AND e.edge_kind = 'Calls'
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
       RETURN callee.name AS callee, callee.file_path AS file
       ORDER BY callee
     assert:

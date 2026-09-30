@@ -34,14 +34,21 @@ fn load_unprefixed_ontology() -> ontology::Ontology {
         .unwrap_or_else(|e| panic!("ontology overlay '{name}' failed to load: {e}"))
 }
 
-pub fn load_ontology() -> ontology::Ontology {
+pub fn load_ontology() -> std::sync::Arc<ontology::Ontology> {
     let ont = load_unprefixed_ontology();
     let prefix = &*TABLE_PREFIX;
     if prefix.is_empty() {
-        ont
+        std::sync::Arc::new(ont)
     } else {
-        ont.with_schema_version_prefix(prefix)
+        std::sync::Arc::new(ont.with_schema_version_prefix(prefix))
     }
+}
+
+pub fn derive_clickhouse_data_model(
+    ontology: &std::sync::Arc<ontology::Ontology>,
+) -> std::sync::Arc<query_data_model::ClickHouseDataModel> {
+    query_engine::compiler::data_model::clickhouse(std::sync::Arc::clone(ontology))
+        .expect("test ontology should produce a ClickHouse data model")
 }
 
 pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));

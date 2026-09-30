@@ -1,5 +1,10 @@
 //! Pinned versions from `config/versions.yaml`, embedded at compile time.
 //! Dependency-light on purpose so build scripts can use it too.
+//!
+//! Format and security constraints (key patterns, hex lengths, path
+//! restrictions) are enforced by `config/schemas/versions.schema.json`
+//! and validated in CI. The Rust structs provide typed access and
+//! `deny_unknown_fields` catches structural drift at compile time.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -13,7 +18,6 @@ pub struct Versions {
     pub query_dsl: String,
     pub raw_output_format: String,
     pub goon_output_format: String,
-    pub gitlab_system_note_actions: String,
     pub vendored: BTreeMap<String, VendoredDependency>,
 }
 
@@ -25,6 +29,7 @@ pub struct VendoredDependency {
     pub vendor_script: Option<String>,
     pub check_script: Option<String>,
     pub extensions: Option<BTreeMap<String, Extension>>,
+    pub pins: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,99 +40,8 @@ pub struct Extension {
     pub binaries: Option<BTreeMap<String, String>>,
 }
 
-impl Versions {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.vendored.is_empty() {
-            return Err("vendored section is empty".into());
-        }
-        for (name, dep) in &self.vendored {
-            if let Some(v) = &dep.version
-                && (v.is_empty() || v != v.trim())
-            {
-                return Err(format!(
-                    "vendored.{name}.version is empty or has whitespace"
-                ));
-            }
-            if let Some(dir) = &dep.vendor_dir
-                && (dir.is_empty() || dir.starts_with('/') || dir.contains(".."))
-            {
-                return Err(format!(
-                    "vendored.{name}.vendor_dir must be non-empty, relative, without ..: {dir}"
-                ));
-            }
-            for (label, path) in [
-                ("vendor_script", &dep.vendor_script),
-                ("check_script", &dep.check_script),
-            ] {
-                if let Some(path) = path {
-                    if !path.ends_with(".sh") {
-                        return Err(format!("vendored.{name}.{label} must end in .sh: {path}"));
-                    }
-                    if path.starts_with('/') || path.contains("..") {
-                        return Err(format!(
-                            "vendored.{name}.{label} must be relative without ..: {path}"
-                        ));
-                    }
-                }
-            }
-            if let Some(exts) = &dep.extensions {
-                for (ext_name, ext) in exts {
-                    if let Some(rev) = &ext.source_revision {
-                        validate_hex(
-                            rev,
-                            40,
-                            &format!("vendored.{name}.extensions.{ext_name}.source_revision"),
-                        )?;
-                    }
-                    if let Some(sha) = &ext.source_archive_sha256 {
-                        validate_hex(
-                            sha,
-                            64,
-                            &format!("vendored.{name}.extensions.{ext_name}.source_archive_sha256"),
-                        )?;
-                    }
-                    if let Some(bins) = &ext.binaries {
-                        for (platform, sha) in bins {
-                            validate_hex(
-                                sha,
-                                64,
-                                &format!(
-                                    "vendored.{name}.extensions.{ext_name}.binaries.{platform}"
-                                ),
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-fn validate_hex(value: &str, expected_len: usize, field: &str) -> Result<(), String> {
-    if value.len() != expected_len {
-        return Err(format!(
-            "{field}: expected {expected_len} hex chars, got {}",
-            value.len()
-        ));
-    }
-    if !value
-        .chars()
-        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
-    {
-        return Err(format!("{field}: must be lowercase hex"));
-    }
-    Ok(())
-}
-
-pub static VERSIONS: LazyLock<Versions> = LazyLock::new(|| {
-    let versions: Versions =
-        parse(include_str!(env!("VERSIONS_FILE"))).expect("config/versions.yaml");
-    versions
-        .validate()
-        .expect("config/versions.yaml validation");
-    versions
-});
+pub static VERSIONS: LazyLock<Versions> =
+    LazyLock::new(|| parse(include_str!(env!("VERSIONS_FILE"))).expect("config/versions.yaml"));
 
 /// Parses any revision's `versions.yaml` text, e.g. `git show` output.
 pub fn parse(yaml: &str) -> Result<Versions, serde_saphyr::Error> {
@@ -141,8 +55,7 @@ mod tests {
     #[test]
     fn parses_every_pin() {
         assert!(VERSIONS.schema > 0);
-        assert_eq!(VERSIONS.gitlab_system_note_actions.len(), 40);
-        VERSIONS.validate().unwrap();
+        assert!(!VERSIONS.vendored.is_empty());
     }
 
     #[test]
@@ -181,83 +94,35 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_bad_hex() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        let fts = duckdb.extensions.as_mut().unwrap().get_mut("fts").unwrap();
-        fts.source_revision = Some("SHORT".into());
-        assert!(versions.validate().is_err());
+    fn gitlab_system_note_actions_entry_is_complete() {
+        let entry = VERSIONS
+            .vendored
+            .get("gitlab_system_note_actions")
+            .expect("vendored.gitlab_system_note_actions");
+        let version = entry.version.as_deref().expect("version");
+        assert_eq!(version.len(), 40);
+        assert!(entry.vendor_dir.is_some());
+        assert!(entry.check_script.is_some());
     }
 
     #[test]
-    fn validate_rejects_absolute_vendor_dir() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.vendor_dir = Some("/etc/passwd".into());
-        assert!(versions.validate().is_err());
-    }
+    fn iglu_entry_is_complete() {
+        let entry = VERSIONS.vendored.get("iglu").expect("vendored.iglu");
+        assert!(entry.vendor_dir.is_some());
+        assert!(entry.vendor_script.is_some());
+        assert!(entry.check_script.is_some());
 
-    #[test]
-    fn validate_rejects_traversal_vendor_dir() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.vendor_dir = Some("crates/../../etc".into());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_empty_vendor_dir() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.vendor_dir = Some(String::new());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_traversal_script_path() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.vendor_script = Some("../escape/evil.sh".into());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_absolute_script_path() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.check_script = Some("/tmp/evil.sh".into());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_empty_vendored_section() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        versions.vendored.clear();
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_whitespace_version() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.version = Some(" v1.5.5 ".into());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_non_sh_script() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        duckdb.vendor_script = Some("scripts/evil.py".into());
-        assert!(versions.validate().is_err());
-    }
-
-    #[test]
-    fn validate_rejects_uppercase_hex() {
-        let mut versions = parse(include_str!(env!("VERSIONS_FILE"))).unwrap();
-        let duckdb = versions.vendored.get_mut("duckdb").unwrap();
-        let fts = duckdb.extensions.as_mut().unwrap().get_mut("fts").unwrap();
-        fts.source_revision = Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into());
-        assert!(versions.validate().is_err());
+        let pins = entry.pins.as_ref().expect("iglu.pins");
+        for name in [
+            "orbit_query",
+            "orbit_common",
+            "orbit_code_indexing",
+            "orbit_sdlc_indexing",
+        ] {
+            let version = pins
+                .get(name)
+                .unwrap_or_else(|| panic!("missing iglu pin for {name}"));
+            assert!(!version.is_empty(), "empty iglu pin for {name}");
+        }
     }
 }

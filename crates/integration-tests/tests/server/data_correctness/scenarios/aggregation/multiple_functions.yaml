@@ -22,6 +22,8 @@ query:
       ],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS cnt, avg(u.id) AS avg_id, min(u.id) AS min_id LIMIT 10
 
 expect:
   groups:

@@ -2,9 +2,6 @@
 description: Cross-namespace CLOSES edge returns a work item from a different group
 
 config:
-  security:
-    scope_prefixes:
-      mr: "1/100/1000/"
   extra_seed:
     gl_edge:
       - { traversal_path: "1/101/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }
@@ -21,6 +18,8 @@ query:
         "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
         "limit": 50
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:CLOSES]->(wi:WorkItem) WHERE mr.project_id = 1000 RETURN mr.project_id, wi LIMIT 50
 
 expect:
   node_count: 2

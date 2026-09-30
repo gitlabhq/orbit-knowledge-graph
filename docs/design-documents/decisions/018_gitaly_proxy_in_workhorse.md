@@ -41,7 +41,7 @@ Native gRPC needs HTTP/2, which the Workhorse inbound listener does not support.
 The listener receives HTTP/1.1 behind a TLS-terminating edge, and the supported
 topologies do not carry HTTP/2 to it. GitLab has handled this constraint with
 WebSockets before. Duo Workflow bridges a bidirectional gRPC stream over a
-WebSocket, and the language-server executors moved from gRPC to WebSockets
+WebSocket. The language-server executors moved from gRPC to WebSockets
 because some customers block HTTP/2
 ([`gitlab-lsp#1219`](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/issues/1219)).
 
@@ -49,7 +49,7 @@ because some customers block HTTP/2
 
 The POC in [#1226](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1226)
 compared a framed HTTP route, a dedicated gRPC port, and a reverse tunnel. It
-settled on a transparent proxy: generated Gitaly stubs speak gRPC through a
+settled on a transparent proxy. Generated Gitaly stubs speak gRPC through a
 WebSocket, and Workhorse forwards RPCs without knowing their schema, the way
 Praefect does. An unmodified Rust `tonic` client completed a code-indexing job
 through GDK Workhorse, Praefect, and Gitaly, including a 21 MB `GetArchive`,
@@ -101,7 +101,7 @@ one. Rails owns that decision with the rest of the GitLab authorization logic.
 ### A connection's lifecycle
 
 1. The consumer opens `/api/v4/internal/gitaly_proxy/project/:id/ws` with its
-   existing service credential — for Orbit, the JWT it already uses against
+   existing service credential. For Orbit, this is the JWT it already uses against
    Rails. Workhorse applies admission limits and asks Rails to preauthorize the
    connection.
 2. Rails identifies the consumer, authorizes the repository, and returns the
@@ -120,7 +120,7 @@ Each connection is scoped to one project because Rails resolves that project's
 repository storage and returns Gitaly coordinates that Workhorse binds to the
 connection. A group-scoped tunnel would have to re-resolve storage for every
 stream and route across Gitaly nodes. A connection costs one Rails
-preauthorization round trip, not a new Gitaly connection: Workhorse pools its
+preauthorization round trip, not a new Gitaly connection. Workhorse pools its
 Gitaly client, so per-project connections do not multiply Gitaly-side
 connections.
 
@@ -155,7 +155,7 @@ After Rails revokes access, a session admitted just before revocation may start
 streams for 10 minutes, and those streams may run for 60 minutes. The worst
 case is therefore about 70 minutes. Workhorse caps this window at two hours
 regardless of the values Rails requests. Workhorse then applies a 30-second
-hard-kill grace (`HardKillGrace`) so in-flight work can close cleanly, which is
+hard-kill grace (`HardKillGrace`) so in-flight work can close cleanly. This is
 why the observed ceiling can be a few seconds over two hours.
 
 The [feature flag](#feature-flag) governs new preauthorizations.
@@ -169,7 +169,7 @@ are bounded by
 which defaults to 10; backfill and incremental indexing share that ceiling. As
 of 2026-09 on GitLab.com, the code-indexer pool has four pods, giving about 40
 concurrent archive-fetch slots. The indexer's `max_concurrent_workers`, set to
-16 in production, bounds concurrent jobs, but each job fetches one archive
+16 in production, bounds concurrent jobs. But each job fetches one archive
 under the `fetch_concurrency` semaphore, so worker slots do not raise the
 archive-connection ceiling. Within each connection, concurrency is also bounded
 by the stream cap Rails returns at preauthorization. Workhorse defaults to
@@ -177,9 +177,10 @@ by the stream cap Rails returns at preauthorization. Workhorse defaults to
 `max_connections` 256, `max_preauth_inflight` 64, `idle_timeout` 60 seconds,
 and `read_limit_bytes` 1 MiB.
 
-Kibana log counts (used because Grafana `increase()` undercounts across indexer
-pod restarts) show that `GetArchive` dominates for
-`client_name="gkg-indexer"`, with 2.97 million calls over seven days.
+Kibana log counts show that `GetArchive` dominates for
+`client_name="gkg-indexer"`, with 2.97 million calls over seven days. These
+counts use Kibana because Grafana `increase()` undercounts across indexer pod
+restarts.
 `ListBlobs` has about 8,000 calls, and other RPCs are noise.
 
 | Window | p50 | p95 | p99 | Maximum |
@@ -197,7 +198,7 @@ above about 2 requests per second. Backfills produce short bursts of about
 160-200 requests per second.
 
 Kibana data from `pubsub-gitaly-inf-gprd*` for `json.grpc.time_ms` over 24 hours
-(about 81,000 `GetArchive` calls) shows a bimodal duration distribution: most
+(about 81,000 `GetArchive` calls) shows a bimodal duration distribution. Most
 archives are small, with a long tail for large repositories.
 
 | p50 | Average | p90 | p95 | p99 |
@@ -207,12 +208,12 @@ archives are small, with a long tail for large repositories.
 Incremental indexing therefore uses about one or two concurrent connections.
 During a backfill, concurrency remains bounded by the configured cap, about 40
 connections for the current pool, rather than growing with repository count.
-The 0.11-second median makes backfills look inexpensive, but the 2.0-second
+The 0.11-second median makes backfills look inexpensive. But the 2.0-second
 average and 36-second p99 mean that some slots remain occupied for tens of
 seconds. The 60-minute stream deadline accommodates the largest repositories.
 
-Rails sees a connection rate comparable to today's `GetArchive` rate: about 0.7
-requests per second in steady state and bursts around 200 requests per second.
+Rails sees a connection rate comparable to today's `GetArchive` rate. It is about 0.7
+requests per second in steady state, with bursts around 200 requests per second.
 It serves inexpensive preauthorization calls instead of handling full archive
 requests through Puma, and it leaves the archive data path.
 
@@ -257,7 +258,7 @@ partial bytes do not reach the parser.
 
 
 Orbit also requires Knowledge Graph indexing to be enabled for the project, the
-same gate the indexing task producer applies, so the proxy cannot read a
+same gate the indexing task producer applies. So the proxy cannot read a
 project the indexer would not have been asked to index.
 
 ## Why not the alternatives
@@ -271,8 +272,7 @@ for routing and credential handling.
 ### Keep adding one Rails endpoint per RPC
 
 This preserves the current authorization path. Each RPC would still require
-changes across four codebases and create another single-caller endpoint, and
-every read would stay a Rails request, which does not scale to per-blob reads.
+changes across four codebases and create another single-caller endpoint. Every read would stay a Rails request, which does not scale to per-blob reads.
 Planned blob and diff reads would repeat that work.
 
 ### A framed HTTP route instead of a WebSocket tunnel

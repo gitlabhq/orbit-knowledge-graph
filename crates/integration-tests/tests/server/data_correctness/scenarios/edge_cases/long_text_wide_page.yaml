@@ -13,6 +13,8 @@ query:
                  "filters": {"note": {"ends_with": "tail"}}}],
       "limit": 1000
     }
+  gql: |
+    MATCH (n:Note {id: 3002}) WHERE n.note ENDS WITH 'tail' RETURN n.note, n.discussion_id LIMIT 1000
 
 expect:
   node_count: 1

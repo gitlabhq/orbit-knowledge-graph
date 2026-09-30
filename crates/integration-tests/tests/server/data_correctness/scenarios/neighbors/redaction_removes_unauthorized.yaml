@@ -14,6 +14,8 @@ query:
       "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
       "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
     }
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n
 
 expect:
   node_count: 2

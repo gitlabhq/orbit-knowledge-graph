@@ -27,7 +27,7 @@ impl QueryParser {
 
     fn Query(input: Node) -> Result<Query> {
         Ok(match_nodes!(input.into_children();
-            [Match((pattern, predicates)), Return(projections), clauses..] => {
+            [Matches((pattern, predicates)), Return(projections), clauses..] => {
                 let mut query = Query {
                     pattern, predicates, projections, order: None, limit: None, debug: false,
                 };
@@ -52,6 +52,26 @@ impl QueryParser {
         Ok(Statement::SchemaCall { node })
     }
 
+    fn Matches(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+        let node = input.clone();
+        let mut matches: Vec<_> = match_nodes!(input.into_children();
+            [Match(matches)..] => matches.collect(),
+        );
+        if matches.len() == 1 {
+            return Ok(matches.pop().expect("one MATCH clause"));
+        }
+        let mut elements = Vec::new();
+        let mut predicates = Vec::new();
+        for (pattern, clause_predicates) in matches {
+            let Pattern::Elements(clause_elements) = pattern else {
+                return Err(node.error("a shortest path must be the only MATCH pattern"));
+            };
+            elements.extend(clause_elements);
+            predicates.extend(clause_predicates);
+        }
+        Ok((Pattern::Elements(elements), predicates))
+    }
+
     fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
         Ok(match_nodes!(input.into_children();
             [Pattern(pattern)] => (pattern, Vec::new()),
@@ -62,14 +82,31 @@ impl QueryParser {
     fn Pattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
             [ShortestPattern(pattern)] => pattern,
-            [PatternElement(element)] => Pattern::Element(element),
+            [PatternElement(elements)..] => Pattern::Elements(elements.collect()),
         ))
     }
 
     fn ShortestPattern(input: Node) -> Result<Pattern> {
         Ok(match_nodes!(input.into_children();
-            [Variable(variable), PatternElement(element)] => Pattern::Shortest { variable, element },
+            [Variable(variable), PathSearch(_), PatternElement(element)] => Pattern::Shortest { variable, element: Box::new(element) },
+            [Variable(_), LegacyShortestPath(_)] => unreachable!("LegacyShortestPath always errors"),
         ))
+    }
+
+    fn LegacyShortestPath(input: Node) -> Result<()> {
+        Err(input.error("use ANY SHORTEST (a)-[*1..3]->(b) for shortest paths"))
+    }
+
+    fn PathSearch(input: Node) -> Result<()> {
+        let span = input.as_span();
+        match_nodes!(input.into_children();
+            [] => Ok(()),
+            [UnsignedInteger(count)] => if count.as_u64() == Some(1) {
+                Ok(())
+            } else {
+                Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
+            },
+        )
     }
 
     fn PatternElement(input: Node) -> Result<PatternElement> {
@@ -208,10 +245,13 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [PropertyExpression(property), operator(op)] => vec![Comparison {
-                span, property, op, value: None,
+                span, property, op, value: None, rhs_property: None,
             }],
             [PropertyExpression(property), operator(op), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
+            }],
+            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
+                span, property: lhs, op, value: None, rhs_property: Some(rhs),
             }],
         ))
     }
@@ -221,7 +261,7 @@ impl QueryParser {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Comparison {
-                span, property, op, value: Some(value),
+                span, property, op, value: Some(value), rhs_property: None,
             }],
         ))
     }
@@ -239,6 +279,7 @@ impl QueryParser {
     fn ComparisonOperator(input: Node) -> Result<FilterOp> {
         Ok(match input.as_str() {
             "=" => FilterOp::Eq,
+            "<>" | "!=" => FilterOp::Ne,
             ">" => FilterOp::Gt,
             "<" => FilterOp::Lt,
             ">=" => FilterOp::Gte,
@@ -383,9 +424,13 @@ impl QueryParser {
     }
 
     fn Order(input: Node) -> Result<Sort> {
-        Ok(match_nodes!(input.into_children();
-            [SortItem(sort)] => sort,
-        ))
+        match_nodes!(input.into_children();
+            [SortItem(sort)] => Ok(sort),
+            [SortItem(_), SortItem(mut extra)..] => Err(error_at(
+                extra.next().expect("a second sort key").span,
+                "ORDER BY accepts one sort key; keep the key that matters most and remove the others",
+            )),
+        )
     }
 
     fn SortItem(input: Node) -> Result<Sort> {

@@ -16,6 +16,8 @@ query:
         ],
         "limit": 50
     }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:`CONTAINS`]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000 RETURN u, g, p LIMIT 50
 
 expect:
   node_count: 14

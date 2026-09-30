@@ -1,0 +1,9 @@
+description: Reusing a node to close a cycle is rejected before planning
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(n:Note), (n)<-[:AUTHORED]-(u)
+    RETURN u, n
+
+expect:
+  compile_error: "cycles are unsupported"

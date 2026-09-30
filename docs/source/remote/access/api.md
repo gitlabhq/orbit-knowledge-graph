@@ -31,7 +31,8 @@ CI pipelines, or custom tooling.
 
 ## Authentication
 
-All endpoints require a GitLab personal access token with `read_api` scope,
+All endpoints require a GitLab personal access token with `read_api` scope, or a
+[fine-grained personal access token](../security.md#fine-grained-personal-access-tokens),
 passed as a Bearer token:
 
 ```shell
@@ -40,10 +41,18 @@ passed as a Bearer token:
 
 Results are scoped to entities the token owner can access in GitLab.
 
+To query from a script or CI/CD job without a personal account, use a
+[service account](../security.md#service-accounts).
+
 ## Billing
 
-API calls consume GitLab Credits from your subscription. Each call to
-`POST /api/v4/orbit/query` uses credits. The other endpoints are free.
+During the beta, API calls do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, each call to `POST /api/v4/orbit/query`
+consumes GitLab Credits from your subscription. The other endpoints stay free.
+Credit rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
 
 ## Endpoints
 
@@ -56,13 +65,15 @@ API calls consume GitLab Credits from your subscription. Each call to
 
 ## Query endpoint
 
-Execute a graph query using the GitLab Orbit query DSL.
+Execute a graph query. The instance decides the query language: a JSON Query DSL object by default, or read-only GQL text when GitLab has enabled GQL for you.
 
 The request body contains:
 
-- `query`: The GitLab Orbit query object.
+- `query`: A JSON Query DSL object, or a text string when GQL is enabled. A query whose shape does not match the enabled language is rejected.
 - `response_format`: Optional response format. Use `raw` for structured JSON, or `llm`
   for compact text optimized for AI agents. Default: `raw`.
+
+The GitLab Orbit CLI explicitly sends `llm` by default.
 
 For example:
 
@@ -75,6 +86,37 @@ curl --request POST \
 ```
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
+
+The per-user `orbit_gql_queries` feature flag in Rails selects the mode. It is off by default, which accepts only JSON objects.
+With the flag on, the query endpoint, the named-query catalog, and the dashboard editor all use GQL text. JSON queries then reject, including requests from existing JSON callers.
+There is no public language selector. Rails sets the protobuf language for GitLab Orbit to JSON or GQL. Raw or named query kind is separate; named queries render and compile in that selected language. Agents and public REST callers do not send a language selector.
+
+To send read-only query text or inspect its ontology with the flag on:
+
+```shell
+curl --request POST \
+  --header "Authorization: Bearer <your_token>" \
+  --header "Content-Type: application/json" \
+  --data '{"query":"MATCH (u:User {id: 1}) RETURN u.username LIMIT 1","response_format":"llm"}' \
+  "https://gitlab.com/api/v4/orbit/query"
+
+curl --request POST \
+  --header "Authorization: Bearer <your_token>" \
+  --header "Content-Type: application/json" \
+  --data '{"query":"CALL db.schema(\"MergeRequest\")","response_format":"raw"}' \
+  "https://gitlab.com/api/v4/orbit/query"
+```
+
+The CLI accepts GQL text directly, without a language option:
+
+```shell
+glab orbit query 'CALL db.schema()'
+glab orbit query 'MATCH (u:User {id: 1}) RETURN u'
+```
+
+To send a JSON request envelope, pass `--file <path>`, or `--file -` to read it from stdin.
+
+The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/orbit_query_frontend.md) design document.
 
 ### Example request
 

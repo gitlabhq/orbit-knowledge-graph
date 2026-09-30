@@ -11,13 +11,16 @@
 //! # Example
 //!
 //! ```rust
+//! use std::sync::Arc;
 //! use compiler::{compile, Frontend, SecurityContext};
 //! use ontology::{Ontology, DataType};
 //!
-//! let ontology = Ontology::new()
-//!     .with_nodes(["User", "Project"])
-//!     .with_edges(["MEMBER_OF"])
-//!     .with_fields("User", [("username", DataType::String)]);
+//! let ontology = Arc::new(
+//!     Ontology::new()
+//!         .with_nodes(["User", "Project"])
+//!         .with_edges(["MEMBER_OF"])
+//!         .with_fields("User", [("username", DataType::String)]),
+//! );
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
@@ -34,6 +37,7 @@
 pub mod analytics;
 pub mod ast;
 pub mod constants;
+pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
@@ -55,11 +59,12 @@ pub use constants::{
 };
 pub use error::{QueryError, Result};
 pub use input::{
-    ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
-    QueryType, parse_input,
+    ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
+    parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
+pub use query_data_model::EntityAuthConfig;
 
 pub use analytics::ExecMetrics;
 pub use passes::codegen::{
@@ -71,11 +76,12 @@ pub use passes::codegen::{
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
-    DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
+    DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
+pub use passes::normalize::build_entity_auth;
+pub use passes::plan::HydrationCompileOptions;
+pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -100,36 +106,88 @@ fn finish<C: config::CompilerCtx>(
 pub fn compile(
     raw: &str,
     fe: Frontend,
-    ontology: &Ontology,
+    ontology: &Arc<Ontology>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    compile_model(raw, fe, &data_model, ctx)
+}
+
+pub fn compile_model(
+    raw: &str,
+    fe: Frontend,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
         Frontend::JsonDsl => {
-            let mut ctx =
-                config::ClickhouseJsonDslCtx::new(Arc::new(ontology.clone()), ctx.clone());
+            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_json_dsl)
         }
         Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(Arc::new(ontology.clone()), ctx.clone());
+            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
             ctx.set_raw(raw.to_string());
             finish(&mut ctx, config::run_clickhouse_gql)
         }
     }
 }
 
-/// Run only `validate` + `normalize`, returning the normalized [`Input`].
+/// Compile a graph query into DuckDB SQL for local execution.
 ///
-/// Lets the querying pipeline's path-resolution stage read normalized scope
-/// keys before the full pipeline runs, then resolve and attach the tight
-/// traversal_path prefix as [`SecurityContext`] scope metadata.
-pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
-    let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
+/// Collapses edge tables to the local single-table layout before compiling.
+/// No security, hydration, or cursor phases — local mode trusts all data.
+#[must_use = "the compiled query context should be used"]
+pub fn compile_local(
+    raw: &str,
+    fe: Frontend,
+    ontology: &Arc<Ontology>,
+) -> Result<CompiledQueryContext> {
+    let mut ontology = ontology.as_ref().clone();
+    ontology.remove_data_model_optimizations();
+    let data_model = data_model::duckdb(Arc::new(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    match fe {
+        Frontend::JsonDsl => {
+            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
+            c.set_raw(raw.to_string());
+            finish(&mut c, config::run_duckdb_json_dsl)
+        }
+        Frontend::Gql => {
+            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
+            c.set_raw(raw.to_string());
+            finish(&mut c, config::run_duckdb_gql)
+        }
+    }
+}
+
+/// Run only `validate` + `normalize`, returning the normalized [`Input`].
+pub fn validate_normalize(json_input: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    let mut ctx = config::ValidateNormalizeCtx::new(data_model);
     ctx.set_raw(json_input.to_string());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
+            })
+        })
+        .count_err()
+}
+
+pub fn validate_normalize_gql(raw: &str, ontology: &Arc<Ontology>) -> Result<Input> {
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    let mut ctx = config::ValidateNormalizeGqlCtx::new(data_model);
+    ctx.set_raw(raw.to_string());
+    config::run_validate_normalize_gql(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                error::QueryError::PipelineInvariant(
+                    "validate_normalize_gql produced no input".into(),
+                )
             })
         })
         .count_err()
@@ -142,11 +200,24 @@ pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input
 /// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
+    options: HydrationCompileOptions,
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
+    let data_model = data_model::clickhouse(Arc::clone(ontology))
+        .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
+    compile_input_model(input, options, &data_model, ctx)
+}
+
+pub fn compile_input_model(
+    input: Input,
+    options: HydrationCompileOptions,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
     ctx.set_input(input);
+    ctx.set_hydration_options(options);
     config::run_ch_hydration(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
@@ -180,8 +251,8 @@ mod tests {
     use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
-    static ONTOLOGY: LazyLock<Ontology> =
-        LazyLock::new(|| Ontology::load_embedded().expect("ontology must load"));
+    static ONTOLOGY: LazyLock<Arc<Ontology>> =
+        LazyLock::new(|| Arc::new(Ontology::load_embedded().expect("ontology must load")));
 
     fn security_ctx() -> SecurityContext {
         crate::testkit::non_admin_ctx()
@@ -192,6 +263,32 @@ mod tests {
             .expect("should compile")
             .base
             .render()
+    }
+
+    #[test]
+    fn relationship_filter_keeps_edge_column_type() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "filters": {"target_id": 2}
+            }]
+        }"#;
+
+        let compiled = compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).unwrap();
+        let filter_param = compiled
+            .base
+            .params
+            .values()
+            .find(|param| param.value == serde_json::json!(2))
+            .expect("target_id filter parameter");
+        assert_eq!(filter_param.ch_type, orbit_utils::clickhouse::ChType::Int64);
     }
 
     #[test]
@@ -297,7 +394,7 @@ mod tests {
 
     #[test]
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
-        let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
+        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
         let compiled =
@@ -312,7 +409,7 @@ mod tests {
 
     #[test]
     fn compile_with_prefixed_ontology_prefixes_edge_table() {
-        let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
+        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
         let compiled =
@@ -331,12 +428,15 @@ mod tests {
 
     #[test]
     fn compile_uses_supplied_ontology_for_scoped_user_table() {
-        let scoped_user = ONTOLOGY.clone().with_path_scopable_nodes(["User"]);
+        let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
 
         for (ontology, expected_table) in [
-            (scoped_user.clone(), "gl_user"),
-            (scoped_user.with_schema_version_prefix("v1_"), "v1_gl_user"),
+            (Arc::new(scoped_user.clone()), "gl_user"),
+            (
+                Arc::new(scoped_user.with_schema_version_prefix("v1_")),
+                "v1_gl_user",
+            ),
         ] {
             let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
                 .expect("should compile")
@@ -382,14 +482,14 @@ mod tests {
         let prefixed = archived_ontology.clone().with_schema_version_prefix("v1_");
 
         for (ontology, expected_user_table) in [
-            (archived_ontology.clone(), "gl_renamed_user"),
+            (Arc::new(archived_ontology.clone()), "gl_renamed_user"),
             (ONTOLOGY.clone(), "gl_user"),
-            (prefixed, "v1_gl_renamed_user"),
+            (Arc::new(prefixed), "v1_gl_renamed_user"),
             (
-                ONTOLOGY.clone().with_schema_version_prefix("v2_"),
+                Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v2_")),
                 "v2_gl_user",
             ),
-            (archived_ontology, "gl_renamed_user"),
+            (Arc::new(archived_ontology), "gl_renamed_user"),
         ] {
             let sql = compile(query, Frontend::JsonDsl, &ontology, &security_ctx())
                 .expect("should compile")
@@ -619,7 +719,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("argMax"),
+            !sql.contains("argMax("),
             "single-hop edge scan must not dedup, got:\n{sql}"
         );
     }
@@ -1663,9 +1763,10 @@ mod tests {
             "center should get a candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j")
-                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe"),
-            "outer latest-row reads should use dedup (FINAL or LIMIT BY), got:\n{sql}"
+            sql.contains("FROM gl_job AS j FINAL")
+                && sql.contains("LIMIT 1 BY pipe.traversal_path, pipe.id) AS pipe WHERE")
+                && sql.contains("AS pipe ON (pipe.id = j.pipeline_id)"),
+            "joined target filters must run after latest-row dedup, got:\n{sql}"
         );
         assert!(
             sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
@@ -1739,9 +1840,24 @@ mod tests {
             "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
-                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
-            "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
+            sql.contains("FROM gl_pipeline AS p1 FINAL")
+                && sql.contains(
+                    "LIMIT 1 BY p2.traversal_path, p2.id) AS p2 WHERE (p2._deleted = false)",
+                ),
+            "joined target deletion filtering must run after latest-row dedup, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn narrowed_join_keeps_sort_key_filters_before_dedup() {
+        let sql = compile_sql(
+            r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
+        );
+        assert!(
+            sql.contains(
+                "p.id IN (SELECT id FROM _candidate_p) AND startsWith(p.traversal_path, '1/100/'))) ORDER BY"
+            ) && sql.contains("LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (startsWith(p.traversal_path, '1/100/') AND (p._deleted = false))"),
+            "sort-key filters must prune before dedup and recheck after it, got:\n{sql}"
         );
     }
 
@@ -1840,11 +1956,7 @@ mod tests {
         let query = format!(
             r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
         );
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_scope_prefixes(
-                [("g".to_string(), TraversalPath::new_unchecked("1/9970/"))].into(),
-            );
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
             .unwrap()
             .base
@@ -1864,7 +1976,7 @@ mod tests {
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
-                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
+                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group AS g",
             ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
@@ -1872,6 +1984,27 @@ mod tests {
                 "p",
                 "n",
                 "'CONTAINS'|'HAS_NOTE'",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "p.created_at",
+                "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
+                "d.state",
+                "d",
+                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "mr",
+                "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
             ),
         ];
         for (nodes, rels, group, agg, expect) in cases {
@@ -1886,13 +2019,133 @@ mod tests {
     }
 
     #[test]
+    fn scope_anchor_aggregation_rejects_join_predicates() {
+        for predicate in ["g.id = p.id", "p.id = g.id"] {
+            let query =
+                format!("MATCH (g:Group {{id: 100}})-[:CONTAINS]->(p:Project) WHERE {predicate}");
+            let error = compile(
+                &format!("{query} RETURN count(p) AS c LIMIT 20"),
+                Frontend::Gql,
+                &ONTOLOGY,
+                &security_ctx(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, QueryError::Validation(ref message)
+                    if message == "cross-node property comparisons are only supported in traversal queries"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_proofs_preserve_deeper_authorization_filters() {
+        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
+            .unwrap()
+            .with_scope_proofs(std::collections::HashMap::from([(
+                "p".into(),
+                ScopeProof::literal("1/2/"),
+            )]));
+        for (query, lookup) in [
+            (
+                "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
+                false,
+            ),
+            ("MATCH (p:Project {id: 100}) RETURN p LIMIT 20", true),
+            (
+                "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
+                true,
+            ),
+        ] {
+            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
+            let sql = compiled.base.render();
+            for path in ["1/2/", "1/2/3/", "1/2/4/"] {
+                assert!(
+                    sql.contains(&format!("startsWith(p.traversal_path, '{path}')")),
+                    "{query}: {sql}"
+                );
+            }
+            if lookup {
+                assert!(sql.contains("argMaxOrNull"), "{query}: {sql}");
+                for path in ["1/2/3/", "1/2/4/"] {
+                    assert!(
+                        sql.contains(&format!("startsWith(_scope.traversal_path, '{path}')")),
+                        "{query}: {sql}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
+        let cases = [
+            (
+                "Group",
+                "Project",
+                r#""from":"a","to":"x""#,
+                "countSubstrings(x.traversal_path, '/') >=",
+            ),
+            (
+                "Group",
+                "Group",
+                r#""from":"a","to":"x","hops":[2,3]"#,
+                "countSubstrings(x.traversal_path, '/') <=",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x""#,
+                "(x.traversal_path = (SELECT",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x","direction":"incoming""#,
+                "gl_edge",
+            ),
+            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+        ];
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (anchor, far, rel, expect) in cases {
+            let query = format!(
+                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
+            );
+            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+                .unwrap()
+                .base
+                .render();
+            assert!(
+                sql.contains(expect),
+                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
+            );
+            if expect != "gl_edge" {
+                assert!(
+                    !sql.contains("gl_edge"),
+                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}}
+                {"id": "g", "entity": "Group", "filters": {"name": "gitlab-org"}}
             ],
             "relationships": [
                 {"type": "IN_PROJECT", "from": "n", "to": "p"},
@@ -2015,10 +2268,8 @@ mod tests {
             nodes: vec![InputNode {
                 id: "mr".into(),
                 entity: Some("MergeRequest".into()),
-                table: Some("gl_merge_request".into()),
                 columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
                 node_ids: vec![1],
-                has_traversal_path: true,
                 traversal_paths: vec![TraversalPath::new_unchecked("1/")],
                 ..Default::default()
             }],
@@ -2026,9 +2277,14 @@ mod tests {
             ..Default::default()
         };
 
-        let ont = Arc::new(ONTOLOGY.clone());
-        let compiled =
-            compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
+        let ont = ONTOLOGY.clone();
+        let compiled = compile_input(
+            input,
+            HydrationCompileOptions::default(),
+            &ont,
+            &security_ctx(),
+        )
+        .expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
             !sql.contains(" FINAL"),
@@ -2098,7 +2354,7 @@ mod tests {
 
     #[test]
     fn multi_filter_range_compiles_both_predicates() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let query = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
@@ -2124,7 +2380,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_compiles_without_sql_predicate() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -2158,7 +2414,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_without_selecting_it_injects_resolution() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -2201,7 +2457,7 @@ mod tests {
 
     #[test]
     fn filter_on_selected_virtual_column_is_not_marked_injected() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
             r#"{
         "query_type": "traversal",
@@ -2233,7 +2489,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_without_node_ids() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
             r#"{
         "query_type": "traversal",
@@ -2259,7 +2515,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_for_aggregation() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
             r#"{
         "query_type": "aggregation",
@@ -2285,7 +2541,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejected_for_neighbors() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
             r#"{
         "query_type": "neighbors",
@@ -2310,7 +2566,7 @@ mod tests {
 
     #[test]
     fn filter_on_virtual_column_rejects_unsupported_op() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let err = compile(
             r#"{
         "query_type": "traversal",
@@ -2376,7 +2632,7 @@ mod tests {
     }
 
     fn note_excerpt_chars(limit: u32) -> u32 {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let compiled = compile(
             &format!(
                 r#"{{

@@ -34,12 +34,12 @@ Orbit has four consumption channels with different billing models per deployment
 
 Split monetization into four phases. Phases 1 and 2 run in parallel from the start. Phase 3 depends on Phase 1. Phase 4 depends on both.
 
-1. **Instrumentation** (April): propagate source type from Rails to GKG via JWT claims, wire the GKG webserver to emit billable events via `labkit-rs` (OIDC-authenticated Snowplow), and add a pre-execution CustomersDot quota check. No AIGW work.
+1. **Instrumentation** (April): propagate source type from Rails to GKG via JWT claims. Wire the GKG webserver to emit billable events via `labkit-rs` (OIDC-authenticated Snowplow). Add a pre-execution CustomersDot quota check. No AIGW work.
 2. **Tier enforcement** (April, parallel): gate all Orbit endpoints behind `licensed_feature_available?(:orbit)` for Premium/Ultimate.
 3. **Zero-rate enforcement** (May): a signed service token (Workhorse-signed JWT) on DWS calls to tamper-proof the channel tag on .com and GitLab-hosted Dedicated.
 4. **CDot billing pipeline** (May to June): flat-rate multiplier pricing in CDot and a credits dashboard. Zero-rating is applied by the `source_type` multiplier on the GKG event, so no separate DAP-side flag is needed.
 
-Rails does not emit billing events. It acts as a proxy. Billing events are emitted by the service that executes the work: the GKG webserver emits the per-query billable event, and the indexer emits volume events where GB-based pricing applies.
+Rails does not emit billing events. It acts as a proxy. Billing events are emitted by the service that executes the work. The GKG webserver emits the per-query billable event. The indexer emits volume events where GB-based pricing applies.
 
 ### Alternatives considered
 
@@ -49,7 +49,7 @@ Rails does not emit billing events. It acts as a proxy. Billing events are emitt
 
 **Use `ai_workflows` OAuth scope alone for zero-rate enforcement.** Insufficient. A user can extract the token from browser dev tools (valid 2 hours) and call the API directly. Good enough for Phase 1 analytics, but Phase 3 adds a signed service token for tamper-proof billing.
 
-**Use correlation IDs to zero-rate GKG billing events.** Rejected for billing purposes. The idea was to link the DAP billing event and the GKG billing event by correlation ID so CDot could suppress the GKG charge when it sees a matching DAP event. At the [zero-rating meeting](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw), Fulfillment confirmed: *"We don't support that currently. We have a CorrelationId field but we use it for logging/tracing purposes only."* Each billing event must stand alone with its own `source_type` to determine its multiplier. Correlation IDs are still propagated end-to-end for observability and tracing (Rails → GKG via gRPC metadata, as they are today), just not used for billing decisions.
+**Use correlation IDs to zero-rate GKG billing events.** Rejected for billing purposes. The idea was to link the DAP billing event and the GKG billing event by correlation ID. Then CDot could suppress the GKG charge when it sees a matching DAP event. At the [zero-rating meeting](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw), Fulfillment confirmed: *"We don't support that currently. We have a CorrelationId field but we use it for logging/tracing purposes only."* Each billing event must stand alone with its own `source_type` to determine its multiplier. Correlation IDs are still propagated end-to-end for observability and tracing (Rails → GKG via gRPC metadata, as they are today), just not used for billing decisions.
 
 **Do quota checks in Rails instead of GKG.** Considered since Rails already has CDot subscription data via `ServiceAccessToken`. Rejected because GKG already owns billable-event emission and integrates with CustomersDot, so it can run the quota check itself. Doing the check in GKG keeps the billing logic co-located with the service that executes queries and avoids adding latency to the Rails proxy layer. This also matches AIGW's pattern where the executing service (not the proxy) owns quota enforcement.
 
@@ -134,7 +134,7 @@ Four channels, each with different auth and billing per deployment type:
 
 On .com and GitLab-hosted Dedicated, DAP usage is zero-rated while MCP/CLI usage is charged. The signed service token (Phase 3) prevents users from spoofing DAP origin to get free queries. On self-managed and customer-hosted Dedicated there is no per-query billing today, so the distinction is analytics-only.
 
-**Note on self-managed and customer-hosted Dedicated pricing:** The billing model for these deployments (currently seat-based and GB-based respectively) is subject to change. The instrumentation in Phase 1 captures usage data on all deployments regardless of billing model, so if pricing changes later the data pipeline is already in place.
+**Note on self-managed and customer-hosted Dedicated pricing:** The billing model for these deployments (currently seat-based and GB-based respectively) is subject to change. The instrumentation in Phase 1 captures usage data on all deployments regardless of billing model. So if pricing changes later, the data pipeline is already in place.
 
 ### Billing event emission points
 
@@ -148,7 +148,9 @@ Rails does **not** emit billing events. It acts as a proxy only. Billing events 
 
 ### Billing event transport (orbit/kg#307)
 
-GKG emits billable events as Snowplow structured events through `labkit-rs` (the `labkit_events` tracker). The tracker authenticates to the GitLab Snowplow collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. Each event carries the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` self-describing context. Downstream, the Data Insights Platform ingests the events and CustomersDot's hourly mediation processes them. The OIDC support in `labkit-rs` is tracked in [orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307).
+GKG emits billable events as Snowplow structured events through `labkit-rs` (the `labkit_events` tracker). Each event carries the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` self-describing context. Downstream, the Data Insights Platform ingests the events and CustomersDot's hourly mediation processes them. The OIDC support in `labkit-rs` is tracked in [orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307).
+
+The tracker's authentication is selected by `billing.auth_mode`. On GitLab.com (SaaS) it authenticates to the collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. On Self-Managed / Dedicated there is no workload identity. GKG instead pulls the Cloud Connector instance token (a CustomersDot-minted JWT held in the Rails DB) from a Rails internal route. It caches the token in memory and presents it as the collector `Authorization` header. The pull-and-cache design (rather than a per-request JWT claim) is required because indexer-path emission is CDC/cron-driven with no request JWT.
 
 For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
 
@@ -247,8 +249,8 @@ Rails sets `source_type` when constructing the JWT before calling GKG. GKG reads
 
 **Goal:** Propagate caller source type from Rails through gRPC to GKG. Wire up the GKG webserver to emit billable events via `labkit-rs` (OIDC-authenticated Snowplow). Add a pre-execution CustomersDot quota check, and label the billing and quota metrics with source type. No AIGW work in this phase.
 
-**Depends on:** Nothing (can start immediately)
-**Blocks:** Phase 3 (zero-rating), Phase 4 (CDot billing pipeline)
+**Depends on:** Nothing (can start immediately).
+**Blocks:** Phase 3 (zero-rating), Phase 4 (CDot billing pipeline).
 **Owner:** GKG team (@michaelangeloio, @bohdanpk, with @nbelokolodov for Rust Snowplow SDK)
 
 ### 1.1 Four instrumentation layers
@@ -345,7 +347,7 @@ claims[:source_type] = caller_channel  # "frontend", "dws", "mcp", "core", "rest
 
 ### 1.3 Billing attribution: namespace selection
 
-GKG queries have no per-request namespace context. Every query scopes across all top-level namespaces the user can access, so the JWT's `root_namespace_id` claim cannot be inferred from the request body and must be resolved by Rails before the call.
+GKG queries have no per-request namespace context. Every query scopes across all top-level namespaces the user can access. So the JWT's `root_namespace_id` claim cannot be inferred from the request body. Rails must resolve it before the call.
 
 **Decision.** Introduce a per-user preference `knowledge_graph_governing_namespace_id`. Do not reuse `duo_default_namespace_id`.
 
@@ -356,7 +358,7 @@ GKG queries have no per-request namespace context. Every query scopes across all
 
 **Candidate logic.** Namespaces where the user is a member AND the namespace has a Premium or Ultimate plan.
 
-**Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
+**Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting. This applies when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
 
 **UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
 
@@ -418,7 +420,9 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 // A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
 ```
 
-**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve` with the CDot admin credentials, then caches the decision in a `moka` cache. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
+**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
+
+**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
 
 **Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
 
@@ -449,7 +453,7 @@ pub struct Claims {
 
 ### 1.8 Validation
 
-- **Billing events:** Confirm events arrive at the Snowplow collector from the staging GKG deployment. Verify all source types produce events. Pipeline health can be observed via the `gkg.billing.events.*` counter family: `emitted` and `delivered` should rise with query traffic while `dropped`, `rejected`, and `delivery_failed` stay at zero.
+- **Billing events:** Confirm events arrive at the Snowplow collector from the staging GKG deployment. Verify all source types produce events. Pipeline health can be observed via the `gkg.billing.events.*` counter family. `emitted` and `delivered` should rise with query traffic, while `dropped`, `rejected`, and `delivery_failed` stay at zero.
 - **Metrics:** Query Prometheus for `gkg.billing.quota.decisions` broken down by `source_type` and confirm the breakdown by channel.
 - **Quota check:** Verify that a namespace at quota receives gRPC `RESOURCE_EXHAUSTED` for MCP/REST queries, while DWS/frontend/core queries still succeed.
 
@@ -526,11 +530,11 @@ On self-managed, the license check works the same way. `licensed_feature_availab
 
 ## 7. Phase 3: Zero-rate enforcement
 
-**Goal:** Zero-rate DAP (DWS) Orbit queries on .com and GitLab-hosted Dedicated while charging MCP/CLI queries. The Phase 1 `ai_workflows` OAuth scope is not tamper-proof (a user can extract the token and call the API directly), so this phase adds a signed service token that only the platform can mint.
+**Goal:** Zero-rate DAP (DWS) Orbit queries on .com and GitLab-hosted Dedicated while charging MCP/CLI queries. The Phase 1 `ai_workflows` OAuth scope is not tamper-proof (a user can extract the token and call the API directly). So this phase adds a signed service token that only the platform can mint.
 
-**Depends on:** Phase 1 (instrumentation must be in place to emit events)
-**Blocks:** Phase 4 (CDot needs the channel tag to apply the multiplier)
-**Owner:** GKG team (Rails side) + AF team (DWS side)
+**Depends on:** Phase 1 (instrumentation must be in place to emit events).
+**Blocks:** Phase 4 (CDot needs the channel tag to apply the multiplier).
+**Owner:** GKG team (Rails side) + AF team (DWS side).
 **Issue:** [orbit/knowledge-graph#501](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501)
 
 ### 3.1 Scope

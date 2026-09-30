@@ -4,18 +4,34 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::constants::*;
+use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::plan::BoundFilter;
 
-pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
+pub enum FilterOwner<'a> {
+    Entity(query_data_model::EntityId),
+    Table(&'a str),
+}
+
+pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
+    let filter = &bound.filter;
     let col = Expr::col(alias, prop);
+
+    if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
+        let rhs = Expr::col(rhs_alias, rhs_prop);
+        return comparison(col, filter.op.unwrap_or(FilterOp::Eq), rhs)
+            .expect("validated property comparison");
+    }
+
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let str_val = || filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
     let typed = |v: serde_json::Value| -> Expr {
-        Expr::param(data_type_to_ch(filter.data_type.as_ref()), v)
+        Expr::param(data_type_to_ch(bound.data_type.as_ref()), v)
     };
 
     match filter.op {
         None | Some(FilterOp::Eq) => Expr::eq(col, typed(val())),
+        Some(FilterOp::Ne) => Expr::binary(Op::Ne, col, typed(val())),
         Some(FilterOp::Gt) => Expr::binary(Op::Gt, col, typed(val())),
         Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, typed(val())),
         Some(FilterOp::Lt) => Expr::binary(Op::Lt, col, typed(val())),
@@ -25,7 +41,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
                 Expr::col_in(
                     alias,
                     prop,
-                    data_type_to_ch(filter.data_type.as_ref()),
+                    data_type_to_ch(bound.data_type.as_ref()),
                     arr.clone(),
                 )
                 .unwrap_or_else(|| Expr::param(ChType::Bool, false))
@@ -60,6 +76,21 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
             vec![col, Expr::param(ChType::String, str_val())],
         ),
     }
+}
+
+pub fn comparison(left: Expr, operator: FilterOp, right: Expr) -> Result<Expr> {
+    let operator = match operator {
+        FilterOp::Eq => Op::Eq,
+        FilterOp::Ne => Op::Ne,
+        FilterOp::Gt => Op::Gt,
+        FilterOp::Gte => Op::Ge,
+        FilterOp::Lt => Op::Lt,
+        FilterOp::Lte => Op::Le,
+        _ => {
+            return Err(QueryError::Lowering("invalid property comparison".into()));
+        }
+    };
+    Ok(Expr::binary(operator, left, right))
 }
 
 pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
@@ -97,15 +128,34 @@ pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
 
 pub fn ordered_filters(
     filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
-) -> Vec<(String, crate::input::InputFilter)> {
+    owner: FilterOwner<'_>,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            filters
-                .iter()
-                .map(move |filter| (property.clone(), filter.clone()))
+            let metadata = match owner {
+                FilterOwner::Entity(entity) => model
+                    .property_for_entity_id(entity, property)
+                    .map(|property| (Some(property.id), Some(property.data_type))),
+                FilterOwner::Table(table) => Some((None, model.table_column_type(table, property))),
+            };
+            let (property_id, data_type) = metadata.unwrap_or_default();
+            filters.iter().map(move |filter| {
+                (
+                    property.clone(),
+                    BoundFilter {
+                        filter: filter.clone(),
+                        property: property_id,
+                        data_type,
+                        selectivity: property_id
+                            .map(|property| model.property_selectivity(property))
+                            .unwrap_or_default(),
+                    },
+                )
+            })
         })
         .collect()
 }
@@ -133,15 +183,6 @@ pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectE
     .iter()
     .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{prefix}_{suffix}")))
     .collect()
-}
-
-pub fn resolve_edge_table(input: &Input, rel_types: &[String]) -> String {
-    for t in rel_types {
-        if let Some(table) = input.compiler.edge_table_for_rel.get(t) {
-            return table.clone();
-        }
-    }
-    input.compiler.default_edge_table.clone()
 }
 
 pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
@@ -352,15 +393,26 @@ pub fn dedup_subquery(
 }
 
 pub fn has_non_denorm_filters(
-    entity: &str,
-    filters: &[(String, InputFilter)],
-    denorm_map: &HashMap<(String, String, String), (String, String)>,
+    filters: &[(String, BoundFilter)],
+    denormalized: &HashMap<
+        query_data_model::DenormalizedKey,
+        query_data_model::DenormalizedProperty,
+    >,
 ) -> bool {
-    filters.iter().any(|(prop, _)| {
-        let src =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "source".to_string()));
-        let tgt =
-            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "target".to_string()));
-        !src && !tgt
+    filters.iter().any(|(_, filter)| {
+        let Some(property) = filter.property else {
+            return true;
+        };
+        [
+            query_data_model::DenormalizedDirection::Source,
+            query_data_model::DenormalizedDirection::Target,
+        ]
+        .into_iter()
+        .all(|direction| {
+            !denormalized.contains_key(&query_data_model::DenormalizedKey {
+                property,
+                direction,
+            })
+        })
     })
 }

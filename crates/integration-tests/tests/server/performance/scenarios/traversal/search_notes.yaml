@@ -1,0 +1,10 @@
+description: Single-node Note lookup (search), page of 100
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000]}],
+      "limit": 100
+    }
+expect:
+  compile_only: true

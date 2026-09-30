@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
@@ -17,7 +18,7 @@ pub enum RepoStatus {
     Error,
 }
 
-/// Manages the `~/.orbit/` workspace — graph database, repo discovery,
+/// Manages the `~/.gitlab/orbit/` workspace — graph database, repo discovery,
 /// and manifest.
 pub struct Workspace {
     root: PathBuf,
@@ -29,15 +30,18 @@ impl Workspace {
     }
 
     pub fn default_root() -> Result<PathBuf> {
-        if let Some(dir) = std::env::var("ORBIT_DATA_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
-            Ok(PathBuf::from(dir))
-        } else {
-            let home = dirs::home_dir().context("Could not determine home directory")?;
-            Ok(home.join(".orbit"))
-        }
+        // Resolution runs inside the cell so the legacy migration happens at most
+        // once per process, even when MCP tool calls race on the first use.
+        static ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
+        ROOT.get_or_init(|| {
+            let override_dir = std::env::var("ORBIT_DATA_DIR")
+                .ok()
+                .filter(|s| !s.is_empty());
+            let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+            resolve_root(override_dir, &home).map_err(|e| e.to_string())
+        })
+        .clone()
+        .map_err(anyhow::Error::msg)
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {
@@ -54,11 +58,43 @@ impl Workspace {
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
-        let discovered = discover_repos(&canonical);
+        let mut discovered = discover_repos(&canonical);
+        discovered.retain(|repo| *repo == canonical || !is_ignored_by_enclosing_repo(repo));
         if discovered.is_empty() && is_git_repo(&canonical) {
             Ok(vec![canonical])
         } else {
             Ok(discovered)
+        }
+    }
+}
+
+fn resolve_root(override_dir: Option<String>, home: &Path) -> Result<PathBuf> {
+    if let Some(dir) = override_dir {
+        return Ok(PathBuf::from(dir));
+    }
+    let root = home.join(".gitlab").join("orbit");
+    let legacy = home.join(".orbit");
+    if !root.exists() && legacy.is_dir() {
+        return Ok(migrate_legacy_root(&legacy, root));
+    }
+    Ok(root)
+}
+
+fn migrate_legacy_root(legacy: &Path, root: PathBuf) -> PathBuf {
+    let moved = std::fs::create_dir_all(root.parent().unwrap_or(&root))
+        .and_then(|()| std::fs::rename(legacy, &root));
+    match moved {
+        Ok(()) => {
+            eprintln!("orbit: moved {} to {}", legacy.display(), root.display());
+            root
+        }
+        Err(e) => {
+            eprintln!(
+                "orbit: kept {} in place; move to {} failed ({e})",
+                legacy.display(),
+                root.display()
+            );
+            legacy.to_path_buf()
         }
     }
 }
@@ -75,6 +111,24 @@ pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
     absolutize(path)
 }
 
+pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
+    static HOLDER: OnceLock<regex::Regex> = OnceLock::new();
+    let holder = HOLDER.get_or_init(|| {
+        regex::Regex::new(r"Conflicting lock is held in (.+?) \(PID (\d+)\)")
+            .expect("lock holder pattern is valid")
+    });
+    let chain = format!("{error:#}");
+    let captures = holder.captures(&chain)?;
+    let program = Path::new(&captures[1])
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| captures[1].to_string());
+    Some(format!(
+        "The local graph is busy: {program} (PID {}) is using it. Wait for it to finish, then try again.",
+        &captures[2]
+    ))
+}
+
 pub struct IndexedRepo {
     pub git: GitInfo,
     pub client: DuckDbClient,
@@ -88,33 +142,33 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
-    let indexed_count = |client: &DuckDbClient| -> Result<i64> {
-        let batches = client.query_arrow_json(
-            "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
-            &[git.project_id.into(), git.commit_sha.clone().into()],
-        )?;
-        Ok(duckdb_client::scalar_i64(&batches))
-    };
-
-    let mut client = crate::sql::open_graph(Some(db.clone()))?;
-    if indexed_count(&client)? == 0 {
-        eprintln!(
-            "current commit {} is not indexed — indexing {} first",
-            git.short_sha(),
-            git.repo_path.display()
-        );
-        drop(client);
-        crate::index_collect(git.repo_path.clone(), 0, false, Some(db.clone()))
+    if graph_lacks_commit(&db, &git)? {
+        crate::commands::index::index_before_first_query(git.repo_path.clone(), Some(db.clone()))
             .context("failed to index the repository")?;
-        client = crate::sql::open_graph(Some(db))?;
-        if indexed_count(&client)? == 0 {
+        if graph_lacks_commit(&db, &git)? {
             anyhow::bail!(
                 "indexing finished but commit {} still has no rows in the local graph",
                 git.commit_sha
             );
         }
     }
+    let client = crate::sql::open_graph(Some(db))?;
     Ok(IndexedRepo { git, client })
+}
+
+fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
+    if !db.exists() {
+        return Ok(true);
+    }
+    let client = crate::sql::open_graph(Some(db.to_path_buf()))?;
+    if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
+        return Ok(true);
+    }
+    let files = client.query_arrow_json(
+        "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
+        &[git.project_id.into(), git.commit_sha.clone().into()],
+    )?;
+    Ok(duckdb_client::scalar_i64(&files) == 0)
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
@@ -128,10 +182,14 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 }
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
+const CODE_INDEX_META_KEY: &str = "code_index_revision";
+const CODE_INDEX_REVISION: &str = "1";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
-    if stored_local_ddl(&client)?.as_deref() == Some(ddl) {
+    if stored_meta(&client, LOCAL_DDL_META_KEY)?.as_deref() == Some(ddl)
+        && stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() == Some(CODE_INDEX_REVISION)
+    {
         return Ok(());
     }
     let had_data = table_exists(&client, "_orbit_manifest")?;
@@ -139,7 +197,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
 
     if had_data {
         tracing::warn!(
-            "local graph schema changed; rebuilding {} (previously indexed repositories must be re-indexed)",
+            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
             db_path.display()
         );
     }
@@ -151,21 +209,26 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
         .context("failed to create schema")?;
     client
         .execute(
-            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2)",
-            &[json!(LOCAL_DDL_META_KEY), json!(ddl)],
+            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2), (?3, ?4)",
+            &[
+                json!(LOCAL_DDL_META_KEY),
+                json!(ddl),
+                json!(CODE_INDEX_META_KEY),
+                json!(CODE_INDEX_REVISION),
+            ],
         )
         .context("failed to record schema fingerprint")?;
     Ok(())
 }
 
-fn stored_local_ddl(client: &DuckDbClient) -> Result<Option<String>> {
+fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
     if !table_exists(client, "_orbit_meta")? {
         return Ok(None);
     }
     let batches = client
         .query_arrow_json(
             "SELECT value FROM _orbit_meta WHERE key = ?1",
-            &[json!(LOCAL_DDL_META_KEY)],
+            &[json!(key)],
         )
         .context("failed to read _orbit_meta")?;
     Ok(duckdb_client::string_column(&batches, "value")
@@ -263,6 +326,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     }
 }
 
+#[derive(Clone)]
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
@@ -355,6 +419,19 @@ fn is_git_repo(path: &Path) -> bool {
     git.is_dir() || git.is_file()
 }
 
+fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
+    let Some(enclosing) = repo.parent().and_then(|parent| git_toplevel(parent).ok()) else {
+        return false;
+    };
+    Command::new("git")
+        .args(["check-ignore", "--quiet"])
+        .arg(repo)
+        .current_dir(enclosing)
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if let Err(e) = ws.index_repositories() {
@@ -382,6 +459,64 @@ mod tests {
     }
 
     const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+    #[test]
+    fn resolve_root_prefers_the_explicit_override() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = resolve_root(Some("/custom/dir".to_string()), home.path()).unwrap();
+        assert_eq!(root, PathBuf::from("/custom/dir"));
+    }
+
+    #[test]
+    fn resolve_root_uses_the_gitlab_home_on_a_fresh_install() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = resolve_root(None, home.path()).unwrap();
+        assert_eq!(root, home.path().join(".gitlab").join("orbit"));
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn resolve_root_migrates_a_legacy_directory() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = home.path().join(".orbit");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, home.path().join(".gitlab").join("orbit"));
+        assert!(root.join("graph.duckdb").exists());
+        assert!(!legacy.exists());
+    }
+
+    #[test]
+    fn resolve_root_keeps_the_new_directory_when_both_exist() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(home.path().join(".orbit")).unwrap();
+        let expected = home.path().join(".gitlab").join("orbit");
+        std::fs::create_dir_all(&expected).unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, expected);
+        assert!(home.path().join(".orbit").exists());
+    }
+
+    #[test]
+    fn resolve_root_keeps_the_legacy_directory_when_the_move_fails() {
+        let home = tempfile::TempDir::new().unwrap();
+        let legacy = home.path().join(".orbit");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("graph.duckdb"), b"data").unwrap();
+        // A file where the parent directory must go makes create_dir_all fail
+        // without relying on permissions, which root ignores in CI containers.
+        std::fs::write(home.path().join(".gitlab"), b"").unwrap();
+
+        let root = resolve_root(None, home.path()).unwrap();
+
+        assert_eq!(root, legacy);
+        assert!(legacy.join("graph.duckdb").exists());
+    }
 
     #[test]
     fn record_git_info_failure_writes_error_row() {
@@ -471,7 +606,7 @@ mod tests {
         assert!(!table_exists(&client, "old_table").unwrap());
         assert!(table_exists(&client, "gl_definition").unwrap());
         assert_eq!(
-            stored_local_ddl(&client).unwrap().as_deref(),
+            stored_meta(&client, LOCAL_DDL_META_KEY).unwrap().as_deref(),
             Some(LOCAL_DDL)
         );
     }

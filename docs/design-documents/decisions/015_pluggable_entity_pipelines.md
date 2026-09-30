@@ -19,25 +19,25 @@ Before this change, the SDLC indexer's transform stage was SQL-only. Every entit
 flows through one generic `EntityHandler`
 (`crates/indexer/src/modules/sdlc/handler/entity.rs`) that owns a `Plan` and drives
 a shared `Pipeline` (`crates/indexer/src/modules/sdlc/pipeline.rs`). The runtime
-pipeline still owns extraction, transformation, writing, and checkpointing, but the
-ontology input has been unified: nodes, edges, and derived entities all declare
+pipeline still owns extraction, transformation, writing, and checkpointing. But the
+ontology input has been unified. Nodes, edges, and derived entities all declare
 top-level `pipelines:` entries with `extract` and `transform` sections. The loader
-resolves those YAML entries into `ontology::etl::Pipeline { extract, transform }`;
-the indexer lowers them into a `Plan` whose `extract_template` is the pipeline's
-resolved SQL template and whose `TransformSpec` decides how rows become graph
+resolves those YAML entries into `ontology::etl::Pipeline { extract, transform }`.
+The indexer lowers them into a `Plan`. That plan's `extract_template` is the
+pipeline's resolved SQL template. Its `TransformSpec` decides how rows become graph
 outputs.
 
 This is right for entities whose graph shape is a row-wise projection of one
 extracted batch. It is wrong for entities whose transform is **derived at runtime
-and needs to query the datalake again mid-transform** — the driver being the
-SystemNote handler (ADR 013), which parses GFM reference tokens out of free-text
-note bodies, then resolves them to entity IDs with batched `IN`-list lookups
-against `siphon_routes` and the entity tables. A `SELECT … FROM source_data`
+and needs to query the datalake again mid-transform**. The driver is the
+SystemNote handler (ADR 013). That handler parses GFM reference tokens out of
+free-text note bodies. It then resolves them to entity IDs with batched `IN`-list
+lookups against `siphon_routes` and the entity tables. A `SELECT … FROM source_data`
 against a single in-memory block cannot express that second hop.
 
 The trap is to conclude "SystemNote needs its own pipeline." It does not, and it
 must not. **The pipeline is mostly shared, hard-won extraction and writing
-machinery that every SDLC entity needs**, and re-owning it per entity is exactly
+machinery that every SDLC entity needs.** Re-owning it per entity is exactly
 the duplication this ADR exists to prevent. The optimizations that live in the
 pipeline today, none of which are entity-specific:
 
@@ -52,12 +52,12 @@ pipeline today, none of which are entity-specific:
 | Idempotent re-processing via `ReplacingMergeTree` | graph DDL |
 | Read/write stats + observer wiring | `PipelineStats` (`pipeline.rs:50`), `PipelineContext` (`pipeline.rs:68`) |
 
-Crucially, the only entity-specific object inside that machinery was the
+The only entity-specific object inside that machinery was the
 `Transformer`, built from a plan's SQL `Transformation` list. Everything wrapped
 around it is generic. That is the seam this ADR replaces with a trait.
 
 ADR 014 named an `EntityPipeline` trait with SystemNotes as the custom-pipeline
-example. Taken literally — one custom *pipeline* implementation per hard entity —
+example. Taken literally (one custom *pipeline* implementation per hard entity),
 that framing reintroduces the duplication above. This ADR refines it: the
 extension point is the **transform stage**, not the whole pipeline. There remains
 exactly one pipeline *type*, and a single shared instance, parameterized per run by
@@ -67,8 +67,8 @@ the plan's transform.
 
 Keep one generic `Pipeline` that owns all extraction and writing. Make the
 **transform** the single pluggable seam, as a trait that can read the datalake.
-Every SDLC entity — SQL-projected or hand-written Rust — runs on the same
-pipeline; only its transform differs.
+Every SDLC entity (SQL-projected or hand-written Rust) runs on the same
+pipeline. Only its transform differs.
 
 ### The seam: a `BlockTransform` trait
 
@@ -92,7 +92,7 @@ pub(in crate::modules::sdlc) trait BlockTransform: Send + Sync {
 ```
 
 A transform takes no per-call context. Its dependencies (the datalake handle, any
-config) are captured at construction by the registry factory, and the namespace
+config) are captured at construction by the registry factory. The namespace
 scope for a transform's own lookups travels in the block's `traversal_path` column.
 There is no `TransformContext` parameter threaded through the pipeline.
 
@@ -104,32 +104,32 @@ Two design rules the trait enforces:
 - **Datalake access is granted at construction, not via pipeline ownership.** The
   multi-hop capability SystemNote needs already exists on `DatalakeQuery`
   (`datalake.rs`: `query_batches`). The registry factory captures that handle when
-  it builds the transform, so the transform does *not* need to own pagination,
+  it builds the transform. So the transform does *not* need to own pagination,
   checkpointing, or writing to do a second-hop read.
 
-The pipeline drives the transform per block (the page's blocks are fed through it
-one at a time and the output rows are grouped per destination table before a single
-bulk write). Per-block granularity also naturally bounds a transform's enrichment
-`IN`-list to one block rather than a whole page; a transform that needs wider
+The pipeline drives the transform per block. The page's blocks are fed through it
+one at a time. The output rows are grouped per destination table before a single
+bulk write. Per-block granularity also bounds a transform's enrichment
+`IN`-list to one block rather than a whole page. A transform that needs wider
 batching can buffer internally.
 
 ### Two implementations of one trait
 
-- **`DataFusionTransform`** — today's SQL behavior, unchanged. Owns a
+- **`DataFusionTransform`**: today's SQL behavior, unchanged. It owns a
   `SessionContext` internally (register/deregister take `&self` via DataFusion's
-  interior mutability, so no `&mut` and no leak), registers the block as
-  `source_data`, runs the ontology-generated SQL list, returns `TableBatch`es.
+  interior mutability, so no `&mut` and no leak). It registers the block as
+  `source_data`, runs the ontology-generated SQL list, and returns `TableBatch`es.
   Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`.
-- **`SystemNotesTransform`** (ADR 013, follow-up MR) — hand-written Rust. Parses
+- **`SystemNotesTransform`** (ADR 013, follow-up MR): hand-written Rust. It parses
   note bodies, collects distinct refs, calls `datalake.query_batches` for the
-  `siphon_routes` and entity-table resolution hops, emits edge rows. No DataFusion.
+  `siphon_routes` and entity-table resolution hops, and emits edge rows. No DataFusion.
   Its datalake handle is captured at construction.
 
-### Extraction and writing are not duplicated — they are reused as-is
+### Extraction and writing are not duplicated: they are reused as-is
 
-SystemNote needs no bespoke extractor: its source is the `SystemNote` pipeline in
-`config/ontology/derived/core/system_note.yaml`, whose extract is an authored
-`system_note.sql.j2` — a `_batch` scan of `siphon_notes` plus a page-bounded join over
+SystemNote needs no bespoke extractor. Its source is the `SystemNote` pipeline in
+`config/ontology/derived/core/system_note.yaml`. That pipeline's extract is an authored
+`system_note.sql.j2`. It is a `_batch` scan of `siphon_notes` plus a page-bounded join over
 `siphon_system_note_metadata` for the note action. It rides the same keyset
 pagination, watermark window, retry, read-ahead, checkpoint, and streaming-write
 path as every other entity. The only Rust-specific code is the transform body. This
@@ -143,8 +143,8 @@ A transform exposes its destination tables via `outputs() -> &[String]`, and
 `DataFusionTransform` keeps its own dict-encoding (`prepare_batches` over each
 `Transformation`'s `dict_encode_columns`); a Rust transform is responsible for
 emitting batches that conform to `config/graph.sql`. Centralizing dict-encoding in
-the `Loader` so a Rust transform inherits it for free was considered but not
-adopted here; it can follow if Rust transforms find it error-prone.
+the `Loader` was considered but not adopted here. That would let a Rust transform
+inherit it for free. It can follow if Rust transforms find it error-prone.
 
 ### The transform travels in the plan, resolved per run by a registry
 
@@ -163,33 +163,33 @@ derived entity pipeline gets `Rust(<transform.type>)`.
 
 ### Ontology is a declarative model; the indexer owns all SQL
 
-The ontology crate (`crates/ontology`) is a dumb YAML → declarative model: it holds
+The ontology crate (`crates/ontology`) is a dumb YAML → declarative model. It holds
 no ClickHouse SQL and no knowledge of runtime markers. `ExtractQuery` is either
-`Generated { filter }` (the indexer builds the SQL from the declaration) or
-`Sql(String)` (the raw content of a co-located `.sql.j2` MiniJinja template, carried
-verbatim — markers unresolved). Derived-entity pipelines are always `Sql`: their rows
+`Generated { filter }` or `Sql(String)`. `Generated` means the indexer builds the SQL
+from the declaration. `Sql` is the raw content of a co-located `.sql.j2` MiniJinja
+template, carried verbatim with markers unresolved. Derived-entity pipelines are always `Sql`: their rows
 are neither node properties nor edge endpoints, so the indexer has nothing to generate
-a projection from. Eight `.sql.j2` files exist — the seven genuinely complex nodes (Group,
+a projection from. Eight `.sql.j2` files exist. They are the seven genuinely complex nodes (Group,
 Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) and the SystemNote
-derived entity; every other node and edge is `generated`.
+derived entity. Every other node and edge is `generated`.
 
 The indexer's `plan` module is the one entry point that turns that model into runs.
-`plan/build.rs::build_plans` is the **only** place that reads `pipeline.transform`; it
-walks nodes, edge ETL configs, and derived entities, decomposes each pipeline once,
-and hands each stage exactly its inputs so data flows top-down:
+`plan/build.rs::build_plans` is the **only** place that reads `pipeline.transform`. It
+walks nodes, edge ETL configs, and derived entities. It decomposes each pipeline once.
+It hands each stage exactly its inputs so data flows top-down:
 
 - `plan/extract/lookup.rs` is the single point-lookup join convention.
   `PointLookupJoin::get_from_extract_declaration` turns `extract.lookups` entries into internal `_eN`
-  CTEs, each keyed by the source node's `id`, matched against the declared batch ID
-  column, and path-scoped when both the pipeline and source node are namespaced.
+  CTEs. Each CTE is keyed by the source node's `id` and matched against the declared batch ID
+  column. It is path-scoped when both the pipeline and source node are namespaced.
   The final projection exposes only the stable output field aliases from the extract
   declaration.
 - `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
   effective version/watermark/deleted expressions) from a `ClickHouseExtractDeclaration` that owns
   its source columns, lookup joins, and query configuration. It imports
   **nothing** from the transform stage. `compile_extract_spec` dispatches
-  `Generated` to `extract/generated.rs` and `Sql` to `extract/sql.rs`; the generated
-  compiler selects a direct projection or lookup-backed query from the declaration,
+  `Generated` to `extract/generated.rs` and `Sql` to `extract/sql.rs`. The generated
+  compiler selects a direct projection or lookup-backed query from the declaration.
   `extract/sql.rs` handles the authored escape hatch. The `RecordBatch` schema produced at
   runtime is the extract-transform contract; planning does not maintain a second schema model.
 - `plan/transform.rs` exposes an owned, narrow `TransformDeclaration` and builds the `TransformSpec`
@@ -200,10 +200,10 @@ and hands each stage exactly its inputs so data flows top-down:
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
 unvalidated template cannot reach the runtime. A build-time gate in `orbit-server`'s
-build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces that every
-authored `.sql.j2` file projects `AS _version`/`AS _deleted` and uses
+build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces two things.
+Every authored `.sql.j2` file projects `AS _version`/`AS _deleted`. It uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
-names; projection completeness (order-by and lookup columns) is exercised end-to-end
+names. Projection completeness (order-by and lookup columns) is exercised end-to-end
 by the indexer's Docker integration scenarios.
 
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
@@ -245,8 +245,8 @@ Because the spec rides in the `Plan`, the transform never has to thread through
 
 **Handler/pipeline split.** The pipeline owns per-page execution (extract,
 transform, write, checkpoint). `EntityHandler` owns the `Plan` and its dispatch
-decisions — watermark derivation, partition-range computation via `self.datalake`,
-request decoding — and passes the plan into `Pipeline::run_plan` per request. The
+decisions (watermark derivation, partition-range computation via `self.datalake`,
+request decoding). It passes the plan into `Pipeline::run_plan` per request. The
 plan carries its own `TransformSpec`, so the pipeline resolves the transform
 without the handler holding one.
 
@@ -254,8 +254,8 @@ without the handler holding one.
 
 What improves:
 
-- The transform stage is no longer SQL-only, and the extraction/writing
-  optimizations are inherited by every entity with zero duplication — the explicit
+- The transform stage is no longer SQL-only. The extraction/writing
+  optimizations are inherited by every entity with zero duplication, the explicit
   goal. A new Rust entity is one `BlockTransform` impl plus an extract plan.
 - ADR 013 unblocks with a smaller surface than "a whole custom pipeline":
   SystemNote becomes an extract plan + one trait impl.
@@ -269,16 +269,16 @@ What gets harder:
   (`transform_index` → `output_index`).
 - Risk of hand-written-transform proliferation. Mitigation: the default stays
   "express it as an ontology plan + `DataFusionTransform`." A Rust transform is justified
-  only when the projection cannot be SQL — concretely, when it needs multi-hop
-  datalake reads or cross-row work the SQL projection can't do. Document that bar
+  only when the projection cannot be SQL: multi-hop datalake reads, or
+  cross-row work the SQL projection can't do. Document that bar
   in `crates/indexer/AGENTS.md` beside the reuse checklist.
 
 ## Relationship to ADR 014
 
 ADR 014 (Accepted) decided entity-level dispatch and named `EntityPipeline` /
 `SimpleEntityPipeline`, with SystemNotes as the custom example. This ADR refines
-the *granularity* of that extension point: rather than one custom **pipeline** per
-hard entity (which would re-own extraction and writing), the seam is the
+the *granularity* of that extension point. One custom **pipeline** per
+hard entity would re-own extraction and writing. Instead, the seam is the
 **transform stage**. One shared `Pipeline` runs every entity and resolves each
 plan's transform from its `TransformSpec`; there is no per-entity pipeline impl.
 ADR 014's dispatch model, per-entity NATS subjects, and partitioning are
@@ -293,7 +293,7 @@ unaffected.
   a different source shape is a different extract plan, not new machinery.
 - **A transform-type taxonomy in the ontology.** The ontology names the transform in
   each pipeline's `transform.type` (`datafusion` for the built-in path, or a
-  registered Rust transform name), but it does not model transform behavior; whether
+  registered Rust transform name). But it does not model transform behavior. Whether
   a named Rust transform resolves is a registration concern. Edge/node kinds remain
   ontology-declared.
 - **Code and namespace-deletion modules.** Out of scope; they sit outside the SQL
@@ -301,22 +301,22 @@ unaffected.
 
 ## References
 
-- ADR 014 (Entity-level SDLC indexing) — [014_entity_level_indexing.md](014_entity_level_indexing.md)
-- ADR 013 (Materialize edges from system notes); multi-hop resolution shape —
+- ADR 014 (Entity-level SDLC indexing): [014_entity_level_indexing.md](014_entity_level_indexing.md)
+- ADR 013 (Materialize edges from system notes); multi-hop resolution shape:
   [013_system_note_edges.md](013_system_note_edges.md)
 - Shared pipeline + the transform seam: `crates/indexer/src/modules/sdlc/pipeline.rs`
   (`Pipeline::run`, `Producer`, `Loader`, `Extractor`) and
   `crates/indexer/src/modules/sdlc/transform.rs` (`BlockTransform`,
   `DataFusionTransform`, `TransformRegistry`)
 - Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
-  `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
-  `crates/ontology/src/loading/node.rs`; authored `.sql.j2` marker/alias check in
+  `ExtractQuery`, `Transform`, `EdgeMapping`). YAML loading in
+  `crates/ontology/src/loading/node.rs`. Authored `.sql.j2` marker/alias check in
   `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
   `orbit-server`'s build script)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
-  `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; point
-  lookups in `plan/extract/lookup.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
-  `ExtractTemplate`, `SourceColumn`); transform building in `plan/transform.rs`
+  `Transformation`, `Cursor`, filters). Plan building in `plan/build.rs`. Point
+  lookups in `plan/extract/lookup.rs`. Extract stage in `plan/extract/` (`ExtractSpec`,
+  `ExtractTemplate`, `SourceColumn`). Transform building in `plan/transform.rs`
 - Generic handler: `crates/indexer/src/modules/sdlc/handler/entity.rs`
 - Datalake query capability: `crates/indexer/src/modules/sdlc/datalake.rs` (`DatalakeQuery`)
 - Reuse-infra checklist: `crates/indexer/AGENTS.md`

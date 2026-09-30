@@ -7,13 +7,13 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 Config is loaded in layers, each overriding the previous:
 
 1. **Embedded defaults**: `config/default.yaml`, compiled into the binary. It declares every
-   section and scalar the server reads; the Rust config structs carry no fallback values, so a
+   section and scalar the server reads. The Rust config structs carry no fallback values. So a
    key removed from this file fails startup with a "missing field" error. Optional keys are
    `Option` fields (passwords, TLS paths, values derived from container resources) and are
-   commented out in the file. These are **deployment defaults**: a production pod runs on them for
-   every key the Helm ConfigMap does not set, so the file holds no local-development tuning. Its
-   maps stay empty unless an entry is a genuine universal default, because config-rs deep-merges
-   maps and any entry here that a partial ConfigMap does not set would leak into production.
+   commented out in the file. These are **deployment defaults**. A production pod runs on them for
+   every key the Helm ConfigMap does not set. So the file holds no local-development tuning. Its
+   maps stay empty unless an entry is a genuine universal default. The reason: config-rs
+   deep-merges maps. Any entry here that a partial ConfigMap does not set would leak into production.
 2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
    the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
 3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
@@ -25,18 +25,20 @@ There is no environment-variable layer. Every override is a YAML overlay or a se
 
 Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
 value to `config/default.yaml`; nothing else. Tests that need a config start from
-`AppConfig::embedded_defaults()` and override the fields they care about.
+`AppConfig::embedded_defaults()` and override the fields they care about. The `orbit` CLI uses its
+own clap configuration instead of `AppConfig`.
 
 The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
-`dev:healthcheck`) run `scripts/orbit-native-dev.sh`, which writes `.dev/<mode>.yaml` on every start
-and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
+`dev:healthcheck`) run `scripts/orbit-native-dev.sh`. That script writes `.dev/<mode>.yaml` on every
+start and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
    consumer name, database names and users, laptop tuning.
-2. Values read from the GDK checkout: ClickHouse URLs from `gdk.yml`, the GitLab base URL, the Siphon
-   stream name from GDK's Siphon config, JWT keys and the ClickHouse password from the GitLab secret files.
-3. The mode's Prometheus port, so the processes `mise run dev` starts side by side do not collide once
-   metrics are enabled.
+2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
+   and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
+   password from the GitLab secret files.
+3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
+   Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
 
 Passing `--config` disables the default `config/config.yaml` lookup.
@@ -160,9 +162,9 @@ On the graph connection the switch does three things:
 
 1. Prefixes `Replicated` onto every `*MergeTree` engine in DDL, the same rewrite GitLab Rails applies on a `Replicated` database. A `Replicated` database replicates metadata only; without replicated table engines, rows stay on the replica that took the write. ClickHouse takes the ZooKeeper path and replica name from the server settings `default_replica_path` and `default_replica_name`, so the DDL carries no customer macros.
 1. Applies the quorum session settings below.
-1. Retries a request that fails with error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
-   a Keeper session error, a DDL that timed out waiting for a replica, a query cancelled by a replica
-   that shuts down, a connection error, or a 5xx from the load balancer.
+1. Retries a request that fails with any of these. Error 286 (`UNSATISFIED_QUORUM`), error 289 (`REPLICA_IS_NOT_IN_QUORUM`),
+   a Keeper session error, or a DDL that timed out waiting for a replica. Also a query cancelled by a
+   replica that shuts down, a connection error, or a 5xx from the load balancer.
    The backoff is linear, 100 ms per attempt, capped at 1 s, up to 20 attempts.
    All of these errors are transient by design. Serialized quorum inserts collide.
    A sequential-consistency read can land on a replica that has not received the last quorum write.
@@ -215,9 +217,9 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 These fields derive from the container's resources at startup when left unset; an explicit config value always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
 
-- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit), capped by the cgroup memory limit at 1.5 GiB per worker so a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
-- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
-- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit, anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page), floored at 100k rows so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
+- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit). The cgroup memory limit caps this at 1.5 GiB per worker. So a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
+- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap. A pool spanning both the SDLC and code groups splits the cap 75% / 25%. That is the historical universal-pool ratio of sdlc 12 / code 4 out of 16. Namespace deletion shares the sdlc group.
+- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit. It is anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page). It is floored at 100k rows, so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
 
 On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
@@ -238,20 +240,20 @@ engine:
 ## Topic configuration
 
 Each topic's default subscription policy (retry, DLQ, concurrency group) is
-**declared in Rust** by the indexer module that owns the topic, next to the
-handler it protects:
+**declared in Rust**. The indexer module that owns the topic declares it, next
+to the handler it protects:
 
-- `code-indexing-task` — `crates/indexer/src/modules/code/mod.rs`
-- `global-handler`, `namespace-handler` — `crates/indexer/src/modules/sdlc/mod.rs`
-- `namespace-deletion` — `crates/indexer/src/modules/namespace_deletion/mod.rs`
+- `code-indexing-task`: `crates/indexer/src/modules/code/mod.rs`
+- `global-handler`, `namespace-handler`: `crates/indexer/src/modules/sdlc/mod.rs`
+- `namespace-deletion`: `crates/indexer/src/modules/namespace_deletion/mod.rs`
 
 Because the policy lives in code, a deployment that omits config still gets the
-correct policy — omitting `engine.topics` no longer silently disables
+correct policy. Omitting `engine.topics` no longer silently disables
 `code-indexing-task` retries and dead-lettering.
 
 An `engine.topics.<name>` entry in YAML is a **sparse, field-wise override**
-layered on top of the declared default: only the fields the entry sets change;
-every unset field keeps the module default. `dead_letter_on_exhaustion` is
+layered on top of the declared default. Only the fields the entry sets change.
+Every unset field keeps the module default. `dead_letter_on_exhaustion` is
 `Option<bool>`, so an entry can explicitly turn it off, not just on.
 
 | Config path | Overrides | Description |
@@ -328,13 +330,13 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each s
 | Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
 
 The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
-dispatches every enabled namespace once (cold start) and records a checkpoint;
-every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
+dispatches every enabled namespace once (cold start) and records a checkpoint.
+Every later tick queries Siphon-backed datalake tables for changes since that checkpoint,
 however old it is. The same task re-dispatches every enabled namespace when its separate
 sweep checkpoint is older than `schedule.tasks.namespace.sweep_interval_secs` (default
 `3600`), backstopping migration backfill and missed windows.
 
-`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe — the next
+`APPLY DELETED MASK` is idempotent. A failed or skipped run is safe. The next
 run picks up all outstanding masks. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
 failed table and moves on.
@@ -389,8 +391,20 @@ Example: `info,orbit_server=debug,gkg_indexer=trace`
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `metrics.prometheus.enabled` | `false` | Expose the `/-/metrics` scrape endpoint |
-| `metrics.prometheus.port` | `9394` | Prometheus scrape port |
+| `metrics.prometheus.enabled` | `false` | Add the `/-/metrics` scrape endpoint to the probe server |
+| `metrics.prometheus.port` | unset | Deprecated. Use `probe_server.bind_address`. When set alone it gives the probe server address as `0.0.0.0:<port>` |
+
+### Probe server
+
+One internal listener serves `/-/liveness`, `/-/readiness` and, when
+`metrics.prometheus.enabled` is true, `/-/metrics`. It binds in every mode.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `probe_server.bind_address` | `0.0.0.0:9394` | Probe server listen address |
+
+When both `probe_server.bind_address` and `metrics.prometheus.port` are set and they name a
+different port, startup fails. Set `probe_server.bind_address` alone.
 
 ## Webserver
 
@@ -407,10 +421,33 @@ These settings are used by the Webserver mode.
 
 ### TLS
 
+`cert_path` and `key_path` are the shared identity. Setting both enables TLS on the gRPC
+server. The internal group below is off by default. When enabled it inherits that identity
+unless it names its own, so an externally pinned certificate and an internal one can rotate
+on different cycles.
+
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `tls.cert_path` | None | TLS certificate path (PEM) |
 | `tls.key_path` | None | TLS private key path (PEM) |
+| `tls.internal.enabled` | `false` | TLS on the probe server (`/-/liveness`, `/-/readiness`, `/-/metrics`) and the health-check API |
+| `tls.internal.cert_path` | None | Overrides `tls.cert_path` for the internal listeners |
+| `tls.internal.key_path` | None | Overrides `tls.key_path` for the internal listeners |
+
+Certificates are read at startup, so rotation needs a pod restart.
+
+Enabling `tls.internal` changes what clients must send:
+
+- Kubernetes probes on the probe server need `scheme: HTTPS`. The kubelet does not verify the
+  certificate.
+- `health_check_url` must become `https://`. The webserver verifies that certificate against
+  the OS trust store. The certificate needs a SAN for the health-check service name, and its
+  CA must be present in `/etc/pki/tls/certs`.
+- KEDA scalers that read `/queue-depth` need the same treatment.
+- The PodMonitor needs `scheme: https` and a `tlsConfig` that either trusts the issuing CA
+  (with `serverName`, because Prometheus connects to the pod IP) or sets `insecureSkipVerify`.
+
+The legacy `/live` and `/ready` listeners stay plaintext until the chart probes the probe server.
 
 ### gRPC tuning
 
@@ -489,7 +526,8 @@ Controls Snowplow billing-event emission and the CDot quota gate that enforces G
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.enabled` | `false` | Enable Snowplow billing-event emission |
-| `billing.collector_url` | `""` | Snowplow collector endpoint |
+| `billing.collector_url` | `""` | Snowplow collector endpoint. On Self-Managed / Dedicated, point at the host matching the Cloud Connector token audience (`https://billing.prdsub.gitlab.net` / `https://billing.stgsub.gitlab.net`). |
+| `billing.auth_mode` | `oidc` | Authentication for emission. `oidc` uses GCP workload-identity (GitLab.com only). `cloud_connector` pulls the Cloud Connector instance token from Rails and caches it in memory (Self-Managed / Dedicated). |
 
 ### Quota gate
 
@@ -498,10 +536,15 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.quota.enabled` | `false` | Enable the CDot quota gate |
-| `billing.quota.customers_dot_url` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.customers_dot_url` | `http://localhost:5000` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.auth_mode` | `admin_token` | How the gate authenticates to CDot: `admin_token` (GitLab.com) or `license_checksum` (self-managed and Dedicated) |
 | `billing.quota.request_timeout_ms` | `1000` | CDot request timeout in milliseconds |
-| `billing.quota.api_user` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
-| `billing.quota.api_token` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+| `billing.quota.api_user` | None | CDot admin email, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_user`. |
+| `billing.quota.api_token` | None | CDot admin token, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_token`. |
+
+In `license_checksum` mode the gate sends the instance's license checksum as `X-License-Token`. GitLab adds it to the Orbit JWT as the `license_checksum` claim when the instance has an online cloud license. No CDot credentials are deployed. Requests without the claim skip the check and are allowed with a warning (`decision=skipped` on `gkg.billing.quota.decisions`). A CDot `401` (expired or unknown license) fails open with a warning and is not cached. Cached decisions are not keyed on the license, so a renewal can take up to one cache TTL to take effect. Orbit pods need egress to `customers_dot_url`. The claim travels inside the JWT, so use TLS between GitLab and Orbit when that traffic leaves a trusted network.
+
+Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` query parameter, so CDot logs can be traced back to Orbit requests.
 
 ## Object storage
 
@@ -568,8 +611,8 @@ cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-di
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | Health check server address for Indexer mode |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | Health check server address for DispatchIndexing mode |
+| `indexer_health_bind_address` | `0.0.0.0:4202` | `/live` and `/ready` address for Indexer mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
+| `dispatcher_health_bind_address` | `0.0.0.0:4203` | `/live` and `/ready` address for DispatchIndexing mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
 
 ## Tuning guide
 
@@ -625,7 +668,7 @@ nats:
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`; every key the chart does not render comes from the embedded `config/default.yaml`.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML. The chart renders the values it knows about into a ConfigMap mounted at `/app/config`. Every key the chart does not render comes from the embedded `config/default.yaml`.
 
 ### Key Helm values mapping
 
@@ -780,5 +823,7 @@ metrics:
   log_level: info,orbit_server=debug
   prometheus:
     enabled: true
-    port: 9394
+
+probe_server:
+  bind_address: "0.0.0.0:9394"
 ```

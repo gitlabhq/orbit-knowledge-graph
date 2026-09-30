@@ -45,6 +45,24 @@ The first release build compiles every dependency and takes a few minutes
 (about 5 minutes on an Apple Silicon laptop). Incremental rebuilds are much
 faster.
 
+## Read the agent skill
+
+`orbit skills` lists the agent skills deployed by the selected GitLab instance.
+`orbit skills get orbit [path]` validates and caches the instance's whole remote
+tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
+omitted. The cache uses the operating system's user cache directory and keeps
+instance origins isolated.
+
+When the glab-provided Orbit API and authentication environment is absent or
+incomplete, the command serves the embedded local tree. It makes no network or
+credential-helper call. This makes the local guidance available in offline
+development builds:
+
+```shell
+./target/release/orbit skills
+./target/release/orbit skills get orbit references/local/sql.md
+```
+
 ## Index a repository and run a query
 
 Index the knowledge-graph repository itself as a test target, then query the
@@ -64,7 +82,7 @@ resulting DuckDB graph with SQL:
 ./target/release/orbit sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
 ```
 
-The graph is written to `~/.orbit/graph.duckdb`. `orbit schema` lists every
+The graph is written to `~/.gitlab/orbit/graph.duckdb`. `orbit schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
 query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 
@@ -88,7 +106,7 @@ first invocation pays the compile cost.
 - The query REST API and authorization paths
 
 The full server integration suite (`mise run test:integration`) also runs
-without GDK — it needs Docker (`mise run colima:start` on macOS), not the
+without GDK. It needs Docker (`mise run colima:start` on macOS), not the
 GDK stack.
 
 For the rest, follow [Local development](local-development.md).

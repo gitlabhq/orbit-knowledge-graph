@@ -1,0 +1,9 @@
+description: Two output aliases for one node cannot request different property sets
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN u{.username} AS author, u{.name} AS owner, count(mr) AS mr_count
+
+expect:
+  compile_error: "duplicate or overlapping node projection"

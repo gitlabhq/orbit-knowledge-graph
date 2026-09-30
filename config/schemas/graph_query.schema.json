@@ -396,6 +396,7 @@
       "minProperties": 1,
       "properties": {
         "eq": { "$ref": "#/$defs/FilterValue" },
+        "ne": { "$ref": "#/$defs/FilterValue" },
         "gt": { "$ref": "#/$defs/FilterValue" },
         "lt": { "$ref": "#/$defs/FilterValue" },
         "gte": { "$ref": "#/$defs/FilterValue" },

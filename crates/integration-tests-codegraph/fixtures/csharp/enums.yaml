@@ -77,10 +77,9 @@ tests:
 
   - name: "Members of Status are extracted as EnumMember definitions"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
         AND m.definition_type = 'EnumMember'
-        AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -92,10 +91,9 @@ tests:
 
   - name: "Explicitly-valued members of Priority are extracted as EnumMember"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Priority'
         AND m.definition_type = 'EnumMember'
-        AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -107,10 +105,9 @@ tests:
 
   - name: "Members of [Flags] enum Permissions are extracted as EnumMember"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Permissions'
         AND m.definition_type = 'EnumMember'
-        AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
       ORDER BY m.name
     assert:
@@ -123,21 +120,19 @@ tests:
 
   - name: "Enum defines its member via a Defines edge"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'Models.Status'
         AND m.definition_type = 'EnumMember'
         AND m.name = 'Active'
-        AND edge.edge_kind = 'Defines'
       RETURN m.name AS name
     assert:
       - { row_count: 1 }
 
   - name: "File defines the enum"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'Models/Status.cs'
         AND d.fqn = 'Models.Status'
-        AND e.edge_kind = 'Defines'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

@@ -48,7 +48,7 @@ fn snapshot_search() {
                 "title",
                 json!("Add per-activity reduction policy overrides"),
             ),
-            ("created_at", json!("2026-05-08 14:47:05.123456")),
+            ("created_at", json!("2026-05-08T14:47:05.123456Z")),
         ]),
     }];
     insta::assert_snapshot!(run(r));

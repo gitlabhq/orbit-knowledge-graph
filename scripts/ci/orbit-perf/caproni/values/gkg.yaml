@@ -1,0 +1,56 @@
+image:
+  tag: "dev"
+
+clickhouse:
+  datalake:
+    host: gitlab-dev-stack-clickhouse.gitlab-dev-stack.svc.cluster.local
+    httpPort: 8123
+    database: gitlab_main
+    user: gitlab-dev-stack
+    ssl: false
+  graph:
+    host: gitlab-dev-stack-clickhouse.gitlab-dev-stack.svc.cluster.local
+    httpPort: 8123
+    database: gkg
+    user: gitlab-dev-stack
+    readUser: gitlab-dev-stack
+    ssl: false
+
+secrets:
+  perKey:
+    gitlabJwtVerifyingKey:
+      secretName: gitlab-dev-stack-gkg-secrets
+      key: gitlab-jwt-verifying-key
+    gitlabJwtSigningKey:
+      secretName: gitlab-dev-stack-gkg-secrets
+      key: gitlab-jwt-signing-key
+    datalakePassword:
+      secretName: gitlab-dev-stack-gkg-secrets
+      key: datalake-password
+    graphPassword:
+      secretName: gitlab-dev-stack-gkg-secrets
+      key: graph-password
+    graphReadPassword:
+      secretName: gitlab-dev-stack-gkg-secrets
+      key: graph-read-password
+
+nats:
+  url: "nats://gitlab-dev-stack-nats.gitlab-dev-stack.svc.cluster.local:4222"
+
+gitlab:
+  baseUrl: "http://gitlab-webservice-default:8181"
+
+webserver:
+  replicas: 1
+indexer:
+  replicas: 1
+dispatcher:
+  enabled: true
+healthCheck:
+  enabled: true
+  replicas: 1
+
+# Keeps the metrics port open; the chart's PodMonitors are not used here.
+metrics:
+  prometheus:
+    enabled: true

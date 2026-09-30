@@ -1,0 +1,30 @@
+description: Hydrated datetime renders in the same ISO 8601 UTC form as the inline path
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+            {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
+        ],
+        "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+        "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
+
+expect:
+  hydration: static
+  sql_not_contains: ["AS n_created_at"]
+  node_count: 4
+  edge_exists:
+    HAS_NOTE:
+      - [2000, 3000]
+  nodes:
+    MergeRequest:
+      ids: [2000]
+    Note:
+      ids: [3000, 3002, 3003]
+      rows:
+        - { id: 3000, created_at: "2024-01-15T10:30:00Z" }

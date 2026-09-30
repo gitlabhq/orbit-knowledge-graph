@@ -6,6 +6,3 @@ license = "LicenseRef-EE"
 
 [lints]
 workspace = true
-
-[dependencies]
-stop-words = { workspace = true }

@@ -1,0 +1,6 @@
+# Time budgets in milliseconds. A file that overruns a per-file budget is
+# dropped from the graph and the run continues; total_ms ends the run.
+file_rewrite_ms: 200
+file_link_ms: 100
+file_resolve_ms: 100
+total_ms: 300000

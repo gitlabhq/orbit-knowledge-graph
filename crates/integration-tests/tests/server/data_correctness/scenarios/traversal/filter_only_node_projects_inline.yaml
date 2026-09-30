@@ -1,0 +1,37 @@
+description: Filter-only group node is projected from its join; the lazy user node still hydrates
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "filters": {"name": {"contains": "Private"}}, "columns": ["name", "visibility_level"]}
+        ],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+        "limit": 20
+    }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 AND g.name CONTAINS 'Private' RETURN u.username, g.name, g.visibility_level LIMIT 20
+
+expect:
+  hydration: static
+  sql_contains: ["AS g_name", "AS g_visibility_level"]
+  sql_not_contains: ["AS u_username"]
+  node_count: 5
+  edge_exists:
+    MEMBER_OF:
+      - [3, 101]
+      - [5, 101]
+  nodes:
+    Group:
+      ids: [101]
+      filters:
+        name:
+          contains: Private
+      rows:
+        - { id: 101, name: Private Group, visibility_level: private }
+    User:
+      rows:
+        - { id: 3, username: charlie }
+        - { id: 5, username: eve }

@@ -46,6 +46,12 @@ Prerequisites:
 - A maintenance window for one PostgreSQL restart.
 - Helm 3 and `kubectl` access to the cluster.
 
+The versions in the commands on this page are for reference only. Prefer the latest versions. To
+find them, see:
+
+- [Siphon releases](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases)
+- [Siphon Helm chart releases](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases)
+
 Set up replication in this order:
 
 1. Turn on logical replication in PostgreSQL.
@@ -286,7 +292,10 @@ A missing tag prevents pods from starting.
 
    image:
      repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-     tag: 0.0.124-beta
+     tag: 0.0.137-beta
+
+   waitForMigrations:
+     enabled: false
 
    siphonConnectionConfigMap:
      create: true
@@ -383,7 +392,7 @@ A missing tag prevents pods from starting.
    helm repo update
 
    helm upgrade --install siphon siphon/siphon \
-     --version 1.18.0 \
+     --version 1.22.1 \
      --namespace siphon \
      --create-namespace \
      --values siphon-values.yaml
@@ -413,6 +422,7 @@ kubectl -n siphon rollout restart deployment
 | Setting | Requirement |
 |---------|-------------|
 | `database_mapping` | Required. The GitLab schema is split across three logical databases (`main`, `ci`, and `sec`), whether or not your instance stores them separately. Without the mapping, the generator fails. Do not remove the table definitions that reference `ci` and `sec` instead, because that silently drops every CI, vulnerability, and dependency table. |
+| `waitForMigrations.enabled` | Set to `false` for a Linux package instance. Otherwise, Siphon pods wait for a GitLab migrations job in the cluster that does not exist, and never start. For the GitLab Helm chart, you can set it to `true` and set `waitForMigrations.namespace` to the GitLab namespace. Siphon then starts only after GitLab completes the database migrations for `global.gitlabVersion`. |
 | `stream_name` | Must match the stream name GitLab Orbit reads. For the full list of values both sides share, see [Shared configuration values](getting-started.md#shared-configuration-values). |
 | `advisory_lock_id` and the lock timeouts | Required. The producer stops at startup without them. |
 | `nats_config.replicas` | Must match your NATS cluster size. A single NATS server supports only one replica. |

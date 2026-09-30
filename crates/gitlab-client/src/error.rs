@@ -20,6 +20,9 @@ pub enum GitlabClientError {
     #[error("JWT signing failed: {0}")]
     JwtSigning(String),
 
+    #[error("JWT decoding failed: {0}")]
+    JwtDecoding(String),
+
     #[error("invalid base64 in JWT secret: {0}")]
     InvalidSecret(#[from] base64::DecodeError),
 
@@ -38,6 +41,7 @@ impl CircuitBreakableError for GitlabClientError {
             | Self::NotFound(_)
             | Self::ForcePush(_)
             | Self::JwtSigning(_)
+            | Self::JwtDecoding(_)
             | Self::InvalidSecret(_)
             | Self::Unexpected(_)
             | Self::CircuitOpen { .. } => false,

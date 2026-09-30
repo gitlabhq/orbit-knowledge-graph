@@ -36,13 +36,13 @@ The `NamespaceDeletionHandler` consumes `NamespaceDeletionRequest` messages from
 
 The handler follows these steps:
 
-1. **Validate the traversal path.** The path must match `<org_id>/<namespace_id>/` where both segments are numeric. An empty or malformed path would cause `startsWith(traversal_path, '')` to match every row in every table, so the handler rejects anything that does not fit the expected format.
+1. **Validate the traversal path.** The path must match `<org_id>/<namespace_id>/` where both segments are numeric. An empty or malformed path would cause `startsWith(traversal_path, '')` to match every row in every table. So the handler rejects anything that does not fit the expected format.
 
 2. **Check if the namespace is still deleted.** Between scheduling and execution, an operator may have re-enabled the namespace. The handler queries the datalake to check the current state. If the namespace was re-enabled, the handler clears the schedule entry without touching any data and returns early.
 
-3. **Soft-delete graph data.** For every namespaced node table and all configured edge tables, the handler runs an `INSERT INTO ... SELECT` that copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup, so adding a new entity type or edge table to the ontology automatically includes it in namespace deletion. The handler attempts every table, records each outcome, and returns an error after the pass if any table failed. Successful tombstones are not rolled back.
+3. **Soft-delete graph data.** For every namespaced node table and all configured edge tables, the handler runs an `INSERT INTO ... SELECT`. That query copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup. So adding a new entity type or edge table to the ontology automatically includes it in namespace deletion. The handler attempts every table, records each outcome, and returns an error after the pass if any table failed. Successful tombstones are not rolled back.
 
-4. **Soft-delete checkpoints.** Once every graph-table attempt succeeds, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and then the code indexing checkpoints (keyed by traversal path prefix). These are two sequential ClickHouse inserts rather than one transaction. This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
+4. **Soft-delete checkpoints.** Once every graph-table attempt succeeds, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`). It then removes the code indexing checkpoints (keyed by traversal path prefix). These are two sequential ClickHouse inserts rather than one transaction. This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
 
 5. **Mark deletion complete.** The handler soft-deletes the `namespace_deletion_schedule` entry so the scheduler does not dispatch it again.
 
@@ -57,15 +57,15 @@ WHERE startsWith(traversal_path, {traversal_path:String})
 
 ### Relationship to row-level deletion
 
-Namespace deletion is separate from the row-level soft-delete that flows through Siphon's CDC pipeline. When an individual row is deleted in the source PostgreSQL database, Siphon sets `_siphon_deleted = true`, and the SDLC indexer carries the `_deleted` flag through to the graph table during normal ETL. Namespace deletion removes an entire namespace and all of its data at once.
+Namespace deletion is separate from the row-level soft-delete that flows through Siphon's CDC pipeline. When an individual row is deleted in the source PostgreSQL database, Siphon sets `_siphon_deleted = true`. The SDLC indexer then carries the `_deleted` flag through to the graph table during normal ETL. Namespace deletion removes an entire namespace and all of its data at once.
 
 ### Reconciling moved entities
 
-When a project or subgroup is transferred or reparented, Rails rewrites its `traversal_path` in the route tables (`project_namespace_traversal_paths`, `namespace_traversal_paths`) while keeping the same `id`. Those tables are `ReplacingMergeTree(version, deleted)` keyed on `id` alone, so both the old and the new path stay readable until a merge collapses them. The SDLC ETL then re-indexes the entity at its new path, creating a new ReplacingMergeTree key. The graph tables are sorted by `traversal_path`, so the old-path row is a distinct key that never gets touched and survives FINAL with `_deleted = false`, producing a duplicate live row under the stale path.
+When a project or subgroup is transferred or reparented, Rails rewrites its `traversal_path` in the route tables (`project_namespace_traversal_paths`, `namespace_traversal_paths`) while keeping the same `id`. Those tables are `ReplacingMergeTree(version, deleted)` keyed on `id` alone, so both the old and the new path stay readable until a merge collapses them. The SDLC ETL then re-indexes the entity at its new path, creating a new ReplacingMergeTree key. The graph tables are sorted by `traversal_path`, so the old-path row is a distinct key that never gets touched. It survives FINAL with `_deleted = false`, producing a duplicate live row under the stale path.
 
-The `Project` and `Group` extracts collapse that join with `argMax(traversal_path, version)` scoped to the root being indexed, so a move within a root stops emitting the old path; moves across roots and rows written before the collapse still reach the reconciler.
+The `Project` and `Group` extracts collapse that join with `argMax(traversal_path, version)` scoped to the root being indexed. A move within a root then stops emitting the old path. Moves across roots and rows written before the collapse still reach the reconciler.
 
-On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT` but appends one predicate that narrows the scan from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
+On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT`. It appends one predicate that narrows the scan. The scan goes from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
 
 ```sql
 INSERT INTO {table} ({sort_key_columns}, _deleted, _version)
@@ -77,7 +77,7 @@ WHERE startsWith(traversal_path, {traversal_path:String})
   AND traversal_path NOT IN (current routes under root)
 ```
 
-A row at the entity's current path is always present in the route set (the ETL joins those same tables to write it), so it is never matched. Only old-path rows match. The `count() > 0` guard skips reconcile for a freshly-enabled root whose route tables have not replicated yet, so a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent: a tombstoned row has `_deleted = true` and is filtered out, and a still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
+A row at the entity's current path is always present in the route set. The ETL joins those same tables to write it, so it is never matched. Only old-path rows match. The `count() > 0` guard skips reconcile for a freshly-enabled root whose route tables have not replicated yet. So a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent. A tombstoned row has `_deleted = true` and is filtered out. A still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
 
 ## Data model
 
@@ -98,9 +98,9 @@ The scheduler writes to this table when it detects a deleted namespace. The hand
 
 ## Error handling
 
-Graph-table deletion is an idempotent, best-effort pass, not an all-or-nothing transaction. Every table is attempted even after a failure, so a failed request can leave successful tombstones visible alongside live rows from failed tables. The handler then returns an error. It does not start checkpoint cleanup or clear the schedule entry while any graph-table outcome is unsuccessful, so a later scheduler publication or configured NATS redelivery can retry the request.
+Graph-table deletion is an idempotent, best-effort pass, not an all-or-nothing transaction. Every table is attempted even after a failure, so a failed request can leave successful tombstones visible alongside live rows from failed tables. The handler then returns an error. It does not start checkpoint cleanup or clear the schedule entry while any graph-table outcome is unsuccessful. So a later scheduler publication or configured NATS redelivery can retry the request.
 
-Checkpoint cleanup is also nontransactional: the SDLC checkpoint insert completes before the code checkpoint insert starts. If the second insert fails, the schedule entry remains and a later attempt safely retries both. If `mark_deletion_complete` fails after graph data and checkpoints have been deleted, a later attempt re-executes the idempotent soft-deletes and cleanup before trying the schedule entry again.
+Checkpoint cleanup is also nontransactional: the SDLC checkpoint insert completes before the code checkpoint insert starts. If the second insert fails, the schedule entry remains and a later attempt safely retries both. If `mark_deletion_complete` fails after graph data and checkpoints have been deleted, a later attempt re-executes the idempotent soft-deletes and cleanup. It does this before trying the schedule entry again.
 
 ## Observability
 

@@ -18,6 +18,8 @@ query:
                  "node_ids": [9002]}],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 9002}) RETURN u.username LIMIT 10
 
 expect:
   skip_requirements: [node_ids]

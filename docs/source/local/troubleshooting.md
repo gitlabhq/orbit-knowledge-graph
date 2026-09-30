@@ -29,7 +29,7 @@ following issues.
 You might get an error that states:
 
 ```plaintext
-Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
+Error: no local graph found at ~/.gitlab/orbit/graph.duckdb. Run `orbit index` first.
 ```
 
 This issue occurs when the repository is not indexed yet, or when the `--db` path you specified

@@ -78,8 +78,8 @@ if (-not $Version) {
 Write-Host "Installing the Orbit local CLI $Version..."
 
 $pkgVersion  = $Version.TrimStart('v')
-$artifact    = "orbit-local-$Platform-$Arch.zip"
-$pkgBase     = "https://gitlab.com/api/v4/projects/$ProjectId/packages/generic/orbit-local/$pkgVersion"
+$artifact    = "orbit-cli-$Platform-$Arch.zip"
+$pkgBase     = "https://gitlab.com/api/v4/projects/$ProjectId/packages/generic/orbit-cli/$pkgVersion"
 $downloadUrl = "$pkgBase/$artifact"
 $checksumUrl = "$pkgBase/$artifact.sha256"
 

@@ -247,6 +247,12 @@ impl Context {
                     .expect("inline narrow subquery must not fail");
                 format!("{e} IN ({q})")
             }
+            Expr::Scalar(query) => {
+                let q = self
+                    .emit_query(query)
+                    .expect("scalar subquery must not fail");
+                format!("({q})")
+            }
             Expr::Star => "*".to_string(),
         }
     }
@@ -297,6 +303,7 @@ impl Context {
                 table,
                 alias,
                 final_,
+                ..
             } => {
                 if *final_ {
                     Ok(format!("{table} AS {alias} FINAL"))

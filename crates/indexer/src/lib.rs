@@ -30,7 +30,6 @@ pub mod clickhouse;
 pub mod config;
 pub mod engine;
 pub mod health;
-pub mod indexing_status;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -60,7 +59,6 @@ use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
 use health::run_health_server;
-use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -82,6 +80,7 @@ use tracing::{info, warn};
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
+    serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
@@ -104,20 +103,14 @@ pub async fn run(
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
-    broker
-        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
-        .await?;
 
     broker
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
-
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
     // wait phase. Readiness stays `503` until the gate clears (`serving`).
-    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
@@ -205,7 +198,7 @@ pub async fn run(
     );
 
     let engine = Arc::new(
-        EngineBuilder::new(broker, registry, indexing_status)
+        EngineBuilder::new(broker, registry)
             .metrics(metrics)
             .build(),
     );
@@ -245,6 +238,7 @@ pub async fn run(
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     archive: &ontology::archive::OntologyArchive,
+    serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
@@ -275,7 +269,6 @@ pub async fn run_dispatcher(
     // Start the health server before migration so that the Kubernetes liveness
     // probe is answered during the (potentially long) DDL phase. Readiness stays
     // `503` until migration completes (`serving`).
-    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;

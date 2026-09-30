@@ -2,11 +2,10 @@
 set -euo pipefail
 
 # Build the `orbit` local CLI binary and package it as
-# orbit-local-<platform>-<arch>.(tar.gz|zip) in the repository root.
+# orbit-cli-<platform>-<arch>.(tar.gz|zip) in the repository root.
 # The binary inside the archive is `orbit` (or `orbit.exe` on Windows); the
-# `orbit-local-` prefix on the archive is the legacy artifact name (the crate is orbit-cli) and
-# disambiguates from the gkg-server image release. PLATFORM/ARCH default to
-# the host (linux/macOS amd64 or arm64).
+# `orbit-cli-` prefix on the archive disambiguates from the gkg-server image
+# release. PLATFORM/ARCH default to the host (linux/macOS amd64 or arm64).
 #
 # Supported triples:
 #   {x86_64,aarch64}-unknown-linux-{gnu,musl}
@@ -61,11 +60,11 @@ if [ -z "${TARGET:-}" ]; then
 fi
 
 if [ "$PLATFORM" = "windows" ]; then
-    ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.zip"
+    ARCHIVE="orbit-cli-${PLATFORM}-${ARCH}.zip"
 elif [ "$PLATFORM" = "linux" ] && [ "$LIBC" = "musl" ]; then
-    ARCHIVE="orbit-local-${PLATFORM}-${LIBC}-${ARCH}.tar.gz"
+    ARCHIVE="orbit-cli-${PLATFORM}-${LIBC}-${ARCH}.tar.gz"
 else
-    ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.tar.gz"
+    ARCHIVE="orbit-cli-${PLATFORM}-${ARCH}.tar.gz"
 fi
 
 if [ "${PRINT_TARGET:-0}" = "1" ]; then

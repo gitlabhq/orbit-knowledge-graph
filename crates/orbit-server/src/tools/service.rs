@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use jsonschema::Validator;
 use ontology::Ontology;
-use ontology::introspection::{IntrospectionScope, build_schema_response};
+use ontology::introspection::{IntrospectionScope, SchemaResponse, build_schema_response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
-use super::registry::ToolDefinition;
+use super::registry::{CommandCatalogEntry, ToolDefinition};
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
 use super::{CommandRegistry, ToolRegistry};
 
@@ -180,8 +180,11 @@ impl ToolService {
         expand_nodes: &[String],
     ) -> Result<String, ExecutorError> {
         let response = build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-        let options = EncodeOptions::default();
-        encode(&response, &options)
+        Self::encode_schema_toon(&response)
+    }
+
+    pub fn encode_schema_toon(response: &SchemaResponse) -> Result<String, ExecutorError> {
+        encode(response, &EncodeOptions::default())
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
     }
 
@@ -190,25 +193,11 @@ impl ToolService {
     ) -> Result<String, ExecutorError> {
         #[derive(Serialize)]
         struct CommandCatalogToon {
-            commands: Vec<CommandToon>,
-        }
-
-        #[derive(Serialize)]
-        struct CommandToon {
-            name: String,
-            description: String,
-            input_schema: Value,
+            commands: Vec<CommandCatalogEntry>,
         }
 
         let catalog = CommandCatalogToon {
-            commands: commands
-                .iter()
-                .map(|command| CommandToon {
-                    name: command.name.clone(),
-                    description: command.description.clone(),
-                    input_schema: command.parameters.clone(),
-                })
-                .collect(),
+            commands: commands.iter().map(CommandCatalogEntry::from).collect(),
         };
 
         encode(&catalog, &EncodeOptions::default()).map_err(|e| {

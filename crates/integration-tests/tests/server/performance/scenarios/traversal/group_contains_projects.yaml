@@ -1,0 +1,19 @@
+description: Group -> Project CONTAINS traversal (perf load query)
+
+# compile_only: the query is validated against the live ontology but not
+# executed, so no seeded rows are needed. The perf load driver reads this same
+# file to fire the query against a running stack.
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "g", "entity": "Group", "node_ids": [100]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+      "limit": 50
+    }
+
+expect:
+  compile_only: true

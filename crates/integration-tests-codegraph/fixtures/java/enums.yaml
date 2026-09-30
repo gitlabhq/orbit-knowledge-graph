@@ -60,7 +60,7 @@ tests:
 
   - name: "Enum constants are extracted as EnumConstant definitions"
     query: |
-      MATCH (e:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.definition_type = 'EnumConstant'
       RETURN c.name AS name
@@ -73,7 +73,7 @@ tests:
 
   - name: "Enum constructor is extracted"
     query: |
-      MATCH (e:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.definition_type = 'Constructor'
       RETURN c.name AS name
@@ -101,20 +101,18 @@ tests:
 
   - name: "Enum defines its instance method via a Defines edge"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(m:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND m.fqn = 'com.example.enums.Planet.surfaceGravity'
-        AND edge.edge_kind = 'Defines'
       RETURN m.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "Enum defines its constants via Defines edges"
     query: |
-      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(c:Definition)
+      MATCH (e:Definition)-[edge:DEFINES]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND c.definition_type = 'EnumConstant'
-        AND edge.edge_kind = 'Defines'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -125,20 +123,18 @@ tests:
 
   - name: "Enum Planet has an Extends edge to the Describable interface"
     query: |
-      MATCH (e:Definition)-[r:DefinitionToDefinition]->(i:Definition)
+      MATCH (e:Definition)-[r:EXTENDS]->(i:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
         AND i.fqn = 'com.example.enums.Describable'
-        AND r.edge_kind = 'Extends'
       RETURN i.fqn AS fqn
     assert:
       - { row_count: 1 }
 
   - name: "File defines the enum"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'com/example/enums/Planet.java'
         AND d.fqn = 'com.example.enums.Planet'
-        AND e.edge_kind = 'Defines'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

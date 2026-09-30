@@ -89,10 +89,11 @@ fi
 # must be read from the GDK checkout is derived here.
 CLICKHOUSE_URL="http://127.0.0.1:${GDK_CLICKHOUSE_HTTP_PORT}"
 GITLAB_BASE_URL="$GDK_GITLAB_URL"
-# GDK templates its own Siphon stream name (siphon_stream), which differs from the server default.
-SIPHON_STREAM_NAME="$(yq '.producers[0].queueing.stream_name' "$GDK_ROOT/siphon/config_main.yml" 2>/dev/null || true)"
+# GDK templates its Siphon stream name in layout.yml, not the generated CDC config.
+SIPHON_STREAM_NAME="$(yq '.stream_name' "$GDK_ROOT/siphon/layout.yml" 2>/dev/null || true)"
 if [[ -z "$SIPHON_STREAM_NAME" || "$SIPHON_STREAM_NAME" == "null" ]]; then
-  SIPHON_STREAM_NAME="siphon_stream_main_db"
+  printf 'Warning: Siphon stream name missing from %s; using fallback siphon_stream\n' "$GDK_ROOT/siphon/layout.yml" >&2
+  SIPHON_STREAM_NAME="siphon_stream"
 fi
 
 GITALY_TCP_ADDR="$(python3 - "$GDK_ROOT/gitaly/gitaly.config.toml" <<'PY'
@@ -145,15 +146,21 @@ gdk_overlay_yaml() {
   echo "      events_stream_name: $(yaml_str "$SIPHON_STREAM_NAME")"
 }
 
-# The only value that differs between the processes `mise run dev` starts side by side; it matters
-# once metrics.prometheus.enabled is switched on in config/dev.local.yaml.
+# The only value that differs between the processes `mise run dev` starts side by side. Every mode
+# binds this address for the labkit probe server, so each one needs its own even with metrics off.
 mode_overlay_yaml() {
   case "$1" in
     webserver)
-      printf 'metrics:\n  prometheus:\n    port: 9100\n'
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9100"\n'
       ;;
     indexer)
-      printf 'metrics:\n  prometheus:\n    port: 9200\n'
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9200"\n'
+      ;;
+    dispatch-indexing)
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9300"\n'
+      ;;
+    health-check)
+      printf 'probe_server:\n  bind_address: "127.0.0.1:9400"\n'
       ;;
     *)
       ;;

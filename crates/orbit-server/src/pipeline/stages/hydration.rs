@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
-use query_engine::compiler::{HydrationPlan, InputNode, QueryType, compile_input};
+use query_engine::compiler::{
+    HydrationCompileOptions, HydrationPlan, InputNode, QueryType, compile_input_model,
+};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -59,10 +61,6 @@ impl HydrationStage {
         .await
     }
 
-    /// The `traversal_path` filter shape (`arrayExists` vs OR-of-`startsWith`)
-    /// is selected by the compiler from the originating query type, read off
-    /// the pipeline ctx (`ctx.compiled.input.query_type`) here and stamped on
-    /// `Input.hydration_dynamic` before compile.
     async fn execute_hydration(
         ctx: &QueryPipelineContext,
         nodes: Vec<InputNode>,
@@ -75,24 +73,38 @@ impl HydrationStage {
 
         let client = Self::client(ctx)?;
 
-        let mut hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
-        hydration_input.hydration_dynamic = matches!(
-            ctx.compiled()?.input.query_type,
-            QueryType::Neighbors | QueryType::PathFinding
-        );
-        hydration_input.path_segment_budget =
-            Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS);
+        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
+        let options = HydrationCompileOptions {
+            dynamic: matches!(
+                ctx.compiled()?.input.query_type,
+                QueryType::Neighbors | QueryType::PathFinding
+            ),
+            path_segment_budget: Some(orbit_utils::clickhouse::MAX_BOUND_PATH_SEGMENTS),
+        };
 
-        let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
-            .map_err(|e| PipelineError::Compile {
-                client_safe: e.is_client_safe(),
-                message: e.to_string(),
-            })?;
+        let data_model = ctx
+            .server_extensions
+            .get::<Arc<query_data_model::ClickHouseDataModel>>()
+            .ok_or_else(|| PipelineError::custom("query data model missing"))?;
+        let compiled = compile_input_model(
+            hydration_input,
+            options,
+            data_model,
+            ctx.security_context()?,
+        )
+        .map_err(|e| PipelineError::Compile {
+            client_safe: e.is_client_safe(),
+            message: e.to_string(),
+        })?;
 
         let rendered_sql = compiled.base.render();
-        let debug = DebugQuery {
-            sql: compiled.base.sql.clone(),
-            rendered: rendered_sql.clone(),
+        let debug = if ctx.compiled()?.input.options.include_debug_sql {
+            vec![DebugQuery {
+                sql: compiled.base.sql.clone(),
+                rendered: rendered_sql.clone(),
+            }]
+        } else {
+            Vec::new()
         };
 
         let start = Instant::now();
@@ -135,7 +147,7 @@ impl HydrationStage {
         };
 
         let props = hydration_helpers::parse_hydration_batches(&batches, &ctx.ontology)?;
-        Ok((props, vec![debug], vec![execution]))
+        Ok((props, debug, vec![execution]))
     }
 }
 
@@ -150,11 +162,11 @@ impl PipelineStage for HydrationStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<RedactionOutput>()
+            .remove::<RedactionOutput>()
             .ok_or_else(|| PipelineError::Execution("RedactionOutput not found in phases".into()))
             .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
-        let mut query_result = input.query_result.clone();
+        let mut query_result = input.query_result;
         let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
         let mut hydration_queries = Vec::new();

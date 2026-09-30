@@ -11,6 +11,8 @@ query:
       "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
       "limit": 10
     }
+  gql: |
+    MATCH (p:Project) WHERE p.id >= 1 AND p.id <= 10000 RETURN p.name LIMIT 10
 
 expect:
   node_count: 3

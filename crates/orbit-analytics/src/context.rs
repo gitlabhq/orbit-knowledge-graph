@@ -120,12 +120,34 @@ impl SnowplowContext for OrbitCodeIndexingContext {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OrbitCliCommandContext {
+    pub data: orbit_cli_command::OrbitCliCommand,
+}
+
+impl OrbitCliCommandContext {
+    pub fn new(data: orbit_cli_command::OrbitCliCommand) -> Self {
+        Self { data }
+    }
+}
+
+impl SnowplowContext for OrbitCliCommandContext {
+    fn schema(&self) -> &str {
+        orbit_cli_command::SCHEMA_URI
+    }
+
+    fn data(&self) -> serde_json::Value {
+        serde_json::to_value(&self.data).expect("generated OrbitCliCommand is always serializable")
+    }
+}
+
 // Re-exported for callers that need the bare URI string, e.g. assertions in
 // observer and integration tests.
 pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
 pub const ORBIT_QUERY_SCHEMA: &str = orbit_query::SCHEMA_URI;
 pub const ORBIT_SDLC_INDEXING_SCHEMA: &str = orbit_sdlc_indexing::SCHEMA_URI;
 pub const ORBIT_CODE_INDEXING_SCHEMA: &str = orbit_code_indexing::SCHEMA_URI;
+pub const ORBIT_CLI_COMMAND_SCHEMA: &str = orbit_cli_command::SCHEMA_URI;
 
 /// Return the inlined schema JSON for `name` at its pinned version.
 ///
@@ -138,6 +160,7 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
         "orbit_query" => orbit_query::SCHEMA_JSON,
         "orbit_sdlc_indexing" => orbit_sdlc_indexing::SCHEMA_JSON,
         "orbit_code_indexing" => orbit_code_indexing::SCHEMA_JSON,
+        "orbit_cli_command" => orbit_cli_command::SCHEMA_JSON,
         other => panic!("unknown iglu schema {other:?}"),
     };
     serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON")

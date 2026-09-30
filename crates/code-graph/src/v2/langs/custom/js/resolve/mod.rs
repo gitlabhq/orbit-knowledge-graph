@@ -71,6 +71,9 @@ pub fn attach_resolution_edges(
                         "per-file watchdog killed local call resolution",
                     );
                 }
+                ctx.config
+                    .progress
+                    .files_advanced(crate::v2::pipeline::ProgressPhase::Resolve, 1);
                 edges
             })
             .collect()
@@ -550,11 +553,9 @@ fn add_unresolved_imported_call_edges(
             let Some(source) = source_node_for_call(lookup, source_path, call) else {
                 continue;
             };
-            let Some(target_node) = import_lookup.unresolved_import_node(
-                source_path,
-                &imported_call.fallback_binding,
-                source.definition_node,
-            ) else {
+            let Some(target_node) =
+                import_lookup.unresolved_import_node(source_path, &imported_call.fallback_binding)
+            else {
                 continue;
             };
 
@@ -581,7 +582,6 @@ struct SourceCallNode {
     node: NodeIndex,
     node_kind: NodeKind,
     def_kind: Option<DefKind>,
-    definition_node: Option<NodeIndex>,
 }
 
 fn source_node_for_call(
@@ -599,7 +599,6 @@ fn source_node_for_call(
                 node,
                 node_kind: NodeKind::Definition,
                 def_kind: Some(lookup.def_kind_by_node[&node]),
-                definition_node: Some(node),
             })
         }
         JsCallSite::ModuleLevel => {
@@ -611,7 +610,6 @@ fn source_node_for_call(
                     node,
                     node_kind: NodeKind::File,
                     def_kind: None,
-                    definition_node: None,
                 })
         }
     }
@@ -636,6 +634,7 @@ fn add_edge(
 #[derive(Hash, PartialEq, Eq)]
 struct ImportSymbolKey {
     file_path: String,
+    import_byte_offset: u32,
     specifier: String,
     mode: ImportMode,
     binding_kind: ImportBindingKind,
@@ -645,12 +644,7 @@ struct ImportSymbolKey {
 
 #[derive(Default)]
 struct ImportedSymbolLookup {
-    unresolved_by_key: FxHashMap<ImportSymbolKey, Vec<ImportedSymbolEntry>>,
-}
-
-struct ImportedSymbolEntry {
-    node: NodeIndex,
-    enclosing_definition: Option<NodeIndex>,
+    unresolved_by_key: FxHashMap<ImportSymbolKey, Vec<NodeIndex>>,
 }
 
 impl ImportedSymbolLookup {
@@ -664,11 +658,6 @@ impl ImportedSymbolLookup {
             {
                 continue;
             }
-            let enclosing_definition = graph.enclosing_definition_for_range(
-                file_path.as_ref(),
-                import.range.byte_offset.0 as u32,
-                import.range.byte_offset.1 as u32,
-            );
             lookup
                 .unresolved_by_key
                 .entry(import_symbol_key_for_graph_import(
@@ -677,10 +666,7 @@ impl ImportedSymbolLookup {
                     import,
                 ))
                 .or_default()
-                .push(ImportedSymbolEntry {
-                    node,
-                    enclosing_definition,
-                });
+                .push(node);
         }
         lookup
     }
@@ -689,32 +675,12 @@ impl ImportedSymbolLookup {
         &self,
         source_path: &str,
         binding: &JsImportedBinding,
-        source_definition: Option<NodeIndex>,
     ) -> Option<NodeIndex> {
         let entries = self
             .unresolved_by_key
             .get(&import_symbol_key_for_binding(source_path, binding))?;
 
-        if let Some(source_definition) = source_definition {
-            let scoped = entries
-                .iter()
-                .filter(|entry| entry.enclosing_definition == Some(source_definition))
-                .map(|entry| entry.node)
-                .collect::<Vec<_>>();
-            if scoped.len() == 1 {
-                return Some(scoped[0]);
-            }
-            if scoped.len() > 1 {
-                return None;
-            }
-        }
-
-        let unscoped = entries
-            .iter()
-            .filter(|entry| entry.enclosing_definition.is_none())
-            .map(|entry| entry.node)
-            .collect::<Vec<_>>();
-        (unscoped.len() == 1).then(|| unscoped[0])
+        (entries.len() == 1).then(|| entries[0])
     }
 }
 
@@ -725,6 +691,7 @@ fn import_symbol_key_for_graph_import(
 ) -> ImportSymbolKey {
     ImportSymbolKey {
         file_path: file_path.to_string(),
+        import_byte_offset: import.range.byte_offset.0 as u32,
         specifier: graph.str(import.path).to_string(),
         mode: import.mode,
         binding_kind: import.binding_kind,
@@ -753,6 +720,7 @@ fn import_symbol_key_for_binding(
     };
     ImportSymbolKey {
         file_path: source_path.to_string(),
+        import_byte_offset: binding.import_byte_offset,
         specifier: binding.specifier.clone(),
         mode: match binding.resolution_mode {
             JsResolutionMode::Import => ImportMode::Declarative,
@@ -810,7 +778,13 @@ mod tests {
 
         let files = vec!["a.js".to_string()];
         let root_path = root.to_str().expect("utf8 root path");
-        let (analyzed, _) = analyze_files(&files, root_path, None, &Default::default());
+        let (analyzed, _) = analyze_files(
+            &files,
+            root_path,
+            None,
+            &Default::default(),
+            &crate::v2::pipeline::SilentProgress,
+        );
         let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
         let mut infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved = Vec::new();

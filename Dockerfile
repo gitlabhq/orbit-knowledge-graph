@@ -20,12 +20,16 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     "$SCCACHE_BIN" --start-server || true && \
     cargo build --release -p orbit-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \
+    ./scripts/check-fips-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
 
 ARG GKG_VERSION=dev
 ENV GKG_VERSION=$GKG_VERSION
+
+LABEL com.gitlab.image.fips="true" \
+      com.gitlab.fips.module="AWS-LC"
 
 WORKDIR /app
 

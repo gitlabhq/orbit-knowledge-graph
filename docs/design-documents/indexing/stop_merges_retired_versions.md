@@ -7,9 +7,9 @@ Branch already created: `michaelusa/stop-merges-on-retire` (off `main`).
 
 When a schema migration completes and the old version is marked `retired`, the
 old version's tables keep getting picked up by ClickHouse's background merge
-scheduler. Those merges do no useful work (the retired version serves no queries
-and receives no writes) but consume the cluster's limited big-merge capacity,
-starving the new active version. Fix: when a version is retired at cutover, stop
+scheduler. Those merges do no useful work: the retired version serves no queries
+and receives no writes. But they consume the cluster's limited big-merge capacity,
+which starves the new active version. Fix: when a version is retired at cutover, stop
 background merges on its tables. Keep them readable for the rollback window;
 existing retention logic still drops them later.
 
@@ -22,8 +22,8 @@ SharedMergeTree, 10 replicas), captured 2026-06-09:
 - v58 is `active` (serving queries), v57 is `retired`, v56 is `dropped`.
 - v57 still occupies **297 parts / 476 GiB** on disk.
 - A single **50 GiB merge on `v57_gl_ci_edge` ran for 7.8 hours** (~1.86 MiB/s,
-  2.4B rows, vertical merge + projection rebuild) while it was the cluster's one
-  in-flight big merge.
+  2.4B rows, vertical merge + projection rebuild). At the time it was the
+  cluster's one in-flight big merge.
 - v58 (the version that matters) had only 13 tiny CDC merges (132 KiB total)
   running at the same time.
 
@@ -32,8 +32,8 @@ themselves are otherwise healthy (single-digit to low-20s part counts); this is
 purely wasted allocation, not a fragmentation problem.
 
 Background context on why big merges are slow (so the implementer understands the
-stakes): these tables carry ~9 projections each under
-`deduplicate_merge_projection_mode='rebuild'`, so every merge re-materializes all
+stakes). These tables carry ~9 projections each under
+`deduplicate_merge_projection_mode='rebuild'`. So every merge re-materializes all
 projections. That makes each big merge expensive and the merge pool precious.
 Reserving it for the active version is the goal.
 
@@ -53,16 +53,16 @@ Reserving it for the active version is the goal.
 - Changing the retention window or drop timing (existing `drop_version_tables`
   retention logic is unchanged).
 - The v56 "dropped but 4 orphan parts / 5.21 GiB still on disk" issue is a
-  separate cleanup bug; note it but do not fix it here.
+  separate cleanup bug. Note it but do not fix it here.
 
 ## Where the change goes
 
 `crates/indexer/src/schema/completion.rs`, in `MigrationCompletionChecker`. All
 references below are by symbol because exact line numbers drift.
 
-- The cutover happens in the `promote`-style method: a loop over
+- The cutover happens in the `promote`-style method. A loop over
   `read_all_versions` marks any `status == "active" && version != migrating` as
-  retired via `mark_version_retired(...)` (around line 233-243), then marks the
+  retired via `mark_version_retired(...)` (around line 233-243). It then marks the
   migrating version active. Add the stop-merges call immediately after the
   `mark_version_retired` call for that entry.
 - Mirror the existing `drop_version_tables(version)` method for table
@@ -71,10 +71,10 @@ references below are by symbol because exact line numbers drift.
   sibling `stop_merges_for_version(version)` that enumerates the same graph
   tables (tables only; views and dictionaries do not merge) and issues the stop
   per table.
-- For the idempotent path: in the retention/cleanup pass that iterates retired
-  versions, ensure merges are stopped for any retired-not-dropped version too
-  (cheap and idempotent: stopping merges on a table with merges already stopped
-  is a no-op).
+- For the idempotent path: the retention/cleanup pass iterates retired
+  versions. It must also stop merges for any retired-not-dropped version. This
+  is cheap and idempotent: stopping merges on a table with merges already stopped
+  is a no-op.
 
 ## The one thing that is easy to get wrong: `SYSTEM STOP MERGES` is node-local
 
@@ -82,8 +82,8 @@ references below are by symbol because exact line numbers drift.
 `ON CLUSTER` because it is metadata DDL that auto-replicates across the shared
 catalog. **`SYSTEM STOP MERGES` is different: it is node-local runtime server
 state, not replicated DDL.** The indexer connects through the load-balanced Cloud
-endpoint, so a plain `SYSTEM STOP MERGES <table>` would stop merges on exactly
-one of the 10 replicas and the other 9 would keep merging. This is the most
+endpoint. So a plain `SYSTEM STOP MERGES <table>` would stop merges on exactly
+one of the 10 replicas. The other 9 would keep merging. This is the most
 likely way to ship a fix that silently does nothing.
 
 ### Recommended approach (verify on staging/dev first)
@@ -168,8 +168,8 @@ if let Err(e) = self.stop_merges_for_version(entry.version).await {
 ## Acceptance criteria
 
 - After a migration cutover, the newly retired version's graph tables have
-  background merges stopped, verified in a non-prod environment via
-  `system.merges` showing no new merges for that version while the active
+  background merges stopped. Verify this in a non-prod environment via
+  `system.merges`. It should show no new merges for that version while the active
   version still merges.
 - Promotion still succeeds if the stop call fails (best-effort; a warning is
   logged, no error propagates).
@@ -181,10 +181,10 @@ if let Err(e) = self.stop_merges_for_version(entry.version).await {
 
 - Unit test: the cutover path invokes `stop_merges_for_version` for the retired
   version. Assert the generated statements cover every `generate_graph_tables`
-  entry with the correct `v{N}_` prefix (mirror the existing `drop_version_tables`
-  test style; see the test module at the bottom of `completion.rs`).
+  entry with the correct `v{N}_` prefix. Mirror the existing `drop_version_tables`
+  test style; see the test module at the bottom of `completion.rs`.
 - Note for integration tests: `SYSTEM STOP MERGES ON CLUSTER` will not behave
-  meaningfully in a single-node testcontainer, so validate statement generation
+  meaningfully in a single-node testcontainer. So validate statement generation
   and invocation with a mocked client rather than asserting merge behavior.
 
 ## Hard safety constraint

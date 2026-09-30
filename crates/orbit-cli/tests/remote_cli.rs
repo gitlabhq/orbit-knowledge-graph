@@ -188,7 +188,7 @@ fn query_posts_envelope_with_resolved_response_format() {
     let output = {
         use std::process::Stdio;
         let mut child = Command::new(env!("CARGO_BIN_EXE_orbit"))
-            .args(["query", "--response-format", "raw", "-"])
+            .args(["query", "--response-format", "raw", "--file", "-"])
             .env("ORBIT_API_BASE_URL", &base_url)
             .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
             .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
@@ -220,6 +220,22 @@ fn query_posts_envelope_with_resolved_response_format() {
     assert_eq!(sent["query"]["query_type"], "traversal");
 
     assert_eq!(output.stdout, b"@ok");
+}
+
+#[test]
+fn query_posts_positional_text_as_query_string() {
+    let (base_url, handle) = serve_once("@ok", "text/plain");
+    let output = run_orbit(&base_url, &["query", "CALL db.schema()"]);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+    assert_eq!(sent["query"], "CALL db.schema()");
+    assert_eq!(sent["response_format"], "llm");
 }
 
 #[test]

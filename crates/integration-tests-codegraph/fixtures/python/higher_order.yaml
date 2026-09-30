@@ -43,7 +43,7 @@ tests:
     # add5(10) resolves add5 → make_adder via SSA alias, producing
     # a duplicate edge. Pipeline should dedup same source→target pairs.
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'caller' AND callee.name = 'make_adder'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
@@ -52,7 +52,7 @@ tests:
 
   - name: Callable class has __call__
     query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      MATCH (cls:Definition)-[:CALLS|DEFINES|EXTENDS]->(m:Definition)
       WHERE cls.name = 'Callable' AND m.name = '__call__'
       RETURN m.fqn AS fqn
     assert:
@@ -61,7 +61,7 @@ tests:
 
   - name: Nested function calls as arguments resolve
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'nested_args'
       RETURN callee.name AS callee
     assert:

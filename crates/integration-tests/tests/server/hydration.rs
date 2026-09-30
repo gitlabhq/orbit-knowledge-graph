@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
+    derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests_shared, t};
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::{Frontend, HydrationPlan, SecurityContext, compile};
+use query_engine::compiler::{Frontend, HydrationPlan, SecurityContext, compile, compile_model};
 use query_engine::formatters::row_to_json;
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -99,7 +99,8 @@ async fn compile_execute_hydrate(
     query_engine::compiler::ResultContext,
     HydrationPlan,
 ) {
-    let compiled = compile(json, Frontend::JsonDsl, ontology, security_ctx).unwrap();
+    let data_model = derive_clickhouse_data_model(ontology);
+    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, security_ctx).unwrap();
     let plan = compiled.hydration.clone();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
@@ -112,7 +113,9 @@ async fn compile_execute_hydrate(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(client));
+    server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
@@ -139,7 +142,8 @@ async fn compile_execute_redact_hydrate(
     client: &Arc<clickhouse_client::ArrowClickHouseClient>,
     mock_service: &MockRedactionService,
 ) -> (QueryResult, query_engine::compiler::ResultContext, usize) {
-    let compiled = compile(json, Frontend::JsonDsl, ontology, security_ctx).unwrap();
+    let data_model = derive_clickhouse_data_model(ontology);
+    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, security_ctx).unwrap();
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -153,7 +157,9 @@ async fn compile_execute_redact_hydrate(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(client));
+    server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
@@ -178,7 +184,7 @@ fn make_test_resources(
     Arc<ontology::Ontology>,
     Arc<clickhouse_client::ArrowClickHouseClient>,
 ) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let client = Arc::new(ctx.create_client());
     (ontology, client)
 }
@@ -746,6 +752,7 @@ async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
 async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
+    let data_model = derive_clickhouse_data_model(&ontology);
 
     let json = r#"{
         "query_type": "path_finding",
@@ -753,10 +760,11 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]},
+        "options": {"include_debug_sql": true}
     }"#;
 
-    let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
+    let compiled = compile_model(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&compiled.base).await;
     let result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -767,7 +775,9 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(&client));
+    server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(&ontology),
@@ -802,7 +812,7 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
 /// `collect_static_ids` reads `_gkg_f_id` (= project_id 1000) and the hydration
 /// query looks up `gl_file WHERE id = 1000`, returning nothing.
 async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -869,7 +879,7 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
 /// (the actual entity PK), so indirect-auth entities (File, Definition) resolve
 /// without the static-hydration PK fix.
 async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -919,7 +929,7 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
 }
 
 async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
@@ -981,7 +991,7 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
 }
 
 async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 

@@ -56,7 +56,7 @@ query object in a top-level `query` field:
 | `query` | Yes | The query object documented below. |
 | `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
 
-The `orbit query` command requires this envelope.
+Pass this envelope to `orbit query` with `--file`.
 
 ## Query shape
 
@@ -591,6 +591,8 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 
 Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
+The response lists the center node alongside its neighbors, so leave the center out
+when counting neighbors.
 
 ```json orbit-query
 {

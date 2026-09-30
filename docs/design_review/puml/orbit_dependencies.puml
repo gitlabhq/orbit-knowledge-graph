@@ -24,7 +24,7 @@ rectangle "Orbit Depends On" as deps #FFE0B2 {
 }
 
 rectangle "What Depends on Orbit" as consumers #F3E5F5 {
-  component "Rails gRPC Client\n(9 RPCs)" as grpc
+  component "Rails gRPC Client\n(11 RPCs)" as grpc
   component "Orbit Dashboard\n(Vue 3)" as dash
   component "DAP / AI Gateway\n(2 tools)" as dap
   component "Web IDE / Duo Chat\n(MCP)" as ide

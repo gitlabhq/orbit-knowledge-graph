@@ -19,11 +19,13 @@ pub(crate) fn build_common(
     let environment: &'static str = config.deployment.environment.into();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: config.deployment.kind.into(),
+        deployment_type: Some(config.deployment.kind.into()),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
-        environment: environment
-            .parse::<orbit_common::OrbitCommonEnvironment>()
-            .map_err(validation("environment"))?,
+        environment: Some(
+            environment
+                .parse::<orbit_common::OrbitCommonEnvironment>()
+                .map_err(validation("environment"))?,
+        ),
         correlation_id: labkit::correlation::current()
             .as_deref()
             .map(str::parse::<orbit_common::OrbitCommonCorrelationId>)
@@ -110,7 +112,6 @@ fn apply_metrics(
         let mut filter_count: i64 = 0;
         let mut max_hops: i64 = 0;
         let mut variable_hops = false;
-        let mut virtual_cols = false;
 
         let mut columns = BTreeSet::new();
         let mut has_star = false;
@@ -119,7 +120,6 @@ fn apply_metrics(
             if let Some(e) = &node.entity {
                 entities.insert(e.clone());
             }
-            virtual_cols |= !node.virtual_columns.is_empty();
             match &node.columns {
                 Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
                 Some(query_engine::compiler::ColumnSelection::List(cols)) => {
@@ -173,7 +173,7 @@ fn apply_metrics(
         q.filter_count = Some(filter_count);
         q.max_hops = Some(max_hops);
         q.has_variable_hops = Some(variable_hops);
-        q.has_virtual_columns = Some(virtual_cols);
+        q.has_virtual_columns = Some(metrics.has_virtual_columns);
         q.column_selection_mode = if has_star {
             "all"
         } else if !columns.is_empty() {
@@ -191,7 +191,10 @@ fn apply_metrics(
         q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
     }
 
-    let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
+    let label: &str = metrics
+        .hydration
+        .as_ref()
+        .map_or("none", |h| h.kind().into());
     q.hydration_plan = label.parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
     q.compile_ms = metrics.compile_ms.map(|v| v as i64);
@@ -315,6 +318,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            license_checksum: None,
         }
     }
 
@@ -632,9 +636,6 @@ mod tests {
                     hops: HopRange::default(),
                     direction: Direction::Outgoing,
                     filters: Default::default(),
-                    fk_column: None,
-                    scope_prefix: None,
-                    scope_preserving: false,
                 }],
                 ..Default::default()
             }),

@@ -12,7 +12,8 @@ use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
-use ontology::{EdgeVariantScope, Ontology};
+#[cfg(test)]
+use ontology::Ontology;
 use orbit_utils::traversal_path::TraversalPath;
 use std::collections::HashSet;
 
@@ -24,12 +25,11 @@ fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
         .and_then(|n| n.entity.as_deref())
 }
 
-fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
-    let is_scoped = |entity: &str| {
-        ontology
-            .get_node(entity)
-            .is_some_and(|n| n.has_traversal_path)
-    };
+fn enforce_aggregation_scope(
+    input: &Input,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Result<()> {
+    let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
 
     let mut reachable: HashSet<&str> = input
         .nodes
@@ -86,7 +86,7 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
 
 fn enforce_traversal_path_filters(
     input: &Input,
-    ontology: &Ontology,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
@@ -96,15 +96,13 @@ fn enforce_traversal_path_filters(
         ) else {
             continue;
         };
-        let Some(ont_node) = ontology.get_node(entity) else {
+        let Some(_) = model.entity(entity) else {
             continue;
         };
         // Entities without a redaction role use the normal traversal-path floor:
         // Rails only sends Reporter+ paths, and stricter entities override this.
-        let min_role = ont_node
-            .redaction
-            .as_ref()
-            .map(|r| r.required_role.as_access_level())
+        let min_role = model
+            .entity_minimum_access_level(entity)
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
         for tp_filter in tp_filters {
@@ -199,98 +197,36 @@ fn validate_traversal_path_within_scope(
 /// only hold rows under that scope; scoping it is lossless and restores the
 /// edge PK prefix that the broad org-wide authorization filter erases (#601941).
 ///
-/// The endpoint prefixes come from the ontology's scope-annotation taint walk
-/// ([`Ontology::propagate_scope_prefixes`]) seeded with the prefixes the path
-/// resolver already attached to `scope_prefixes`. The node-table scans are
-/// scoped separately via `scope_prefixes` in the security pass; this stamps the
-/// edges the lowerer emits.
-fn stamp_edge_scope_prefixes(
-    input: &mut Input,
-    ontology: &Ontology,
-    security_ctx: &SecurityContext,
-) {
-    if security_ctx.scope_prefixes.is_empty() {
-        return;
-    }
-
-    let node_prefix = {
-        let edges = crate::scope::scope_edges(input);
-        ontology.propagate_scope_prefixes(&edges, &security_ctx.scope_prefixes)
-    };
-
-    let entity_of: std::collections::HashMap<&str, &str> = input
-        .nodes
-        .iter()
-        .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
-        .collect();
-
-    for rel in &mut input.relationships {
-        let pf = node_prefix.get(&rel.from);
-        let pt = node_prefix.get(&rel.to);
-
-        if let (Some(pf), Some(pt)) = (pf, pt)
-            && pf == pt
-        {
-            rel.scope_prefix = Some(pf.clone());
-            continue;
-        }
-
-        let Some(from_kind) = entity_of.get(rel.from.as_str()).copied() else {
-            continue;
-        };
-        let Some(to_kind) = entity_of.get(rel.to.as_str()).copied() else {
-            continue;
-        };
-        for kind in &rel.types {
-            let named = match ontology.edge_scope_for(kind, from_kind, to_kind) {
-                Some(EdgeVariantScope::PruneToSource) => pf,
-                Some(EdgeVariantScope::PruneToTarget) => pt,
-                _ => continue,
-            };
-            if let Some(prefix) = named {
-                rel.scope_prefix = Some(prefix.clone());
-                break;
-            }
-        }
-    }
+/// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
+fn stamp_edge_scope_proofs(
+    input: &Input,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
+    crate::scope::derive_scope_proofs(input, model)
 }
 
-/// Mark each relationship whose every resolved variant keeps both endpoints in
-/// the same namespace. The orientation is checked both ways because the query
-/// may traverse a variant in reverse of its ontology definition.
-fn stamp_scope_preserving(input: &mut Input, ontology: &Ontology) {
-    let entity_of: std::collections::HashMap<String, String> = input
-        .nodes
-        .iter()
-        .filter_map(|n| Some((n.id.clone(), n.entity.clone()?)))
-        .collect();
-    for rel in &mut input.relationships {
-        let (Some(from_e), Some(to_e)) = (entity_of.get(&rel.from), entity_of.get(&rel.to)) else {
-            continue;
-        };
-        rel.scope_preserving = !rel.types.is_empty()
-            && rel.types.iter().all(|kind| {
-                ontology.is_scope_preserving_triple(kind, from_e, to_e)
-                    || ontology.is_scope_preserving_triple(kind, to_e, from_e)
-            });
-    }
+fn admin_only(
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    entity: &str,
+    property: &str,
+) -> bool {
+    model.admin_only(entity, property)
 }
 
 pub fn restrict(
     input: &mut Input,
-    ontology: &Ontology,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
-) -> Result<()> {
-    enforce_traversal_path_filters(input, ontology, security_ctx)?;
-    stamp_edge_scope_prefixes(input, ontology, security_ctx);
-    stamp_scope_preserving(input, ontology);
+) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
+    enforce_traversal_path_filters(input, model, security_ctx)?;
+    let scope_proofs = stamp_edge_scope_proofs(input, model);
 
     if security_ctx.admin {
-        return Ok(());
+        return Ok(scope_proofs);
     }
 
     if matches!(input.query_type, QueryType::Aggregation) {
-        enforce_aggregation_scope(input, ontology)?;
+        enforce_aggregation_scope(input, model)?;
     }
 
     for node in &mut input.nodes {
@@ -299,7 +235,7 @@ pub fn restrict(
         };
 
         for prop in node.filters.keys() {
-            if ontology.is_admin_only(entity, prop) {
+            if admin_only(model, entity, prop) {
                 return Err(QueryError::Restrict(format!(
                     "filter on \"{prop}\" for {entity}: field requires administrator access"
                 )));
@@ -313,13 +249,13 @@ pub fn restrict(
         }
 
         if let Some(ColumnSelection::List(cols)) = &mut node.columns {
-            cols.retain(|col_name| !ontology.is_admin_only(entity, col_name));
+            cols.retain(|col_name| !admin_only(model, entity, col_name));
         }
     }
 
     if let Some(ob) = &input.order_by
         && let Some(entity) = entity_of(input, &ob.node)
-        && ontology.is_admin_only(entity, &ob.property)
+        && admin_only(model, entity, &ob.property)
     {
         return Err(QueryError::Restrict(format!(
             "order_by on \"{}\" for {entity}: field requires administrator access",
@@ -334,7 +270,7 @@ pub fn restrict(
         let Some(entity) = entity_of(input, agg.expr.node()) else {
             continue;
         };
-        if ontology.is_admin_only(entity, prop) {
+        if admin_only(model, entity, prop) {
             return Err(QueryError::Restrict(format!(
                 "aggregation on \"{prop}\" for {entity}: field requires administrator access"
             )));
@@ -345,7 +281,7 @@ pub fn restrict(
         let Some(entity) = entity_of(input, node) else {
             continue;
         };
-        if ontology.is_admin_only(entity, property) {
+        if admin_only(model, entity, property) {
             return Err(QueryError::Restrict(format!(
                 "group_by on \"{}\" for {entity}: field requires administrator access",
                 property
@@ -353,7 +289,37 @@ pub fn restrict(
         }
     }
 
-    Ok(())
+    for node in &input.nodes {
+        if node.entity.is_none() {
+            continue;
+        }
+        for filters in node.filters.values() {
+            for filter in filters {
+                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
+                    && let Some(rhs_entity) = entity_of(input, rhs_node)
+                    && admin_only(model, rhs_entity, rhs_prop)
+                {
+                    return Err(QueryError::Restrict(format!(
+                        "filter on \"{rhs_prop}\" for {rhs_entity}: field requires administrator access"
+                    )));
+                }
+            }
+        }
+    }
+
+    for jp in &input.join_predicates {
+        for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
+            if let Some(entity) = entity_of(input, node_id)
+                && admin_only(model, entity, prop)
+            {
+                return Err(QueryError::Restrict(format!(
+                    "filter on \"{prop}\" for {entity}: field requires administrator access"
+                )));
+            }
+        }
+    }
+
+    Ok(scope_proofs)
 }
 
 #[cfg(test)]
@@ -365,9 +331,13 @@ mod tests {
     };
 
     use ontology::{DataType, RequiredRole};
-    use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
     use std::collections::HashMap;
+
+    fn apply(input: &mut Input, ontology: &Ontology, context: &SecurityContext) -> Result<()> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        restrict(input, model.as_ref(), context).map(|_| ())
+    }
 
     fn ontology() -> Ontology {
         Ontology::new()
@@ -404,9 +374,6 @@ mod tests {
             hops: crate::input::HopRange::default(),
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
-            fk_column: None,
-            scope_prefix: None,
-            scope_preserving: false,
         }
     }
 
@@ -478,7 +445,7 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_columns(vec!["username", "is_admin", "is_auditor"]);
-        restrict(&mut input, &ont, &ctx).unwrap();
+        apply(&mut input, &ont, &ctx).unwrap();
         let cols = match &input.nodes[0].columns {
             Some(ColumnSelection::List(c)) => c.clone(),
             _ => panic!("expected List"),
@@ -491,7 +458,7 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_filter("is_admin", Value::Bool(true));
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -503,7 +470,7 @@ mod tests {
             traversal_path_filter(FilterOp::StartsWith, Value::String("1/100/200/".into())),
         );
 
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -515,7 +482,7 @@ mod tests {
             traversal_path_filter(FilterOp::StartsWith, Value::String("1/".into())),
         );
 
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Authorization(_)),
             "scope rejection should be an authorization error, got: {err:?}"
@@ -550,7 +517,7 @@ mod tests {
             traversal_path_filter(FilterOp::Eq, Value::String("1/100/".into())),
         );
 
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Authorization(_)),
             "role-scope rejection should be an authorization error, got: {err:?}"
@@ -592,7 +559,7 @@ mod tests {
             ..Input::default()
         };
 
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Authorization(_)),
             "relationship scope rejection should be an authorization error, got: {err:?}"
@@ -612,7 +579,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_columns(vec!["username", "is_admin", "state", "is_auditor"]);
-        restrict(&mut input, &ont, &ctx).unwrap();
+        apply(&mut input, &ont, &ctx).unwrap();
         let cols = match &input.nodes[0].columns {
             Some(ColumnSelection::List(c)) => c.clone(),
             _ => panic!("expected List"),
@@ -625,7 +592,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_columns(vec!["username", "state"]);
-        restrict(&mut input, &ont, &ctx).unwrap();
+        apply(&mut input, &ont, &ctx).unwrap();
         let cols = match &input.nodes[0].columns {
             Some(ColumnSelection::List(c)) => c.clone(),
             _ => panic!("expected List"),
@@ -638,7 +605,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_filter("is_admin", Value::Bool(true));
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Restrict(_)),
             "admin-only field rejection should be a restrict error, got: {err:?}"
@@ -659,7 +626,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_filter("username", Value::String("alice".into()));
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -676,7 +643,7 @@ mod tests {
             }],
             ..Input::default()
         };
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     fn input_with_order_by(property: &str) -> Input {
@@ -776,7 +743,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_order_by("is_admin");
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("is_admin"),
@@ -797,7 +764,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_order_by("username");
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -805,7 +772,7 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_order_by("is_admin");
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -813,7 +780,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Restrict(_)),
             "admin-only aggregation rejection should be a restrict error, got: {err:?}"
@@ -838,7 +805,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, Some("is_auditor"));
-        assert!(restrict(&mut input, &ont, &ctx).is_err());
+        assert!(apply(&mut input, &ont, &ctx).is_err());
     }
 
     #[test]
@@ -846,7 +813,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("username"));
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -854,7 +821,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -862,7 +829,7 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -870,7 +837,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_property_group("is_admin");
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Restrict(_)),
             "admin-only group_by rejection should be a restrict error, got: {err:?}"
@@ -886,7 +853,7 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_property_group("is_admin");
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -894,7 +861,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = user_only_aggregation(AggFunction::Count, None);
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("traversal_path"),
@@ -919,7 +886,7 @@ mod tests {
                 ..Default::default()
             }],
         );
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(err.to_string().contains("traversal_path"));
     }
 
@@ -929,7 +896,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
         input.relationships.push(rel("_u", "_g"));
-        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+        assert!(apply(&mut input, &ont, &ctx).is_ok());
     }
 
     #[test]
@@ -940,7 +907,7 @@ mod tests {
         // User and Group declared but not connected: the old declaration-based
         // check accepted this; the reachability check must reject it.
         input.relationships.clear();
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             matches!(err, QueryError::Restrict(_)),
             "aggregation reachability rejection should be a restrict error, got: {err:?}"
@@ -958,7 +925,7 @@ mod tests {
         let ctx = admin_ctx();
         let mut input = user_only_aggregation(AggFunction::Count, None);
         assert!(
-            restrict(&mut input, &ont, &ctx).is_ok(),
+            apply(&mut input, &ont, &ctx).is_ok(),
             "admin should bypass traversal_path scoping guard"
         );
     }
@@ -969,7 +936,7 @@ mod tests {
         let ctx = non_admin_ctx();
         let mut input = input_with_filter("username", Value::String("bob".into()));
         assert!(
-            restrict(&mut input, &ont, &ctx).is_ok(),
+            apply(&mut input, &ont, &ctx).is_ok(),
             "search queries are redacted by the Rails layer and must not be blocked here"
         );
     }
@@ -988,7 +955,7 @@ mod tests {
             }],
             ..Input::default()
         };
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let err = apply(&mut input, &ont, &ctx).unwrap_err();
         assert!(
             err.to_string().contains("normalization"),
             "should reference normalization: {err}"
@@ -1080,7 +1047,7 @@ mod tests {
             }],
             ..Input::default()
         };
-        restrict(&mut input, &ont, &ctx).expect("restrict pass succeeds for non-admin select");
+        apply(&mut input, &ont, &ctx).expect("restrict pass succeeds for non-admin select");
         let cols = match &input.nodes[0].columns {
             Some(ColumnSelection::List(c)) => c.clone(),
             _ => panic!("expected List"),
@@ -1101,7 +1068,7 @@ mod tests {
         let ctx = non_admin_ctx();
         for field in USER_ADMIN_ONLY_COLUMNS {
             let mut input = user_filter_input(field, sample_value(field));
-            let err = restrict(&mut input, &ont, &ctx).expect_err(field);
+            let err = apply(&mut input, &ont, &ctx).expect_err(field);
             let msg = err.to_string();
             assert!(
                 msg.contains(field) && msg.contains("administrator"),
@@ -1116,7 +1083,7 @@ mod tests {
         let ctx = non_admin_ctx();
         for field in USER_ADMIN_ONLY_COLUMNS {
             let mut input = user_order_by_input(field);
-            let err = restrict(&mut input, &ont, &ctx).expect_err(field);
+            let err = apply(&mut input, &ont, &ctx).expect_err(field);
             let msg = err.to_string();
             assert!(
                 msg.contains(field) && msg.contains("administrator"),
@@ -1144,7 +1111,7 @@ mod tests {
             }],
             ..Input::default()
         };
-        restrict(&mut input, &ont, &ctx).expect("admin restrict succeeds");
+        apply(&mut input, &ont, &ctx).expect("admin restrict succeeds");
         let cols = match &input.nodes[0].columns {
             Some(ColumnSelection::List(c)) => c.clone(),
             _ => panic!("expected List"),
@@ -1164,7 +1131,7 @@ mod tests {
         for field in USER_ADMIN_ONLY_COLUMNS {
             let mut input = user_filter_input(field, sample_value(field));
             assert!(
-                restrict(&mut input, &ont, &ctx).is_ok(),
+                apply(&mut input, &ont, &ctx).is_ok(),
                 "admin must be allowed to filter on User.{field}"
             );
         }
@@ -1173,7 +1140,8 @@ mod tests {
     fn reviewer_prune_to_target_ontology() -> Ontology {
         let base = Ontology::new()
             .with_nodes(["User"])
-            .with_path_scopable_nodes(["MergeRequest"]);
+            .with_path_scopable_nodes(["MergeRequest"])
+            .with_traversal_path_lookup("MergeRequest", "id");
         let edge_table = base.edge_table().to_string();
         base.with_edge_variant(ontology::EdgeEntity {
             relationship_kind: "REVIEWER".into(),
@@ -1195,22 +1163,13 @@ mod tests {
             hops: crate::input::HopRange::default(),
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
-            fk_column: None,
-            scope_prefix: None,
-            scope_preserving: false,
         }
     }
 
     #[test]
     fn prune_to_target_stamps_when_target_resolves() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([(
-            "mr".to_string(),
-            TraversalPath::new_unchecked("1/9970/15846663/"),
-        )]);
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_scope_prefixes(prefixes);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
         let mut input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
@@ -1222,39 +1181,33 @@ mod tests {
                 InputNode {
                     id: "mr".into(),
                     entity: Some("MergeRequest".into()),
+                    node_ids: vec![15846663],
                     ..Default::default()
                 },
             ],
             relationships: vec![rel_kind(&["REVIEWER"], "u", "mr")],
             ..Input::default()
         };
-        restrict(&mut input, &ont, &ctx).expect("restrict ok");
-        assert_eq!(
-            input.relationships[0]
-                .scope_prefix
-                .as_ref()
-                .map(TraversalPath::as_str),
-            Some("1/9970/15846663/"),
-            "prune_to_target must stamp the edge from the pinned target prefix"
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
+        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        let mr_prefix = proofs.get("mr").cloned();
+        assert!(
+            mr_prefix.is_some(),
+            "pinned MergeRequest derives a scope prefix"
         );
     }
 
     #[test]
     fn prune_to_target_does_not_propagate_across_hub() {
         let ont = reviewer_prune_to_target_ontology();
-        let prefixes = HashMap::from([(
-            "mr_a".to_string(),
-            TraversalPath::new_unchecked("1/9970/15846663/"),
-        )]);
-        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_scope_prefixes(prefixes);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()]).unwrap();
         let mut input = Input {
             query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "mr_a".into(),
                     entity: Some("MergeRequest".into()),
+                    node_ids: vec![15846663],
                     ..Default::default()
                 },
                 InputNode {
@@ -1274,26 +1227,12 @@ mod tests {
             ],
             ..Input::default()
         };
-        restrict(&mut input, &ont, &ctx).expect("restrict ok");
-
-        assert_eq!(
-            input.relationships[0]
-                .scope_prefix
-                .as_ref()
-                .map(TraversalPath::as_str),
-            Some("1/9970/15846663/"),
-            "edge adjacent to pinned mr_a must be scoped"
-        );
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
+        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
 
         assert!(
-            input.relationships[1].scope_prefix.is_none(),
-            "edge to unpinned mr_b must NOT inherit mr_a's prefix; got {:?}",
-            input.relationships[1].scope_prefix
-        );
-
-        assert!(
-            !ctx.scope_prefixes.contains_key("mr_b"),
-            "mr_b must remain unpinned in the security context"
+            proofs.contains_key("mr_a") && !proofs.contains_key("mr_b"),
+            "mr_b must remain unpinned"
         );
     }
 }

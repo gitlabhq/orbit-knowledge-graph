@@ -92,11 +92,11 @@ Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids Ja
 
 ### Examples by query type
 
-Every query returns `{ format_version, query_type, nodes, edges }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows`. The content varies, the base shape does not.
+Every query returns `{ format_version, query_type, nodes, edges }`. Aggregation queries also include `columns`, `group_columns`, and `rows`. The content varies, the base shape does not.
 
 #### Single-entity Traversal (lookup)
 
-A `traversal` with a single node and no relationships — what was previously a separate `search` query type. Nodes only, no edges.
+A `traversal` with a single node and no relationships: what was previously a separate `search` query type. Nodes only, no edges.
 
 ```json
 {
@@ -305,13 +305,13 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ format_version, query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
+3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ format_version, query_type, nodes, edges, pagination }`. Aggregation queries also include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
 5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination uses keyset cursors (`{ page_size, after }`): the seek predicate is compiled into SQL and the response always carries `pagination { has_more, truncated, next_cursor? }`; there is no row-count field (the proto metadata's `row_count` carries the page's authorized row count).
+9. Pagination uses keyset cursors (`{ page_size, after }`). The seek predicate is compiled into SQL. The response always carries `pagination { has_more, truncated, next_cursor? }`. There is no row-count field (the proto metadata's `row_count` carries the page's authorized row count).
 
 ### Display hint
 
@@ -336,7 +336,7 @@ Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`)
 2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Goon`).
 3. The JSON Schema `$id` (`schemas/query_response/v1`), whose `vN` suffix tracks the version's major component. CI asserts the two stay in sync.
 
-The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
+The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()`. The proto field then carries an empty string, which makes "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
 
 GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) is added alongside the actual GOON encoding (ADR 012).
 
@@ -353,7 +353,7 @@ GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) is added alongside 
 
 **What gets harder:**
 
-- Breaking change to `result_json`. Rails passes the JSON through without parsing, so no Rails changes are needed, but any consumer that parses the JSON will need to handle the new shape.
+- Breaking change to `result_json`. Rails passes the JSON through without parsing, so no Rails changes are needed. But any consumer that parses the JSON will need to handle the new shape.
 - Single-entity traversal responses are slightly larger due to the envelope overhead.
 - Adding a new query type means adding a new extractor in `GraphFormatter`.
 

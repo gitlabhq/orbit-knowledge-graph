@@ -5,15 +5,14 @@
 use std::sync::Arc;
 
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
+    derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
 };
 use integration_testkit::load_seed;
 use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 use orbit_server::pipeline::HydrationStage;
 use orbit_server::redaction::QueryResult;
-use query_engine::compiler::compile;
-use query_engine::compiler::{AuthorizedPath, Frontend, SecurityContext};
+use query_engine::compiler::{AuthorizedPath, Frontend, SecurityContext, compile_model};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -58,9 +57,11 @@ async fn query_with_security(
     security_ctx: SecurityContext,
 ) -> ResponseView {
     let svc = allow_all();
-    let ontology = Arc::new(load_ontology());
+    let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap());
+    let compiled =
+        Arc::new(compile_model(json, Frontend::JsonDsl, &data_model, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
@@ -68,7 +69,9 @@ async fn query_with_security(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(data_model);
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend: query_engine::compiler::Frontend::JsonDsl,
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),

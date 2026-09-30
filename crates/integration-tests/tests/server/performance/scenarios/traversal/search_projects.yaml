@@ -1,0 +1,10 @@
+description: Single-node Project lookup (search)
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
+      "limit": 10
+    }
+expect:
+  compile_only: true

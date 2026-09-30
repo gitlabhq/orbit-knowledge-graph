@@ -4,6 +4,10 @@ static PROMPTS: LazyLock<orbit_prompts::Prompts> = LazyLock::new(|| {
     orbit_prompts::Prompts::load_embedded("local").expect("prompts are validated by build.rs")
 });
 
+pub(crate) fn summary(name: &str) -> &'static str {
+    prompt(name).summary()
+}
+
 pub(crate) fn short(name: &str) -> &'static str {
     prompt(name).short()
 }

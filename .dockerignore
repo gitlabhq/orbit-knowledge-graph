@@ -10,4 +10,5 @@ e2e/
 fixtures/
 helm/
 scripts/
+!scripts/check-fips-binary.sh
 tools/

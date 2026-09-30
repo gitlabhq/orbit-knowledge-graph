@@ -8,7 +8,6 @@ use futures::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::dead_letter::DEAD_LETTER_STREAM;
-use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
 use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
@@ -16,7 +15,10 @@ use orbit_migrations::version::SCHEMA_VERSION;
 
 pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
 
-pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
+// No writer since the KV progress store was removed. Kept so GC deletes the streams of older schema versions.
+const RETIRED_INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
+
+pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, RETIRED_INDEXING_PROGRESS_BUCKET];
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(release_segment(), *SCHEMA_VERSION));

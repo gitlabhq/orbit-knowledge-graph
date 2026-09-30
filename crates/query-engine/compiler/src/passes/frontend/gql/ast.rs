@@ -47,10 +47,10 @@ impl From<Property<'_>> for PropertyRef {
 }
 
 pub(super) enum Pattern<'i> {
-    Element(PatternElement<'i>),
+    Elements(Vec<PatternElement<'i>>),
     Shortest {
         variable: Name<'i>,
-        element: PatternElement<'i>,
+        element: Box<PatternElement<'i>>,
     },
 }
 
@@ -96,6 +96,7 @@ pub(super) struct Comparison<'i> {
     pub property: Property<'i>,
     pub op: FilterOp,
     pub value: Option<Value>,
+    pub rhs_property: Option<Property<'i>>,
 }
 
 pub(super) enum Projections<'i> {

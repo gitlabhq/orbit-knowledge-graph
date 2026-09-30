@@ -1,0 +1,18 @@
+description: Stress - two-join traversal at the DSL limit cap (1000)
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "g", "entity": "Group", "node_ids": [100]},
+        {"id": "p", "entity": "Project"},
+        {"id": "n", "entity": "Note"}
+      ],
+      "relationships": [
+        {"type": "CONTAINS", "from": "g", "to": "p"},
+        {"type": "IN_PROJECT", "from": "n", "to": "p"}
+      ],
+      "limit": 1000
+    }
+expect:
+  compile_only: true

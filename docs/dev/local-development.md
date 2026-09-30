@@ -16,8 +16,8 @@ ClickHouse from your GDK installation.
    GDK does **not** download the ClickHouse binary for you. When
    `clickhouse.enabled: true`, GDK templates the config and registers the
    service, but expects a binary to already exist at `clickhouse.bin` (default
-   `/usr/bin/clickhouse`). If none is present, GDK silently skips the service —
-   so install ClickHouse yourself first.
+   `/usr/bin/clickhouse`). If none is present, GDK silently skips the service.
+   So install ClickHouse yourself first.
 
    On macOS, follow the
    [terminal process instructions](https://clickhouse.com/docs/install/macOS#terminal-process).
@@ -89,11 +89,14 @@ ClickHouse from your GDK installation.
    clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS \`gkg-development\`"
    ```
 
-   Apply the graph schema using the helper script (it applies each
-   statement individually since ClickHouse does not support
-   multi-statement DDL execution):
+   Clone this repository first (see [Setup](#setup)). From its root (not
+   `$GDK_ROOT/gitlab`), apply the graph schema with the helper script.
+   ClickHouse does not support
+   multi-statement DDL execution, so the script applies each statement
+   individually:
 
    ```shell
+   cd /path/to/knowledge-graph
    scripts/apply-graph-schema.sh
    ```
 
@@ -109,18 +112,18 @@ ClickHouse from your GDK installation.
 
    The set of replicated tables is driven by per-table YAML files in
    `$GDK_ROOT/gitlab/db/siphon/tables/`. GDK reads them on `gdk reconfigure` and
-   generates the entire Siphon config (`$GDK_ROOT/siphon/config.yml`) — both the
-   producer and consumer sides — from that single source. In general you do
-   **not** hand-write `config.yml`; add or remove table files and let GDK
-   regenerate it. (One exception, the hardcoded Prometheus port, is covered under
+   generates Siphon's CDC config (`$GDK_ROOT/siphon/cdc-config.yml`) using
+   `$GDK_ROOT/siphon/layout.yml`. In general you do **not** hand-write the
+   generated config; add or remove table files and let GDK regenerate it.
+   (One exception, the hardcoded Prometheus port in `config.yml`, is covered under
    [Siphon Prometheus port conflict](#siphon-prometheus-port-conflict).)
 
-   The GitLab repo already ships the tables the live indexing path needs,
-   including the system-notes / commit-edge path: `notes`,
-   `system_note_metadata`, `merge_requests`, `issues`, `users`, and `routes`
-   (the transform reads these to resolve note bodies, the `action`
-   discriminator, noteable and cross-reference targets, authors, and
-   `path` → traversal-path lookups), alongside `namespaces` and `projects`.
+   The GitLab repo already ships the tables the live indexing path needs.
+   This includes the system-notes / commit-edge path: `notes`,
+   `system_note_metadata`, `merge_requests`, `issues`, `users`, and `routes`.
+   It also includes `namespaces` and `projects`. The transform reads these to
+   resolve note bodies, the `action` discriminator, noteable and
+   cross-reference targets, authors, and `path` → traversal-path lookups.
    Confirm the ones you need exist:
 
    ```shell
@@ -178,36 +181,54 @@ ClickHouse from your GDK installation.
        - gitlab/config/gitlab.yml
    ```
 
-   Restart Rails to auto-generate the JWT secret file:
+   Restart Rails with the updated config:
 
    ```shell
+   cd $GDK_ROOT
    gdk restart rails-web rails-background-jobs
    ```
 
-   This creates `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` which the
-   dev script reads automatically to configure the GKG webserver's JWT
-   verifying key. Verify the file was created:
+   The JWT secret is created when Rails boots with
+   `Gitlab.config.knowledge_graph['enabled']` set to true. `gdk restart`
+   returns before Puma and Sidekiq finish booting. Wait for Rails to come up,
+   or boot it synchronously with `rails runner` before checking. The dev script
+   reads `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` to configure the
+   GKG webserver's JWT verifying key. Verify the file was created:
 
    ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails runner 'nil'
    ls $GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret
    ```
 
-   If the file does not exist, restart Rails again. It may take a second
-   restart for the secret to be generated.
-
-   Enable the feature flags:
+   If it is missing, check the effective setting in the development environment
+   and search the Rails logs for a secret-file permission error:
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Feature.enable(:knowledge_graph); Feature.enable(:knowledge_graph_infra)"
+   bundle exec rails runner 'puts Gitlab.config.knowledge_graph["enabled"]'
+   grep -F 'Could not write Knowledge Graph secret file' log/*.log
    ```
 
-   Enable namespaces for indexing:
+   To enroll existing and future top-level groups automatically, select
+   **Index root namespaces automatically** under **Admin > Orbit > Orbit
+   settings** and save. Or enable the same setting in the Rails console:
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   bundle exec rails runner 'ApplicationSetting.current.update!(orbit_auto_index_root_namespace: true)'
    ```
+
+   This enqueues a Sidekiq job to enroll groups that are not already enrolled
+   or excluded. An hourly job handles new groups. After Sidekiq processes the
+   job, verify enrollment:
+
+   ```shell
+   bundle exec rails runner 'puts Analytics::KnowledgeGraph::EnabledNamespace.count'
+   ```
+
+   If the count stays at zero, check the Orbit license and confirm that
+   `knowledge_graph.enabled` is effective in the development environment.
 
    The Orbit UI is available at
    `https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
@@ -306,7 +327,7 @@ trust the certificate. If you used `mkcert` to generate GDK certificates, run
 
 Siphon's Prometheus port (8081) often conflicts with Elasticsearch. GDK
 hardcodes this port when it generates `$GDK_ROOT/siphon/config.yml` and exposes
-no `gdk.yml` knob for it, so changing it is the one case where you override the
+no `gdk.yml` knob for it. So changing it is the one case where you override the
 generated file. If Siphon crash-loops with
 `listen tcp :8081: bind: address already in use`, change the port:
 
@@ -316,9 +337,8 @@ prometheus:
 ```
 
 Then protect the file from being regenerated by adding `siphon/config.yml` to
-`gdk.protected_config_files` in `gdk.yml`, and `gdk restart siphon`. Note that
-while this file is protected, GDK will not pick up new table files until you
-remove the protection and reconfigure.
+`gdk.protected_config_files` in `gdk.yml`, and `gdk restart siphon`. Table-file
+changes still flow into `cdc-config.yml` when GDK reconfigures.
 
 ## Troubleshooting
 
@@ -336,8 +356,8 @@ remove the protection and reconfigure.
 
 **ClickHouse connection issues:**
 
-ClickHouse exposes two ports: the **native TCP port** (`9001` in GDK)
-used by `clickhouse client`, and the **HTTP port** (`8123`) used for
+ClickHouse exposes two ports. The **native TCP port** (`9001` in GDK) is
+used by `clickhouse client`. The **HTTP port** (`8123`) is used for
 health checks and REST-style queries.
 
 - Verify ClickHouse is running: `gdk status clickhouse`
@@ -348,18 +368,24 @@ health checks and REST-style queries.
 
 ClickHouse's `max_server_memory_usage` is a **whole-host RSS** limit, not a
 per-query budget. GDK sets it from `clickhouse.max_server_memory_usage` in
-`gdk.yml` (default 3 GB), and on a busy GDK the baseline RSS can already exceed
-that cap — so even a trivial `SELECT` fails with
+`gdk.yml` (default 3 GB). On a busy GDK the baseline RSS can already exceed
+that cap. So even a trivial `SELECT` fails with
 `(total) memory limit exceeded ... (MEMORY_LIMIT_EXCEEDED)`.
 
-GDK generates `$GDK_ROOT/clickhouse/config.d/gdk.xml` from `gdk.yml`, so editing
-that file directly is overwritten on the next `gdk reconfigure`. Raise the limit
-through `gdk.yml` instead:
+GDK generates `$GDK_ROOT/clickhouse/config.d/gdk.xml` from `gdk.yml`. Editing
+that file directly is overwritten on the next `gdk reconfigure`. Measure
+ClickHouse's baseline RSS on your machine (for example, with `ps`). Set
+`clickhouse.max_server_memory_usage` in `gdk.yml` above that baseline, leaving
+enough RAM for GitLab and other services. An 8 GB cap is too low for a
+12 GiB baseline. If the host has enough headroom, a higher cap could be:
 
 ```yaml
 clickhouse:
-  max_server_memory_usage: 8000000000
+  max_server_memory_usage: 16000000000
 ```
+
+Choose the value based on your own measurements and available RAM, rather than
+copying this example.
 
 Then apply it and restart:
 
@@ -368,8 +394,8 @@ gdk reconfigure
 gdk restart clickhouse
 ```
 
-A value of `0` disables the absolute cap and falls back to a fraction of host
-RAM (`max_server_memory_usage_to_ram_ratio`), which is a good choice when total
+A value of `0` disables the absolute cap. It falls back to a fraction of host
+RAM (`max_server_memory_usage_to_ram_ratio`). That is a good choice when total
 RAM, not a fixed number, is the right ceiling.
 
 **403 Forbidden on the /dashboard/orbit page but JWT auth works:**

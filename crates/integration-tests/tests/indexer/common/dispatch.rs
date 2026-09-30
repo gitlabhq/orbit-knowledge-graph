@@ -65,6 +65,10 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
     }
 }
 
+pub fn serving_flag() -> Arc<std::sync::atomic::AtomicBool> {
+    Arc::new(std::sync::atomic::AtomicBool::new(false))
+}
+
 pub async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
     let container = Nats::default()
         .with_cmd(&NatsServerCmd::default().with_jetstream())

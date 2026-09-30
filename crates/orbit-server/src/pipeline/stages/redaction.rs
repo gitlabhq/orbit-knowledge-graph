@@ -18,13 +18,13 @@ impl PipelineStage for RedactionStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<AuthorizationOutput>()
+            .remove::<AuthorizationOutput>()
             .ok_or_else(|| {
                 PipelineError::Authorization("AuthorizationOutput not found in phases".into())
             })
             .inspect_err(|e| obs.record_error(e))?;
 
-        let mut query_result = input.query_result.clone();
+        let mut query_result = input.query_result;
         let redacted_count = query_result.apply_authorizations(&input.authorizations);
 
         Ok(RedactionOutput {
@@ -41,12 +41,15 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use ontology::Ontology;
-    use query_engine::compiler::{EntityAuthConfig, ResultContext};
+    use query_engine::compiler::{EntityAuthConfig, Frontend, ResultContext};
     use query_engine::pipeline::NoOpObserver;
     use query_engine::types::{QueryResult, ResourceAuthorization};
     use std::sync::Arc;
 
-    fn seed_ctx(authorizations: Vec<ResourceAuthorization>) -> QueryPipelineContext {
+    fn seed_ctx(
+        frontend: Frontend,
+        authorizations: Vec<ResourceAuthorization>,
+    ) -> QueryPipelineContext {
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -74,6 +77,7 @@ mod tests {
         );
 
         let mut ctx = QueryPipelineContext {
+            frontend,
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::new()),
@@ -90,25 +94,29 @@ mod tests {
 
     #[tokio::test]
     async fn denied_rows_are_redacted() {
-        let auth = vec![ResourceAuthorization {
-            resource_type: "project".to_string(),
-            authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
-        }];
-        let mut ctx = seed_ctx(auth);
-        let mut obs = NoOpObserver;
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let auth = vec![ResourceAuthorization {
+                resource_type: "project".to_string(),
+                authorized: [(10, true), (20, false), (30, true)].into_iter().collect(),
+            }];
+            let mut ctx = seed_ctx(frontend, auth);
+            let mut obs = NoOpObserver;
 
-        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
-        assert_eq!(output.redacted_count, 1);
-        assert_eq!(output.query_result.authorized_count(), 2);
+            let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
+            assert_eq!(output.redacted_count, 1, "{frontend:?}");
+            assert_eq!(output.query_result.authorized_count(), 2, "{frontend:?}");
+        }
     }
 
     #[tokio::test]
     async fn no_authorizations_redacts_all() {
-        let mut ctx = seed_ctx(vec![]);
-        let mut obs = NoOpObserver;
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let mut ctx = seed_ctx(frontend, vec![]);
+            let mut obs = NoOpObserver;
 
-        let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
-        assert_eq!(output.redacted_count, 3);
-        assert_eq!(output.query_result.authorized_count(), 0);
+            let output = RedactionStage.execute(&mut ctx, &mut obs).await.unwrap();
+            assert_eq!(output.redacted_count, 3, "{frontend:?}");
+            assert_eq!(output.query_result.authorized_count(), 0, "{frontend:?}");
+        }
     }
 }

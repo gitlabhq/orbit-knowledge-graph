@@ -26,7 +26,7 @@ Siphon CDC, and all four GKG modes (webserver, indexer, dispatcher, health-check
 ## Cluster
 
 - **GKE**: `gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness`
-- **Harness config**: [`gitlab-org/orbit/orbit-e2e-harness`](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness) — cluster bootstrap (cert-manager, GitLab Agent)
+- **Harness config**: [`gitlab-org/orbit/orbit-e2e-harness`](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness): cluster bootstrap (cert-manager, GitLab Agent)
 - **CI access**: GitLab Agent `e2e-harness-agent`
 
 ## Running
@@ -64,17 +64,17 @@ In CI the `e2e` job runs automatically on `main` and manually on MRs.
 
 ## Parallel execution
 
-The robot-runner job executes suites with [pabot](https://pabot.org/): suite
-`01_setup_and_smoke` runs alone first (it bootstraps credentials, provisions
-the shared namespace, and proves the pipeline reached steady state), then every
+The robot-runner job executes suites with [pabot](https://pabot.org/). Suite
+`01_setup_and_smoke` runs alone first. It bootstraps credentials, provisions
+the shared namespace, and proves the pipeline reached steady state. Then every
 other suite runs in a parallel worker pool.
 
 - `e2e/tests/ordering.txt` defines the barrier: suites listed before `#WAIT`
   run first; everything else is auto-discovered. A new `NN_name.robot` file
-  needs no registration — it joins the parallel pool automatically.
-- Suite 01 publishes the shared namespace through PabotLib parallel keys;
-  downstream suites adopt it via the `Attach To Shared Fixture` suite setup
-  (`gitlab.resource`), which also mints a per-suite admin bot user. The Rails
+  needs no registration. It joins the parallel pool automatically.
+- Suite 01 publishes the shared namespace through PabotLib parallel keys.
+  Downstream suites adopt it via the `Attach To Shared Fixture` suite setup
+  (`gitlab.resource`). That setup also mints a per-suite admin bot user. The Rails
   `orbit_query` rate limit (60 req/min) is scoped per user, so suites must not
   poll through one shared PAT. A new suite that needs credentials or the
   shared namespace must declare that setup (copy the header of any existing
@@ -85,9 +85,9 @@ other suite runs in a parallel worker pool.
 - Plain `robot` runs still work for local debugging: PabotLib degrades to an
   in-process value store, so `robot tests/` executes the suites sequentially
   with identical semantics.
-- In CI the runner pod uses the prebaked `e2e-robot` image (built from
-  `e2e/Dockerfile.robot` by the `e2e-robot-image` job whenever that file
-  changes, tagged by its content hash). Local runs default to
+- In CI the runner pod uses the prebaked `e2e-robot` image. The
+  `e2e-robot-image` job builds it from `e2e/Dockerfile.robot` whenever that file
+  changes, tagged by its content hash. Local runs default to
   `python:3.12-slim` and install Robot Framework at pod startup.
 
 ## Setup phases
@@ -112,6 +112,6 @@ consumers update automatically.
 
 ## Key files
 
-- `e2e/helmfile.yaml.gotmpl` — all Helm releases
-- `e2e/values/` — per-component Helm values (`.gotmpl` for templated ones)
-- `e2e/charts/` — local charts (ClickHouse, robot-runner)
+- `e2e/helmfile.yaml.gotmpl`: all Helm releases
+- `e2e/values/`: per-component Helm values (`.gotmpl` for templated ones)
+- `e2e/charts/`: local charts (ClickHouse, robot-runner)

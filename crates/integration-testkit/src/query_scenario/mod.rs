@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -19,7 +19,9 @@ use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
 use crate::visitor::{NodeExt, Requirement, ResponseView};
-use crate::{SeededColumnResolver, collect_subtest_results, load_ontology};
+use crate::{
+    SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
+};
 
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
@@ -125,15 +127,26 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        crate::scenario::seed::apply_seed(
-            &forked,
-            &cfg.extra_seed,
-            &Default::default(),
-            &columns,
-            name,
-        )
-        .await;
-        forked.optimize_all().await;
+        let mut settings = Default::default();
+        if cfg.unmerged_seed {
+            for table in cfg.extra_seed.keys() {
+                let table = crate::scenario::seed::prefix_graph_table(table);
+                assert!(
+                    columns.contains_key(&table),
+                    "{name}: unknown table '{table}'"
+                );
+                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
+            }
+            settings = std::collections::BTreeMap::from([(
+                "optimize_on_insert".to_string(),
+                serde_json::json!(0),
+            )]);
+        }
+        crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+            .await;
+        if !cfg.unmerged_seed {
+            forked.optimize_all().await;
+        }
         forked
     } else {
         ctx.clone()
@@ -154,15 +167,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
-        let label = format!("{name} [{frontend_key}]");
         run_frontend(
             &ctx,
-            frontend,
+            (frontend, frontend_key),
             query_str,
             &security,
             &redaction,
             &scenario.expect,
-            &label,
+            name,
         )
         .await;
     }
@@ -170,21 +182,21 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 
 async fn run_frontend(
     ctx: &TestContext,
-    frontend: Frontend,
+    (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
-    label: &str,
+    name: &str,
 ) {
-    let ontology = Arc::new(load_ontology());
+    let label = &format!("{name} [{frontend_key}]");
+    let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile(query, frontend, &ontology, security) {
+    let compiled = match compile_model(query, frontend, &data_model, security) {
         Ok(c) => {
-            let expects_error = matches!(
+            let expects_error = !matches!(
                 expect.compile_error,
-                Some(format::CompileErrorExpect::Flag(true))
-                    | Some(format::CompileErrorExpect::Substring(_))
+                None | Some(format::CompileErrorExpect::Flag(false))
             );
             assert!(
                 !expects_error,
@@ -193,9 +205,18 @@ async fn run_frontend(
             Arc::new(c)
         }
         Err(e) => match &expect.compile_error {
-            Some(format::CompileErrorExpect::Flag(true)) => {
+            None | Some(format::CompileErrorExpect::Flag(false)) => {
+                panic!("{label}: unexpected compile error: {e}")
+            }
+            Some(expected) => {
                 let msg = e.to_string();
-                for banned in &expect.compile_error_not_contains {
+                if let Some(sub) = expected.substring_for(frontend_key) {
+                    assert!(
+                        msg.contains(sub),
+                        "{label}: compile error '{msg}' does not contain '{sub}'"
+                    );
+                }
+                for banned in expect.compile_error_not_contains.banned_for(frontend_key) {
                     assert!(
                         !msg.contains(banned.as_str()),
                         "{label}: compile error must not contain '{banned}'\nerror: {msg}"
@@ -203,23 +224,17 @@ async fn run_frontend(
                 }
                 return;
             }
-            Some(format::CompileErrorExpect::Substring(sub)) => {
-                let msg = e.to_string();
-                assert!(
-                    msg.contains(sub.as_str()),
-                    "{label}: compile error '{msg}' does not contain '{sub}'"
-                );
-                for banned in &expect.compile_error_not_contains {
-                    assert!(
-                        !msg.contains(banned.as_str()),
-                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
-                    );
-                }
-                return;
-            }
-            _ => panic!("{label}: unexpected compile error: {e}"),
         },
     };
+
+    if let Some(expected) = expect.hydration {
+        assert_eq!(
+            compiled.hydration.kind(),
+            expected,
+            "{label}: unexpected hydration plan\n{:?}",
+            compiled.hydration
+        );
+    }
 
     let sql = compiled.base.render();
     for fragment in &expect.sql_contains {
@@ -242,20 +257,28 @@ async fn run_frontend(
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
-            ctx, frontend, query, &ontology, security, redaction, expect, label,
+            ctx,
+            frontend,
+            query,
+            &data_model,
+            security,
+            redaction,
+            expect,
+            label,
         )
         .await;
         return;
     }
 
-    let resp = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+    let resp = execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
         let baseline_node_ids = canonical_ids(&resp);
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
-            let rerun = execute_pipeline(ctx, &compiled, &ontology, security, redaction).await;
+            let rerun =
+                execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
@@ -293,7 +316,7 @@ async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
     base_query: &str,
-    ontology: &Arc<ontology::Ontology>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -312,11 +335,12 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
 
         let compiled = Arc::new(
-            compile(&query_str, frontend, ontology, security)
+            compile_model(&query_str, frontend, data_model, security)
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 
-        let resp = execute_pipeline(ctx, &compiled, ontology, security, redaction).await;
+        let resp =
+            execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
         let response: query_engine::formatters::GraphResponse =
             serde_json::from_value(resp).expect("response should deserialize");
 
@@ -414,8 +438,9 @@ async fn run_pages(
 
 async fn execute_pipeline(
     ctx: &TestContext,
+    frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
-    ontology: &Arc<ontology::Ontology>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
@@ -433,12 +458,14 @@ async fn execute_pipeline(
     let client = Arc::new(ctx.create_client());
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(Arc::clone(data_model));
     server_extensions.insert(resolver_registry);
 
     let mut pipeline_ctx = QueryPipelineContext {
+        frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(ontology),
+        ontology: Arc::clone(data_model.ontology()),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),
@@ -458,6 +485,7 @@ async fn execute_pipeline(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
+        &compiled.pagination,
     ));
 
     let output = PipelineOutput {
@@ -983,17 +1011,6 @@ fn build_security(overrides: &Option<SecurityOverride>) -> SecurityContext {
     if let Some(true) = ov.admin {
         ctx = ctx.with_role(true, Some(AccessLevel::Owner as u32));
     }
-    if !ov.scope_prefixes.is_empty() {
-        let prefixes: std::collections::HashMap<
-            String,
-            orbit_utils::traversal_path::TraversalPath,
-        > = ov
-            .scope_prefixes
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_str().into()))
-            .collect();
-        ctx = ctx.with_scope_prefixes(prefixes);
-    }
     ctx
 }
 
@@ -1092,6 +1109,7 @@ fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use query_engine::compiler::compile;
 
     #[test]
     fn json_and_gql_keys_map_to_their_frontends() {
@@ -1120,14 +1138,22 @@ mod tests {
     }
 
     #[test]
-    fn gql_frontend_rejects_writes() {
-        let error = compile(
-            "CREATE (u:User)",
-            Frontend::Gql,
-            &load_ontology(),
-            &SecurityContext::new(1, vec!["1/".into()]).unwrap(),
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("Orbit query syntax"), "{error}");
+    fn gql_syntax_errors_report_position_without_echoing_source() {
+        let ontology = load_ontology();
+        let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (raw, position) in [
+            ("CREATE (u:User)", "line 1, column 1"),
+            (
+                "\nMATCH (u:User {username: 'private-query-literal'}) RETURN u LMIT 1",
+                "line 2, column",
+            ),
+        ] {
+            let error = compile(raw, Frontend::Gql, &ontology, &security).unwrap_err();
+            let message = error.to_string();
+            assert!(error.is_client_safe(), "{message}");
+            assert!(message.contains("Orbit query syntax"), "{message}");
+            assert!(message.contains(position), "{message}");
+            assert!(!message.contains("private-query-literal"), "{message}");
+        }
     }
 }

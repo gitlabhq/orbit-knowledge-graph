@@ -1,0 +1,26 @@
+# Daily sync of the distilled GitLab documentation principles into
+# .ai/principles/distilled/. Opens an MR when they change upstream; see that directory's README
+# for what is synced and why.
+#
+# Token provisioned by infra-mgmt terraform
+# (environments/release-platform/knowledge-graph.tf). Setup: create a daily
+# pipeline schedule with SCHEDULE_ONLY=doc-principles-sync; rehearse once with
+# DRY_RUN=true on the schedule.
+doc-principles-sync:
+  extends: .automation-bot
+  stage: review
+  needs: []
+  variables:
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "doc-principles-sync"
+  before_script:
+    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
+    - apk add --no-cache bash curl python3 git coreutils
+    # The project-level GITLAB_TOKEN variable outranks glab auth login config,
+    # so override it or glab acts as that token's bot.
+    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
+  script:
+    - bash scripts/ci/sync-doc-principles.sh

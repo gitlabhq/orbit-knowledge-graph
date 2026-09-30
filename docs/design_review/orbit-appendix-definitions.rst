@@ -50,7 +50,7 @@ Rails Monolith Backend Integration
 Rails backend integration for Orbit.  Covers the three-layer authorization
 stack (org isolation, traversal ID filtering from JWT-supplied
 ``group_traversal_ids`` claims, and Rails redaction via ``Ability.allowed?``
-over the gRPC stream), JWT authentication, the gRPC client (9 RPC methods with
+over the gRPC stream), JWT authentication, the gRPC client (11 RPC methods with
 stub caching), the Rails-hosted MCP endpoint (JSON-RPC 2.0), the REST API under
 ``/api/v4/orbit/*`` (query, schema, dsl, status, tools) proxying to gRPC,
 internal API for Gitaly access, Siphon ClickHouse tables for CDC replication,

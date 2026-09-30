@@ -20,6 +20,8 @@ query:
       }],
       "limit": 10
     }
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/102/'}]->(g:Group) RETURN u.username, g.name, g.traversal_path LIMIT 10
 
 expect:
   node_count: 2

@@ -167,7 +167,7 @@ impl StaleEdgeReconciliation {
 
         let mut ids: Vec<i64> = checkpoints
             .iter()
-            .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+            .filter(|(_, checkpoint)| checkpoint.is_paging())
             .filter_map(|(key, _)| namespace_id_from_key(key))
             .collect();
         ids.sort_unstable();

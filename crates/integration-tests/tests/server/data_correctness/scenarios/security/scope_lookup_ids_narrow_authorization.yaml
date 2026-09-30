@@ -1,0 +1,14 @@
+description: ID scope lookups preserve narrower authorization
+
+config:
+  security: { paths: ["1/100/1000/", "1/100/200/"] }
+
+query:
+  gql: |
+    MATCH (p:Project) WHERE p.id IN [1000, 1002]
+    RETURN p LIMIT 20
+
+expect:
+  node_count: 1
+  nodes:
+    Project: { ids: [1000], absent: [1002] }

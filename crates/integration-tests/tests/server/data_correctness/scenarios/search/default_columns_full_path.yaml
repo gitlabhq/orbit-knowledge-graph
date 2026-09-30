@@ -8,6 +8,8 @@ query:
       "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
       "limit": 10
     }
+  gql: |
+    MATCH (g:Group) WHERE g.id >= 1 AND g.id <= 10000 RETURN g LIMIT 10
 
 expect:
   node_count: 5

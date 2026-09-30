@@ -1,4 +1,5 @@
 use orbit_utils::traversal_path::TraversalPath;
+use secrecy::SecretString;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// One traversal path the user holds in their scope, paired with the exact
@@ -66,11 +67,23 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+    /// SHA-256 of the instance's online cloud license, sent by Rails on self-managed
+    /// and Dedicated only. Authenticates the quota gate to CustomersDot as
+    /// `X-License-Token`. Anyone holding it can query that subscription's CustomersDot
+    /// quota verdicts, so it is never serialized or logged.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_license_checksum",
+        skip_serializing
+    )]
+    pub license_checksum: Option<SecretString>,
 }
 
 /// Source type of the request, matching the Iglu `orbit_query` enum.
 /// Unknown JWT values deserialize to `Rest` (the catch-all).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
+#[cfg_attr(test, derive(strum::EnumIter))]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum SourceType {
     Frontend,
@@ -93,26 +106,82 @@ fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType
     })
 }
 
+fn deserialize_license_checksum<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<SecretString>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.map(SecretString::from))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use secrecy::ExposeSecret;
+    use serde_json::{Value, json};
 
     fn parse(raw: &str) -> SourceType {
         deserialize_source_type(Value::String(raw.into())).unwrap()
     }
 
     #[test]
-    fn code_intelligence_round_trips() {
-        assert_eq!(parse("code_intelligence"), SourceType::CodeIntelligence);
-        assert_eq!(
-            <&str>::from(SourceType::CodeIntelligence),
-            "code_intelligence"
-        );
+    fn every_source_type_serializes_to_the_name_the_deserializer_accepts() {
+        use strum::IntoEnumIterator;
+        for variant in SourceType::iter() {
+            let wire = serde_json::to_value(variant).unwrap();
+            assert_eq!(wire, Value::String(<&str>::from(variant).into()));
+            let parsed = deserialize_source_type(wire).unwrap();
+            assert_eq!(parsed, variant);
+        }
     }
 
     #[test]
     fn unknown_source_type_falls_back_to_rest() {
         assert_eq!(parse("something_else"), SourceType::Rest);
+    }
+
+    const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn claims_json(license_checksum: Option<Value>) -> Value {
+        let mut v = json!({
+            "sub": "user:1",
+            "iss": "gitlab",
+            "aud": "gitlab-knowledge-graph",
+            "iat": 0,
+            "exp": 0,
+            "user_id": 1,
+            "username": "u",
+            "source_type": "mcp",
+        });
+        if let Some(checksum) = license_checksum {
+            v["license_checksum"] = checksum;
+        }
+        v
+    }
+
+    fn parse_claims(license_checksum: Option<Value>) -> Claims {
+        serde_json::from_value(claims_json(license_checksum)).unwrap()
+    }
+
+    #[test]
+    fn valid_license_checksum_is_kept() {
+        let claims = parse_claims(Some(json!(CHECKSUM)));
+        assert_eq!(
+            claims.license_checksum.as_ref().map(|s| s.expose_secret()),
+            Some(CHECKSUM)
+        );
+    }
+
+    #[test]
+    fn absent_or_null_license_checksum_is_none() {
+        assert!(parse_claims(None).license_checksum.is_none());
+        assert!(parse_claims(Some(Value::Null)).license_checksum.is_none());
+    }
+
+    #[test]
+    fn license_checksum_is_never_serialized_or_debug_printed() {
+        let claims = parse_claims(Some(json!(CHECKSUM)));
+        assert!(!format!("{claims:?}").contains(CHECKSUM));
+        let serialized = serde_json::to_string(&claims).unwrap();
+        assert!(!serialized.contains(CHECKSUM));
+        assert!(!serialized.contains("license_checksum"));
     }
 }

@@ -1,0 +1,13 @@
+description: >
+  Property comparison between incompatible types is rejected at
+  compile time. Comparing an integer field against a string field
+  must not reach the database engine.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
+    WHERE u.username <> mr.draft
+    RETURN mr.title LIMIT 10
+
+expect:
+  compile_error: "type mismatch"

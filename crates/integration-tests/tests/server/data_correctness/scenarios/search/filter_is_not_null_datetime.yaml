@@ -14,6 +14,8 @@ query:
       "order_by": "-mr.merged_at",
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 1 AND mr.id <= 10000 AND mr.merged_at IS NOT NULL RETURN mr.title, mr.state, mr.merged_at ORDER BY mr.merged_at DESC LIMIT 10
 
 expect:
   node_count: 3

@@ -1,30 +1,15 @@
-//! A single named query template: YAML parsing, placeholder substitution,
-//! and parameter validation.
-
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use crate::{NamedQueryError, invalid};
+use crate::{Language, NamedQueryError, gql, invalid, json};
 
-const BINDING_KEY: &str = "$binding";
-const PARAM_KEY: &str = "$param";
-const PARAM_KEY_PREFIX: &str = "$param:";
 const CURRENT_USER_ID: &str = "current_user_id";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BindingValues {
     pub current_user_id: u64,
-}
-
-impl BindingValues {
-    fn entries(&self) -> [(String, Value); 1] {
-        [(
-            CURRENT_USER_ID.to_string(),
-            Value::from(self.current_user_id),
-        )]
-    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -64,6 +49,13 @@ impl ParameterSpec {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct QueryTexts {
+    json: Value,
+    gql: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NamedQueryYaml {
     name: String,
     description: String,
@@ -73,26 +65,17 @@ struct NamedQueryYaml {
     bindings: Vec<String>,
     #[serde(default)]
     parameters: BTreeMap<String, ParameterSpecYaml>,
-    query: Value,
+    query: QueryTexts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Placeholder {
+pub(crate) enum Slot {
     Binding,
     Param,
 }
 
-impl Placeholder {
-    const ALL: [Self; 2] = [Self::Binding, Self::Param];
-
-    fn key(self) -> &'static str {
-        match self {
-            Self::Binding => BINDING_KEY,
-            Self::Param => PARAM_KEY,
-        }
-    }
-
-    fn label(self) -> &'static str {
+impl Slot {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Binding => "binding",
             Self::Param => "parameter",
@@ -100,31 +83,53 @@ impl Placeholder {
     }
 }
 
-struct Substitution {
-    available: HashMap<(Placeholder, String), Value>,
-    used: HashSet<(Placeholder, String)>,
+#[derive(Debug, Clone)]
+pub(crate) struct Lookup {
+    bindings: Map<String, Value>,
+    params: Map<String, Value>,
+    used: HashSet<(Slot, String)>,
 }
 
-impl Substitution {
-    fn new(values: &BindingValues, params: &Map<String, Value>) -> Self {
-        let bindings = values
-            .entries()
-            .into_iter()
-            .map(|(name, value)| ((Placeholder::Binding, name), value));
-        let params = params
+impl Lookup {
+    fn new(
+        declared_bindings: &[String],
+        values: &BindingValues,
+        params: &Map<String, Value>,
+    ) -> Self {
+        let bindings = declared_bindings
             .iter()
-            .map(|(name, value)| ((Placeholder::Param, name.clone()), value.clone()));
+            .map(|name| (name.clone(), Value::from(values.current_user_id)))
+            .collect();
         Self {
-            available: bindings.chain(params).collect(),
+            bindings,
+            params: params.clone(),
             used: HashSet::new(),
         }
     }
 
-    fn resolve(&mut self, kind: Placeholder, name: &str) -> Option<Value> {
-        let key = (kind, name.to_string());
-        let value = self.available.get(&key).cloned()?;
-        self.used.insert(key);
-        Some(value)
+    pub(crate) fn resolve(&mut self, slot: Slot, name: &str) -> Result<Value, String> {
+        let available = match slot {
+            Slot::Binding => &self.bindings,
+            Slot::Param => &self.params,
+        };
+        let value = available
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("uses undeclared {} `{name}`", slot.label()))?;
+        self.used.insert((slot, name.to_string()));
+        Ok(value)
+    }
+
+    fn unused(&self) -> Option<String> {
+        let declared = self
+            .bindings
+            .keys()
+            .map(|name| (Slot::Binding, name))
+            .chain(self.params.keys().map(|name| (Slot::Param, name)));
+        declared
+            .filter(|(slot, name)| !self.used.contains(&(*slot, (*name).clone())))
+            .map(|(slot, name)| format!("declares {} `{name}` but never uses it", slot.label()))
+            .next()
     }
 }
 
@@ -135,7 +140,8 @@ pub struct NamedQuery {
     pub default: bool,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
-    query: Value,
+    json: Value,
+    gql: String,
 }
 
 impl NamedQuery {
@@ -181,38 +187,21 @@ impl NamedQuery {
             default: yaml.default,
             bindings: yaml.bindings,
             parameters,
-            query: yaml.query,
+            json: yaml.query.json,
+            gql: yaml.query.gql,
         };
         query.validate()?;
         Ok(query)
     }
 
     fn validate(&self) -> Result<(), NamedQueryError> {
-        let params = self.example_parameters();
-        let mut ctx = Substitution::new(&BindingValues { current_user_id: 0 }, &params);
-        self.substitute(&mut self.query.clone(), &mut ctx)?;
-        for kind in Placeholder::ALL {
-            for name in self.declared(kind) {
-                if !ctx.used.contains(&(kind, name.to_string())) {
-                    let label = kind.label();
-                    return Err(self.invalid(format!(
-                        "declares {label} `{name}` but never uses it; remove it from `{label}s:`"
-                    )));
-                }
-            }
+        if let Some(name) = self.bindings.iter().find(|name| *name != CURRENT_USER_ID) {
+            return Err(self.invalid(format!("uses unknown binding `{name}`")));
+        }
+        for language in Language::ALL {
+            self.render_example_language(language)?;
         }
         Ok(())
-    }
-
-    fn declared(&self, kind: Placeholder) -> Vec<&str> {
-        match kind {
-            Placeholder::Binding => self.bindings.iter().map(String::as_str).collect(),
-            Placeholder::Param => self.parameters.keys().map(String::as_str).collect(),
-        }
-    }
-
-    fn declares(&self, kind: Placeholder, name: &str) -> bool {
-        self.declared(kind).contains(&name)
     }
 
     pub fn render(
@@ -220,6 +209,48 @@ impl NamedQuery {
         values: &BindingValues,
         params: &Map<String, Value>,
     ) -> Result<String, NamedQueryError> {
+        self.render_language(Language::Json, values, params)
+    }
+
+    pub fn render_language(
+        &self,
+        language: Language,
+        values: &BindingValues,
+        params: &Map<String, Value>,
+    ) -> Result<String, NamedQueryError> {
+        self.check_parameters(params)?;
+        let lookup = Lookup::new(&self.bindings, values, params);
+        let (rendered, lookup) = match language {
+            Language::Json => json::render(&self.json, lookup),
+            Language::Gql => gql::render(&self.gql, lookup),
+        }
+        .map_err(|message| self.invalid(message))?;
+        if let Some(message) = lookup.unused() {
+            return Err(self.invalid(message));
+        }
+        Ok(rendered)
+    }
+
+    pub fn render_example(&self) -> Result<String, NamedQueryError> {
+        self.render_example_language(Language::Json)
+    }
+
+    pub fn render_example_language(&self, language: Language) -> Result<String, NamedQueryError> {
+        self.render_language(
+            language,
+            &BindingValues { current_user_id: 0 },
+            &self.example_parameters(),
+        )
+    }
+
+    pub fn example_parameters(&self) -> Map<String, Value> {
+        self.parameters
+            .iter()
+            .map(|(name, spec)| (name.clone(), spec.example.clone()))
+            .collect()
+    }
+
+    fn check_parameters(&self, params: &Map<String, Value>) -> Result<(), NamedQueryError> {
         if let Some(unknown) = params.keys().find(|k| !self.parameters.contains_key(*k)) {
             return Err(self.invalid(format!(
                 "unknown parameter `{unknown}`. Valid parameters: {}",
@@ -237,107 +268,7 @@ impl NamedQuery {
                 self.invalid(format!("parameter `{param}` is invalid: {errors}"))
             })?;
         }
-
-        let mut rendered = self.query.clone();
-        self.substitute(&mut rendered, &mut Substitution::new(values, params))?;
-        Ok(rendered.to_string())
-    }
-
-    pub fn render_example(&self) -> Result<String, NamedQueryError> {
-        self.render(
-            &BindingValues { current_user_id: 0 },
-            &self.example_parameters(),
-        )
-    }
-
-    pub fn example_parameters(&self) -> Map<String, Value> {
-        self.parameters
-            .iter()
-            .map(|(name, spec)| (name.clone(), spec.example.clone()))
-            .collect()
-    }
-
-    fn substitute(&self, value: &mut Value, ctx: &mut Substitution) -> Result<(), NamedQueryError> {
-        match value {
-            Value::Object(map) => {
-                let kind = Placeholder::ALL
-                    .into_iter()
-                    .find(|k| map.contains_key(k.key()));
-                if let Some(kind) = kind {
-                    *value = self.resolve_placeholder(kind, map, ctx)?;
-                } else {
-                    let mut rekeyed = Map::with_capacity(map.len());
-                    for (key, mut nested) in std::mem::take(map) {
-                        self.substitute(&mut nested, ctx)?;
-                        let key = self.resolve_key(&key, ctx)?;
-                        if rekeyed.contains_key(&key) {
-                            return Err(self.invalid(format!(
-                                "parameter key `{key}` collides with another key in the same object"
-                            )));
-                        }
-                        rekeyed.insert(key, nested);
-                    }
-                    *map = rekeyed;
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    self.substitute(item, ctx)?;
-                }
-            }
-            _ => {}
-        }
         Ok(())
-    }
-
-    fn resolve_key(&self, key: &str, ctx: &mut Substitution) -> Result<String, NamedQueryError> {
-        let Some(name) = key.strip_prefix(PARAM_KEY_PREFIX) else {
-            return Ok(key.to_string());
-        };
-        if !self.declares(Placeholder::Param, name) {
-            return Err(self.invalid(format!(
-                "key uses undeclared parameter `{name}`; declare it under `parameters:`"
-            )));
-        }
-        let Some(resolved) = ctx.resolve(Placeholder::Param, name) else {
-            return Err(self.invalid(format!("missing value for parameter `{name}`")));
-        };
-        match resolved {
-            Value::String(s) if s.is_empty() || s.starts_with('$') => Err(self.invalid(format!(
-                "parameter `{name}` is used as an object key so it must not be empty or start with `$`"
-            ))),
-            Value::String(s) => Ok(s),
-            other => Err(self.invalid(format!(
-                "parameter `{name}` is used as an object key so it must be a string, got {other}"
-            ))),
-        }
-    }
-
-    fn resolve_placeholder(
-        &self,
-        kind: Placeholder,
-        map: &Map<String, Value>,
-        ctx: &mut Substitution,
-    ) -> Result<Value, NamedQueryError> {
-        let (key, label) = (kind.key(), kind.label());
-        if map.len() != 1 {
-            return Err(self.invalid(format!("a {key} object must have no other keys")));
-        }
-        let Some(name) = map[key].as_str() else {
-            return Err(self.invalid(format!("{key} value must be a string")));
-        };
-        if !self.declares(kind, name) {
-            return Err(self.invalid(format!(
-                "uses undeclared {label} `{name}`; declare it under `{label}s:`"
-            )));
-        }
-        let Some(resolved) = ctx.resolve(kind, name) else {
-            return Err(self.invalid(match kind {
-                Placeholder::Binding => format!("uses unknown binding `{name}`"),
-                Placeholder::Param => format!("missing value for parameter `{name}`"),
-            }));
-        };
-        Ok(resolved)
     }
 
     fn valid_parameters(&self) -> String {
@@ -351,298 +282,5 @@ impl NamedQuery {
 
     fn invalid(&self, message: String) -> NamedQueryError {
         invalid(&self.name, message)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn parse(yaml: &str) -> Result<NamedQuery, NamedQueryError> {
-        NamedQuery::from_yaml("q.yaml", yaml)
-    }
-
-    fn values() -> BindingValues {
-        BindingValues {
-            current_user_id: 42,
-        }
-    }
-
-    fn params(value: Value) -> Map<String, Value> {
-        value.as_object().expect("params must be an object").clone()
-    }
-
-    const VALID: &str = r#"
-name: q
-description: A query.
-bindings: [current_user_id]
-query:
-  node_ids:
-    - { $binding: current_user_id }
-"#;
-
-    const VALID_WITH_PARAMS: &str = r#"
-name: q
-description: A query.
-parameters:
-  entity:
-    schema: { type: string }
-    example: User
-  node_ids:
-    schema: { type: array, items: { type: integer }, minItems: 1, maxItems: 500 }
-    example: [1]
-query:
-  entity: { $param: entity }
-  node_ids: { $param: node_ids }
-"#;
-
-    #[test]
-    fn render_substitutes_current_user_id() {
-        let query = parse(VALID).expect("valid template");
-        let rendered = query
-            .render(&values(), &Map::new())
-            .expect("render succeeds");
-        assert_eq!(rendered, r#"{"node_ids":[42]}"#);
-    }
-
-    #[test]
-    fn render_rejects_missing_parameter_and_lists_valid() {
-        let query = parse(VALID_WITH_PARAMS).expect("valid template");
-        let err = query
-            .render(&values(), &params(json!({"entity": "User"})))
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing required parameter `node_ids`"),
-            "{err}"
-        );
-        assert!(err.to_string().contains("entity, node_ids"), "{err}");
-    }
-
-    #[test]
-    fn render_rejects_unknown_parameter_and_lists_valid() {
-        let query = parse(VALID_WITH_PARAMS).expect("valid template");
-        let err = query
-            .render(
-                &values(),
-                &params(json!({"entity": "User", "node_ids": [1], "extra": 1})),
-            )
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("unknown parameter `extra`"),
-            "{err}"
-        );
-        assert!(err.to_string().contains("entity, node_ids"), "{err}");
-    }
-
-    #[test]
-    fn render_rejects_parameter_violating_schema() {
-        let query = parse(VALID_WITH_PARAMS).expect("valid template");
-        let err = query
-            .render(
-                &values(),
-                &params(json!({"entity": "User", "node_ids": "not-an-array"})),
-            )
-            .unwrap_err();
-        assert!(
-            err.to_string().contains("parameter `node_ids` is invalid"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn render_with_example_parameters_uses_declared_examples() {
-        let query = parse(VALID_WITH_PARAMS).expect("valid template");
-        let rendered = query
-            .render(&values(), &query.example_parameters())
-            .expect("render succeeds");
-        assert_eq!(rendered, r#"{"entity":"User","node_ids":[1]}"#);
-    }
-
-    const VALID_WITH_KEY_PARAM: &str = r#"
-name: q
-description: A query.
-parameters:
-  field:
-    schema: { type: string, pattern: "^[a-z_]+$" }
-    example: name
-  text:
-    schema: { type: string, minLength: 3 }
-    example: abc
-query:
-  filters:
-    "$param:field": { contains: { $param: text } }
-"#;
-
-    #[test]
-    fn render_substitutes_parameter_used_as_object_key() {
-        let query = parse(VALID_WITH_KEY_PARAM).expect("key usage counts as using the parameter");
-        let rendered = query
-            .render(
-                &values(),
-                &params(json!({"field": "full_path", "text": "gitlab"})),
-            )
-            .expect("render succeeds");
-        assert_eq!(
-            rendered,
-            r#"{"filters":{"full_path":{"contains":"gitlab"}}}"#
-        );
-    }
-
-    #[test]
-    fn key_parameter_rejects_undeclared_non_string_and_colliding_keys() {
-        let undeclared = VALID_WITH_KEY_PARAM.replace(
-            "  field:\n    schema: { type: string, pattern: \"^[a-z_]+$\" }\n    example: name\n",
-            "",
-        );
-        let err = parse(&undeclared).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("key uses undeclared parameter `field`"),
-            "{err}"
-        );
-
-        let non_string = VALID_WITH_KEY_PARAM
-            .replace(
-                "schema: { type: string, pattern: \"^[a-z_]+$\" }",
-                "schema: { type: integer }",
-            )
-            .replace("example: name", "example: 7");
-        let err = parse(&non_string).unwrap_err();
-        assert!(err.to_string().contains("must be a string"), "{err}");
-
-        let colliding = VALID_WITH_KEY_PARAM.replace("  filters:\n", "  filters:\n    name: 1\n");
-        let err = parse(&colliding).unwrap_err();
-        assert!(err.to_string().contains("collides"), "{err}");
-    }
-
-    #[test]
-    fn key_parameter_rejects_placeholder_shaped_values_at_render() {
-        let unconstrained = VALID_WITH_KEY_PARAM.replace(", pattern: \"^[a-z_]+$\"", "");
-        let query = parse(&unconstrained).unwrap();
-        for field in ["$param", "$binding", "$param:text", ""] {
-            let err = query
-                .render(
-                    &values(),
-                    &params(json!({"field": field, "text": "gitlab"})),
-                )
-                .unwrap_err();
-            assert!(
-                err.to_string()
-                    .contains("must not be empty or start with `$`"),
-                "{field:?}: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn example_must_satisfy_parameter_schema() {
-        let yaml = VALID_WITH_PARAMS.replace("example: [1]", "example: nope");
-        let err = parse(&yaml).unwrap_err();
-        assert!(
-            err.to_string().contains("does not satisfy its own schema"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn undeclared_param_is_rejected() {
-        let yaml = r#"
-name: q
-description: A query.
-query:
-  entity: { $param: entity }
-"#;
-        let err = parse(yaml).unwrap_err();
-        assert!(err.to_string().contains("undeclared parameter"), "{err}");
-    }
-
-    #[test]
-    fn unused_declared_param_is_rejected() {
-        let yaml = r#"
-name: q
-description: A query.
-parameters:
-  entity:
-    schema: { type: string }
-    example: User
-query:
-  limit: 1
-"#;
-        let err = parse(yaml).unwrap_err();
-        assert!(err.to_string().contains("never uses it"), "{err}");
-    }
-
-    #[test]
-    fn name_must_match_file_stem() {
-        let err = parse(&VALID.replace("name: q", "name: other")).unwrap_err();
-        assert!(err.to_string().contains("file stem"), "{err}");
-    }
-
-    #[test]
-    fn description_must_be_non_empty() {
-        let err = parse(&VALID.replace("A query.", "''")).unwrap_err();
-        assert!(err.to_string().contains("description"), "{err}");
-    }
-
-    #[test]
-    fn unknown_binding_is_rejected() {
-        let yaml = VALID.replace("current_user_id", "current_project_id");
-        let err = parse(&yaml).unwrap_err();
-        assert!(err.to_string().contains("unknown binding"), "{err}");
-    }
-
-    #[test]
-    fn undeclared_binding_is_rejected() {
-        let err = parse(&VALID.replace("bindings: [current_user_id]", "")).unwrap_err();
-        assert!(err.to_string().contains("undeclared binding"), "{err}");
-    }
-
-    #[test]
-    fn unused_declared_binding_is_rejected() {
-        let yaml = r#"
-name: q
-description: A query.
-bindings: [current_user_id]
-query:
-  limit: 1
-"#;
-        let err = parse(yaml).unwrap_err();
-        assert!(err.to_string().contains("never uses it"), "{err}");
-    }
-
-    #[test]
-    fn binding_object_must_have_single_key() {
-        let yaml = r#"
-name: q
-description: A query.
-bindings: [current_user_id]
-query:
-  node_ids:
-    - { $binding: current_user_id, extra: 1 }
-"#;
-        let err = parse(yaml).unwrap_err();
-        assert!(err.to_string().contains("no other keys"), "{err}");
-    }
-
-    #[test]
-    fn binding_value_must_be_string() {
-        let yaml = r#"
-name: q
-description: A query.
-bindings: [current_user_id]
-query:
-  node_ids:
-    - { $binding: 7 }
-"#;
-        let err = parse(yaml).unwrap_err();
-        assert!(err.to_string().contains("must be a string"), "{err}");
-    }
-
-    #[test]
-    fn unknown_top_level_yaml_key_is_rejected() {
-        let err = parse(&format!("{VALID}extra_key: 1\n")).unwrap_err();
-        assert!(matches!(err, NamedQueryError::Parse { .. }), "{err}");
     }
 }

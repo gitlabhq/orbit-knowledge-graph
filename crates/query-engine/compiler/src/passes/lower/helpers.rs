@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use orbit_utils::traversal_path::TraversalPath;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -15,43 +14,8 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
-const TEXT_TRUNCATION_SUFFIX: &str = " [truncated]";
-
-pub(super) fn text_excerpt_projection(
-    alias: &str,
-    column: &str,
-    text_excerpt: &TextExcerpt,
-) -> Expr {
-    let value = Expr::col(alias, column);
-    if !text_excerpt.columns.contains(column) {
-        return value;
-    }
-
-    let excerpt = Expr::func(
-        "substringUTF8",
-        vec![
-            value.clone(),
-            Expr::lit(1),
-            Expr::lit(text_excerpt.max_chars),
-        ],
-    );
-    let shortened = Expr::binary(
-        Op::Gt,
-        Expr::func("length", vec![value]),
-        Expr::func("length", vec![excerpt.clone()]),
-    );
-    let suffix = Expr::func(
-        "if",
-        vec![
-            shortened,
-            Expr::string(TEXT_TRUNCATION_SUFFIX),
-            Expr::string(""),
-        ],
-    );
-    Expr::func("concat", vec![excerpt, suffix])
-}
-
-/// Predicates applied after `FINAL` has resolved each node's latest row.
+/// The candidate-id prefilter runs these before dedup, so it may over-select
+/// stale rows; the target scan re-applies them after latest-row dedup.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
@@ -67,21 +31,22 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     predicates
 }
 
-/// Predicates for a candidate-id prefilter. These run before `FINAL`, so they
-/// may over-select stale rows, but the outer latest-row scan re-applies the
-/// same predicates after `FINAL`.
-pub(super) fn candidate_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut predicates = Vec::new();
-    for (prop, filter) in &np.filters {
-        predicates.push(filter_to_expr(alias, prop, filter));
+fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<Expr> {
+    let in_sort_key = |column: &str| sort_key.iter().any(|key| key == column);
+    let mut predicates: Vec<Expr> = np
+        .filters
+        .iter()
+        .filter(|(prop, filter)| in_sort_key(prop) && filter.filter.rhs_column.is_none())
+        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+        .collect();
+    if in_sort_key(DEFAULT_PRIMARY_KEY) {
+        if !np.node_ids.is_empty() {
+            predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+        }
+        if let Some(ref range) = np.id_range {
+            predicates.push(id_range_predicate(alias, range));
+        }
     }
-    if !np.node_ids.is_empty() {
-        predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        predicates.push(id_range_predicate(alias, range));
-    }
-    predicates.push(deleted_false(alias));
     predicates
 }
 
@@ -93,12 +58,7 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     }
     crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
-        .map(|col| {
-            SelectExpr::new(
-                text_excerpt_projection(alias, &col, &np.text_excerpt),
-                format!("{alias}_{col}"),
-            )
-        })
+        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
         .collect()
 }
 
@@ -113,27 +73,7 @@ pub(super) fn emit_node_join_with_narrowing(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
-    use_traversal_path_join: bool,
-    narrow: Option<NarrowSource>,
-    sort_key: &[String],
-) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    emit_node_join_inner(
-        from,
-        np,
-        edge_alias,
-        edge_col,
-        use_traversal_path_join,
-        narrow,
-        sort_key,
-    )
-}
-
-fn emit_node_join_inner(
-    from: TableRef,
-    np: &NodePlan,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
+    node_column: &str,
     narrow: Option<NarrowSource>,
     sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
@@ -144,81 +84,45 @@ fn emit_node_join_inner(
     let alias = &np.alias;
 
     let in_predicate = narrow.map(|NarrowSource::Cte(cte_name)| Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+        expr: Box::new(Expr::col(alias, node_column)),
         cte_name,
         column: DEFAULT_PRIMARY_KEY.to_string(),
     });
 
     let selects = node_select_columns(alias, np);
-    let mut wheres = latest_node_predicates(alias, np);
-    let narrowed = in_predicate.is_some();
-    if let Some(in_predicate) = in_predicate {
-        wheres.push(in_predicate);
-    }
-
-    // Broad target: FINAL streams deduped rows in PK order so the top-level LIMIT
-    // short-circuits the join. Narrowed target: candidate set is tiny, LIMIT 1 BY is cheaper.
-    let node_scan = if narrowed {
-        let mut order_by: Vec<OrderExpr> = sort_key
-            .iter()
-            .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-            .collect();
-        order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-        let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                order_by,
-                limit_by: Some((1, limit_by_cols)),
-                ..Default::default()
-            },
+    let scan = match in_predicate {
+        Some(predicate) => limit_by_scan(
+            table,
             alias,
-        )
-    } else {
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan_final(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                ..Default::default()
-            },
-            alias,
-        )
+            vec![SelectExpr::star()],
+            sort_key,
+            std::iter::once(predicate)
+                .chain(sort_key_predicates(alias, np, sort_key))
+                .collect(),
+        ),
+        None => TableRef::scan_final(table, alias),
     };
+    let node_scan = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: scan,
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
+        },
+        alias,
+    );
 
     let joined = TableRef::join(
         JoinType::Inner,
         from,
         node_scan,
-        node_join_condition(alias, edge_alias, edge_col, use_traversal_path_join, np),
+        Expr::eq(
+            Expr::col(alias, node_column),
+            Expr::col(edge_alias, edge_col),
+        ),
     );
 
     Ok((joined, selects, vec![]))
-}
-
-fn node_join_condition(
-    alias: &str,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
-    np: &NodePlan,
-) -> Expr {
-    let mut on = Expr::eq(
-        Expr::col(alias, DEFAULT_PRIMARY_KEY),
-        Expr::col(edge_alias, edge_col),
-    );
-    if use_traversal_path_join && np.has_traversal_path {
-        on = Expr::and(
-            on,
-            Expr::eq(
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-            ),
-        );
-    }
-    on
 }
 
 // Authoritative filter: dedup with FINAL before filtering so a stale matching version can't resurrect a row.
@@ -226,6 +130,7 @@ pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
+    node_column: &str,
     ctes: &mut Vec<Cte>,
 ) -> Result<Vec<Expr>> {
     let table = np
@@ -238,7 +143,10 @@ pub(super) fn emit_filter_subquery(
     ctes.push(Cte::new(
         &cte_name,
         Query {
-            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+            select: vec![SelectExpr::new(
+                Expr::col(alias, node_column),
+                DEFAULT_PRIMARY_KEY,
+            )],
             from: TableRef::scan_final(table, alias),
             where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
             ..Default::default()
@@ -263,51 +171,29 @@ fn node_ids_dedup_scan(
             "no sort key for node table '{table}'; cannot emit LIMIT BY dedup"
         )));
     }
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-
+    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
     Ok(Query {
         select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
         order_by,
-        limit_by: Some((1, limit_by_cols)),
+        limit_by,
         ..Default::default()
     })
 }
 
-pub(super) fn node_ids_from_candidate_scan(
+pub(super) fn node_values_from_candidate_scan(
     alias: &str,
     table: &str,
+    column: &str,
     np: &NodePlan,
     extra_predicates: Vec<Expr>,
 ) -> Query {
-    let mut predicates = candidate_node_predicates(alias, np);
-    predicates.extend(extra_predicates);
-    Query {
-        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(predicates),
-        ..Default::default()
-    }
-}
-
-pub(super) fn fk_values_from_candidate_scan(
-    alias: &str,
-    table: &str,
-    fk_column: &str,
-    np: &NodePlan,
-    extra_predicates: Vec<Expr>,
-) -> Query {
-    let mut predicates = candidate_node_predicates(alias, np);
+    let mut predicates = latest_node_predicates(alias, np);
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::new(
-            Expr::col(alias, fk_column),
+            Expr::col(alias, column),
             DEFAULT_PRIMARY_KEY,
         )],
         from: TableRef::scan(table, alias),
@@ -391,6 +277,19 @@ pub(super) fn dedup_edge_scan(
     )
 }
 
+fn latest_row_dedup(
+    alias: &str,
+    sort_key: &[String],
+) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+    (order_by, Some((1, limit_by_cols)))
+}
+
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
 /// over a plain (non-`FINAL`) scan, with WHERE predicates injected for PK
 /// pruning. Reproduces `ReplacingMergeTree` latest-row semantics while keeping
@@ -404,20 +303,13 @@ pub(super) fn limit_by_scan(
     sort_key: &[String],
     where_predicates: Vec<Expr>,
 ) -> TableRef {
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-
+    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
     let query = Query {
         select,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(where_predicates),
         order_by,
-        limit_by: Some((1, limit_by_cols)),
+        limit_by,
         ..Default::default()
     };
     TableRef::subquery(query, alias)
@@ -436,27 +328,35 @@ pub(super) fn emit_denorm_tags(
         let Some(np) = plan.nodes.get(node_alias) else {
             continue;
         };
-        let Some(ref entity) = np.entity else {
-            continue;
-        };
-        let dir = if id_col == SOURCE_ID_COLUMN {
-            "source"
+        let direction = if id_col == SOURCE_ID_COLUMN {
+            query_data_model::DenormalizedDirection::Source
         } else {
-            "target"
+            query_data_model::DenormalizedDirection::Target
         };
         for (prop, filter) in &np.filters {
             let tag_id = (node_alias.clone(), prop.clone());
             if tagged.contains(&tag_id) {
                 continue;
             }
-            let key = (entity.clone(), prop.clone(), dir.to_string());
+            let Some(property) = filter.property else {
+                continue;
+            };
+            let key = query_data_model::DenormalizedKey {
+                property,
+                direction,
+            };
             // Skip hops that don't write this tag; pushing it there matches an
             // empty edge and silently drops the row.
             if !hop_carries_denorm(plan, hop, &key) {
                 continue;
             }
-            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+            if let Some(facts) = plan.denormalized.get(&key)
+                && let Some(expr) = denorm_tag_expr(
+                    edge_alias,
+                    &facts.edge_column,
+                    &facts.tag_key,
+                    &filter.filter,
+                )
             {
                 where_parts.push(expr);
                 tagged.insert(tag_id);
@@ -465,14 +365,16 @@ pub(super) fn emit_denorm_tags(
     }
 }
 
-fn hop_carries_denorm(plan: &Plan, hop: &Hop, key: &(String, String, String)) -> bool {
+fn hop_carries_denorm(plan: &Plan, hop: &Hop, key: &query_data_model::DenormalizedKey) -> bool {
     // A wildcard hop's relationship is unknown at runtime, so no tag is safe.
     if crate::passes::normalize::is_wildcard(&hop.rel_types) {
         return false;
     }
-    plan.denorm_rel_kinds
-        .get(key)
-        .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
+    plan.denormalized.get(key).is_some_and(|facts| {
+        hop.relationships
+            .iter()
+            .any(|relationship| facts.relationships.contains(relationship))
+    })
 }
 
 pub(super) fn node_id_pin_predicates(
@@ -602,12 +504,11 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
-                hop.scope_prefix.as_ref(),
             )
         })
         .collect();
 
-    let union = TableRef::union_all(queries, alias);
+    let union = TableRef::union_all(queries, alias).with_relationship(hop.input_index);
 
     // For incoming edges, the from_node is on the target side and the
     // to_node is on the source side (the depth arm already swaps the
@@ -639,20 +540,7 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
-    scope_prefix: Option<&TraversalPath>,
 ) -> Query {
-    let scope_pred = |alias: &str| -> Option<Expr> {
-        scope_prefix.map(|p| {
-            Expr::func(
-                "startsWith",
-                vec![
-                    Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                    Expr::string(p.as_str()),
-                ],
-            )
-        })
-    };
-
     let mut from = TableRef::scan(edge_table, "e1");
     let mut where_parts = Vec::new();
     if let Some(types) = type_filter
@@ -669,7 +557,6 @@ pub(super) fn build_depth_arm(
         where_parts.push(f);
     }
     where_parts.push(deleted_false("e1"));
-    where_parts.extend(scope_pred("e1"));
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
@@ -690,9 +577,6 @@ pub(super) fn build_depth_arm(
             )
         {
             join_on = Expr::and(join_on, tc);
-        }
-        if let Some(sp) = scope_pred(&curr) {
-            join_on = Expr::and(join_on, sp);
         }
         from = TableRef::join(JoinType::Inner, from, right, join_on);
     }

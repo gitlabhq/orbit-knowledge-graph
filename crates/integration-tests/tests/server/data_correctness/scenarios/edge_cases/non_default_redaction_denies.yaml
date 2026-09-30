@@ -17,6 +17,8 @@ query:
         "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
         "limit": 20
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE mr.id IN [2000, 2001] RETURN mr, d LIMIT 20
 
 expect:
   node_count: 2

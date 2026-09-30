@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 
-use super::TextExcerpt;
-
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
 
 use super::{Plan, PlanBody, Strategy};
+use query_data_model::QueryDataModel;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HydrationCompileOptions {
+    pub dynamic: bool,
+    pub path_segment_budget: Option<usize>,
+}
 
 pub struct HydrationNodePlan {
     pub alias: String,
@@ -15,7 +20,6 @@ pub struct HydrationNodePlan {
     pub id_property: String,
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
-    pub text_excerpt: TextExcerpt,
     /// Traversal paths extracted from the base query, used to narrow hydration
     /// scans via `startsWith(traversal_path, tp)`.
     pub traversal_paths: Vec<TraversalPath>,
@@ -24,7 +28,11 @@ pub struct HydrationNodePlan {
     pub sort_key: Vec<String>,
 }
 
-pub fn plan_hydration(input: &Input) -> Result<Plan> {
+pub fn plan_hydration(
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+    options: HydrationCompileOptions,
+) -> Result<Plan> {
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
@@ -35,8 +43,9 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
         .iter()
         .map(|node| {
             let table = node
-                .table
-                .as_ref()
+                .entity
+                .as_deref()
+                .and_then(|entity| model.entity_table(entity))
                 .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
             let entity = node
                 .entity
@@ -46,23 +55,20 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
             };
-            let sort_key = input
-                .compiler
-                .table_sort_keys
-                .get(table)
+            let sort_key = model
+                .table_sort_key(table)
                 .filter(|sk| !sk.is_empty())
-                .cloned()
+                .map(<[String]>::to_vec)
                 .ok_or_else(|| {
                     QueryError::Lowering(format!("hydration table {table} has no sort key"))
                 })?;
             Ok(HydrationNodePlan {
                 alias: node.id.clone(),
-                table: table.clone(),
+                table: table.to_string(),
                 entity: entity.clone(),
                 id_property: node.id_property.clone(),
                 node_ids: node.node_ids.clone(),
                 columns,
-                text_excerpt: TextExcerpt::default(),
                 traversal_paths: node.traversal_paths.clone(),
                 sort_key,
             })
@@ -73,14 +79,13 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
         nodes: HashMap::new(),
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.limit,
-        order_by: None,
-        cursor: None,
         node_edge_mappings: HashMap::new(),
-        denorm_columns: HashMap::new(),
-        denorm_rel_kinds: HashMap::new(),
+        denormalized: HashMap::new(),
         table_columns: HashMap::new(),
         table_sort_keys: HashMap::new(),
-        body: PlanBody::Hydration(hydration_nodes),
+        body: PlanBody::Hydration {
+            nodes: hydration_nodes,
+            options,
+        },
     })
 }

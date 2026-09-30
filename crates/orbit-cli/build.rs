@@ -5,6 +5,7 @@ fn main() {
     }
 
     validate_prompts();
+    validate_skills();
 
     println!(
         "cargo:rerun-if-changed={}",
@@ -52,4 +53,24 @@ fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
     println!("cargo:rerun-if-changed={}", dir.display());
     orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+}
+
+fn validate_skills() {
+    let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let remote = repository.join("skills/orbit");
+    let local = repository.join("skills/orbit-cli");
+    let commands = repository.join("crates/orbit-cli/src/main.rs");
+    println!("cargo:rerun-if-changed={}", remote.display());
+    println!("cargo:rerun-if-changed={}", local.display());
+    println!("cargo:rerun-if-changed={}", commands.display());
+    let validation = orbit_prompts::validate_skill_pair(remote, local, commands)
+        .unwrap_or_else(|error| panic!("Orbit skill validation failed: {error}"));
+    println!(
+        "cargo:rustc-env=ORBIT_SKILL_REMOTE_COMMANDS={}",
+        validation
+            .remote_commands
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 }

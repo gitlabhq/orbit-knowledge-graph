@@ -119,8 +119,8 @@ tests:
 
   - name: "Admin extends User via struct embedding"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'main.Admin' AND e.edge_kind = 'Extends'
+      MATCH (caller:Definition)-[e:EXTENDS]->(callee:Definition)
+      WHERE caller.fqn = 'main.Admin'
       RETURN callee.fqn AS parent
     assert:
       - { row: { parent: "main.User" } }
@@ -130,8 +130,8 @@ tests:
   - name: "main calls exactly NewDatabase, NewUserService, FindUser, Greet, Promote, Query"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.main' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.main'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -144,7 +144,7 @@ tests:
           - { row: { callee: "main.Query" } }
       # No false positives: main does NOT call Close, Save, or DeleteUser
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
           WHERE caller.fqn = 'main.main'
             AND callee.name IN ['Close', 'Save', 'DeleteUser']
           RETURN callee.name
@@ -156,14 +156,14 @@ tests:
   - name: "db.Query resolves to Database.Query via NewDatabase return type"
     queries:
       - query: |
-          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Query'
           RETURN callee.fqn AS callee
         assert:
           - { row_count: 1 }
       # No false positive to Close
       - query: |
-          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Close'
           RETURN callee.fqn
         assert:
@@ -173,7 +173,7 @@ tests:
 
   - name: "admin.Greet resolves via User embedding"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Greet'
       RETURN callee.fqn AS callee
     assert:
@@ -184,8 +184,8 @@ tests:
   - name: "DeleteUser calls exactly FindUser and Save"
     queries:
       - query: |
-          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'main.DeleteUser' AND e.edge_kind = 'Calls'
+          MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+          WHERE caller.fqn = 'main.DeleteUser'
           RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
@@ -193,7 +193,7 @@ tests:
           - { row: { callee: "main.Save" } }
       # No false positive to other UserService methods
       - query: |
-          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.fqn = 'main.DeleteUser'
             AND callee.name IN ['Query', 'Close', 'Greet', 'Promote']
           RETURN callee.name

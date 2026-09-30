@@ -4,6 +4,7 @@
 
 use ontology::constants::*;
 
+use super::NodeBinding;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
@@ -17,12 +18,13 @@ use crate::passes::shared::{
 
 pub fn emit_neighbors(
     plan: &Plan,
+    input: &Input,
     center_alias: &str,
     direction: Direction,
     edge: &EdgeTableConfig,
     has_non_denorm: bool,
     center_tp_lookup: Option<&(String, String)>,
-) -> Result<Node> {
+) -> Result<(Node, NodeBinding)> {
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -45,7 +47,7 @@ pub fn emit_neighbors(
     fn build_center_dedup(
         alias: &str,
         table: &str,
-        filters: &[(String, InputFilter)],
+        filters: &[(String, crate::passes::plan::BoundFilter)],
         node_ids: &[i64],
         id_range: Option<&InputIdRange>,
         extra_select: &[&str],
@@ -70,41 +72,12 @@ pub fn emit_neighbors(
         dedup_subquery(alias, table, select, scan_where)
     }
 
-    let edge_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::col(edge_alias, SOURCE_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, TARGET_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN)),
-        ]
-    };
-    let projected_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::ident(redaction_id_column(&center_id))),
-            OrderExpr::asc(Expr::ident(neighbor_id_column())),
-            OrderExpr::asc(Expr::ident(relationship_type_column())),
-            OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
-        ]
-    };
-    let tie_breakers = || {
-        if direction == Direction::Both {
-            projected_tiebreakers()
+    let order_by = match &input.order_by {
+        Some(ob) => vec![if ob.direction == OrderDirection::Desc {
+            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
         } else {
-            edge_tiebreakers()
-        }
-    };
-    let order_by = match &plan.order_by {
-        Some(ob) => {
-            let mut exprs = vec![if ob.direction == OrderDirection::Desc {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }];
-            if plan.cursor.is_some() {
-                exprs.extend(tie_breakers());
-            }
-            exprs
-        }
-        None if plan.cursor.is_some() => tie_breakers(),
+            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
+        }],
         None => vec![],
     };
 
@@ -128,10 +101,10 @@ pub fn emit_neighbors(
             Direction::Both => unreachable!(),
         };
 
-        let denorm_dir = if dir == Direction::Outgoing {
-            "source"
+        let denorm_direction = if dir == Direction::Outgoing {
+            query_data_model::DenormalizedDirection::Source
         } else {
-            "target"
+            query_data_model::DenormalizedDirection::Target
         };
 
         let arm_where = |a: &str| -> Vec<Expr> {
@@ -171,10 +144,21 @@ pub fn emit_neighbors(
 
         let mut where_parts: Vec<Expr> = Vec::new();
         // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
-        for (prop, filter) in &center_filters {
-            let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+        for (_, filter) in &center_filters {
+            let Some(property) = filter.property else {
+                continue;
+            };
+            let key = query_data_model::DenormalizedKey {
+                property,
+                direction: denorm_direction,
+            };
+            if let Some(facts) = plan.denormalized.get(&key)
+                && let Some(expr) = denorm_tag_expr(
+                    edge_alias,
+                    &facts.edge_column,
+                    &facts.tag_key,
+                    &filter.filter,
+                )
             {
                 where_parts.push(expr);
             }
@@ -283,7 +267,7 @@ pub fn emit_neighbors(
         && center_uses_default_pk
         && edge_table.len() == 1;
 
-    if fused_both_eligible {
+    let query = if fused_both_eligible {
         let mut q = build_fused_both_arm(
             &center_id,
             &center_entity,
@@ -296,20 +280,35 @@ pub fn emit_neighbors(
             edge_alias,
         );
         q.order_by = order_by;
-        q.limit = Some(plan.limit);
-        Ok(Node::Query(Box::new(q)))
+        q.limit = Some(input.limit);
+        q
     } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
-        outgoing.limit = Some(plan.limit);
-        Ok(Node::Query(Box::new(outgoing)))
+        outgoing.limit = Some(input.limit);
+        outgoing
     } else {
         let mut arm = build_arm(direction);
         arm.order_by = order_by;
-        arm.limit = Some(plan.limit);
-        Ok(Node::Query(Box::new(arm)))
-    }
+        arm.limit = Some(input.limit);
+        arm
+    };
+    let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
+        query
+            .select
+            .iter()
+            .find(|select| {
+                select.alias.as_deref() == Some(redaction_id_column(center_alias).as_str())
+            })
+            .expect("neighbors emits its center identity")
+            .expr
+            .clone()
+    });
+    Ok((
+        Node::Query(Box::new(query)),
+        NodeBinding::Projected { role_identity },
+    ))
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
@@ -325,13 +324,16 @@ fn build_fused_both_arm(
     center_entity: &str,
     center_has_tp: bool,
     center_node_ids: &[i64],
-    center_filters: &[(String, InputFilter)],
+    center_filters: &[(String, crate::passes::plan::BoundFilter)],
     plan: &Plan,
     edge: &EdgeTableConfig,
     edge_table: &str,
     edge_alias: &str,
 ) -> Query {
-    let arm_predicate = |kind_col: &str, id_col: &str, denorm_dir: &str| -> Expr {
+    let arm_predicate = |kind_col: &str,
+                         id_col: &str,
+                         direction: query_data_model::DenormalizedDirection|
+     -> Expr {
         let mut parts = vec![Expr::eq(
             Expr::col(edge_alias, kind_col),
             Expr::string(center_entity),
@@ -339,14 +341,21 @@ fn build_fused_both_arm(
         if !center_node_ids.is_empty() {
             parts.push(id_list_predicate(edge_alias, id_col, center_node_ids));
         }
-        for (prop, filter) in center_filters {
-            let key = (
-                center_entity.to_string(),
-                prop.clone(),
-                denorm_dir.to_string(),
-            );
-            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
-                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+        for (_, filter) in center_filters {
+            let Some(property) = filter.property else {
+                continue;
+            };
+            let key = query_data_model::DenormalizedKey {
+                property,
+                direction,
+            };
+            if let Some(facts) = plan.denormalized.get(&key)
+                && let Some(expr) = denorm_tag_expr(
+                    edge_alias,
+                    &facts.edge_column,
+                    &facts.tag_key,
+                    &filter.filter,
+                )
             {
                 parts.push(expr);
             }
@@ -354,8 +363,16 @@ fn build_fused_both_arm(
         Expr::conjoin(parts).expect("fused arm predicate always has the center-kind conjunct")
     };
 
-    let source_arm = arm_predicate(SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, "source");
-    let target_arm = arm_predicate(TARGET_KIND_COLUMN, TARGET_ID_COLUMN, "target");
+    let source_arm = arm_predicate(
+        SOURCE_KIND_COLUMN,
+        SOURCE_ID_COLUMN,
+        query_data_model::DenormalizedDirection::Source,
+    );
+    let target_arm = arm_predicate(
+        TARGET_KIND_COLUMN,
+        TARGET_ID_COLUMN,
+        query_data_model::DenormalizedDirection::Target,
+    );
 
     // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
     let out_tuple = Expr::func(

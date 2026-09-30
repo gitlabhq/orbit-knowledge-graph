@@ -13,7 +13,7 @@ use testcontainers::ContainerAsync;
 use testcontainers_modules::nats::Nats;
 use tokio_util::sync::CancellationToken;
 
-use super::super::common::dispatch::start_nats;
+use super::super::common::dispatch::{serving_flag, start_nats};
 
 const LEGACY_SCHEMA_VERSION: u32 = 93;
 
@@ -240,8 +240,13 @@ async fn dispatcher_rejects_conflicting_archives_before_migration() {
     let conflicting = archive_with_extra_newline(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
 
-    let result =
-        indexer::run_dispatcher(&context.config, &conflicting, CancellationToken::new()).await;
+    let result = indexer::run_dispatcher(
+        &context.config,
+        &conflicting,
+        serving_flag(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(
         result,
@@ -261,7 +266,13 @@ async fn dispatcher_rejects_invalid_archives_before_migration() {
     let invalid = archive_with_invalid_schema(*SCHEMA_VERSION);
     catalog.publish(&archive).await.unwrap();
 
-    let result = indexer::run_dispatcher(&context.config, &invalid, CancellationToken::new()).await;
+    let result = indexer::run_dispatcher(
+        &context.config,
+        &invalid,
+        serving_flag(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(
         result,

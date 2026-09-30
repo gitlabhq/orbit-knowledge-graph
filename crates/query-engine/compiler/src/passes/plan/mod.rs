@@ -9,18 +9,23 @@ pub mod pathfinding;
 
 use std::collections::{HashMap, HashSet};
 
-use ontology::{DataType, FieldSource, Ontology};
-
 use crate::error::{QueryError, Result};
 use crate::input::*;
-
-const WORKHORSE_GRPC_MESSAGE_CAP_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_UTF8_BYTES_PER_CHAR: u64 = 4;
 
 pub use edge_chain::{
     FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
 };
-pub use hydration::HydrationNodePlan;
+pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
+use query_data_model::QueryDataModel;
+pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
+
+#[derive(Clone)]
+pub struct BoundFilter {
+    pub filter: InputFilter,
+    pub property: Option<query_data_model::PropertyId>,
+    pub data_type: Option<ontology::DataType>,
+    pub selectivity: ontology::FieldSelectivity,
+}
 
 /// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
 pub type QueryPlan = Plan;
@@ -29,14 +34,8 @@ pub struct Plan {
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
     pub strategy: Strategy,
-    pub limit: u32,
-    pub order_by: Option<InputOrderBy>,
-    pub cursor: Option<InputCursor>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
-    /// Relationship kinds whose edge writes each denorm tag, keyed like
-    /// `denorm_columns`.
-    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
+    pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     /// Per-table column sets from the ontology. Used by the lowerer to
     /// push node-level filters (e.g. project_id, branch) down to edge
     /// scans when the edge table has those columns.
@@ -46,62 +45,33 @@ pub struct Plan {
     pub body: PlanBody,
 }
 
-impl Plan {
-    pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
-        self.node_edge_mappings.clone()
-    }
-
-    pub(crate) fn resolve_text_excerpts(&mut self, ontology: &Ontology) {
-        let max_chars = calculate_text_excerpt_chars(self.limit);
-        for node in self.nodes.values_mut() {
-            node.text_excerpt = TextExcerpt {
-                columns: text_excerpt_columns(node.entity.as_deref(), ontology),
-                max_chars,
-            };
-        }
-        if let PlanBody::Hydration(nodes) = &mut self.body {
-            for node in nodes {
-                node.text_excerpt = TextExcerpt {
-                    columns: text_excerpt_columns(Some(&node.entity), ontology),
-                    max_chars,
-                };
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TextExcerpt {
-    pub columns: HashSet<String>,
-    pub max_chars: u32,
-}
-
-fn calculate_text_excerpt_chars(rows_per_page: u32) -> u32 {
-    let page_chars = WORKHORSE_GRPC_MESSAGE_CAP_BYTES / MAX_UTF8_BYTES_PER_CHAR;
-    (page_chars / u64::from(rows_per_page.max(1))) as u32
-}
-
-fn text_excerpt_columns(entity: Option<&str>, ontology: &Ontology) -> HashSet<String> {
-    let Some(node) = entity.and_then(|name| ontology.get_node(name)) else {
-        return HashSet::new();
-    };
-
-    let mut excerpt_columns: HashSet<String> = node
-        .fields
+pub fn denormalized_facts(
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+) -> HashMap<DenormalizedKey, DenormalizedProperty> {
+    input
+        .nodes
         .iter()
-        .filter(|field| field.column_name().is_some() && field.data_type == DataType::String)
-        .map(|field| field.name.clone())
-        .collect();
-
-    for field in &node.fields {
-        if let FieldSource::Virtual(source) = &field.source {
-            for lookup_input in &source.depends_on {
-                excerpt_columns.remove(lookup_input);
-            }
-        }
-    }
-
-    excerpt_columns
+        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
+        .flat_map(|(entity, node)| {
+            [DenormalizedDirection::Source, DenormalizedDirection::Target]
+                .into_iter()
+                .flat_map(move |direction| {
+                    node.filters.keys().filter_map(move |property| {
+                        let property = model.graph().property_id(entity, property)?;
+                        let key = DenormalizedKey {
+                            property,
+                            direction,
+                        };
+                        model
+                            .denormalized()
+                            .property(key)
+                            .cloned()
+                            .map(|facts| (key, facts))
+                    })
+                })
+        })
+        .collect()
 }
 
 pub enum PlanBody {
@@ -120,7 +90,10 @@ pub enum PlanBody {
         center_tp_lookup: Option<(String, String)>,
     },
     PathFinding(PathFindingBody),
-    Hydration(Vec<HydrationNodePlan>),
+    Hydration {
+        nodes: Vec<HydrationNodePlan>,
+        options: HydrationCompileOptions,
+    },
 }
 
 pub struct PathFindingBody {
@@ -151,19 +124,25 @@ pub struct EdgeTableConfig {
 }
 
 impl EdgeTableConfig {
-    pub fn from_input(metadata: &CompilerMetadata, rel_types: &[String]) -> Self {
+    pub fn from_model(model: &(impl QueryDataModel + ?Sized), rel_types: &[String]) -> Self {
         use std::collections::BTreeSet;
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            if let Some(kinds) = metadata.edge_source_kinds.get(rt) {
-                source_kinds.extend(kinds.iter().cloned());
-            }
-            if let Some(kinds) = metadata.edge_target_kinds.get(rt) {
-                target_kinds.extend(kinds.iter().cloned());
+            if let Some(route) = model.relationship_route(rt) {
+                source_kinds.extend(
+                    route
+                        .source_entities()
+                        .map(|entity| model.graph().entity(entity).name.clone()),
+                );
+                target_kinds.extend(
+                    route
+                        .target_entities()
+                        .map(|entity| model.graph().entity(entity).name.clone()),
+                );
             }
         }
-        let tables = metadata.resolve_edge_tables(rel_types);
+        let tables = model.relationship_tables(rel_types);
         Self {
             rel_type_filter: if rel_types.is_empty() {
                 None
@@ -187,11 +166,40 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
 }
 
-pub fn plan(input: &mut Input) -> Result<Plan> {
+pub fn plan_clickhouse(
+    input: &Input,
+    model: &query_data_model::ClickHouseDataModel,
+    hydration_options: HydrationCompileOptions,
+    table_scans: &HashSet<String>,
+) -> Result<Plan> {
+    plan(input, model, hydration_options, true, table_scans)
+}
+
+pub fn plan_duckdb(
+    input: &Input,
+    model: &query_data_model::DuckDbDataModel,
+    hydration_options: HydrationCompileOptions,
+    table_scans: &HashSet<String>,
+) -> Result<Plan> {
+    plan(input, model, hydration_options, false, table_scans)
+}
+
+fn plan<M>(
+    input: &Input,
+    model: &M,
+    hydration_options: HydrationCompileOptions,
+    use_fk_elision: bool,
+    table_scans: &HashSet<String>,
+) -> Result<Plan>
+where
+    M: QueryDataModel + ?Sized,
+{
     match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => Ok(edge_chain::plan(input)),
-        QueryType::Neighbors => neighbors::plan_neighbors(input),
-        QueryType::PathFinding => pathfinding::plan_pathfinding(input),
-        QueryType::Hydration => hydration::plan_hydration(input),
+        QueryType::Traversal | QueryType::Aggregation => {
+            Ok(edge_chain::plan(input, model, use_fk_elision, table_scans))
+        }
+        QueryType::Neighbors => neighbors::plan_neighbors(input, model),
+        QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),
+        QueryType::Hydration => hydration::plan_hydration(input, model, hydration_options),
     }
 }

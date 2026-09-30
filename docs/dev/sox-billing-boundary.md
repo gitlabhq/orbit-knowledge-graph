@@ -12,27 +12,27 @@ into the billing path, read this first.
 
 The `orbit-billing` crate emits the Snowplow billing events that GitLab's
 fulfillment systems use to bill customers for Orbit usage. Changes to the
-billing-emission code path are in scope for SOX (Sarbanes-Oxley) controls:
-the events the system emits must accurately reflect billable activity, and
-the surface that produces them must be auditable.
+billing-emission code path are in scope for SOX (Sarbanes-Oxley) controls.
+The events the system emits must accurately reflect billable activity. The
+surface that produces them must be auditable.
 
-See ADR 013 — `docs/design-documents/decisions/013_billing_sox_scope.md` —
+See ADR 013 (`docs/design-documents/decisions/013_billing_sox_scope.md`)
 for the formal scope definition and audit context.
 
 ## Architecture in one paragraph
 
 `orbit-billing` is the only crate that builds and emits billing events.
 Inside `orbit-server`, the file `crates/orbit-server/src/billing_adapter.rs`
-is the sole `Claims → BillingInputs` conversion point — every field that
+is the sole `Claims → BillingInputs` conversion point. Every field that
 ends up in a billing event flows through this file. A small number of
 other files in `orbit-server` invoke those conversions at the call site
-(e.g. `billing_adapter::billing_inputs(&claims, …)`) and hold references to
+(e.g. `billing_adapter::billing_inputs(&claims, …)`). They hold references to
 `BillingTracker` / `QuotaService` constructed at startup. They do not
-define what data crosses into a billing event — that logic lives only
+define what data crosses into a billing event. That logic lives only
 in `billing_adapter.rs`.
 
 The existing hard gate around this boundary is **CODEOWNERS**
-(`.gitlab/CODEOWNERS`), which routes `/crates/orbit-billing/`,
+(`.gitlab/CODEOWNERS`). It routes `/crates/orbit-billing/`,
 `/crates/orbit-server/src/billing_adapter.rs`, and a small set of related
 paths to the SOX-billing approver group. Changes to those paths require
 explicit SOX approval to merge.
@@ -55,7 +55,7 @@ CODEOWNERS group.
 
 Do not add `pub use orbit_billing::...` (or equivalent re-export) anywhere
 in `orbit-server`. A re-export silently widens the SOX scope through the
-public API of `orbit-server` — every crate that depends on `orbit-server`
+public API of `orbit-server`. Every crate that depends on `orbit-server`
 would gain access without being on the explicit allowlist.
 
 ### R3. Billing-relevant data only flows through `billing_adapter.rs`
@@ -102,9 +102,9 @@ silently break it. Stop and surface the conflict to the human owner of
 the task. The right answer is almost always one of:
 
 - Move the change into `billing_adapter.rs`.
-- If the change must introduce a new file that touches billing and that
-  file cannot live in `billing_adapter.rs`, add the new path to the
-  `[SOX Billing]` section in `.gitlab/CODEOWNERS` in the same MR so it
+- A new file may touch billing and be unable to live in
+  `billing_adapter.rs`. In that case, add the new path to the
+  `[SOX Billing]` section in `.gitlab/CODEOWNERS` in the same MR. It then
   falls under the existing hard gate from the start.
 - Surface the concern and ask for explicit approval from someone on the
   SOX-billing CODEOWNERS group.
@@ -113,6 +113,6 @@ the task. The right answer is almost always one of:
 
 When you change the rules in this document, also update the corresponding
 inline rules in `.gitlab/duo/mr-review-instructions.yml`. GitLab Duo cannot
-follow file references from its custom review instructions, so the YAML
-file carries its own copy of the rules and must be kept in sync with this
-document.
+follow file references from its custom review instructions. So the YAML
+file carries its own copy of the rules. That copy must be kept in sync with
+this document.

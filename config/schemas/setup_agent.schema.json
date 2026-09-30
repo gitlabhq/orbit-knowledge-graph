@@ -2,15 +2,29 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "setup_agent.schema.json",
   "title": "Orbit setup assistant spec",
-  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: a managed instruction-file block, marker-owned JSON merges, templated files, and string registrations. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
+  "description": "One AI coding assistant configured by `orbit setup`, described as generic operations: detection paths, a managed instruction-file block, marker-owned JSON merges, templated files, string registrations, an MCP server entry, and skill directories. Each file's name field must match its file stem. Applied by crates/orbit-cli/src/commands/setup.",
   "type": "object",
-  "required": ["name", "instruction_file"],
+  "required": ["name", "title", "detect", "instruction_file"],
   "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
       "description": "Assistant identifier accepted by `orbit setup <ASSISTANT>`. Must match the YAML file stem."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name shown in the setup wizard, e.g. Claude Code."
+    },
+    "detect": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^(\\$[A-Z_][A-Z0-9_]*(/.*)?|~/.+)$"
+      },
+      "description": "Paths whose existence means the assistant is installed. `$VAR` reads an environment variable (skipped when unset), `~/` is the home directory."
     },
     "instruction_file": {
       "$ref": "#/definitions/scopedPath",
@@ -33,6 +47,36 @@
       "minItems": 1,
       "items": { "$ref": "#/definitions/registration" },
       "description": "Strings appended to a JSON array in the assistant's config, e.g. a plugin list."
+    },
+    "mcp": {
+      "type": "object",
+      "required": ["file", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "$ref": "#/definitions/scopedPath" },
+        "format": {
+          "type": "string",
+          "enum": ["claude", "codex", "opencode"],
+          "description": "Serializer for the MCP entry: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON with an array command."
+        }
+      },
+      "description": "Config file that receives the shared `mcp_server` entry from setup.yaml."
+    },
+    "skills": {
+      "type": "object",
+      "required": ["dir"],
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "$ref": "#/definitions/scopedPath",
+          "description": "Skills directory the assistant scans. The embedded skill is written to <dir>/<skill name>/."
+        },
+        "link": {
+          "$ref": "#/definitions/scopedPath",
+          "description": "Second skills directory that receives a symlink to the written skill, for assistants that do not scan `dir`."
+        }
+      },
+      "description": "Where the embedded skill is installed on disk."
     }
   },
   "definitions": {

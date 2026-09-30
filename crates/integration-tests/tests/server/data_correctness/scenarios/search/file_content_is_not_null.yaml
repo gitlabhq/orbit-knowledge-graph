@@ -15,6 +15,8 @@ query:
       "order_by": "f.id",
       "limit": 10
     }
+  gql: |
+    MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content IS NOT NULL RETURN f.path, f.project_id, f.content ORDER BY f.id LIMIT 10
 
 expect:
   node_count: 4

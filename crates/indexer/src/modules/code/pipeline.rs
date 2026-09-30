@@ -4,13 +4,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
+use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig, ProgressObserver};
 use orbit_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
-use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
+use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
@@ -19,16 +19,32 @@ use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::locking::LockGuard;
-use crate::observer::IndexingObserver;
+use crate::nats::ProgressNotifier;
+use crate::observer::{IndexingMode, IndexingObserver};
 use orbit_utils::traversal_path::TraversalPath;
 
+#[derive(Clone)]
 pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
     pub traversal_path: TraversalPath,
     pub task_id: i64,
     pub commit_sha: Option<String>,
-    pub had_prior_checkpoint: bool,
+    pub checkpoint: CodeCheckpoint,
+}
+
+/// Keeps the NATS message alive during long pipeline runs so it is not redelivered.
+struct NatsHeartbeat {
+    runtime: tokio::runtime::Handle,
+    notifier: ProgressNotifier,
+}
+
+impl ProgressObserver for NatsHeartbeat {
+    fn family_finished(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.runtime.block_on(self.notifier.notify_in_progress());
+        }));
+    }
 }
 
 pub enum IndexOutcome {
@@ -92,11 +108,11 @@ impl WorkClock {
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
-    checkpoint: CodeIndexingCheckpoint,
+    request: IndexingRequest,
+    indexed_at: DateTime<Utc>,
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
-    had_prior_checkpoint: bool,
 }
 
 impl ProjectCommit {
@@ -112,34 +128,45 @@ impl ProjectCommit {
     async fn finalize(&self) {
         if self.failed.load(Ordering::Acquire) {
             warn!(
-                project_id = self.checkpoint.project_id,
+                project_id = self.request.project_id,
                 "a buffered write failed; skipping checkpoint so the project is re-indexed",
             );
             return;
         }
-        let cp = &self.checkpoint;
+        let mut checkpoint = self.request.checkpoint.clone();
         // A first index into this schema version (backfill or new project) has no
         // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
-        if self.had_prior_checkpoint
+        if checkpoint.indexing_mode() == IndexingMode::Incremental
             && let Err(error) = self
                 .cleaner
-                .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+                .delete_stale_data(
+                    &checkpoint.traversal_path,
+                    checkpoint.project_id,
+                    &checkpoint.branch,
+                    self.indexed_at,
+                )
                 .await
         {
             warn!(
-                project_id = cp.project_id,
+                project_id = checkpoint.project_id,
                 %error,
                 "failed to delete stale data, will retry on next indexing"
             );
         }
-        match self.store.set_checkpoint(cp).await {
+
+        checkpoint.complete(
+            self.request.task_id,
+            self.request.commit_sha.clone(),
+            self.indexed_at,
+        );
+        match self.store.save(&checkpoint).await {
             Ok(()) => info!(
-                project_id = cp.project_id,
-                task_id = cp.last_task_id,
+                project_id = checkpoint.project_id,
+                task_id = checkpoint.last_task_id,
                 "completed code indexing"
             ),
             Err(e) => warn!(
-                project_id = cp.project_id,
+                project_id = checkpoint.project_id,
                 error = %e,
                 "failed to checkpoint code indexing; project will be re-indexed",
             ),
@@ -361,15 +388,10 @@ impl CodeIndexer {
                     .record_empty_repository(reason.as_metric_label());
                 self.metrics.record_fetch_duration(fetch_start.elapsed());
                 // No rows to flush, so checkpoint directly rather than through the sink.
+                let mut checkpoint = request.checkpoint.clone();
+                checkpoint.complete_empty_repository(request.task_id);
                 self.checkpoint_store
-                    .set_checkpoint(&CodeIndexingCheckpoint {
-                        traversal_path: request.traversal_path.clone(),
-                        project_id: request.project_id,
-                        branch: request.branch.clone(),
-                        last_task_id: request.task_id,
-                        last_commit: None,
-                        indexed_at: Utc::now(),
-                    })
+                    .save(&checkpoint)
                     .await
                     .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
                     .record_error_stage(&self.metrics, "checkpoint")?;
@@ -399,7 +421,10 @@ impl CodeIndexer {
         within: Duration,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
+        let parseable = repository.file_inventory.count_by(|e| {
+            e.decision == code_graph::v2::Decision::Parse
+                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
+        });
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -510,14 +535,10 @@ impl CodeIndexer {
         cancel: CancellationToken,
     ) -> PipelineConfig {
         let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
-        let handle = tokio::runtime::Handle::current();
-        let progress = context.progress.clone();
-        let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
-            Some(std::sync::Arc::new(move || {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    handle.block_on(progress.notify_in_progress());
-                }));
-            }));
+        let progress = Arc::new(NatsHeartbeat {
+            runtime: tokio::runtime::Handle::current(),
+            notifier: context.progress.clone(),
+        });
         let phase_cpu_metrics = self.metrics.clone();
         let on_phase_cpu: Option<code_graph::v2::PhaseCpuObserver> =
             Some(std::sync::Arc::new(move |language, cpu| {
@@ -535,7 +556,7 @@ impl CodeIndexer {
             cross_file_resolve_timeout: to_timeout(
                 self.pipeline_config.cross_file_resolve_timeout_ms,
             ),
-            on_progress,
+            progress,
             on_phase_cpu,
             ..Default::default()
         }
@@ -577,18 +598,11 @@ impl CodeIndexer {
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
-            checkpoint: CodeIndexingCheckpoint {
-                traversal_path: request.traversal_path.clone(),
-                project_id: request.project_id,
-                branch: request.branch.clone(),
-                last_task_id: request.task_id,
-                last_commit: request.commit_sha.clone(),
-                indexed_at,
-            },
+            request: request.clone(),
+            indexed_at,
             store: self.checkpoint_store.clone(),
             cleaner: self.stale_data_cleaner.clone(),
             inflight: self.inflight.clone(),
-            had_prior_checkpoint: request.had_prior_checkpoint,
         });
 
         let writer = self.writer.clone();
@@ -632,7 +646,6 @@ impl CodeIndexer {
         let code_graph_start = Instant::now();
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
-        let stream_reasons = repository.stream_reasons.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
@@ -640,7 +653,6 @@ impl CodeIndexer {
                     &repo_dir,
                     file_inventory,
                     config,
-                    &stream_reasons,
                     tracer,
                     converter,
                     on_batch,
@@ -735,7 +747,7 @@ impl CodeIndexer {
 
         for skipped in &result.skipped {
             self.metrics
-                .record_file_skipped(skipped.kind.as_metric_label());
+                .record_file_skipped(skipped.kind.as_metric_label(), &skipped.path);
             debug!(
                 project_id = request.project_id,
                 branch = %request.branch,
@@ -746,7 +758,8 @@ impl CodeIndexer {
         }
 
         for fault in &result.faults {
-            self.metrics.record_file_fault(fault.kind.as_metric_label());
+            self.metrics
+                .record_file_fault(fault.kind.as_metric_label(), &fault.path);
         }
         if !result.faults.is_empty() {
             warn!(
@@ -787,6 +800,21 @@ async fn acquire(
 }
 
 #[cfg(test)]
+impl CodeIndexer {
+    pub(crate) async fn occupy_small_indexing_lanes(&self) -> OwnedSemaphorePermit {
+        let lanes = self
+            .small_indexing_slots
+            .clone()
+            .expect("small indexing lanes are bounded");
+        let free = lanes.available_permits() as u32;
+        lanes
+            .acquire_many_owned(free)
+            .await
+            .expect("lanes are open")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;
@@ -800,32 +828,37 @@ mod tests {
         inflight: Arc<AtomicUsize>,
         batches: usize,
     ) -> Arc<ProjectCommit> {
-        commit_with_prior(store, cleaner, inflight, batches, true)
+        commit_with_checkpoint(store, cleaner, inflight, batches, true)
     }
 
-    fn commit_with_prior(
+    fn commit_with_checkpoint(
         store: Arc<dyn CodeCheckpointStore>,
         cleaner: Arc<dyn StaleDataCleaner>,
         inflight: Arc<AtomicUsize>,
         batches: usize,
-        had_prior_checkpoint: bool,
+        indexed: bool,
     ) -> Arc<ProjectCommit> {
         inflight.fetch_add(1, Ordering::AcqRel);
+        let traversal_path = TraversalPath::new_unchecked("1/7/");
+        let mut checkpoint = CodeCheckpoint::new(traversal_path.clone(), 7, "main");
+        if indexed {
+            checkpoint.complete_empty_repository(6);
+        }
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
-            checkpoint: CodeIndexingCheckpoint {
-                traversal_path: TraversalPath::new_unchecked("1/7/"),
+            request: IndexingRequest {
                 project_id: 7,
                 branch: "main".into(),
-                last_task_id: 7,
-                last_commit: None,
-                indexed_at: Utc::now(),
+                traversal_path,
+                task_id: 7,
+                commit_sha: None,
+                checkpoint,
             },
+            indexed_at: Utc::now(),
             store,
             cleaner,
             inflight,
-            had_prior_checkpoint,
         })
     }
 
@@ -850,7 +883,7 @@ mod tests {
         commit.clone().release();
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -861,7 +894,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -874,7 +907,8 @@ mod tests {
         let store = Arc::new(MockCodeCheckpointStore::new());
         let cleaner = Arc::new(MockStaleDataCleaner::default());
         let inflight = Arc::new(AtomicUsize::new(0));
-        let commit = commit_with_prior(store.clone(), cleaner.clone(), inflight.clone(), 1, false);
+        let commit =
+            commit_with_checkpoint(store.clone(), cleaner.clone(), inflight.clone(), 1, false);
 
         commit.clone().release();
         commit.release();
@@ -883,7 +917,7 @@ mod tests {
         assert!(cleaner.calls.lock().is_empty());
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_some(),
@@ -917,7 +951,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
@@ -968,7 +1002,7 @@ mod tests {
         settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint(&TraversalPath::new_unchecked("1/7/"), 7, "main")
+                .load(&TraversalPath::new_unchecked("1/7/"), 7, "main")
                 .await
                 .unwrap()
                 .is_none(),

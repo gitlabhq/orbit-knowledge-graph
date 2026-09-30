@@ -33,8 +33,10 @@ Claude Code, OpenAI Codex, or any other tool that supports the Model Context Pro
 ## Prerequisites
 
 - GitLab Orbit is [enabled on your group](../getting-started.md).
-- You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
-  personal access tokens with `read_api` scope also work).
+- You're authenticated to GitLab. Run `glab auth login`. This command uses OAuth
+  authentication by default. Alternatively, you can use either a
+  [fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/)
+  or a personal access token with the scope set to `read_api`.
 - Your auth has access to the groups you want to query.
 - If your MCP client connects directly over native HTTP (not through
   `mcp-remote`), its OAuth request must include the `mcp_orbit` scope. See the
@@ -51,10 +53,16 @@ Commands available through `invoke_command`:
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Execute a graph query using the GitLab Orbit query DSL. |
+| `query_graph` | Execute a graph query using the GitLab Orbit query DSL, or read-only GQL text when enabled for the user. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
 | `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
 | `get_response_format` | Return the `query_graph` response JSON Schema and version. |
+
+The default-off Rails `orbit_gql_queries` feature flag selects one mode per user.
+See the [GQL access requirements](api.md#query-endpoint).
+With the flag off, `list_commands` teaches JSON and `query_graph` accepts only JSON objects.
+With the flag on, discovery teaches only GQL and `query_graph` accepts only strings. The catalog hides `get_query_dsl`, and direct or invoked DSL requests reject. Use `CALL db.schema()` for graph discovery instead.
+Clients cannot select a language, and discovery results must not be shared across users or modes.
 
 ## Connect your MCP client
 
@@ -168,12 +176,12 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
 Antigravity.
 
 > [!note]
-> A planned `glab orbit setup` subcommand will install the GitLab Orbit skill and
-> write this MCP config in one step. Until it ships, configure your MCP client
-> manually as shown above.
+> [`orbit setup --mcp`](../../local/access/cli.md#set-up-your-ai-agent)
+> configures the local server in one step. The hosted endpoint above still
+> needs the manual configuration shown.
 
 You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
-today to give the agent query recipes, DSL guidance, and troubleshooting.
+to give the agent query recipes, DSL guidance, and troubleshooting.
 
 ### Test it
 
@@ -187,9 +195,14 @@ check that GitLab Orbit is enabled on at least one of your groups.
 
 ## Billing
 
-Queries through MCP consume GitLab Credits. Each `invoke_command` call that runs
-`query_graph` uses credits from your GitLab subscription. `list_commands` and the
-`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands are free.
+During the beta, queries through MCP do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, each `invoke_command` call that runs
+`query_graph` consumes GitLab Credits from your subscription. `list_commands` and the
+`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands stay free.
+Credit rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
 
 ## Using the tools
 

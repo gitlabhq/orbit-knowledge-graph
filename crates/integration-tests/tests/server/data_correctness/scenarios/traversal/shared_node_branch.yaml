@@ -1,0 +1,46 @@
+description: Three branches through a shared merge request return the same nodes and edges
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
+        {"id": "p", "entity": "Project", "columns": ["name"]},
+        {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["note"]}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+        {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+      ],
+      "limit": 20
+    }
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest {id: 2000}),
+          (mr)-[:IN_PROJECT]->(p:Project),
+          (mr)-[:HAS_NOTE]->(n:Note {id: 3000})
+    RETURN u.username, mr.title, p.name, n.note
+    LIMIT 20
+
+expect:
+  node_count: 4
+  referential_integrity: true
+  edge_exists:
+    AUTHORED: [[1, 2000]]
+    IN_PROJECT: [[2000, 1000]]
+    HAS_NOTE: [[2000, 3000]]
+  nodes:
+    User:
+      ids: [1]
+      rows: [{ id: 1, username: alice }]
+    MergeRequest:
+      ids: [2000]
+      rows: [{ id: 2000, title: "Add feature A" }]
+    Project:
+      ids: [1000]
+      rows: [{ id: 1000, name: "Public Project" }]
+    Note:
+      ids: [3000]
+      rows: [{ id: 3000, note: "Normal note on feature A" }]

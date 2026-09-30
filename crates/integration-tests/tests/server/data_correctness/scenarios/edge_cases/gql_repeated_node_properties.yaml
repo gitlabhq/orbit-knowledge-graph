@@ -1,0 +1,9 @@
+description: Repeated node properties cannot silently overwrite the original selector
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}), (u {id: 2})
+    RETURN u
+
+expect:
+  compile_error: "declare a node's properties once"

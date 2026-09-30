@@ -19,7 +19,7 @@ impl PipelineStage for OutputStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<HydrationOutput>()
+            .remove::<HydrationOutput>()
             .ok_or_else(|| PipelineError::Execution("HydrationOutput not found in phases".into()))
             .inspect_err(|e| obs.record_error(e))?;
 
@@ -43,8 +43,12 @@ impl PipelineStage for OutputStage {
             .map(|log| log.0.clone())
             .unwrap_or_default();
 
-        let mut query_result = input.query_result.clone();
-        let pagination = Some(crate::types::paginate(&mut query_result, &compiled.input));
+        let mut query_result = input.query_result;
+        let pagination = Some(crate::types::paginate(
+            &mut query_result,
+            &compiled.input,
+            &compiled.pagination,
+        ));
 
         Ok(PipelineOutput {
             row_count: query_result.authorized_count(),
@@ -53,7 +57,7 @@ impl PipelineStage for OutputStage {
             raw_query_strings,
             compiled: Arc::clone(compiled),
             query_result,
-            result_context: input.result_context.clone(),
+            result_context: input.result_context,
             execution_log,
             pagination,
         })
@@ -87,6 +91,7 @@ mod tests {
 
     fn make_ctx(security_context: Option<SecurityContext>) -> QueryPipelineContext {
         QueryPipelineContext {
+            frontend: compiler::Frontend::JsonDsl,
             query_json: String::new(),
             compiled: None,
             ontology: Arc::new(Ontology::default()),

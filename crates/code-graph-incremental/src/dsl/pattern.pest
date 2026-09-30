@@ -1,0 +1,54 @@
+// S-expression pattern grammar for tree-dsl rewrite rules.
+//
+// Match patterns:   (kind "lit"? field: $Cap $$$Var:filter !neg **/desc)
+// Templates:        (__kind @$Cap|tf (__child? @$Ref->__rekind) $$$Var->__name)
+
+Pattern  =  { SOI ~ SP? ~ Element ~ SP? ~ EOI }
+Pipeline =  { SOI ~ TfChain ~ EOI }
+Element  = _{ Node | Variadic | CapRef | Spread | Capture | Negation | Descendant }
+
+// ── S-expression node ──────────────────────────────────────────────
+
+Node     =  { "(" ~ SP? ~ (Ident | Quoted) ~ Opt? ~ (SP? ~ Content)* ~ SP? ~ ")" }
+Content  = _{ Quoted | TextField | FieldChild | Negation | Descendant | Element }
+
+FieldChild = { Ident ~ ":" ~ Opt? ~ SP? ~ Element }
+
+// ── Captures and variadics ─────────────────────────────────────────
+
+// @$NAME|tf  (text ref inside Node) or @$NAME->kind (child capture)
+TextField = { "@$" ~ Name ~ !Arrow ~ ("|" ~ TfChain)? }
+CapRef    = { "@$" ~ Name ~ Arrow ~ Ident }
+Capture   = { "$" ~ Name ~ Opt? ~ (":" ~ (Node | Ident))? }
+
+// $$$NAME:filter|filter->kind  or  $$$NAME:filter=>kind  or  $$$NAME:(guard)
+Variadic  = { "$$$" ~ Name ~ (":" ~ (Node | Filter))? ~ (Arrow ~ Ident)? }
+
+// ── Match-side assertions ──────────────────────────────────────────
+
+Spread     = { "$" ~ Name ~ SP? ~ "{" ~ (SP? ~ Content)* ~ SP? ~ "}" }
+Negation   = { "!" ~ Element }
+Descendant = { "**/" ~ Element }
+Opt        = { "?" }
+
+Arrow     = @{ "=>" | "->" }
+Filter    =  { Ident ~ ("|" ~ Ident)* }
+
+// ── Transforms (pipe-separated chain) ──────────────────────────────
+
+TfChain   = { TfExpr ~ ("|" ~ TfExpr)* }
+TfExpr    = { TfFunc | TfLegacy | TfBare }
+TfFunc    = { TfName ~ "(" ~ SP? ~ TfArgs ~ SP? ~ ")" }
+TfArgs    = { Quoted ~ (SP? ~ "," ~ SP? ~ Quoted)* }
+TfLegacy  = { TfName ~ "=" ~ LegacyVal }
+TfBare    = { TfName }
+TfName    = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+LegacyVal = @{ (!(" " | "\t" | "|" | ")") ~ ANY)+ }
+
+// ── Leaves ─────────────────────────────────────────────────────────
+
+Ident     = @{ (ASCII_ALPHANUMERIC | "_" | "." | "*")+ }
+Name      = @{ (ASCII_ALPHANUMERIC | "_")+ }
+Quoted    = ${ "\"" ~ Inner ~ "\"" }
+Inner     = @{ (!("\"") ~ ANY)* }
+SP        = _{ (" " | "\t" | "\n" | "\r")+ }

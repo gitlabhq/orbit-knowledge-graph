@@ -28,7 +28,7 @@ pub fn open_graph(db: Option<PathBuf>) -> Result<DuckDbClient> {
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Index a repository first \
-             (`{} index <path>`, or the `index` MCP tool).",
+             (`{} index` inside it, or the `index` MCP tool).",
             db_path.display(),
             spec::launcher()
         );

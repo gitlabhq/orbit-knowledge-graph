@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use compiler::{
-    AuthorizedPath, ColumnSelection, Frontend, HydrationPlan, Input, InputNode, QueryType, compile,
-    compile_input,
+    AuthorizedPath, ColumnSelection, Frontend, HydrationCompileOptions, HydrationPlan, Input,
+    InputNode, QueryType, compile, compile_input,
 };
 use orbit_utils::traversal_path::TraversalPath;
 
@@ -888,7 +886,6 @@ fn hydration_query_type_generates_union_all() {
             InputNode {
                 id: "hydrate".into(),
                 entity: Some("Note".into()),
-                table: Some("gl_note".into()),
                 columns: Some(ColumnSelection::List(vec![
                     "id".into(),
                     "noteable_type".into(),
@@ -899,7 +896,6 @@ fn hydration_query_type_generates_union_all() {
             InputNode {
                 id: "hydrate".into(),
                 entity: Some("Project".into()),
-                table: Some("gl_project".into()),
                 columns: Some(ColumnSelection::List(vec!["id".into(), "name".into()])),
                 node_ids: vec![10, 20],
                 ..InputNode::default()
@@ -909,7 +905,13 @@ fn hydration_query_type_generates_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     // Hydration SQL uses ClickHouse array literals (`IN [1,2,3]`) which
     // sqlparser doesn't support yet, so we check the raw SQL string.
     let raw = &result.base.render();
@@ -928,10 +930,9 @@ fn hydration_widens_paths_to_segment_budget() {
             .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
             .collect()
     };
-    let node = |table: &str, entity: &str, paths: Vec<TraversalPath>| InputNode {
+    let node = |entity: &str, paths: Vec<TraversalPath>| InputNode {
         id: "hydrate".into(),
         entity: Some(entity.into()),
-        table: Some(table.into()),
         columns: Some(ColumnSelection::List(vec!["id".into()])),
         node_ids: vec![1],
         traversal_paths: paths,
@@ -942,11 +943,18 @@ fn hydration_widens_paths_to_segment_budget() {
             query_type: QueryType::Hydration,
             nodes,
             limit: 10,
-            hydration_dynamic: true,
-            path_segment_budget: budget,
             ..Input::default()
         };
-        compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap()
+        compile_input(
+            input,
+            HydrationCompileOptions {
+                dynamic: true,
+                path_segment_budget: budget,
+            },
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap()
     };
     let bound_paths = |result: &compiler::CompiledQueryContext| -> Vec<TraversalPath> {
         result
@@ -964,10 +972,7 @@ fn hydration_widens_paths_to_segment_budget() {
 
     let exact = deep(500);
     let result = compile_hydration(
-        vec![
-            node("gl_note", "Note", exact.clone()),
-            node("gl_project", "Project", exact.clone()),
-        ],
+        vec![node("Note", exact.clone()), node("Project", exact.clone())],
         Some(2000),
     );
     let array_params = result
@@ -984,7 +989,7 @@ fn hydration_widens_paths_to_segment_budget() {
     assert_eq!(kept, expected, "under budget keeps exact leaf paths");
 
     let over = deep(900);
-    let result = compile_hydration(vec![node("gl_note", "Note", over.clone())], Some(2000));
+    let result = compile_hydration(vec![node("Note", over.clone())], Some(2000));
     let widened = bound_paths(&result);
     assert!(widened.iter().all(|w| !over.contains(w)));
     for path in &over {
@@ -996,7 +1001,7 @@ fn hydration_widens_paths_to_segment_budget() {
         );
     }
 
-    let result = compile_hydration(vec![node("gl_note", "Note", over.clone())], None);
+    let result = compile_hydration(vec![node("Note", over.clone())], None);
     assert_eq!(
         bound_paths(&result).len(),
         over.len(),
@@ -1011,7 +1016,6 @@ fn hydration_single_entity_no_union_all() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec!["id".into(), "username".into()])),
             node_ids: vec![42],
             ..InputNode::default()
@@ -1020,7 +1024,13 @@ fn hydration_single_entity_no_union_all() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(!rendered.contains("UNION ALL"));
@@ -1035,7 +1045,6 @@ fn hydration_uses_parameterized_ids() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("Note".into()),
-            table: Some("gl_note".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "confidential".into(),
@@ -1048,7 +1057,13 @@ fn hydration_uses_parameterized_ids() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let parameterized = &result.base.sql;
 
     assert!(
@@ -1071,7 +1086,6 @@ fn hydration_skips_security_context() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("Note".into()),
-            table: Some("gl_note".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "confidential".into(),
@@ -1083,7 +1097,13 @@ fn hydration_skips_security_context() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(
@@ -1103,7 +1123,6 @@ fn hydration_id_only_columns_produces_map_with_id() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec!["id".into()])),
             node_ids: vec![1],
             ..InputNode::default()
@@ -1112,7 +1131,13 @@ fn hydration_id_only_columns_produces_map_with_id() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         rendered.contains("map(") && rendered.contains("'id'"),
@@ -1127,7 +1152,6 @@ fn hydration_empty_columns_produces_empty_json() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec![])),
             node_ids: vec![1],
             ..InputNode::default()
@@ -1136,7 +1160,13 @@ fn hydration_empty_columns_produces_empty_json() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
     assert!(
         !rendered.contains("map("),
@@ -1151,7 +1181,6 @@ fn hydration_id_column_included_in_map() {
         nodes: vec![InputNode {
             id: "hydrate".into(),
             entity: Some("User".into()),
-            table: Some("gl_user".into()),
             columns: Some(ColumnSelection::List(vec![
                 "id".into(),
                 "username".into(),
@@ -1164,7 +1193,13 @@ fn hydration_id_column_included_in_map() {
         ..Input::default()
     };
 
-    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let result = compile_input(
+        input,
+        HydrationCompileOptions::default(),
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
     let rendered = result.base.render();
 
     assert!(rendered.contains("'username'") && rendered.contains("'state'"));

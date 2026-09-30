@@ -1,11 +1,11 @@
 use bolero::check;
 use compiler::{Frontend, Ontology, SecurityContext, compile};
 use std::str::from_utf8;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
-fn ontology() -> &'static Ontology {
-    static ONTOLOGY: OnceLock<Ontology> = OnceLock::new();
-    ONTOLOGY.get_or_init(|| Ontology::load_embedded().expect("load embedded ontology"))
+fn ontology() -> &'static Arc<Ontology> {
+    static ONTOLOGY: OnceLock<Arc<Ontology>> = OnceLock::new();
+    ONTOLOGY.get_or_init(|| Arc::new(Ontology::load_embedded().expect("load embedded ontology")))
 }
 
 fn ctx() -> &'static SecurityContext {

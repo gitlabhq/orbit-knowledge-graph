@@ -13,25 +13,20 @@ use shared::{
 };
 use types::ResourceAuthorization;
 
-use orbit_server::pipeline::{HydrationStage, PathResolutionStage, PathResolver, RedactionStage};
+use orbit_server::pipeline::{HydrationStage, RedactionStage};
 
 pub struct ProfilerPipelineService {
-    ontology: Arc<Ontology>,
+    data_model: Arc<query_data_model::ClickHouseDataModel>,
     client: Arc<ArrowClickHouseClient>,
-    resolver: Option<Arc<PathResolver>>,
 }
 
 impl ProfilerPipelineService {
     pub fn new(
         ontology: Arc<Ontology>,
         client: Arc<ArrowClickHouseClient>,
-        resolver: Option<Arc<PathResolver>>,
-    ) -> Self {
-        Self {
-            ontology,
-            client,
-            resolver,
-        }
+    ) -> Result<Self, query_data_model::DataModelError> {
+        let data_model = compiler::data_model::clickhouse(Arc::clone(&ontology))?;
+        Ok(Self { data_model, client })
     }
 
     pub async fn run_query(
@@ -43,22 +38,19 @@ impl ProfilerPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
-        if let Some(resolver) = &self.resolver {
-            server_extensions.insert(Arc::clone(resolver));
-        }
+        server_extensions.insert(Arc::clone(&self.data_model));
 
         let mut ctx = QueryPipelineContext {
+            frontend: compiler::Frontend::JsonDsl,
             query_json: query_json.to_string(),
             compiled: None,
-            ontology: Arc::clone(&self.ontology),
+            ontology: Arc::clone(self.data_model.ontology()),
             security_context: Some(security_ctx),
             server_extensions,
             phases: TypeMap::default(),
         };
 
         let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&PathResolutionStage)
-            .await?
             .then(&CompilationStage)
             .await?
             .then(&ProfilerExecutor)
@@ -170,7 +162,7 @@ impl PipelineStage for MockAuthorizationStage {
     ) -> Result<Self::Output, PipelineError> {
         let input = ctx
             .phases
-            .get::<ExtractionOutput>()
+            .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::Authorization("ExtractionOutput not found".into()))?;
 
         let checks = input.query_result.resource_checks();
@@ -183,7 +175,7 @@ impl PipelineStage for MockAuthorizationStage {
             .collect();
 
         Ok(AuthorizationOutput {
-            query_result: input.query_result.clone(),
+            query_result: input.query_result,
             authorizations,
         })
     }

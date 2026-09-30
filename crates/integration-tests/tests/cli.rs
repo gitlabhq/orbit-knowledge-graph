@@ -415,6 +415,118 @@ fn reindex_nested_doesnt_affect_parent() {
     );
 }
 
+#[test]
+fn index_skips_nested_repositories_the_parent_ignores() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+
+    let parent = workspace.path().join("parent");
+    init_repo_at(
+        &parent,
+        &[
+            (".gitignore", "vendor/\n"),
+            ("src/app.py", "def app(): pass\n"),
+        ],
+    );
+    init_repo_at(
+        &parent.join("vendor/dependency"),
+        &[("dep.py", "def dep(): pass\n")],
+    );
+    init_repo_at(
+        &parent.join("libs/utils"),
+        &[("helper.py", "def helper(): pass\n")],
+    );
+
+    assert!(orbit_index(&parent, data_dir.path()));
+
+    let indexed = indexed_repo_paths(data_dir.path());
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/parent")),
+        "{indexed:?}"
+    );
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/libs/utils")),
+        "{indexed:?}"
+    );
+    assert!(
+        !indexed.iter().any(|path| path.contains("/vendor/")),
+        "{indexed:?}"
+    );
+}
+
+#[test]
+fn index_defaults_to_the_current_directory() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(&repo, &[("main.py", "def main(): pass\n")]);
+
+    let indexed = orbit_cmd()
+        .arg("index")
+        .current_dir(&repo)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .status()
+        .unwrap();
+
+    assert!(indexed.success());
+    let indexed = indexed_repo_paths(data_dir.path());
+    assert!(
+        indexed.iter().any(|path| path.ends_with("/repo")),
+        "{indexed:?}"
+    );
+}
+
+#[test]
+fn first_grep_on_a_new_machine_indexes_the_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(&repo, &[("greeter.py", "def greet_visitor(): pass\n")]);
+
+    let out = orbit_cmd()
+        .args(["grep", "greet_visitor"])
+        .current_dir(&repo)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("greeter.py"), "{stdout}");
+}
+
+#[test]
+fn a_busy_graph_is_reported_in_one_line() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let _writer = duckdb_client::DuckDbClient::open(&data_dir.path().join("graph.duckdb")).unwrap();
+    let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
+
+    assert!(!ok);
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(stderr.starts_with("The local graph is busy:"), "{stderr}");
+    assert!(
+        stderr.contains(&format!("(PID {})", std::process::id())),
+        "{stderr}"
+    );
+}
+
+fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
+    let (stdout, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir);
+    assert!(ok, "orbit list failed: {stderr}");
+    let listed: Vec<Value> = serde_json::from_str(&stdout).unwrap();
+    listed
+        .iter()
+        .map(|repo| repo["repo_path"].as_str().unwrap().to_string())
+        .collect()
+}
+
 fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
     let out = orbit_cmd()
         .args(args)
@@ -724,48 +836,73 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
 }
 
 #[test]
-fn skill_serves_bundled_content() {
-    let manifest = orbit_cmd().arg("skill").output().unwrap();
+fn skills_lists_and_serves_local_content_without_remote_environment() {
+    let listing = orbit_cmd().arg("skills").output().unwrap();
+    assert!(listing.status.success());
+    assert!(listing.stderr.is_empty());
+    let listing = String::from_utf8(listing.stdout).unwrap();
+    assert!(listing.starts_with("orbit — "));
+    assert!(listing.contains("Orbit CLI"));
+
+    let manifest = orbit_cmd()
+        .args(["skills", "get", "orbit"])
+        .output()
+        .unwrap();
     assert!(manifest.status.success());
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert!(manifest.contains("name: orbit-cli"));
-    assert!(manifest.contains("references/sql.md"));
+    assert!(manifest.contains("references/local/sql.md"));
     assert!(
-        manifest.contains("`orbit skill references/sql.md`"),
+        manifest.contains("`orbit skills get orbit [path]`"),
         "served manifest must tell binary users the version-matched access path"
     );
 
-    let sql_ref = orbit_cmd()
-        .args(["skill", "references/sql.md"])
-        .output()
-        .unwrap()
-        .stdout;
-    assert!(
-        !String::from_utf8(sql_ref)
-            .unwrap()
-            .contains("orbit skill <path>"),
-        "the discovery hint must be manifest-only, not appended to subfiles"
-    );
-
-    for path in ["SKILL.md", "references/sql.md", "references/repo_map.md"] {
-        let out = orbit_cmd().args(["skill", path]).output().unwrap();
-        assert!(out.status.success(), "`orbit skill {path}` failed");
+    for path in [
+        "SKILL.md",
+        "references/local/sql.md",
+        "references/local/repo_map.md",
+    ] {
+        let out = orbit_cmd()
+            .args(["skills", "get", "orbit", path])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "`orbit skills get orbit {path}` failed"
+        );
         assert!(
             !out.stdout.is_empty(),
-            "`orbit skill {path}` printed nothing"
+            "`orbit skills get orbit {path}` printed nothing"
         );
     }
 
-    let no_arg = orbit_cmd().arg("skill").output().unwrap().stdout;
-    let explicit = orbit_cmd()
-        .args(["skill", "SKILL.md"])
+    let canonical = orbit_cmd()
+        .args(["skills", "get", "orbit", "references/local/sql.md"])
         .output()
-        .unwrap()
-        .stdout;
-    assert_eq!(no_arg, explicit, "no-arg must equal `skill SKILL.md`");
+        .unwrap();
+    let named_alias = orbit_cmd()
+        .args(["skills", "orbit", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    let path_alias = orbit_cmd()
+        .args(["skills", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    assert!(canonical.status.success());
+    assert_eq!(canonical.stdout, named_alias.stdout);
+    assert_eq!(canonical.stdout, path_alias.stdout);
+    assert!(
+        !String::from_utf8(canonical.stdout)
+            .unwrap()
+            .contains("skills get orbit <path>"),
+        "the discovery hint must be manifest-only, not appended to subfiles"
+    );
+
+    let singular_alias = orbit_cmd().args(["skill", "SKILL.md"]).output().unwrap();
+    assert!(singular_alias.status.success());
 
     let repo_map_ref = orbit_cmd()
-        .args(["skill", "references/repo_map.md"])
+        .args(["skills", "references/local/repo_map.md"])
         .output()
         .unwrap()
         .stdout;
@@ -777,24 +914,72 @@ fn skill_serves_bundled_content() {
 }
 
 #[test]
-fn skill_rejects_unknown_and_escaping_paths() {
+fn skills_help_presents_get_as_the_canonical_command() {
+    let skills_help = orbit_cmd().args(["skills", "--help"]).output().unwrap();
+    assert!(skills_help.status.success());
+    let skills_help = String::from_utf8(skills_help.stdout).unwrap();
+    assert!(skills_help.contains("get   Print an instance-matched agent skill file."));
+    assert!(!skills_help.contains("NAME_OR_PATH"));
+
+    let get_help = orbit_cmd()
+        .args(["skills", "get", "--help"])
+        .output()
+        .unwrap();
+    assert!(get_help.status.success());
+    let get_help = String::from_utf8(get_help.stdout).unwrap();
+    assert!(get_help.contains(
+        "Print a file from the selected instance's agent skill, composed with local CLI guidance."
+    ));
+    assert!(get_help.contains("Usage: orbit skills get <NAME> [PATH]"));
+}
+
+#[test]
+fn skills_reject_unknown_names_and_paths() {
+    let unknown_name = orbit_cmd()
+        .args(["skills", "get", "unknown-name"])
+        .output()
+        .unwrap();
+    assert!(!unknown_name.status.success());
+    assert!(unknown_name.stdout.is_empty());
+    let error = String::from_utf8(unknown_name.stderr).unwrap();
+    assert!(error.contains("unknown skill name") && error.contains("orbit"));
+    assert!(error.contains("skills get <name> [path]"));
+
+    let path_as_name = orbit_cmd()
+        .args(["skills", "get", "references/local/sql.md"])
+        .output()
+        .unwrap();
+    assert!(!path_as_name.status.success());
+    assert!(path_as_name.stdout.is_empty());
+    let error = String::from_utf8(path_as_name.stderr).unwrap();
+    assert!(error.contains("unknown skill name \"references/local/sql.md\""));
+    assert!(error.contains("Known skills:") && error.contains("orbit"));
+    assert!(!error.contains("path shorthand"));
+
     for path in [
         "references/does-not-exist.md",
         "../Cargo.toml",
         "/etc/passwd",
-        "references/../../secret",
+        "references/local/../../../secret",
     ] {
-        let out = orbit_cmd().args(["skill", path]).output().unwrap();
+        let out = orbit_cmd()
+            .args(["skills", "get", "orbit", path])
+            .output()
+            .unwrap();
         assert!(
             !out.status.success(),
-            "`orbit skill {path}` must exit non-zero"
+            "`orbit skills get orbit {path}` must exit non-zero"
         );
-        assert!(out.stdout.is_empty(), "`orbit skill {path}` leaked stdout");
+        assert!(
+            out.stdout.is_empty(),
+            "`orbit skills get orbit {path}` leaked stdout"
+        );
         let err = String::from_utf8(out.stderr).unwrap();
         assert!(
             err.contains("Available files") && err.contains("SKILL.md"),
             "error must list valid paths, got: {err}"
         );
+        assert!(err.contains("skills get <name> [path]"));
     }
 }
 
@@ -839,14 +1024,15 @@ fn repo_map_yaml_fixture_suite() {
         .map(|(path, content)| (path.as_str(), content.as_str()))
         .collect();
     init_repo_at(repo_dir.path(), &files);
-    let repo_path = repo_dir.path().display().to_string();
-    let sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
+    let repo = repo_dir.path().canonicalize().unwrap();
+    let repo_path = repo.display().to_string();
+    let sha = git(&repo, &["rev-parse", "HEAD"]);
     let dd = data_dir.path();
-    assert!(orbit_index(repo_dir.path(), dd));
+    assert!(orbit_index(&repo, dd));
 
     for command in fixture.commands {
         let args: Vec<_> = command.args.iter().map(String::as_str).collect();
-        let out = repo_map(repo_dir.path(), dd, &args);
+        let out = repo_map(&repo, dd, &args);
         assert!(
             out.status.success(),
             "repo-map {:?} failed: {}",
@@ -1193,14 +1379,14 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_in_fresh_data_dir() {
+fn grep_loads_bundled_extension_and_returns_discovery_results() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
     assert!(orbit_index(&repo.path, dd));
 
     let out = orbit_cmd()
-        .args(["grep", "how do we read a file", "--repo"])
+        .args(["grep", "open", "--repo"])
         .arg(&repo.path)
         .env("ORBIT_DATA_DIR", dd)
         .output()
@@ -1210,11 +1396,67 @@ fn grep_loads_bundled_extension_in_fresh_data_dir() {
         "grep failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("read_file"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Definition:")
+            && stdout.contains("src/utils.py:3-4  body-only ×1")
+            && stdout.contains("4| return open(path).read()"),
+        "{stdout}"
+    );
+    let reference = stdout
+        .split_whitespace()
+        .find(|s| s.starts_with("Definition:"))
+        .unwrap();
+    let repo_arg = repo.path.to_str().unwrap();
+    let fqn = "src.utils.read_file";
+    let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
+    assert!(
+        ok && file.starts_with("File:") && !file.contains("return open"),
+        "{err}\n{file}"
+    );
+    let file_id = file.split_whitespace().next().unwrap();
+    let args = ["context", file_id, fqn, reference, fqn, "--repo", repo_arg];
+    let (context, err, ok) = run_cmd(&args, dd);
+    assert!(ok && context.contains(&file), "{err}\n{context}");
+    assert_eq!(context.matches("return open(path).read()").count(), 1);
+    for (command, query, expected) in [
+        (
+            "grep",
+            "App|read_file|READ_FILE",
+            "exact: App | read_file\n",
+        ),
+        ("grep", "App|missing_symbol", "exact-miss: missing_symbol"),
+        ("context", "src/utils.py:3-4", "3|def read_file(path):"),
+        (
+            "context",
+            "src/utils.py:4",
+            "4|    return open(path).read()",
+        ),
+        ("context", "src", "Dir:  src  (2 files,"),
+    ] {
+        let (out, err, ok) = run_cmd(&[command, query, "--repo", repo_arg], dd);
+        assert!(ok && out.contains(expected), "{query}: {err}\n{out}");
+    }
+    for missing in [
+        "src.utils.read",
+        "' OR true --",
+        "../outside.py",
+        "src/utils.py:40",
+    ] {
+        let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
+        assert!(!ok && out.is_empty(), "{out}\n{err}");
+    }
+    for invalid in ["|", "read_file|", "read_file||App", "!!!"] {
+        let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
+        assert!(
+            !ok && err.contains("no usable search terms"),
+            "{out}\n{err}"
+        );
+    }
 }
 
 #[test]
-fn grep_callers_order_is_stable_across_overloads() {
+fn context_relationship_order_is_stable_across_overloads() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
     let repo = workspace.path().join("repo");
@@ -1244,19 +1486,43 @@ fn grep_callers_order_is_stable_across_overloads() {
 
     let repo_arg = repo.to_str().unwrap();
     for (fqn, section) in [
-        ("Target.ping", "Connections (5):"),
-        ("Target", "Used via members (5)"),
+        ("Target.ping", "Connections (5 indexed):"),
+        ("Target", "Used via members (5 indexed):"),
     ] {
-        let (first, stderr, ok) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} --callers failed: {stderr}");
-        assert!(first.contains(section), "{fqn}: {first}");
+        let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "grep {fqn} failed: {stderr}");
+        let reference = matches
+            .lines()
+            .filter(|line| line.trim_start().starts_with("Definition:"))
+            .find(|line| line.split_whitespace().nth(1) == Some(fqn))
+            .and_then(|line| line.split_whitespace().next())
+            .unwrap();
+        let args = ["context", reference, "--repo", repo_arg];
+        let (first, stderr, ok) = run_cmd(&args, dd);
+        assert!(ok, "context {reference} failed: {stderr}");
+        let (by_name, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "context {fqn} failed: {stderr}");
+        assert_eq!(first, by_name);
+        assert!(
+            first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
+            "{first}"
+        );
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
         assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
         for _ in 0..10 {
-            let (again, _, _) = run_cmd(&["grep", fqn, "--callers", "--repo", repo_arg], dd);
-            assert_eq!(first, again, "grep {fqn} --callers output must be stable");
+            assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
         }
     }
+    let args = ["context", "Caller.run", "Caller.run", "--repo", repo_arg];
+    let (by_name, stderr, ok) = run_cmd(&args, dd);
+    assert!(ok, "{stderr}");
+    assert_eq!(by_name.matches("|    public void run(").count(), 3);
+    let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
+    assert!(ok, "{stderr}");
+    assert!(
+        !file.contains("public class Target") && file.contains("via ping"),
+        "{file}"
+    );
 }
 
 #[test]
@@ -1280,4 +1546,81 @@ fn repo_map_api_empty_prefix_succeeds() {
         !stderr.contains("No files found"),
         "must not leak DuckDB glob error: {stderr}"
     );
+}
+
+#[test]
+fn file_context_bounds_connections_and_keeps_full_definition_followups() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    let models = (0..67)
+        .map(|i| format!("def entry_{i}():\n    return {i}\n\n"))
+        .collect::<String>();
+    let callers = (0..25).map(|i| format!(
+        "import dependency_{i}\nfrom models import entry_0\ndef caller_{i}():\n    return entry_0()\n\n"
+    )).collect::<String>();
+    init_repo_at(
+        &repo,
+        &[
+            ("src/models.py", &models),
+            ("src/callers.py", &callers),
+            ("tests/callers.py", &callers),
+        ],
+    );
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo, dd));
+    let repo_arg = repo.to_str().unwrap();
+    let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
+    assert!(ok && !out.contains("return 0"), "{err}\n{out}");
+    assert_eq!(out.matches("\n  Definition:").count(), 67, "{out}");
+    assert_eq!(out.matches("connections omitted").count(), 2, "{out}");
+    assert!(out.lines().count() < 110, "{out}");
+    let (body, err, ok) = run_cmd(&["context", "src.models.entry_0", "--repo", repo_arg], dd);
+    assert!(ok && body.contains("return 0"), "{err}\n{body}");
+    assert_eq!(body.matches("<-- ").count(), 50, "{body}");
+    assert!(!body.contains("connections omitted"), "{body}");
+    for path in ["src/callers.py", "tests/callers.py"] {
+        let (out, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);
+        assert!(
+            ok && out.contains("connections omitted; list all file edges:"),
+            "{err}\n{out}"
+        );
+        let sql = out
+            .lines()
+            .find_map(|line| line.split_once("sql \""))
+            .unwrap()
+            .1
+            .trim_end_matches('"');
+        let edges = orbit_sql(sql, dd);
+        assert_eq!(rows_where(&edges, "relationship_kind", "IMPORTS").len(), 50);
+    }
+}
+
+#[test]
+fn piped_index_prints_one_json_document_per_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+
+    let out = orbit_cmd()
+        .args(["index", repo.path.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let documents: Vec<Value> = serde_json::Deserializer::from_slice(&out.stdout)
+        .into_iter()
+        .collect::<Result<_, _>>()
+        .expect("stdout is a stream of JSON documents");
+    assert_eq!(documents.len(), 1);
+    let document = &documents[0];
+    let repository_name = repo.path.file_name().unwrap().to_str().unwrap();
+    assert_eq!(document["repository"], json!(repository_name));
+    assert!(document["graph"]["files"].as_u64().unwrap() >= 2);
+    assert!(document["graph"]["definitions"].as_u64().unwrap() >= 1);
+    assert!(document["processing"].is_object());
 }

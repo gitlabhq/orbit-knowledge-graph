@@ -22,26 +22,45 @@ static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-const GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS: &str = "\
-SELECT toInt64(splitByChar('.', key)[2]) AS namespace_id \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false \
-  AND cursor_values IN ('null', '') \
-  AND length(splitByChar('.', key)) = 3 \
-  AND splitByChar('.', key)[1] = 'ns' \
-  AND match(splitByChar('.', key)[2], '^[0-9]+$') \
-  AND splitByChar('.', key)[3] IN {plans:Array(String)} \
-GROUP BY namespace_id \
-HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64}";
+// Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
+fn completed_checkpoint_keys_sql(key_filter: &str) -> String {
+    format!(
+        "SELECT key \
+         FROM (SELECT *, maxIf(_version, _deleted) OVER (PARTITION BY key) AS tombstoned_at \
+               FROM {{table:Identifier}} \
+               WHERE {key_filter}) \
+         GROUP BY key \
+         HAVING argMax(_deleted, _version) = false \
+            AND isNotNull(maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at))"
+    )
+}
 
-const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
-SELECT count(DISTINCT splitByChar('.', key)[2]) AS plan_count \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false \
-  AND cursor_values IN ('null', '') \
-  AND length(splitByChar('.', key)) = 2 \
-  AND splitByChar('.', key)[1] = 'global' \
-  AND splitByChar('.', key)[2] IN {plans:Array(String)}";
+static GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS: LazyLock<String> = LazyLock::new(|| {
+    let completed_keys = completed_checkpoint_keys_sql(
+        "startsWith(key, 'ns.') \
+         AND length(splitByChar('.', key)) = 3 \
+         AND match(splitByChar('.', key)[2], '^[0-9]+$') \
+         AND splitByChar('.', key)[3] IN {plans:Array(String)}",
+    );
+    format!(
+        "SELECT toInt64(splitByChar('.', key)[2]) AS namespace_id \
+         FROM ({completed_keys}) \
+         GROUP BY namespace_id \
+         HAVING uniqExact(splitByChar('.', key)[3]) = {{plan_count:UInt64}}"
+    )
+});
+
+static COUNT_COMPLETE_GLOBAL_PLANS: LazyLock<String> = LazyLock::new(|| {
+    let completed_keys = completed_checkpoint_keys_sql(
+        "startsWith(key, 'global.') \
+         AND length(splitByChar('.', key)) = 2 \
+         AND splitByChar('.', key)[2] IN {plans:Array(String)}",
+    );
+    format!(
+        "SELECT count(DISTINCT splitByChar('.', key)[2]) AS plan_count \
+         FROM ({completed_keys})"
+    )
+});
 
 #[derive(Debug)]
 pub struct SdlcReindexProgress {
@@ -144,7 +163,7 @@ async fn namespace_ids_with_completed_plans(
         return Ok(HashSet::new());
     }
     let batches = graph
-        .query(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS)
+        .query(&GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS)
         .param("table", checkpoint_table)
         .param("plans", required_plan_names)
         .param("plan_count", required_plan_names.len() as u64)
@@ -173,7 +192,7 @@ async fn count_completed_global_plans(
         return Ok(0);
     }
     let batches = graph
-        .query(COUNT_COMPLETE_GLOBAL_PLANS)
+        .query(&COUNT_COMPLETE_GLOBAL_PLANS)
         .param("table", checkpoint_table)
         .param("plans", global_plans)
         .fetch_arrow()

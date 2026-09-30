@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+minijinja = { workspace = true }
 jsonschema = { workspace = true }
 rust-embed = { workspace = true }
 serde = { workspace = true }

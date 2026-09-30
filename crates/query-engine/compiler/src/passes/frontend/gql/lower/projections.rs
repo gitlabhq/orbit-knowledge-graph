@@ -25,10 +25,10 @@ impl Lowering {
             .iter()
             .any(|item| matches!(item.expression, Expression::Aggregate { .. }));
         if aggregate {
-            if self.input.query_type != QueryType::Traversal {
+            if self.input.query_type == QueryType::Neighbors {
                 return Err(invalid(
                     span,
-                    "path finding and neighbors cannot be aggregated; use labeled node patterns",
+                    "neighbors cannot be aggregated; use labeled node patterns",
                 ));
             }
             self.input.query_type = QueryType::Aggregation;
@@ -94,27 +94,19 @@ impl Lowering {
                     variable,
                     properties,
                 } => {
-                    if self.input.query_type != QueryType::Traversal && !aggregate {
+                    if self.input.query_type == QueryType::PathFinding {
                         return Err(invalid(
                             span,
-                            "node projections require traversal or aggregation",
+                            "node projections require traversal, neighbors, or aggregation",
                         ));
                     }
                     let variable = variable.value;
                     let columns: Vec<String> = properties.into_iter().map(|p| p.value).collect();
-                    if !selected.insert(variable.clone())
-                        || columns.iter().collect::<HashSet<_>>().len() != columns.len()
-                    {
+                    let property_set: HashSet<_> = columns.iter().collect();
+                    if property_set.len() != columns.len() {
                         return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
-                    if aggregate {
-                        if !columns.iter().any(|c| c == "id") {
-                            return Err(invalid(
-                                span,
-                                "an aggregated node projection must include .id to preserve node identity; use a scalar property for property grouping",
-                            ));
-                        }
-                    } else if alias.is_some() {
+                    if !aggregate && alias.is_some() {
                         return Err(invalid(
                             span,
                             "traversal node projections cannot be renamed",
@@ -128,7 +120,13 @@ impl Lowering {
                         .ok_or_else(|| {
                             invalid(span, "node projection references an undefined variable")
                         })?;
-                    node.columns = Some(ColumnSelection::List(columns));
+                    if selected.insert(variable.clone()) {
+                        node.columns = Some(ColumnSelection::List(columns));
+                    } else if !aggregate
+                        || !matches!(&node.columns, Some(ColumnSelection::List(previous)) if previous.iter().collect::<HashSet<_>>() == property_set)
+                    {
+                        return Err(invalid(span, "duplicate or overlapping node projection"));
+                    }
                     if aggregate {
                         self.input.aggregation.group_by.push(InputGroupByKey::Node {
                             node: variable,
@@ -150,10 +148,10 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() || self.input.query_type != QueryType::Traversal {
+                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
-                                "property projections require traversal and cannot be renamed",
+                                "property projections require traversal or neighbors and cannot be renamed",
                             ));
                         }
                         let input_node = self
@@ -219,6 +217,9 @@ impl Lowering {
             || (self.input.query_type == QueryType::Neighbors
                 && (all || self.edges.contains_key(&variable)))
         {
+            if aggregate {
+                return Err(invalid(span, "aggregation cannot return the path variable"));
+            }
             if alias.is_some() || (all && !dynamic) {
                 return Err(invalid(
                     span,
@@ -236,7 +237,7 @@ impl Lowering {
         if self.input.query_type == QueryType::PathFinding {
             return Err(invalid(
                 span,
-                "path finding requires RETURN of the shortestPath variable",
+                "path finding requires RETURN of the path variable",
             ));
         }
         let node = self
@@ -250,7 +251,13 @@ impl Lowering {
                     "line {line}, column {column}: projection references undefined node \"{variable}\""
                 ))
             })?;
-        if !selected.insert(variable.clone()) {
+        if !selected.insert(variable.clone())
+            && (!aggregate
+                || !matches!(
+                    (all, &node.columns),
+                    (false, None) | (true, Some(ColumnSelection::All))
+                ))
+        {
             return Err(invalid(span, "duplicate or overlapping node projection"));
         }
         if all {

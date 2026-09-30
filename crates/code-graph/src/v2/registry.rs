@@ -24,9 +24,9 @@ use crate::v2::langs::generic::yaml::{YamlDsl, YamlRules};
 use crate::v2::langs::generic::zig::{ZigDsl, ZigRules};
 use std::sync::Arc;
 
-use crate::v2::inventory::{FamilyFileInput, FileInput};
 use crate::v2::pipeline::{
-    BatchTx, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext, PipelineError,
+    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
+    PipelineContext, PipelineError,
 };
 
 /// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics.

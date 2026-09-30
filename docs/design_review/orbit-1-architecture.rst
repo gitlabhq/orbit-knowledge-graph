@@ -47,7 +47,7 @@ Components Inside the Module
        Pushdown, edge-centric traversal, keyset pagination.
    * - **gRPC Server**
      - Tonic (+ Axum)
-     - gRPC service (9 RPCs) consumed by the Rails monolith; the only HTTP
+     - gRPC service (11 RPCs) consumed by the Rails monolith; the only HTTP
        endpoints are the ``/live`` and ``/ready`` health probes.  The public
        REST API (``/api/v4/orbit/*``) and MCP surface live in Rails and proxy
        to this gRPC service.  JWT auth; metrics via OpenTelemetry.
@@ -102,7 +102,7 @@ External Connections
    * - **Rails gRPC Client**
      - gRPC
      - Rails -> Orbit
-     - 9 RPC methods
+     - 11 RPC methods
    * - **Snowplow -> CDot**
      - Event emission
      - Orbit -> Snowplow

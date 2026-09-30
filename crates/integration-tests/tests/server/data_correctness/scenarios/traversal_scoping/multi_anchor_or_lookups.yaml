@@ -1,0 +1,23 @@
+description: A node pinned to two projects scopes its scan with one lookup per anchor, OR-ed
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1002], "columns": ["name"]}],
+        "limit": 10
+    }
+  gql: |
+    MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
+
+expect:
+  sql_contains:
+    - "(_scope.id = 1000)"
+    - "(_scope.id = 1002)"
+    - ") OR startsWith(p.traversal_path, (SELECT"
+  node_count: 2
+  nodes:
+    Project:
+      ids: [1000, 1002]
+      rows:
+        - { id: 1000, name: Public Project }

@@ -1,6 +1,18 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# Codex rejects additionalContext on PreToolUse hooks, so AGENTS.md is the whole integration.
+# Codex rejects additionalContext on PreToolUse hooks, so AGENTS.md, the MCP entry, and the
+# shared skill dir are the whole integration.
 name: codex
+title: Codex
+detect: ["$CODEX_HOME", "~/.codex"]
 instruction_file:
   project: AGENTS.md
   global: "~/.codex/AGENTS.md"
+mcp:
+  file:
+    project: .codex/config.toml
+    global: "~/.codex/config.toml"
+  format: codex
+skills:
+  dir:
+    project: .agents/skills
+    global: "~/.agents/skills"

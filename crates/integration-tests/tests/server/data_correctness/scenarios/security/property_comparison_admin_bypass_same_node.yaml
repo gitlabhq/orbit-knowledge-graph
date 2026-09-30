@@ -1,0 +1,11 @@
+description: >
+  Same-node property comparison cannot bypass admin-only restriction.
+  A non-admin comparing a public field against an admin-only field
+  on the same node must be rejected.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE u.username <> u.first_name RETURN u.username LIMIT 10
+
+expect:
+  compile_error: "administrator"

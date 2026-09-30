@@ -37,6 +37,12 @@ Prerequisites:
 - The Owner role for the group you want to index.
 - Administrator access to GitLab.
 
+The versions in the commands on this page are for reference only. Prefer the latest versions. To
+find them, see:
+
+- [GitLab Orbit releases](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
+- [GitLab Orbit Helm chart releases](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases)
+
 Set up GitLab Orbit in this order:
 
 1. Create the ClickHouse database and identities.
@@ -65,7 +71,7 @@ To create the database and the identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.96.0 \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -85,7 +91,7 @@ To create the database and the identities:
 
 On a ClickHouse instance you run yourself, every user can read the `system` database, so these grants change
 nothing. A managed ClickHouse usually restricts the `system` database. Without the grants, schema migrations
-stop when a new version is promoted, and query path resolution fails. Add the grants in both cases. The
+stop when a new version is promoted. Add the grants in both cases. The
 configuration then works unchanged if you move to a managed service.
 
 GitLab Orbit reaches ClickHouse over the HTTP interface on port 8123, or port 8443 with TLS. Siphon uses the
@@ -193,7 +199,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
 
    ```yaml
    image:
-     tag: "0.96.0"
+     tag: "0.134.0"
 
    secrets:
      perKey:
@@ -246,7 +252,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    ```shell
    helm upgrade --install gkg \
      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
-     --version 1.5.0 \
+     --version 3.0.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
@@ -356,7 +362,7 @@ indexing, because both pass long before the first index finishes.
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../remote/indexing.md)
+- [What GitLab Orbit indexes](../indexed-data.md)
 - [Schema reference](../remote/schema.md)
 - [Cookbook](../remote/cookbook.md)
 - [Query language](../remote/queries/_index.md)

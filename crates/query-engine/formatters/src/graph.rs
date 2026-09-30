@@ -670,6 +670,8 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
+                pagination: Default::default(),
+                has_virtual_columns: false,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -721,6 +723,8 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
+                pagination: Default::default(),
+                has_virtual_columns: false,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -877,6 +881,8 @@ mod tests {
                     "limit": 10
                 }))
                 .unwrap(),
+                pagination: Default::default(),
+                has_virtual_columns: false,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -1007,6 +1013,8 @@ mod tests {
                     "limit": 5
                 }))
                 .unwrap(),
+                pagination: Default::default(),
+                has_virtual_columns: false,
             }),
             query_result: qr,
             result_context: result_ctx,
@@ -1103,6 +1111,8 @@ mod tests {
                     "limit": 5
                 }))
                 .unwrap(),
+                pagination: Default::default(),
+                has_virtual_columns: false,
             }),
             query_result: qr,
             result_context: result_ctx,

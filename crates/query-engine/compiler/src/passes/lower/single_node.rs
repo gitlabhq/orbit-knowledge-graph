@@ -1,8 +1,8 @@
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::EmitOutput;
 use super::helpers::{latest_node_predicates, node_select_columns};
+use super::{EmitOutput, NodeBinding};
 use crate::passes::plan::*;
 
 pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
@@ -22,6 +22,7 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {
+        nodes: std::collections::HashMap::from([(alias.clone(), NodeBinding::table(alias))]),
         from,
         edge_aliases: vec![],
         where_parts,

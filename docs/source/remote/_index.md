@@ -39,8 +39,8 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 |---|---|
 | [Get started](getting-started.md) | Enable GitLab Orbit and run your first query |
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
-| [What GitLab Orbit indexes](indexing.md) | SDLC coverage, language support, indexing scope |
-| [Security](security.md) | Roles required to query, the authorization model, and programmatic access |
+| [What GitLab Orbit indexes](../indexed-data.md) | SDLC coverage, language support, indexing scope |
+| [Security](security.md) | Roles required to query, the authorization model, programmatic access, and service accounts |
 | [Schema reference](schema.md) | All 28 node types across 6 domains |
 | [Cookbook](cookbook.md) | Copy-paste queries for common use cases |
 | [Query language](queries/) | Full query DSL reference |
@@ -56,4 +56,9 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 
 ## Billing
 
-MCP and REST API queries consume GitLab Credits. GitLab Duo Agent Platform queries are zero-rated.
+During the beta, GitLab Orbit queries do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, queries consume GitLab Credits. Credit
+rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.

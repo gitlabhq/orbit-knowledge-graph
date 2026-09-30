@@ -149,9 +149,9 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         .expect("tracker build");
 
     let common = OrbitCommonContext::new(orbit_common::OrbitCommon {
-        deployment_type: orbit_common::OrbitCommonDeploymentType::Com,
+        deployment_type: Some(orbit_common::OrbitCommonDeploymentType::Com),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
-        environment: "staging".parse().expect("environment"),
+        environment: Some("staging".parse().expect("environment")),
         correlation_id: Some("corr-it-1".parse().expect("correlation_id")),
         instance_id: Some("inst-it".parse().expect("instance_id")),
         unique_instance_id: None,

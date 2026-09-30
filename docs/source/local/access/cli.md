@@ -76,7 +76,7 @@ GitLab Orbit Local indexes the current working tree, including uncommitted sourc
 files not excluded by `.gitignore`. It does not enumerate or check out other Git
 branches.
 
-The graph is stored in `~/.orbit/graph.duckdb` by default. Multiple checkout paths
+The graph is stored in `~/.gitlab/orbit/graph.duckdb` by default. Multiple checkout paths
 can share one database, with each canonical checkout path determining its project
 ID. Switching branches alone does not update the stored graph. Reindexing the same
 checkout replaces its previous graph in that database with the current working-tree
@@ -88,7 +88,7 @@ or worktree paths.
 | `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
-| `--db` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
+| `--db` | Override the DuckDB file path (default: `~/.gitlab/orbit/graph.duckdb`). |
 
 ## Inspect the schema
 
@@ -108,7 +108,7 @@ orbit schema gl_definition gl_edge      # scoped to two tables
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## Run SQL against the local graph
 
@@ -123,7 +123,7 @@ orbit sql --file query.sql
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
 | `-f`, `--file` | Read the SQL from a file. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 ## List indexed repositories
 
@@ -153,7 +153,7 @@ here instead of silently disappearing.
 | Flag | Purpose |
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
-| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
 
 If nothing has been indexed yet, `orbit list` exits `0`. The table view
 prints nothing; structured formats emit valid empty output (`[]` for `json`,
@@ -169,34 +169,42 @@ orbit mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` against
-`~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
+`~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
 
-## Set up your AI assistant
+## Set up your AI agent
 
-`orbit setup` configures an AI coding assistant to consult the graph before it
-reaches for grep. Name the assistants you want to configure:
+`orbit setup` configures your AI coding agents to consult the graph before
+they reach for grep. It detects the agents installed on your machine:
 
 ```shell
-orbit setup claude
+orbit setup
 ```
 
-Supported assistants are `claude`, `codex`, `opencode`, and `pi`. The guidance
-tells the assistant to run `orbit grep` and `orbit context` before it greps or
-reads raw source.
+A picker lists the detected agents, all pre-selected. Press Enter to apply,
+or pass `--yes` to skip the picker. Name an agent to add it even when it is
+not detected, for example `orbit setup claude codex`. Add `--mcp` to also register
+the `orbit` MCP server. Inside a Git repository, setup then indexes it so
+your agents have a graph to query; `--no-index` skips that. Run
+`orbit setup --help` for the other options. Supported agents are GitLab Duo,
+Claude Code, Codex, OpenCode, and Pi.
 
 ### What it changes
 
 This command modifies files that belong to you. It never runs on its own, only
 when you invoke it.
 
-For every assistant you name, `orbit setup`:
+For every agent it configures, `orbit setup`:
 
-- Adds a block to that assistant's instruction file, such as `CLAUDE.md` or
+- Adds a block to that agent's instruction file, such as `CLAUDE.md` or
   `AGENTS.md`. The block sits between `<!-- orbit:setup:begin -->` and
   `<!-- orbit:setup:end -->` markers, and anything outside those markers is left
   alone. Running the command again replaces the block in place instead of adding
   a second copy.
-- Adds entries to that assistant's JSON configuration, where the assistant
+- Installs the `orbit-cli` skill into `.agents/skills/`. Claude Code does not
+  scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
+- With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
+  Existing servers and comments are preserved.
+- Adds entries to that agent's JSON configuration, where the agent
   supports it. For Claude Code this is a `PreToolUse` hook in
   `settings.json`; for OpenCode it is a plugin file and its registration.
   Entries carry an `orbit` marker, and only marked entries are ever replaced or
@@ -220,25 +228,26 @@ teammates. User-global scope, the default, affects only you.
 To undo the changes, run:
 
 ```shell
-orbit setup claude --remove
+orbit uninstall
 ```
 
-This strips the marker-delimited block and the marked JSON entries, and leaves
-the rest of each file untouched. If a file contained nothing but `orbit`
-entries, it is deleted. Omit the assistant names to remove the setup for all of
-them. Backup files are not deleted.
+It lists the detected agents that have GitLab Orbit installed in that scope.
+Name agents to target only those. It removes what `orbit setup` wrote and leaves
+the rest of each file untouched. Files you edited after setup are kept, and so
+are their backups. A backup goes away once its file is back to the original.
+`--yes`, `--project`, and `--dir` work as they do for `orbit setup`.
 
 If you would rather not have `orbit setup` touch your files, skip it and add the
-same instruction block and hooks by hand.
+same instruction block, MCP entry, and hooks by hand.
 
 ## Storage
 
-The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
+The graph is stored at `~/.gitlab/orbit/graph.duckdb`. Multiple repositories share
 the same database. Delete the file to start over.
 
 ## Configure the CLI
 
-`orbit config` reads and writes persisted settings in `~/.orbit/settings.json`.
+`orbit config` reads and writes persisted settings in `~/.gitlab/orbit/settings.json`.
 A saved setting applies to every later run.
 
 ```shell
@@ -254,9 +263,10 @@ orbit config set telemetry.enabled false   # save a setting
 ## Telemetry
 
 The CLI sends usage events to the GitLab product analytics service so the team
-can see how GitLab Orbit is used. Each event records which command ran, nothing more:
-no repository content, file paths, or query text is sent. Telemetry is on by
-default.
+can see how GitLab Orbit is used. Each event records which command or MCP tool
+ran, whether it succeeded, its exit code and duration, the CLI version, and the
+coding agent that ran it. No repository content, file paths, or query text is sent. Telemetry
+is on by default.
 
 Turn it off with a saved setting, or with the environment variable in CI:
 

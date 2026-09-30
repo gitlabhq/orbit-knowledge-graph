@@ -2,10 +2,10 @@ mod context;
 mod tracker;
 
 pub use context::{
-    ORBIT_CODE_INDEXING_SCHEMA, ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA,
-    ORBIT_SDLC_INDEXING_SCHEMA, OrbitCodeIndexingContext, OrbitCommonContext, OrbitQueryContext,
-    OrbitSdlcIndexingContext, orbit_code_indexing, orbit_common, orbit_query, orbit_sdlc_indexing,
-    validation,
+    ORBIT_CLI_COMMAND_SCHEMA, ORBIT_CODE_INDEXING_SCHEMA, ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA,
+    ORBIT_SDLC_INDEXING_SCHEMA, OrbitCliCommandContext, OrbitCodeIndexingContext,
+    OrbitCommonContext, OrbitQueryContext, OrbitSdlcIndexingContext, orbit_cli_command,
+    orbit_code_indexing, orbit_common, orbit_query, orbit_sdlc_indexing, validation,
 };
 pub use tracker::{AnalyticsTracker, SnowplowAnalyticsTracker};
 

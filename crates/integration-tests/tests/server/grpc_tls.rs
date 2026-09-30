@@ -1,4 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use orbit_server::active_schema::ActiveSchema;
@@ -10,33 +9,15 @@ use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
-fn init_crypto_provider() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
+use super::tls_fixtures::{generate_test_certs, init_crypto_provider};
 
-fn generate_test_certs() -> (String, String, String) {
-    let key_pair = rcgen::KeyPair::generate().expect("failed to generate key pair");
-    let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
-        .expect("failed to create cert params");
-    params
-        .subject_alt_names
-        .push(rcgen::SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-    let cert = params
-        .self_signed(&key_pair)
-        .expect("failed to self-sign certificate");
-    let key_pem = key_pair.serialize_pem();
-    let cert_pem = cert.pem();
-    (cert_pem.clone(), key_pem, cert_pem)
-}
-
-fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> GrpcServer {
+fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     let validator =
         Arc::new(JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap());
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     let clickhouse_config = orbit_server_config::AppConfig::embedded_defaults().graph;
     let cluster_health = ClusterHealthChecker::default().into_arc();
     GrpcServer::new(
-        addr,
         validator,
         ActiveSchema::pinned(ontology),
         &clickhouse_config,
@@ -75,17 +56,17 @@ fn tls_endpoint(port: u16, ca_pem: &str) -> Endpoint {
 async fn grpc_tls_handshake_succeeds() {
     init_crypto_provider();
 
-    let (cert_pem, key_pem, ca_pem) = generate_test_certs();
+    let (cert_pem, key_pem) = generate_test_certs();
+    let ca_pem = cert_pem.clone();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
-    drop(listener);
 
     let identity = Identity::from_pem(&cert_pem, &key_pem);
     let tls_config = ServerTlsConfig::new().identity(identity);
-    let server = build_grpc_server(bound_addr, Some(tls_config));
+    let server = build_grpc_server(Some(tls_config));
 
-    let server_handle = tokio::spawn(server.run());
+    let server_handle = tokio::spawn(server.run(listener));
 
     let channel = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
     let mut client = OrbitServiceClient::new(channel);
@@ -105,17 +86,17 @@ async fn grpc_tls_handshake_succeeds() {
 async fn grpc_plaintext_client_rejected_by_tls_server() {
     init_crypto_provider();
 
-    let (cert_pem, key_pem, ca_pem) = generate_test_certs();
+    let (cert_pem, key_pem) = generate_test_certs();
+    let ca_pem = cert_pem.clone();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
-    drop(listener);
 
     let identity = Identity::from_pem(&cert_pem, &key_pem);
     let tls_config = ServerTlsConfig::new().identity(identity);
-    let server = build_grpc_server(bound_addr, Some(tls_config));
+    let server = build_grpc_server(Some(tls_config));
 
-    let server_handle = tokio::spawn(server.run());
+    let server_handle = tokio::spawn(server.run(listener));
 
     // Wait for server readiness via TLS before testing plaintext rejection
     let _ = connect_with_retry(tls_endpoint(bound_addr.port(), &ca_pem), 20).await;
@@ -140,10 +121,9 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
 async fn legacy_gkg_service_path_reaches_the_service() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
-    drop(listener);
 
-    let server = build_grpc_server(bound_addr, None);
-    let server_handle = tokio::spawn(server.run());
+    let server = build_grpc_server(None);
+    let server_handle = tokio::spawn(server.run(listener));
 
     let endpoint =
         Endpoint::from_shared(format!("http://127.0.0.1:{}", bound_addr.port())).unwrap();
@@ -177,10 +157,9 @@ async fn legacy_gkg_service_path_reaches_the_service() {
 async fn unknown_service_path_is_unimplemented() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
-    drop(listener);
 
-    let server = build_grpc_server(bound_addr, None);
-    let server_handle = tokio::spawn(server.run());
+    let server = build_grpc_server(None);
+    let server_handle = tokio::spawn(server.run(listener));
 
     let endpoint =
         Endpoint::from_shared(format!("http://127.0.0.1:{}", bound_addr.port())).unwrap();

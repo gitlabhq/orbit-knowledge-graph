@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fetch Iglu schema JSON files for every pin in vendored.iglu.pins.
+#
+# Called by `mise vendor -- iglu` which sets:
+#   VENDOR_VERSIONS_FILE  — absolute path to config/versions.yaml
+#   VENDOR_DIR            — absolute path to config/schemas/iglu
+#   VENDOR_NAME           — "iglu"
+#
+# Must be invoked through the runner; requires VENDOR_* env vars.
+#
+# Workflow: edit a pin in versions.yaml, then run `mise vendor -- iglu`.
+
+VERSIONS_FILE="${VENDOR_VERSIONS_FILE:?Set VENDOR_VERSIONS_FILE or call via scripts/vendored/run.sh}"
+VENDOR_DIR="${VENDOR_DIR:?Set VENDOR_DIR or call via scripts/vendored/run.sh}"
+IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
+
+for name in $(yq '.vendored.iglu.pins | keys | .[]' "$VERSIONS_FILE"); do
+    version=$(yq ".vendored.iglu.pins.$name" "$VERSIONS_FILE")
+    schema_dir="$VENDOR_DIR/$name"
+    schema_file="$schema_dir/$version.json"
+
+    mkdir -p "$schema_dir"
+
+    echo "Fetching $name/$version from live Iglu..."
+    if ! curl -sfL --max-filesize 1048576 "$IGLU_BASE/$name/jsonschema/$version" -o "$schema_file"; then
+        echo "ERROR: $name/$version not found at $IGLU_BASE" >&2
+        rm -f "$schema_file"
+        exit 1
+    fi
+
+    python3 -c "import json,sys; json.load(sys.stdin)" < "$schema_file" || {
+        echo "ERROR: fetched $schema_file is not valid JSON" >&2
+        exit 1
+    }
+
+    echo "  $schema_file written"
+done
+
+echo "All Iglu schemas fetched."

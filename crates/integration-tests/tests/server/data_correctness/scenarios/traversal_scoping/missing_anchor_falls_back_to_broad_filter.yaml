@@ -1,0 +1,28 @@
+description: Rows of a project with no Project row are still returned; the missing anchor falls back to the authorization filter
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 5500, iid: 1, title: Orphan MR, state: opened, source_branch: b, target_branch: main, project_id: 5555, author_id: 1, traversal_path: "1/100/5555/" }
+  redaction:
+    allow:
+      merge_request: [5500]
+      user: [1]
+
+query:
+  json: |
+    {
+        "query_type": "traversal",
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 5555}, "columns": ["title"]}],
+        "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest {project_id: 5555}) RETURN mr.title LIMIT 10
+
+expect:
+  sql_contains: ["AS _scope WHERE", "= '0/')"]
+  skip_requirements: ["filter:project_id"]
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [5500]

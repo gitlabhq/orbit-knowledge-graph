@@ -244,13 +244,6 @@ impl QuerySettings {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct PathResolverConfig {
-    pub cache_ttl_secs: u64,
-    pub cache_capacity: u64,
-}
-
 static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
 
 /// Initialize the global query settings. Called once at startup by the
@@ -423,15 +416,6 @@ aggregation:
             Some(120)
         );
         assert_eq!(settings.resolve("aggregation").query_cache_ttl, Some(60));
-    }
-
-    #[test]
-    fn path_resolver_config_from_yaml() {
-        let cfg: PathResolverConfig =
-            orbit_utils::yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
-        assert_eq!(cfg.cache_ttl_secs, 120);
-        assert_eq!(cfg.cache_capacity, 500);
-        assert!(orbit_utils::yaml::from_str::<PathResolverConfig>("{}").is_err());
     }
 
     #[test]

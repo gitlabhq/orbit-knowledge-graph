@@ -32,8 +32,21 @@ pre-commit:
     # has no per-job allow_failure primitive — this is the standard workaround.)
     # To promote to a blocking gate, remove `|| true`.
     - name: narration
-      run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
+      run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
+    - name: prose
+      run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
+      glob:
+        - "AGENTS.md"
+        - "CONTEXT.md"
+        - "crates/*/AGENTS.md"
+        - "docs/dev/**/*.md"
+        - "docs/design-documents/**/*.md"
+        - ".gitlab/merge_request_templates/*.md"
+        - ".gitlab/issue_templates/*.md"
+        - "skills/**/*.md"
+        - "config/prompts/**/*.yml"
+        - "config/setup/setup.yaml"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:

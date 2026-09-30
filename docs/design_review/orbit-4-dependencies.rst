@@ -91,7 +91,7 @@ What Depends on Orbit
      - Required
      - Fallback
    * - **Rails gRPC Client**
-     - 9 RPC methods
+     - 11 RPC methods
      - gRPC
      - Optional
      - Standard code navigation
@@ -129,7 +129,7 @@ Rust application.  No monolith dependencies are being severed.
 
 The integration surface with the monolith:
 
-- **Inbound (Rails -> Orbit):** gRPC client (9 RPCs), DAP proxy (HTTP+JWT)
+- **Inbound (Rails -> Orbit):** gRPC client (11 RPCs), DAP proxy (HTTP+JWT)
 - **Outbound (Orbit -> Rails):** batch redaction over the gRPC stream
   (``Ability.allowed?``), internal API (Gitaly access)
 - **Data replication:** Siphon CDC (PostgreSQL -> ClickHouse)

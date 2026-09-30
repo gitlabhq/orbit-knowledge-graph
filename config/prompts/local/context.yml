@@ -1,11 +1,14 @@
 name: context
-version: 1.0.0
-short: Print the source bodies of definitions by fqn or unqualified name
+version: 1.9.0
+short: Expand local code context
 description: >-
-  Print the source bodies of definitions by fqn or unqualified name
+  Expand local code context.
 
 
-  Bodies come from the working tree, so you can read several grep matches in
-  one call. A glob such as `crate::module::*` prints every match in file order.
-  Use `--file` to read a whole file as its definitions, or `--outline` to map a
-  large type before reading one method.
+  Batch file paths, `path:start-end` line ranges, directories, `File:<id>`, or
+  `Definition:<id>`. Files return compact definition maps with every followable
+  ID and up to ten connections per section, with omitted counts. Line ranges
+  return those numbered lines with the definitions they touch; directories list
+  indexed files with definition counts. Choose a Definition ID for complete source and its indexed
+  connections. Test connections appear in their own section. Reuse source; never
+  truncate output. Raw reads are only for non-code or source Orbit cannot provide.

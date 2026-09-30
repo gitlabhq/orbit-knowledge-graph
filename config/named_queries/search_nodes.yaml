@@ -2,19 +2,25 @@ name: search_nodes
 description: Nodes of one entity type whose text property contains the search term
 parameters:
   entity:
-    schema: { type: string }
+    schema: { type: string, maxLength: 64 }
     example: Project
   field:
-    schema: { type: string, pattern: "^[a-z][a-z0-9_]*$" }
+    schema: { type: string, maxLength: 64, pattern: "^[a-z][a-z0-9_]*$" }
     example: full_path
   text:
     schema: { type: string, minLength: 3, maxLength: 1024 }
     example: gitlab
 query:
-  query_type: traversal
-  nodes:
-    - id: n
-      entity: { $param: entity }
-      filters:
-        "$param:field": { contains: { $param: text } }
-  limit: 50
+  json:
+    query_type: traversal
+    nodes:
+      - id: n
+        entity: { $param: entity }
+        filters:
+          "$param:field": { contains: { $param: text } }
+    limit: 50
+  gql: |
+    MATCH (n:{{ identifier("entity") }})
+    WHERE n.{{ identifier("field") }} CONTAINS {{ param("text") }}
+    RETURN n
+    LIMIT 50

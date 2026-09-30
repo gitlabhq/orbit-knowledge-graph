@@ -184,16 +184,16 @@ glab orbit index /path/to/your/repo
 glab orbit schema
 ```
 
-That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints every
+That builds a local DuckDB graph at `~/.gitlab/orbit/graph.duckdb` and prints every
 table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 `gl_imported_symbol`, `gl_edge`, and the `_orbit_manifest` bookkeeping table.
 
 Next:
 
 - Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
-  skill, or [connect via MCP](access/mcp.md). Setup edits your agent's
-  instruction file and hook configuration;
+- Wire it into your AI agent: run `orbit setup` to configure every detected
+  agent, or [connect via MCP](access/mcp.md) by hand. Setup edits your agent's
+  instruction file, MCP configuration, skills, and hooks;
   [see what it changes](access/cli.md#what-it-changes) before you run it.
 - Browse the table layout: [Schema reference](schema.md).
 
@@ -203,7 +203,7 @@ GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
-- [What GitLab Orbit Local indexes](indexing.md) - language and coverage scope.
+- [What GitLab Orbit Local indexes](../indexed-data.md) - language and coverage scope.
 - [Schema reference](schema.md) - the four node types in the local graph.
 - [Cookbook](../remote/cookbook.md) - copy-paste queries (code-only ones apply to Local).
 - [Get started with GitLab Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.

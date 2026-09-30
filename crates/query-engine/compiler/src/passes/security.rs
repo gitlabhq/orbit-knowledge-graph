@@ -26,10 +26,12 @@ use regex::Regex;
 
 use serde_json::Value;
 
+use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
+#[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
@@ -40,7 +42,7 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    ontology: &Ontology,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -59,38 +61,27 @@ pub fn apply_security_context(
         ));
     }
     match node {
-        Node::Query(q) => {
-            for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx, ontology)?;
-            }
-            apply_to_query(q, ctx, ontology)
-        }
+        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from, ontology);
+fn apply_to_query(
+    q: &mut Query,
+    ctx: &SecurityContext,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Result<()> {
+    let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = ontology
-                .min_access_level_for_table(table)
-                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+            let min_role = model.table_minimum_access_level(table);
             let eligible = ctx.paths_at_least(min_role);
-            // Inject the resolved scope prefix as the alias's authorization filter
-            // when it sits within an eligible path; otherwise the broad path set.
-            match ctx.scope_prefixes.get(alias) {
-                Some(prefix)
-                    if ontology.is_table_path_scopable(table)
-                        && eligible.iter().any(|p| prefix.is_descendant_of(p)) =>
-                {
-                    starts_with_expr(alias, prefix.as_str())
+            let broad = build_path_filter(alias, &eligible);
+            match ctx.scope_proofs.get(alias) {
+                Some(scope) if model.table_path_scopable(table) => {
+                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
                 }
-                Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
-                    build_path_filter(alias, &eligible),
-                    starts_with_expr(alias, prefix.as_str()),
-                ),
-                _ => build_path_filter(alias, &eligible),
+                _ => broad,
             }
         });
         q.where_clause = Expr::and_all(
@@ -100,45 +91,7 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
         );
     }
 
-    apply_security_to_from(&mut q.from, ctx, ontology)?;
-
-    if let Some(where_clause) = &mut q.where_clause {
-        apply_security_to_expr(where_clause, ctx, ontology)?;
-    }
-
-    for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, ontology)?;
-    }
-
     Ok(())
-}
-
-fn apply_security_to_expr(
-    expr: &mut Expr,
-    ctx: &SecurityContext,
-    ontology: &Ontology,
-) -> Result<()> {
-    match expr {
-        Expr::InSelect { query, .. } => apply_to_query(query, ctx, ontology),
-        Expr::BinaryOp { left, right, .. } => {
-            apply_security_to_expr(left, ctx, ontology)?;
-            apply_security_to_expr(right, ctx, ontology)
-        }
-        Expr::UnaryOp { expr, .. }
-        | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, ontology),
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                apply_security_to_expr(arg, ctx, ontology)?;
-            }
-            Ok(())
-        }
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::Star => Ok(()),
-    }
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
@@ -178,8 +131,11 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) -> Vec<String> {
-    collect_aliased_tables(table_ref, ontology)
+pub(crate) fn collect_node_aliases(
+    table_ref: &TableRef,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Vec<String> {
+    collect_aliased_tables(table_ref, model)
         .into_iter()
         .map(|(a, _)| a)
         .collect()
@@ -190,50 +146,25 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) ->
 /// minimum role before building the `startsWith(...)` predicate.
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
-    ontology: &Ontology,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, String)> {
-    match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, ontology) => {
-            vec![(alias.clone(), table.clone())]
+    let mut aliases = Vec::new();
+    visit_relations(table_ref, &mut |relation| {
+        if let TableRef::Scan { table, alias, .. } = relation
+            && should_apply_security_filter(table, model)
+        {
+            aliases.push((alias.clone(), table.clone()));
         }
-        TableRef::Scan { .. } => vec![],
-        TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left, ontology);
-            aliases.extend(collect_aliased_tables(right, ontology));
-            aliases
-        }
-        // Derived tables don't have traversal_path columns themselves.
-        // Their arms get security filters via apply_security_to_from.
-        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
-    }
-}
-
-fn apply_security_to_from(
-    table_ref: &mut TableRef,
-    ctx: &SecurityContext,
-    ontology: &Ontology,
-) -> Result<()> {
-    match table_ref {
-        TableRef::Union { queries, .. } => {
-            for arm in queries {
-                apply_to_query(arm, ctx, ontology)?;
-            }
-        }
-        TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx, ontology)?;
-        }
-        TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx, ontology)?;
-            apply_security_to_from(right, ctx, ontology)?;
-        }
-        TableRef::Scan { .. } => {}
-    }
-    Ok(())
+    });
+    aliases
 }
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
-fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
+fn should_apply_security_filter(
+    table: &str,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> bool {
     let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(
             r"^(?:v\d+_)?{}.+$",
@@ -242,17 +173,34 @@ fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
         .expect("valid regex")
     });
 
-    graph_table_pattern.is_match(table) && !ontology.is_global_table(table)
+    graph_table_pattern.is_match(table) && model.table_has_path_columns(table)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::AuthorizedPath;
+    use crate::ast::visit::{visit_expressions, visit_queries};
     use crate::ast::{JoinType, Op, SelectExpr};
+    use crate::scope::ScopeProof;
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
+
+    fn apply(node: &mut Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        apply_security_context(node, context, model.as_ref())
+    }
+
+    fn aliases(table: &TableRef, ontology: &Ontology) -> Vec<String> {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        collect_node_aliases(table, model.as_ref())
+    }
+
+    fn applies(table: &str, ontology: &Ontology) -> bool {
+        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
+        should_apply_security_filter(table, model.as_ref())
+    }
 
     fn simple_query() -> Node {
         Node::Query(Box::new(Query {
@@ -368,60 +316,25 @@ mod tests {
 
     fn starts_with_paths_for_alias(expr: &Expr, alias: &str) -> Vec<String> {
         let mut paths = Vec::new();
-        collect_starts_with_paths(expr, alias, &mut paths);
-        paths
-    }
-
-    fn collect_starts_with_paths(expr: &Expr, alias: &str, paths: &mut Vec<String>) {
-        match expr {
-            Expr::FuncCall { name, args } if name == "startsWith" && args.len() == 2 => {
-                if let (
+        visit_expressions(expr, &mut |expr| {
+            if let Expr::FuncCall { name, args } = expr
+                && name == "startsWith"
+                && let [
                     Expr::Column { table, column },
                     Expr::Param {
                         value: Value::String(path),
                         ..
                     },
-                ) = (&args[0], &args[1])
-                    && table == alias
-                    && column == TRAVERSAL_PATH_COLUMN
-                {
-                    paths.push(path.clone());
-                }
-
-                for arg in args {
-                    collect_starts_with_paths(arg, alias, paths);
-                }
+                ] = args.as_slice()
+                && table == alias
+                && column == TRAVERSAL_PATH_COLUMN
+            {
+                paths.push(path.clone());
             }
-            Expr::FuncCall { args, .. } => {
-                for arg in args {
-                    collect_starts_with_paths(arg, alias, paths);
-                }
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                collect_starts_with_paths(left, alias, paths);
-                collect_starts_with_paths(right, alias, paths);
-            }
-            Expr::UnaryOp { expr, .. } => collect_starts_with_paths(expr, alias, paths),
-            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
-                collect_starts_with_paths(expr, alias, paths)
-            }
-            Expr::Lambda { body, .. } => collect_starts_with_paths(body, alias, paths),
-            Expr::Identifier(_)
-            | Expr::Column { .. }
-            | Expr::Literal(_)
-            | Expr::Param { .. }
-            | Expr::Star => {}
-        }
-    }
-
-    fn find_in_select_query(expr: &Expr) -> Option<&Query> {
-        match expr {
-            Expr::InSelect { query, .. } => Some(query),
-            Expr::BinaryOp { left, right, .. } => {
-                find_in_select_query(left).or_else(|| find_in_select_query(right))
-            }
-            _ => None,
-        }
+            Ok(())
+        })
+        .unwrap();
+        paths
     }
 
     #[test]
@@ -449,14 +362,19 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
         };
-        let anchor = find_in_select_query(q.where_clause.as_ref().unwrap())
-            .expect("InSelect subquery should survive the security pass");
-        let paths = starts_with_paths_for_alias(anchor.where_clause.as_ref().unwrap(), "e0p");
+        let mut paths = Vec::new();
+        visit_queries(q, &mut |query| {
+            if let Some(predicate) = &query.where_clause {
+                paths.extend(starts_with_paths_for_alias(predicate, "e0p"));
+            }
+            Ok(())
+        })
+        .unwrap();
         assert!(
             paths.contains(&"1/100/".to_string()) && paths.contains(&"1/200/".to_string()),
             "anchor subquery must carry the caller's full path set, got {paths:?}"
@@ -493,7 +411,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -536,7 +454,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -584,7 +502,7 @@ mod tests {
     fn inject_adds_security_to_simple_query() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -600,7 +518,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -614,7 +532,7 @@ mod tests {
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
 
-        let aliases = collect_node_aliases(&from, &ontology);
+        let aliases = aliases(&from, &ontology);
         assert_eq!(aliases, vec!["p", "e"]);
     }
 
@@ -628,25 +546,25 @@ mod tests {
             Expr::lit(true),
         );
 
-        let aliases = collect_node_aliases(&from, &ontology);
+        let aliases = aliases(&from, &ontology);
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
         let ontology = Ontology::load_embedded().unwrap();
-        assert!(!should_apply_security_filter("gl_user", &ontology));
-        assert!(should_apply_security_filter(EDGE_TABLE, &ontology));
-        assert!(should_apply_security_filter("gl_project", &ontology));
-        assert!(should_apply_security_filter("gl_merge_request", &ontology));
+        assert!(!applies("gl_user", &ontology));
+        assert!(applies(EDGE_TABLE, &ontology));
+        assert!(applies("gl_project", &ontology));
+        assert!(applies("gl_merge_request", &ontology));
     }
 
     #[test]
     fn should_apply_security_filter_skips_ctes() {
         let ontology = Ontology::new();
-        assert!(!should_apply_security_filter("path_cte", &ontology));
-        assert!(!should_apply_security_filter("some_cte", &ontology));
-        assert!(!should_apply_security_filter("nodes", &ontology));
+        assert!(!applies("path_cte", &ontology));
+        assert!(!applies("some_cte", &ontology));
+        assert!(!applies("nodes", &ontology));
     }
 
     #[test]
@@ -662,7 +580,7 @@ mod tests {
             }],
             "hop_e0",
         );
-        let aliases = collect_node_aliases(&from, &Ontology::new());
+        let aliases = aliases(&from, &Ontology::new());
         assert!(aliases.is_empty());
     }
 
@@ -696,7 +614,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -734,7 +652,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -749,12 +667,12 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_replaces_broad_on_scoped_alias() {
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("p".to_string(), TraversalPath::new_unchecked("1/24/23/"));
+    fn scope_proof_narrows_scoped_alias_beside_broad_filter() {
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("p".to_string(), ScopeProof::literal("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -772,7 +690,7 @@ mod tests {
         }));
 
         let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -780,8 +698,8 @@ mod tests {
         let where_clause = q.where_clause.as_ref().unwrap();
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "p"),
-            vec!["1/24/23/".to_string()],
-            "scoped alias is injected with the tight prefix as its only auth filter"
+            vec!["1/".to_string(), "1/24/23/".to_string()],
+            "scoped alias keeps the broad authz filter and gains the tight prefix"
         );
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "wi"),
@@ -791,13 +709,13 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_below_role_floor_keeps_broad() {
+    fn scope_proof_below_role_floor_keeps_broad() {
         let ontology = Ontology::load_embedded().unwrap();
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("v".to_string(), TraversalPath::new_unchecked("1/100/200/"));
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("v".to_string(), ScopeProof::literal("1/100/200/"));
         let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -808,7 +726,7 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }));
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -821,12 +739,12 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_dropped_on_non_path_scopable_alias() {
-        let mut prefixes = std::collections::HashMap::new();
-        prefixes.insert("g".to_string(), TraversalPath::new_unchecked("1/24/23/"));
+    fn scope_proof_dropped_on_non_path_scopable_alias() {
+        let mut proofs = std::collections::HashMap::new();
+        proofs.insert("g".to_string(), ScopeProof::literal("1/24/23/"));
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes(prefixes);
+            .with_scope_proofs(proofs);
 
         let ontology = Ontology::new().with_nodes(["Global"]);
 
@@ -840,7 +758,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+        apply(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -849,7 +767,7 @@ mod tests {
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "g"),
             vec!["1/".to_string()],
-            "non-path-scopable alias must drop scope_prefix and keep broad authz only"
+            "non-path-scopable alias must drop the scope proof and keep broad authz only"
         );
     }
 
@@ -875,7 +793,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        apply(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()

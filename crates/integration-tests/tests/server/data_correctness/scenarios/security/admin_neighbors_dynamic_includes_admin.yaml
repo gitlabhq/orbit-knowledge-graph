@@ -12,6 +12,8 @@ query:
       "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
       "options": {"dynamic_columns": "*"}
     }
+  gql: |
+    MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(n) RETURN g, properties(n)
 
 expect:
   node_count: 4

@@ -61,6 +61,7 @@ pub fn analyze_files(
     root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
     cancel: &crate::v2::pipeline::CancellationToken,
+    progress: &dyn crate::v2::pipeline::ProgressObserver,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
@@ -84,6 +85,7 @@ pub fn analyze_files(
                 ))
             });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
+            progress.files_advanced(crate::v2::pipeline::ProgressPhase::Parse, 1);
             // If the sentinel killed this file while OXC was running,
             // convert whatever result we got into a timeout skip.
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -733,6 +735,7 @@ mod tests {
             root.to_str().expect("utf8 root path"),
             None,
             &Default::default(),
+            &crate::v2::pipeline::SilentProgress,
         );
 
         assert!(
@@ -772,6 +775,7 @@ mod tests {
             root.to_str().expect("utf8 root path"),
             None,
             &cancel,
+            &crate::v2::pipeline::SilentProgress,
         );
 
         assert!(analyzed.is_empty(), "got {} analyzed files", analyzed.len());

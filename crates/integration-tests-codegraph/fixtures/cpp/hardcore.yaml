@@ -261,13 +261,13 @@ tests:
 
   - name: "Static internal_seek calls internal_flush (same file)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'reader::io::internal_seek'
         AND callee.fqn = 'reader::io::internal_flush'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush", kind: Calls } }
+      - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush" } }
 
   # ══════════════════════════════════════════════════════════════
   # NEGATIVE ASSERTIONS
@@ -275,7 +275,7 @@ tests:
 
   - name: "NO edge from app to static internal_flush"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
         AND callee.fqn = 'reader::io::internal_flush'
       RETURN caller.fqn AS caller
@@ -284,7 +284,7 @@ tests:
 
   - name: "NO edge from app to unrelated_func (not included)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::unrelated_func'
       RETURN caller.fqn AS caller
@@ -293,7 +293,7 @@ tests:
 
   - name: "NO edge from app to static helper"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.fqn IN ['app::copy_file', 'app::main']
         AND callee.fqn = 'unrelated::helper'
       RETURN caller.fqn AS caller
@@ -306,13 +306,13 @@ tests:
 
   - name: "main calls copy_file (same file)"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
         AND callee.fqn = 'app::copy_file'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+      - { row: { caller: "app::main", callee: "app::copy_file" } }
 
   # ══════════════════════════════════════════════════════════════
   # DUPLICATE EDGE CHECK
@@ -320,12 +320,11 @@ tests:
 
   - name: "copy_file CALLS edges have no duplicates"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'app::copy_file'
-        AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
-      - { unique: callee }
+      - { empty: true }
 
   # ══════════════════════════════════════════════════════════════
   # NESTED NAMESPACES
@@ -342,23 +341,23 @@ tests:
 
   - name: "Nested namespace defines inner namespace"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'nested::outer'
         AND child.fqn = 'nested::outer::inner'
-      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+      RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
-      - { row: { parent: "nested::outer", child: "nested::outer::inner", kind: Defines } }
+      - { row: { parent: "nested::outer", child: "nested::outer::inner" } }
 
   - name: "Inner namespace defines Widget"
     query: |
-      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
       WHERE parent.fqn = 'nested::outer::inner'
         AND child.fqn = 'nested::outer::inner::Widget'
-      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+      RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
-      - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget", kind: Defines } }
+      - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget" } }
 
   # ══════════════════════════════════════════════════════════════
   # TEMPLATE DEFINITIONS
@@ -388,7 +387,7 @@ tests:
 
   - name: "reader.cpp defines correct functions"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
         AND d.definition_type = 'Function'
       RETURN d.fqn AS fqn
@@ -403,7 +402,7 @@ tests:
 
   - name: "unrelated.cpp defines exactly 2 functions"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'unrelated.cpp'
         AND d.definition_type = 'Function'
       RETURN d.fqn AS fqn
@@ -415,7 +414,7 @@ tests:
 
   - name: "app.cpp defines exactly 2 functions"
     query: |
-      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'app.cpp'
         AND d.definition_type = 'Function'
       RETURN d.fqn AS fqn
@@ -484,10 +483,10 @@ tests:
 
   - name: "Template usage calls tmpl::swap via include"
     query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
         AND callee.fqn = 'templates::tmpl::swap'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
-      - { row: { caller: "tmpl_usage::extra::use_templates", callee: "templates::tmpl::swap", kind: Calls } }
+      - { row: { caller: "tmpl_usage::extra::use_templates", callee: "templates::tmpl::swap" } }

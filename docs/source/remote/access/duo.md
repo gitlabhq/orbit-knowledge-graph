@@ -51,8 +51,13 @@ live graph rather than the agent's general knowledge.
 
 ## Billing
 
-Queries that GitLab Duo Agent Platform makes against GitLab Orbit on your behalf are
-zero-rated. They do not consume GitLab Credits.
+During the beta, queries that GitLab Duo Agent Platform makes against GitLab Orbit on
+your behalf do not consume GitLab Credits.
+
+When GitLab Orbit is generally available, these queries consume GitLab Credits. Credit
+rates are published in
+[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
+before charging begins.
 
 ## Example prompts
 

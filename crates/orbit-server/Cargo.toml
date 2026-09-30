@@ -17,7 +17,6 @@ testkit = ["orbit-analytics/testkit"]
 mimalloc = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
-moka = { workspace = true }
 base64 = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
@@ -37,11 +36,14 @@ minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 tower = { workspace = true }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
 reqwest = { workspace = true }
-rustls = { workspace = true }
+rust-embed = { workspace = true }
+rustls = { workspace = true, features = ["fips"] }
+aws-lc-rs = { workspace = true, features = ["fips"] }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonschema = { workspace = true }
@@ -49,9 +51,11 @@ jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 labkit-events = { workspace = true }
 serde = { workspace = true }
+secrecy = { workspace = true }
 semver = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util.workspace = true
@@ -67,7 +71,7 @@ toon-format = { workspace = true }
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
 orbit-migrations = { path = "../orbit-migrations" }
-orbit-prompts = { path = "../orbit-prompts" }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
 orbit-versions = { path = "../orbit-versions" }
@@ -77,6 +81,7 @@ tonic-prost-build = { workspace = true }
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
 tracing-subscriber = { workspace = true }
 
 [lints]

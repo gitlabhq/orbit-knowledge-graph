@@ -402,6 +402,11 @@ impl EdgeVariantScope {
     pub fn is_scope_preserving(self) -> bool {
         matches!(self, Self::NamespaceAnchor | Self::SameNamespace)
     }
+
+    #[must_use]
+    pub fn propagates_to_source(self, relationship: &str, source: &str) -> bool {
+        self.is_scope_preserving() && !(relationship == "CONTAINS" && source == "Group")
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -516,7 +521,6 @@ pub enum TraversalPathKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraversalPathLookupSpec {
     pub kind: TraversalPathKind,
-    pub dictionary: Option<String>,
     pub source_table: String,
     pub key_column: String,
 }
@@ -525,7 +529,6 @@ pub struct TraversalPathLookupSpec {
 pub struct TraversalPathLookup {
     pub entity: String,
     pub kind: TraversalPathKind,
-    pub dictionary: Option<String>,
     pub source_table: String,
     pub key_column: String,
 }

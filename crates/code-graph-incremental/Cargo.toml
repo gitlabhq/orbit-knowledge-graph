@@ -1,0 +1,62 @@
+[package]
+name = "code-graph-incremental"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[package.metadata.cargo-shear]
+ignored = ["pest"] # used by pest_derive-generated code
+
+[lints]
+workspace = true
+
+[dependencies]
+arrow = { workspace = true }
+either = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+indextree = "4.9"
+itertools = "0.14"
+lasso = { version = "0.7", features = ["multi-threaded", "ahasher"] }
+pest = { workspace = true }
+pest_consume = { workspace = true }
+pest_derive = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+rkyv = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+smallvec = { workspace = true }
+stacker = { workspace = true }
+strum = { workspace = true }
+termtree = "1.0"
+toml = { workspace = true }
+zstd = "0.13"
+tree-sitter = "0.26.3"
+tree-sitter-bash = "0.25.1"
+tree-sitter-c = "0.24.2"
+tree-sitter-c-sharp = "0.23.0"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-go = "0.25.0"
+tree-sitter-hcl = "1.1.0"
+tree-sitter-java = "0.23.0"
+tree-sitter-kotlin-sg = "0.4.0"
+tree-sitter-lua = "0.5.0"
+tree-sitter-php = "0.24.2"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter-scala = "0.24.0"
+tree-sitter-swift = "0.7.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-zig = "1.1.2"
+tree-sitter-haskell = "0.23.1"
+tree-sitter-ocaml = "0.25.0"
+code-graph = { path = "../code-graph" }
+ontology = { path = "../ontology" }
+orbit-utils = { path = "../utils" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+zstd = "0.13"

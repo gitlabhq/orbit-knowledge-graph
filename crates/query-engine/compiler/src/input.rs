@@ -4,7 +4,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use strum::VariantNames;
 
 /// Controls which columns are fetched for dynamically-discovered entities
@@ -31,42 +31,6 @@ pub struct QueryOptions {
     pub include_debug_sql: bool,
 }
 
-/// Authorization config for an entity type, derived from the ontology and carried
-/// through the compilation pipeline so the server never re-consults the ontology at
-/// request time.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntityAuthConfig {
-    /// Rails resource type sent to the authorization service (e.g. "projects").
-    pub resource_type: String,
-    pub ability: String,
-    /// DB column whose value is used as the authorization ID.
-    /// "id" for most entities; e.g. "project_id" for Definition/File/Branch.
-    pub auth_id_column: String,
-    /// For indirect-auth entities (auth_id_column != "id"): the entity type that
-    /// owns this resource, used to resolve the auth ID from edge columns for
-    /// dynamic (path/neighbor) nodes.
-    pub owner_entity: Option<String>,
-    /// Minimum GitLab role required on a traversal path for rows of this entity
-    /// to survive the security pass. Stored as an access-level integer so the
-    /// compiler can compare against per-path roles carried by `SecurityContext`
-    /// without pulling the ontology crate into `types.rs`.
-    pub required_access_level: u32,
-}
-
-impl Default for EntityAuthConfig {
-    fn default() -> Self {
-        Self {
-            resource_type: String::new(),
-            ability: String::new(),
-            auth_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
-            owner_entity: None,
-            // Reporter mirrors the pre-fix access gate and is the right
-            // default for tests that do not care about role scoping.
-            required_access_level: crate::types::DEFAULT_PATH_ACCESS_LEVEL,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
@@ -84,151 +48,17 @@ pub struct Input {
     pub order_by: Option<InputOrderBy>,
     #[serde(default)]
     pub options: QueryOptions,
-    /// Auth config for every entity type with redaction configured. Populated by
-    /// normalization; covers all ontology entities (not just those in this query)
-    /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
     #[serde(skip)]
-    pub entity_auth: HashMap<String, EntityAuthConfig>,
-    #[serde(skip)]
-    pub compiler: CompilerMetadata,
-    /// True when this Input was constructed for the *dynamic* hydration codepath
-    /// (Neighbors and PathFinding origin). Hydration over Traversal/Aggregation
-    /// uses the static path and leaves this `false`.
-    ///
-    /// Selects the SQL shape for the `traversal_path` filter in hydration:
-    /// - dynamic: `arrayExists(p -> startsWith(tp, p), [paths])` (constant AST depth,
-    ///   safe against ClickHouse `max_parser_depth=1000` when the base query
-    ///   surfaced hundreds of namespace paths)
-    /// - static: left-nested OR of `startsWith(tp, p_i)` (per-leaf PK pushdown,
-    ///   only ever a small project-bounded set of paths)
-    #[serde(skip)]
-    pub hydration_dynamic: bool,
-
-    #[serde(skip)]
-    pub path_segment_budget: Option<usize>,
+    pub join_predicates: Vec<JoinPredicate>,
 }
 
-/// Text index metadata for a column, used by the optimizer to rewrite
-/// LIKE patterns to ClickHouse text-index-aware functions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextIndexMeta {
-    /// The tokenizer strategy, e.g. `"splitByNonAlpha"`, `"splitByString(['/'])"`.
-    pub tokenizer: String,
-}
-
-/// Metadata accumulated across compiler passes.
-///
-/// Written by normalize/lowering, read by downstream passes (deduplicate,
-/// optimize, enforce, SIP, fold, etc.).
 #[derive(Debug, Clone)]
-pub struct CompilerMetadata {
-    /// Maps node alias → (edge_alias, edge_column) for edge-only nodes.
-    /// Written by lower, read by enforce to emit `_gkg_*` redaction columns
-    /// from edge columns instead of node table columns. Also used by SIP
-    /// and fold passes to skip edge-only targets.
-    pub node_edge_col: HashMap<String, (String, String)>,
-    /// All edge table names from the ontology. Used by dedup and optimizer
-    /// passes to identify edge scans without needing the full ontology.
-    pub edge_tables: HashSet<String>,
-    /// Default edge table name for creating new edge scans.
-    pub default_edge_table: String,
-    /// Maps relationship kind → edge table name. Populated by normalize from
-    /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
-    /// relationship's scan to the correct physical table.
-    pub edge_table_for_rel: HashMap<String, String>,
-    /// Maps (node_kind, property_name, direction_prefix) → (edge_column, tag_key).
-    /// Populated by normalize from ontology denormalized properties.
-    /// Example: ("Pipeline", "status", "source") → ("source_tags", "status")
-    pub denormalized_columns: HashMap<(String, String, String), (String, String)>,
-    /// (node_kind, property, direction) → relationship kinds whose edge writes
-    /// that denorm tag. A filter is only pushed onto a hop whose relationship
-    /// is in this set.
-    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
-    /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
-    /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
-    /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
-    /// The hop frontier optimizer uses this to decide whether a CTE is safe
-    /// to forward-chain from.
-    pub lowerer_nf_ctes: HashSet<String>,
-    /// Maps (table_name, column_name) → text index metadata. Populated by
-    /// normalize from the ontology's `StorageIndex` entries. Used by the
-    /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
-    pub text_indexes: HashMap<(String, String), TextIndexMeta>,
-    /// Physical table columns from the ontology. Used by lowering to emit
-    /// internal predicates only when a table is known to carry that column.
-    pub table_columns: HashMap<String, HashSet<String>>,
-    /// ORDER BY (sort key) columns per table from the ontology. Used by
-    /// the lowerer to emit `LIMIT 1 BY` dedup with PK-prefixed ORDER BY
-    /// instead of FINAL for single-hop edge aggregations.
-    pub table_sort_keys: HashMap<String, Vec<String>>,
-    /// Maps relationship kind → valid source entity kinds. Used by
-    /// pathfinding to add intermediate kind filters on frontier hops.
-    pub edge_source_kinds: HashMap<String, Vec<String>>,
-    /// Maps relationship kind → valid target entity kinds.
-    pub edge_target_kinds: HashMap<String, Vec<String>>,
-    /// Namespace entity (Group/Project) → (tp-dict table, key column) for pinning a neighbors anchor arm to its centers' exact traversal_paths.
-    pub tp_id_lookup: HashMap<String, (String, String)>,
-    /// FNV-1a of the canonicalized query JSON minus `cursor`; binds `after` tokens to their query.
-    pub query_hash: u64,
-    /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
-    pub cursor_key_count: usize,
-}
-
-/// Defaults to `gl_edge` for test convenience. In production, `normalize()`
-/// always overwrites `edge_tables` and `default_edge_table` from the ontology.
-impl Default for CompilerMetadata {
-    fn default() -> Self {
-        Self {
-            node_edge_col: HashMap::new(),
-            edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
-            default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
-            edge_table_for_rel: HashMap::new(),
-            denormalized_columns: HashMap::new(),
-            denorm_rel_kinds: HashMap::new(),
-            lowerer_nf_ctes: HashSet::new(),
-            text_indexes: HashMap::new(),
-            table_columns: HashMap::new(),
-            table_sort_keys: HashMap::new(),
-            edge_source_kinds: HashMap::new(),
-            edge_target_kinds: HashMap::new(),
-            tp_id_lookup: HashMap::new(),
-            query_hash: 0,
-            cursor_key_count: 0,
-        }
-    }
-}
-
-impl CompilerMetadata {
-    pub fn table_has_column(&self, table: &str, column: &str) -> bool {
-        self.table_columns
-            .get(table)
-            .is_some_and(|columns| columns.contains(column))
-    }
-
-    /// Resolve the edge table(s) for a relationship's type list.
-    ///
-    /// Returns a deduplicated list of physical tables that need to be scanned.
-    /// - Single table → caller emits a normal `edge_scan`
-    /// - Multiple tables → caller emits a UNION ALL across tables
-    ///
-    /// Wildcards and empty type lists resolve to all declared edge tables.
-    pub fn resolve_edge_tables(&self, types: &[String]) -> Vec<String> {
-        if crate::passes::normalize::is_wildcard(types) {
-            let mut tables: Vec<String> = self.edge_tables.iter().cloned().collect();
-            tables.sort();
-            return tables;
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for t in types {
-            let table = self
-                .edge_table_for_rel
-                .get(t)
-                .map(|s| s.as_str())
-                .unwrap_or(&self.default_edge_table);
-            seen.insert(table.to_string());
-        }
-        seen.into_iter().collect()
-    }
+pub struct JoinPredicate {
+    pub lhs_node: String,
+    pub lhs_prop: String,
+    pub op: FilterOp,
+    pub rhs_node: String,
+    pub rhs_prop: String,
 }
 
 impl Input {
@@ -260,10 +90,7 @@ impl Default for Input {
             cursor: None,
             order_by: None,
             options: QueryOptions::default(),
-            entity_auth: HashMap::new(),
-            compiler: CompilerMetadata::default(),
-            hydration_dynamic: false,
-            path_segment_budget: None,
+            join_predicates: Vec::new(),
         }
     }
 }
@@ -279,8 +106,6 @@ fn default_limit() -> u32 {
 pub struct InputCursor {
     pub page_size: u32,
     pub after: Option<String>,
-    #[serde(skip)]
-    pub seek: Option<Vec<Option<String>>>,
 }
 
 #[derive(
@@ -318,9 +143,6 @@ pub struct InputNode {
     pub id: String,
     #[serde(default)]
     pub entity: Option<String>,
-    /// Resolved table name (e.g., "gl_user"). Populated during normalization.
-    #[serde(skip)]
-    pub table: Option<String>,
     /// If not specified, only mandatory columns (id, type) are returned.
     #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
@@ -330,26 +152,6 @@ pub struct InputNode {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub id_property: String,
-    /// Which DB column to select as the auth ID for this node. Populated unconditionally
-    /// during normalization ("id" for most entities, e.g. "project_id" for Definition).
-    /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
-    #[serde(skip)]
-    pub redaction_id_column: String,
-    #[serde(skip)]
-    pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
-    /// Filters on virtual columns, separated by normalize so they don't flow
-    /// into SQL. Applied in-memory after hydration resolves the column values.
-    #[serde(skip)]
-    pub virtual_filters: Vec<(String, InputFilter)>,
-    /// Virtual columns injected by normalize because they are filtered but
-    /// not selected. Resolved for filtering, then stripped from the response.
-    #[serde(skip)]
-    pub filter_injected_virtual_columns: Vec<String>,
-    #[serde(skip)]
-    pub has_traversal_path: bool,
-    /// Whether the entity is declared `global: true` in the ontology.
-    #[serde(skip)]
-    pub is_global: bool,
     /// Narrowed traversal paths extracted from base query results. Used by the
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
@@ -362,18 +164,11 @@ impl Default for InputNode {
         Self {
             id: String::new(),
             entity: None,
-            table: None,
             columns: None,
             filters: HashMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
-            redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
-            virtual_columns: Vec::new(),
-            virtual_filters: Vec::new(),
-            filter_injected_virtual_columns: Vec::new(),
-            has_traversal_path: false,
-            is_global: false,
             traversal_paths: Vec::new(),
         }
     }
@@ -454,12 +249,9 @@ where
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
-    /// Populated by the validate pass; lets the lowerer bind temporal columns
-    /// with their typed CH param.
-    pub data_type: Option<ontology::DataType>,
-    /// Populated by the validate pass from the ontology field definition.
-    /// Used by the planner to decide whether a filter justifies a narrowing CTE.
-    pub selectivity: ontology::FieldSelectivity,
+    /// When set, compare against another node's column instead of a literal.
+    /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
+    pub rhs_column: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
@@ -467,6 +259,7 @@ pub struct InputFilter {
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
+    Ne,
     Gt,
     Lt,
     Gte,
@@ -578,23 +371,6 @@ pub struct InputRelationship {
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
-    /// FK column on a node table that encodes this relationship. Set during normalization.
-    /// The compiler resolves which node has the column from the edge variant's entity types.
-    #[serde(skip)]
-    pub fk_column: Option<String>,
-    /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
-    /// `restrict` when both endpoints resolve to the same project/group scope, so
-    /// the edge scan inherits the PK prefix instead of the broad org-wide one.
-    /// Lossless because an edge row's `traversal_path` is its source entity's.
-    #[serde(skip)]
-    pub scope_prefix: Option<TraversalPath>,
-    /// Whether every resolved variant of this relationship keeps both endpoints
-    /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
-    /// link a node to an intrinsic child whose lifecycle is coupled to the
-    /// parent; the FK-chain lowering relies on this to be result-equivalent to
-    /// the edge scan (an independent entity like a runner can outlive its edge).
-    #[serde(skip)]
-    pub scope_preserving: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1094,10 +870,6 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
-    #[serde(skip)]
-    pub forward_first_hop_rel_types: Vec<String>,
-    #[serde(skip)]
-    pub backward_first_hop_rel_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]

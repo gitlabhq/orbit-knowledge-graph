@@ -1,17 +1,13 @@
 pub(crate) mod correlation;
 mod helpers;
 pub(crate) mod metrics;
-pub(crate) mod path_resolver;
 mod service;
 mod stages;
 
-pub use helpers::{
-    QueryRequest, receive_query_request, send_invalid_request_error, send_query_error,
-};
+pub use helpers::{receive_query_request, send_invalid_request_error, send_query_error};
 pub use metrics::OTelPipelineObserver;
-pub use path_resolver::PathResolver;
-pub use service::QueryPipelineService;
+pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};
 pub use stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
-    SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
+    RoutingStage, SecurityStage,
 };

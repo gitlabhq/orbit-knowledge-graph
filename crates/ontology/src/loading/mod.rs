@@ -782,7 +782,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     crate::entities::TraversalPathLookup {
                         entity: node.name.clone(),
                         kind: spec.kind,
-                        dictionary: spec.dictionary.clone(),
                         source_table: spec.source_table.clone(),
                         key_column: spec.key_column.clone(),
                     }
@@ -1177,18 +1176,6 @@ fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), Ont
             return Err(OntologyError::Validation(format!(
                 "traversal_path_lookup on '{}': key_column '{}' is not a storage column on '{}'",
                 lookup.entity, lookup.key_column, lookup.source_table
-            )));
-        }
-
-        if let Some(dict) = &lookup.dictionary
-            && !ontology
-                .auxiliary_dictionaries()
-                .iter()
-                .any(|d| &d.name == dict)
-        {
-            return Err(OntologyError::Validation(format!(
-                "traversal_path_lookup on '{}': dictionary '{}' is not a declared auxiliary dictionary",
-                lookup.entity, dict
             )));
         }
     }

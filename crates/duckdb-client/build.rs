@@ -73,7 +73,7 @@ fn main() {
                 continue;
             };
             let url = format!(
-                "http://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
+                "https://extensions.duckdb.org/{duckdb_version}/{platform}/{name}.duckdb_extension.gz"
             );
             let gz = out_dir.join(format!("{name}.duckdb_extension.gz"));
             if sha256_of(&gz).as_deref() != Some(expected.as_str()) {

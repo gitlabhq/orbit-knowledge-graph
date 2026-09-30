@@ -62,6 +62,7 @@ pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     }
 }
 
+#[derive(Clone)]
 pub struct OTelPipelineObserver {
     query_type: &'static str,
     start: Instant,
@@ -73,6 +74,21 @@ pub struct OTelPipelineObserver {
 }
 
 impl OTelPipelineObserver {
+    pub(super) fn finish_schema(&self) {
+        self.record_outcome("ok");
+    }
+
+    fn record_outcome(&self, status: &'static str) {
+        let attrs = [
+            KeyValue::new(spec::labels::QUERY_TYPE, self.query_type),
+            KeyValue::new(spec::labels::STATUS, status),
+        ];
+        METRICS.queries.add(1, &attrs);
+        METRICS
+            .pipeline_duration
+            .record(self.start.elapsed().as_secs_f64(), &attrs);
+    }
+
     pub fn start() -> Self {
         Self {
             query_type: "unknown",
@@ -127,14 +143,7 @@ impl PipelineObserver for OTelPipelineObserver {
     }
 
     fn record_error(&self, err: &PipelineError) {
-        let attrs = [
-            KeyValue::new(spec::labels::QUERY_TYPE, self.query_type),
-            KeyValue::new(spec::labels::STATUS, err.code()),
-        ];
-        METRICS.queries.add(1, &attrs);
-        METRICS
-            .pipeline_duration
-            .record(self.start.elapsed().as_secs_f64(), &attrs);
+        self.record_outcome(err.code());
 
         if let Some(reason) = failure_reason(err) {
             METRICS
@@ -145,14 +154,7 @@ impl PipelineObserver for OTelPipelineObserver {
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
         let qt = [KeyValue::new(spec::labels::QUERY_TYPE, self.query_type)];
-        let attrs = [
-            KeyValue::new(spec::labels::QUERY_TYPE, self.query_type),
-            KeyValue::new(spec::labels::STATUS, "ok"),
-        ];
-        METRICS.queries.add(1, &attrs);
-        METRICS
-            .pipeline_duration
-            .record(self.start.elapsed().as_secs_f64(), &attrs);
+        self.record_outcome("ok");
         METRICS.compile_duration.record(self.compile_secs, &qt);
         METRICS.execute_duration.record(self.execute_secs, &qt);
         METRICS

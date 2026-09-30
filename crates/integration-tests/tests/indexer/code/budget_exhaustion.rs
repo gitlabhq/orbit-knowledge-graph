@@ -27,12 +27,12 @@ fn backfill_envelope() -> Envelope {
     .expect("envelope")
 }
 
-async fn checkpoint_exists(clickhouse: &integration_testkit::TestContext) -> bool {
+async fn project_indexed(clickhouse: &integration_testkit::TestContext) -> bool {
     let rows = clickhouse
         .query(&format!(
             "SELECT last_task_id FROM {} FINAL \
              WHERE traversal_path = '{TRAVERSAL_PATH}' AND project_id = {PROJECT_ID} \
-             AND branch = '{BRANCH}' AND _deleted = false",
+             AND branch = '{BRANCH}' AND indexed_at IS NOT NULL AND _deleted = false",
             t("code_indexing_checkpoint")
         ))
         .await;
@@ -55,7 +55,7 @@ async fn index_once(
     let handler = deps.code_indexing_task_handler();
     let outcome = handler.handle(handler_context(), backfill_envelope()).await;
     let _ = handler.flush().await;
-    (outcome, checkpoint_exists(&clickhouse).await)
+    (outcome, project_indexed(&clickhouse).await)
 }
 
 #[tokio::test]

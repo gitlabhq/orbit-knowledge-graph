@@ -23,15 +23,15 @@ pub mod execute_query_message {
 /// Client-sent initial message to start a query.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteQueryRequest {
-    /// JSON DSL query string
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
     /// RAW: tabular JSON rows; LLM: GOON text
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
-    /// defaults to JSON DSL
     #[prost(enumeration = "QueryType", tag = "3")]
     pub query_type: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "4")]
+    pub language: i32,
 }
 /// Server-sent final message with query results.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -208,6 +208,8 @@ pub struct GetQueryDslRequest {
     /// RAW: full JSON Schema; LLM: condensed TOON
     #[prost(enumeration = "ResponseFormat", tag = "1")]
     pub format: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "2")]
+    pub language: i32,
 }
 /// Response carrying the DSL grammar in the requested format.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -229,6 +231,62 @@ pub mod get_query_dsl_response {
         #[prost(string, tag = "2")]
         FormattedText(::prost::alloc::string::String),
     }
+}
+/// Request for the embedded skill catalog.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListSkillsRequest {}
+/// Response listing every skill embedded in the deployed server.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListSkillsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub skills: ::prost::alloc::vec::Vec<SkillSummary>,
+    /// Not part of skill identity.
+    #[prost(string, tag = "2")]
+    pub server_version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SkillSummary {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub compatibility: ::prost::alloc::string::String,
+}
+/// Request for one embedded skill by name.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetSkillRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// true omits files for a cheap cache revalidation
+    #[prost(bool, tag = "2")]
+    pub metadata_only: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetSkillResponse {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    /// empty when metadata_only is true
+    #[prost(message, repeated, tag = "4")]
+    pub files: ::prost::alloc::vec::Vec<SkillFile>,
+    #[prost(string, tag = "5")]
+    pub compatibility: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub server_version: ::prost::alloc::string::String,
+}
+/// One UTF-8 file in an embedded skill tree.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SkillFile {
+    #[prost(string, tag = "1")]
+    pub path: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub sha256: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub content: ::prost::alloc::string::String,
 }
 /// Request for the query response shape (formatter output schema).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -267,16 +325,16 @@ pub struct ResponseFormatSchema {
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
 }
-/// Request for the named-query catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListNamedQueriesRequest {}
-/// Response listing every embedded named query.
+pub struct ListNamedQueriesRequest {
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNamedQueriesResponse {
     #[prost(message, repeated, tag = "1")]
     pub queries: ::prost::alloc::vec::Vec<NamedQueryDefinition>,
 }
-/// A named query with its DSL rendered for the requesting user.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NamedQueryDefinition {
     /// stable identifier, e.g. "recent_merges"
@@ -285,7 +343,6 @@ pub struct NamedQueryDefinition {
     /// human-readable summary from the template YAML
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
-    /// rendered query DSL as a JSON string, executable as-is
     #[prost(string, tag = "3")]
     pub raw_query: ::prost::alloc::string::String,
 }
@@ -347,7 +404,10 @@ pub struct ResourceAuthorization {
     pub authorized: ::std::collections::HashMap<i64, bool>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListToolsRequest {}
+pub struct ListToolsRequest {
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListToolsResponse {
     #[prost(message, repeated, tag = "1")]
@@ -375,6 +435,8 @@ pub struct ListAgentCommandsRequest {
     /// RAW: command definitions; LLM: TOON command catalog
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAgentCommandsResponse {
@@ -391,6 +453,8 @@ pub struct InvokeAgentCommandRequest {
     /// downstream command parameters object as JSON
     #[prost(string, tag = "2")]
     pub parameters_json: ::prost::alloc::string::String,
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InvokeAgentCommandResponse {
@@ -540,6 +604,9 @@ pub struct ProjectsStatus {
     pub indexed: i64,
     #[prost(int64, tag = "2")]
     pub total_known: i64,
+    /// projects that used all attempts without an index
+    #[prost(int64, tag = "3")]
+    pub gaps: i64,
 }
 /// Entity counts for a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -559,6 +626,64 @@ pub struct GraphStatusItem {
     /// absent for entities with no per-entity signal
     #[prost(enumeration = "IndexingState", optional, tag = "3")]
     pub state: ::core::option::Option<i32>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetIndexingStatusRequest {
+    /// 1 to 100 group or project paths (e.g. "1/2/")
+    #[prost(string, repeated, tag = "1")]
+    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetIndexingStatusResponse {
+    /// request order
+    #[prost(message, repeated, tag = "1")]
+    pub statuses: ::prost::alloc::vec::Vec<NamespaceIndexingStatus>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NamespaceIndexingStatus {
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+    #[prost(enumeration = "IndexingPhase", tag = "2")]
+    pub phase: i32,
+    #[prost(message, repeated, tag = "3")]
+    pub domains: ::prost::alloc::vec::Vec<DomainIndexingStatus>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DomainIndexingStatus {
+    /// e.g. "source_code"
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration = "IndexingPhase", tag = "2")]
+    pub phase: i32,
+    /// source_code only
+    #[prost(message, optional, tag = "3")]
+    pub projects: ::core::option::Option<ProjectsStatus>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetItemCountsRequest {
+    /// one group or project path (e.g. "1/2/")
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetItemCountsResponse {
+    /// only domains with an entity the caller can see
+    #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DomainItemCount {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub entities: ::prost::alloc::vec::Vec<EntityItemCount>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EntityItemCount {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub count: i64,
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
@@ -618,7 +743,6 @@ impl FormatName {
         }
     }
 }
-/// Query language selector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
@@ -642,6 +766,32 @@ impl QueryType {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
             "QUERY_TYPE_NAMED" => Some(Self::Named),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum QueryLanguage {
+    Json = 0,
+    Gql = 1,
+}
+impl QueryLanguage {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Json => "QUERY_LANGUAGE_JSON",
+            Self::Gql => "QUERY_LANGUAGE_GQL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "QUERY_LANGUAGE_JSON" => Some(Self::Json),
+            "QUERY_LANGUAGE_GQL" => Some(Self::Gql),
             _ => None,
         }
     }
@@ -746,6 +896,43 @@ impl IndexingState {
         }
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IndexingPhase {
+    /// checkpoints not readable, or no top-level group in the path
+    Unknown = 0,
+    NotStarted = 1,
+    Syncing = 2,
+    Ready = 3,
+    /// indexing is done, but some data failed to index
+    Error = 4,
+}
+impl IndexingPhase {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unknown => "INDEXING_PHASE_UNKNOWN",
+            Self::NotStarted => "INDEXING_PHASE_NOT_STARTED",
+            Self::Syncing => "INDEXING_PHASE_SYNCING",
+            Self::Ready => "INDEXING_PHASE_READY",
+            Self::Error => "INDEXING_PHASE_ERROR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INDEXING_PHASE_UNKNOWN" => Some(Self::Unknown),
+            "INDEXING_PHASE_NOT_STARTED" => Some(Self::NotStarted),
+            "INDEXING_PHASE_SYNCING" => Some(Self::Syncing),
+            "INDEXING_PHASE_READY" => Some(Self::Ready),
+            "INDEXING_PHASE_ERROR" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
 /// Generated client implementations.
 pub mod orbit_service_client {
     #![allow(
@@ -757,7 +944,7 @@ pub mod orbit_service_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+    /// Core service API. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
     /// Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
     /// T10). The server keeps answering the old request paths through a legacy
@@ -1004,10 +1191,58 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetQueryDsl"));
             self.inner.unary(req, path, codec).await
         }
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
+        /// Lists the standalone Orbit Remote skills embedded in this deployment.
+        /// Used by Rails to build GET /api/v4/orbit/skills.
+        pub async fn list_skills(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListSkillsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListSkillsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/ListSkills",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "ListSkills"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Returns one complete, versioned skill tree or its cache metadata.
+        /// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+        pub async fn get_skill(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetSkillRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetSkillResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/GetSkill",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetSkill"));
+            self.inner.unary(req, path, codec).await
+        }
         /// Used by GET /api/v4/orbit/templates.
         pub async fn list_named_queries(
             &mut self,
@@ -1113,6 +1348,56 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphStatus"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns the indexing phase of each namespace and of each domain in it.
+        pub async fn get_indexing_status(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/GetIndexingStatus",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetIndexingStatus"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Returns entity counts per domain that the caller can see under the paths.
+        pub async fn get_item_counts(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetItemCountsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetItemCountsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/orbit.v1.OrbitService/GetItemCounts",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetItemCounts"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1192,10 +1477,24 @@ pub mod orbit_service_server {
             tonic::Response<super::GetQueryDslResponse>,
             tonic::Status,
         >;
-        /// Lists the server-defined named queries with their DSL rendered for the
-        /// caller (bindings resolved from JWT claims, parameters filled with their
-        /// declared examples). Lets clients discover and display named queries
-        /// without owning copies of the query text.
+        /// Lists the standalone Orbit Remote skills embedded in this deployment.
+        /// Used by Rails to build GET /api/v4/orbit/skills.
+        async fn list_skills(
+            &self,
+            request: tonic::Request<super::ListSkillsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListSkillsResponse>,
+            tonic::Status,
+        >;
+        /// Returns one complete, versioned skill tree or its cache metadata.
+        /// Used by Rails to build GET and HEAD /api/v4/orbit/skills/:name.
+        async fn get_skill(
+            &self,
+            request: tonic::Request<super::GetSkillRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetSkillResponse>,
+            tonic::Status,
+        >;
         /// Used by GET /api/v4/orbit/templates.
         async fn list_named_queries(
             &self,
@@ -1233,8 +1532,24 @@ pub mod orbit_service_server {
             tonic::Response<super::GetGraphStatusResponse>,
             tonic::Status,
         >;
+        /// Returns the indexing phase of each namespace and of each domain in it.
+        async fn get_indexing_status(
+            &self,
+            request: tonic::Request<super::GetIndexingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetIndexingStatusResponse>,
+            tonic::Status,
+        >;
+        /// Returns entity counts per domain that the caller can see under the paths.
+        async fn get_item_counts(
+            &self,
+            request: tonic::Request<super::GetItemCountsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetItemCountsResponse>,
+            tonic::Status,
+        >;
     }
-    /// Core service exposing 4 RPCs. Gated behind the :knowledge_graph feature flag
+    /// Core service API. Gated behind the :knowledge_graph feature flag
     /// in Rails. JWT auth carries user identity and traversal IDs for authorization.
     /// Renamed from gkg.v1.KnowledgeGraphService (knowledge-graph#1152, chain
     /// T10). The server keeps answering the old request paths through a legacy
@@ -1590,6 +1905,96 @@ pub mod orbit_service_server {
                     };
                     Box::pin(fut)
                 }
+                "/orbit.v1.OrbitService/ListSkills" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListSkillsSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::ListSkillsRequest>
+                    for ListSkillsSvc<T> {
+                        type Response = super::ListSkillsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListSkillsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::list_skills(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListSkillsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/orbit.v1.OrbitService/GetSkill" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetSkillSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::GetSkillRequest>
+                    for GetSkillSvc<T> {
+                        type Response = super::GetSkillResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetSkillRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::get_skill(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetSkillSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/orbit.v1.OrbitService/ListNamedQueries" => {
                     #[allow(non_camel_case_types)]
                     struct ListNamedQueriesSvc<T: OrbitService>(pub Arc<T>);
@@ -1758,6 +2163,97 @@ pub mod orbit_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphStatusSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/orbit.v1.OrbitService/GetIndexingStatus" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetIndexingStatusSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::GetIndexingStatusRequest>
+                    for GetIndexingStatusSvc<T> {
+                        type Response = super::GetIndexingStatusResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetIndexingStatusRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::get_indexing_status(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetIndexingStatusSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/orbit.v1.OrbitService/GetItemCounts" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetItemCountsSvc<T: OrbitService>(pub Arc<T>);
+                    impl<
+                        T: OrbitService,
+                    > tonic::server::UnaryService<super::GetItemCountsRequest>
+                    for GetItemCountsSvc<T> {
+                        type Response = super::GetItemCountsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetItemCountsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrbitService>::get_item_counts(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetItemCountsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

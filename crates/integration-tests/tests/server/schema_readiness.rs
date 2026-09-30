@@ -216,7 +216,9 @@ impl Cluster {
         let catalog = OntologyCatalog::open(nats_client.clone()).await.unwrap();
 
         let shutdown = CancellationToken::new();
-        let active_schema = ActiveSchema::spawn(
+        let active_schema = Arc::new(ActiveSchema::default());
+        ActiveSchema::spawn(
+            &active_schema,
             Arc::new(graph.create_client()),
             test_archive(embedded_version),
             catalog.clone(),
@@ -368,7 +370,9 @@ impl Cluster {
             .insert("readonly".into(), "1".into());
         let client = Arc::new(config.graph.build_client());
         let shutdown = CancellationToken::new();
-        let active_schema = ActiveSchema::spawn(
+        let active_schema = Arc::new(ActiveSchema::default());
+        ActiveSchema::spawn(
+            &active_schema,
             client.clone(),
             test_archive(embedded_version),
             self.catalog.clone(),
@@ -438,6 +442,7 @@ impl Cluster {
             .invoke_agent_command(authenticated(InvokeAgentCommandRequest {
                 command_name: "get_graph_schema".into(),
                 parameters_json: json!({"format": "raw", "expand_nodes": ["Project"]}).to_string(),
+                language: QueryLanguage::Json as i32,
             }))
             .await;
         let response = match command {

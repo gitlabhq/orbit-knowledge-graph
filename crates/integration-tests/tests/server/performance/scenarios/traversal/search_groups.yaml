@@ -1,0 +1,10 @@
+description: Single-node Group lookup (search)
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "limit": 10
+    }
+expect:
+  compile_only: true

@@ -44,7 +44,7 @@ crates/
 
 Use the **generic DSL path** for new languages. Go is ~310 lines of declarative
 scope, reference, and import rules. Custom pipelines (JS, Rust) exist for
-ecosystem-specific module resolution — not a starting point.
+language-specific module resolution. They are not a starting point.
 
 ## Files touched
 
@@ -62,13 +62,13 @@ Sizes from the C and C++ MRs. All paths relative to `crates/`.
 | `integration-tests-codegraph/tests/suites.rs` | **+1 `yaml_test!` per fixture** | +N |
 | `docs/design-documents/indexing/code_indexing.md` | Add language to tree-sitter bullet | +2 |
 
-Total: ~700–1,400 LoC across 12–16 files.
+Total: ~700-1,400 LoC across 12-16 files.
 
 ## `DslLanguage` trait
 
 [`crates/code-graph/src/v2/dsl/types.rs:427`](../../crates/code-graph/src/v2/dsl/types.rs#L427).
-Only `name()` and `language()` are required. Implement `scopes()` too —
-without it, no definitions are emitted.
+Only `name()` and `language()` are required. Implement `scopes()` too.
+Without it, no definitions are emitted.
 
 ```rust
 pub trait DslLanguage: Send + Sync + Default {
@@ -104,17 +104,19 @@ pub trait DslLanguage: Send + Sync + Default {
 | `package_node()` | Node naming the file's package/namespace | for module-style FQN scoping |
 | `file_scope()` | Use filename (minus extension) as root scope | for languages without module declarations (C, Bash) |
 
-Builders — `scope(...)`, `reference(...)`, `field(...)`, `child_of_kind(...)`,
-`text(...)`, `has_descendant(...)`, `when(...)` — are in
+Builders are in
 [`extractors.rs`](../../crates/code-graph/src/v2/dsl/extractors.rs) and
 [`types.rs`](../../crates/code-graph/src/v2/dsl/types.rs).
+They include `scope(...)`, `reference(...)`, `field(...)`, `child_of_kind(...)`,
+`text(...)`, `has_descendant(...)`, and `when(...)`.
 For grammars where every construct shares a kind (Elixir: everything is `call`),
 use `scope_fn(...)` with a custom label-picker.
 
-When a definition's name can't be expressed as an `Extract` chain — e.g. C/C++
-declarator descent, where pointer/parenthesized/attributed wrappers of unbounded
-depth sit between the definition and its name — attach a language function with
-`scope(...).name_hook(fn)`, where `fn: fn(&Node) -> Option<String>` receives the
+A definition's name sometimes can't be expressed as an `Extract` chain. An
+example is C/C++ declarator descent, where pointer/parenthesized/attributed
+wrappers of unbounded depth sit between the definition and its name. In that
+case, attach a language function with `scope(...).name_hook(fn)`. Here
+`fn: fn(&Node) -> Option<String>` receives the
 definition node. When set, `name_hook` takes precedence over `name_from`; a
 `None` result falls back to `default_name` (see
 [`c_family.rs`](../../crates/code-graph/src/v2/langs/generic/c_family.rs)).
@@ -156,7 +158,7 @@ builtin-parser = [
 ```
 
 Check crates.io for the **exact constant** the grammar exports. Most export
-`LANGUAGE`, but some differ — `tree-sitter-php` exports `LANGUAGE_PHP`.
+`LANGUAGE`, but some differ: `tree-sitter-php` exports `LANGUAGE_PHP`.
 
 `crates/code-graph/treesitter-visit/src/languages.rs`:
 
@@ -207,9 +209,9 @@ Lang => {
 
 FQN separator conventions:
 
-- `"."` — module-based (Java, Python, Kotlin, C#, Go)
-- `"::"` — namespace-based (C, C++, Ruby, Rust)
-- `"\\"` — PHP
+- `"."`: module-based (Java, Python, Kotlin, C#, Go)
+- `"::"`: namespace-based (C, C++, Ruby, Rust)
+- `"\\"`: PHP
 
 The macro generates `file_extensions()`, `exclude_extensions()`,
 `fqn_separator()`, `names()`, `to_support_lang()`, and `parse_ast()`.
@@ -307,12 +309,12 @@ The macro generates `dispatch_language`, `lang_ctx_for`, and
 documented in
 [`integration-tests-codegraph/README.md`](../../crates/integration-tests-codegraph/README.md).
 
-Write at least three covering these areas (names are suggestions — existing
+Write at least three covering these areas (names are suggestions: existing
 languages use varied names like `resolution.yaml`, `simple_call.yaml`):
 
-1. **Definitions** — scope rules produce `Definition` nodes.
-1. **Imports** — import rules produce `ImportedSymbol` nodes.
-1. **Cross-file call resolution** — resolver wires calls across files.
+1. **Definitions**: scope rules produce `Definition` nodes.
+1. **Imports**: import rules produce `ImportedSymbol` nodes.
+1. **Cross-file call resolution**: resolver wires calls across files.
 
 #### Example: `definitions.yaml`
 
@@ -451,7 +453,7 @@ Always verify with the AST CLI or `grammar.js`. Surprises:
 - Bash: function names are `word`, not `identifier`
 - Swift: `class`, `struct`, `enum`, `extension` all share `class_declaration`
 - Lua: one `function_declaration` for global, local, `M.x`, and `obj:method`
-- Elixir: everything is `call` — `defmodule`, `def`, `alias`, `import`, `use`
+- Elixir: everything is `call` (`defmodule`, `def`, `alias`, `import`, `use`)
 
 Use `scope_fn(...)` or `when(...)` predicates for disambiguation.
 
@@ -469,7 +471,7 @@ Signs a language needs a custom pipeline:
 - Extensive macros or code generation (Rust)
 
 Custom pipelines live under `crates/code-graph/src/v2/langs/custom/`. Out of
-scope for a hackathon contribution — ship the generic DSL pass first and file
+scope for a hackathon contribution. Ship the generic DSL pass first and file
 a follow-up issue.
 
 ## Links

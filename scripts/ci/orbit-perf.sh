@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Orchestrator for the orbit-perf CI job (see .gitlab/ci/orbit-perf.yml).
+#
+# Brings up gitlab-dev-stack + Orbit with caproni (config in
+# scripts/ci/orbit-perf/caproni), seeds gkg's ClickHouse with an
+# xtask-generated synthetic graph (bulk Parquet load, bypassing siphon/seed/
+# indexing), and runs the gRPC load test (xtask loadtest) against gkg.
+#
+# Env (from the CI job): SYNTH_CONFIG, ROUNDS, CONCURRENCY, LOAD_JOBS.
+set -euo pipefail
+
+ROOT="$(pwd)"                                   # knowledge-graph checkout (xtask lives here)
+SYNTH_CONFIG="${SYNTH_CONFIG:-crates/xtask/simulator_small.yaml}"
+ROUNDS="${ROUNDS:-5}"
+CONCURRENCY="${CONCURRENCY:-20}"
+LOAD_JOBS="${LOAD_JOBS:-4}"
+CAPRONI_DIR="$ROOT/scripts/ci/orbit-perf/caproni"
+
+log() { echo "==> $*" >&2; }
+# Debug build, so it shares the compile cache with the lint jobs that also build xtask.
+xtask() { mise exec -- cargo run -p xtask -- "$@"; }
+cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$@"; }
+kc()  { cap kubectl "$@"; }
+chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }
+
+# ---------------------------------------------------------------------------
+# 1. Start the stack in the background; it does not depend on the synth data.
+# ---------------------------------------------------------------------------
+log "[1/4] bringing up gitlab-dev-stack + Orbit in the background"
+mise -C "$CAPRONI_DIR" install
+UP_LOG="$ROOT/caproni-up.log"
+(
+  cap --debug up
+  kc wait -n gitlab --for=condition=Ready pod \
+    -l app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver --timeout=600s
+  cap update-etc-hosts --ip "$(getent hosts docker | awk '{print $1}')"
+) >"$UP_LOG" 2>&1 &
+UP_PID=$!
+
+# ---------------------------------------------------------------------------
+# 2. Build xtask + generate the synthetic graph (Parquet).
+# ---------------------------------------------------------------------------
+log "[2/4] generating synthetic graph ($SYNTH_CONFIG)"
+xtask synth generate -c "$SYNTH_CONFIG" --force
+OUT_DIR="$(grep -E '^\s*output_dir:' "$SYNTH_CONFIG" | head -1 | awk '{print $2}' | tr -d '"'"'"'')"
+OUT_DIR="${OUT_DIR:-gl_synthetic_data}"
+ORG_DIR="$ROOT/$OUT_DIR/org_1"
+[ -d "$ORG_DIR" ] || { echo "synth output not found at $ORG_DIR" >&2; exit 1; }
+log "     synth output: $ORG_DIR ($(ls "$ORG_DIR" | tr '\n' ' ')) "
+
+# Authoritative parquet-file -> ClickHouse table map, straight from the ontology
+# the generator used. filename = node_type.lower()+'.parquet'; table =
+# destination_table (explicit) or the gl_<name> default. edges.parquet -> gl_edge.
+# Pure shell (the rust build image ships no python3).
+MAP_FILE="$ROOT/.synth_table_map"
+{
+  echo "edges=gl_edge"
+  find "$ROOT/config/ontology/nodes" -name '*.yaml' | while read -r f; do
+    nt="$(grep -m1 -E '^node_type:' "$f" | awk '{print $2}')"
+    [ -n "$nt" ] || continue
+    dt="$(grep -m1 -E '^destination_table:' "$f" | awk '{print $2}')"
+    lc="$(printf '%s' "$nt" | tr '[:upper:]' '[:lower:]')"
+    echo "${lc}=${dt:-gl_${lc}}"
+  done
+} > "$MAP_FILE"
+
+log "     waiting for the stack"
+if ! wait "$UP_PID"; then
+  echo "caproni bring-up failed; log follows:" >&2
+  cat "$UP_LOG" >&2
+  exit 1
+fi
+cat "$UP_LOG" >&2
+
+# ---------------------------------------------------------------------------
+# 3. Bulk-load the Parquet into gkg's versioned ClickHouse tables.
+# ---------------------------------------------------------------------------
+log "[3/4] loading synthetic graph into gkg ClickHouse"
+# Sort by version number, not lexically: a plain DESC ranks v9 above v72.
+PFX=""
+for _ in $(seq 1 60); do
+  PFX="$(chq -q "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%gl_file' ORDER BY toInt32OrZero(extract(name, '^v([0-9]+)_')) DESC LIMIT 1" 2>/dev/null | sed 's/_gl_file$//' | tr -d '[:space:]')" || true
+  [ -n "$PFX" ] && break
+  sleep 2
+done
+[ -n "$PFX" ] || { echo "could not discover gkg table prefix" >&2; exit 1; }
+log "     discovered gkg table prefix: $PFX"
+
+INSERT_SETTINGS="input_format_skip_unknown_fields=1, input_format_parquet_allow_missing_columns=1"
+FAILED="$ROOT/.synth_load_failed"
+: > "$FAILED"
+
+# Streams one Parquet into the pod's clickhouse-client over `exec -i` stdin
+# (no kubectl cp / --file, which vary across versions). Missing columns
+# (_version/_deleted/*_tags) fall back to their DDL defaults.
+load_one() {
+  local pq="$1" tbl="$2"
+  if chq --database gkg --query "INSERT INTO \`${tbl}\` SETTINGS ${INSERT_SETTINGS} FORMAT Parquet" < "$pq"; then
+    log "     loaded $(basename "$pq") -> gkg.$tbl"
+  else
+    echo "$tbl" >> "$FAILED"
+  fi
+}
+
+# Largest first so the edge table does not start last; LOAD_JOBS inserts at a time.
+# shellcheck disable=SC2012  # generated lowercase names; ls -S gives size order
+while read -r pq; do
+  stem="$(basename "$pq" .parquet)"
+  suffix="$(grep -E "^${stem}=" "$MAP_FILE" | head -1 | cut -d= -f2)"
+  if [ -z "$suffix" ]; then
+    log "     skip $stem.parquet (no table mapping)"
+    continue
+  fi
+  while [ "$(jobs -rp | wc -l)" -ge "$LOAD_JOBS" ]; do wait -n || true; done
+  log "     $stem.parquet ($(du -h "$pq" | cut -f1)) -> gkg.${PFX}_${suffix}"
+  load_one "$pq" "${PFX}_${suffix}" &
+done < <(ls -S "$ORG_DIR"/*.parquet)
+wait
+if [ -s "$FAILED" ]; then
+  echo "failed to load: $(tr '\n' ' ' < "$FAILED")" >&2
+  exit 1
+fi
+
+# Traversal-path dictionaries are HASHED over the project/group tables; reload
+# them so traversals resolve against the freshly loaded rows.
+chq -q "SYSTEM RELOAD DICTIONARY gkg.\`${PFX}_gl_project_traversal_paths_dict\`" || true
+chq -q "SYSTEM RELOAD DICTIONARY gkg.\`${PFX}_gl_group_traversal_paths_dict\`" || true
+
+log "     row counts:"
+for t in gl_merge_request gl_note gl_edge gl_project gl_group gl_user; do
+  n="$(chq -q "SELECT count() FROM gkg.\`${PFX}_${t}\`" 2>/dev/null | tr -d '[:space:]' || echo '?')"
+  log "       ${PFX}_${t} = ${n}"
+done
+
+# ---------------------------------------------------------------------------
+# 4. Port-forward gkg gRPC + run the gRPC load test (xtask loadtest).
+# ---------------------------------------------------------------------------
+log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY)"
+
+kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >/tmp/gkg-pf.log 2>&1 &
+PF_PID=$!
+trap 'kill "$PF_PID" 2>/dev/null || true' EXIT
+
+# Fail fast rather than load-testing a dead endpoint.
+ready=0
+for _ in $(seq 1 30); do
+  if ! kill -0 "$PF_PID" 2>/dev/null; then
+    echo "port-forward exited early; log follows:" >&2
+    cat /tmp/gkg-pf.log >&2
+    exit 1
+  fi
+  if (exec 3<>/dev/tcp/127.0.0.1/50054) 2>/dev/null; then
+    exec 3>&-
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" != 1 ]; then
+  echo "gRPC port 50054 never became reachable after 30s; log follows:" >&2
+  cat /tmp/gkg-pf.log >&2
+  exit 1
+fi
+
+export GKG_JWT_SECRET
+GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
+[ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
+
+xtask loadtest \
+  --endpoint http://127.0.0.1:50054 \
+  --rounds "$ROUNDS" \
+  --concurrency "$CONCURRENCY" \
+  | tee "$ROOT/loadtest-results.md"
+
+log "done. results in loadtest-results.md"

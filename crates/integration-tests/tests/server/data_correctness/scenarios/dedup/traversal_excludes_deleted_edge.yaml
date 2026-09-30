@@ -31,6 +31,8 @@ query:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 10
     }
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.id >= 1 AND mr.id <= 10000 RETURN mr, p LIMIT 10
 
 expect:
   skip_requirements: [node_count]

@@ -4,7 +4,6 @@
 //! columns the formatter expects.
 
 use ontology::constants::*;
-use orbit_utils::traversal_path::TraversalPath;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
@@ -12,12 +11,11 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
 
-use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing,
-    fk_values_from_candidate_scan, latest_node_predicates, node_ids_from_candidate_scan,
-    node_select_columns,
+    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing, latest_node_predicates,
+    node_select_columns, node_values_from_candidate_scan,
 };
+use super::{EmitOutput, NodeBinding};
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
 
@@ -40,18 +38,9 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
+    let mut nodes = HashMap::from([(center_alias.to_string(), NodeBinding::table(center_alias))]);
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
-
-    // Elevated access: FilterOnly CTE so SecurityPass injects the role-gated filter.
-    if center_np.needs_elevated_filter {
-        center_where_parts.extend(emit_filter_subquery(
-            center_np,
-            center_alias,
-            DEFAULT_PRIMARY_KEY,
-            &mut ctes,
-        )?);
-    }
 
     emit_join_target_candidate_ctes(
         plan,
@@ -95,9 +84,10 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         let cte_name = candidate_cte_name(center_alias);
         ctes.push(Cte::new(
             &cte_name,
-            node_ids_from_candidate_scan(
+            node_values_from_candidate_scan(
                 center_alias,
                 center_table,
+                DEFAULT_PRIMARY_KEY,
                 center_np,
                 candidate_extra_predicates
                     .get(center_alias)
@@ -124,7 +114,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
-        if !target_np.node_ids.is_empty() {
+        if !target_np.node_ids.is_empty() && fk.referenced_column == DEFAULT_PRIMARY_KEY {
             center_where_parts.push(id_list_predicate(
                 center_alias,
                 &fk.fk_column,
@@ -158,7 +148,10 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
             fk.fk_node.clone()
         };
 
-        if !target_np.node_ids.is_empty() && fk_alias != center_alias {
+        if !target_np.node_ids.is_empty()
+            && fk_alias != center_alias
+            && fk.referenced_column == DEFAULT_PRIMARY_KEY
+        {
             where_parts.push(id_list_predicate(
                 &fk_alias,
                 &fk.fk_column,
@@ -184,7 +177,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 let narrow_name = format!("_narrow_{}", fk.target_node);
                 ctes.push(Cte::new(
                     &narrow_name,
-                    fk_values_from_candidate_scan(
+                    node_values_from_candidate_scan(
                         center_alias,
                         center_table,
                         &fk.fk_column,
@@ -212,29 +205,42 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
-                false,
+                &fk.referenced_column,
                 narrow,
                 node_sort_key,
             )?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
-        } else if target_np.hydration == HydrationStrategy::FilterOnly
-            || target_np.needs_elevated_filter
-        {
+        } else if target_np.hydration == HydrationStrategy::FilterOnly {
             where_parts.extend(emit_filter_subquery(
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
+                &fk.referenced_column,
                 &mut ctes,
             )?);
         }
+        let (identity_alias, identity_column) = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+            (fk_alias.as_str(), fk.fk_column.as_str())
+        } else {
+            (fk.target_node.as_str(), DEFAULT_PRIMARY_KEY)
+        };
+        nodes.insert(
+            fk.target_node.clone(),
+            NodeBinding::source(
+                identity_alias,
+                identity_column,
+                target_np.fk_needs_join.then(|| fk.target_node.clone()),
+            ),
+        );
     }
 
     // Synthesize per-hop edge columns for the formatter; aggregations need none.
     let mut edge_aliases = Vec::new();
     if !matches!(plan.body, PlanBody::Traversal) {
         return Ok(EmitOutput {
+            nodes,
             from,
             edge_aliases,
             where_parts,
@@ -246,25 +252,40 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     for (i, hop) in plan.hops.iter().enumerate() {
         let ea = format!("e{i}");
         let fk = hop.fk.as_ref().unwrap();
-        let from_np = plan.nodes.get(&hop.from_node);
-        let to_np = plan.nodes.get(&hop.to_node);
-        let from_entity = from_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
-        let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
+        let (source, target) = match hop.direction {
+            Direction::Incoming => (&hop.to_node, &hop.from_node),
+            Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
+        };
+        let source_entity = plan
+            .nodes
+            .get(source)
+            .and_then(|node| node.entity.as_deref())
+            .unwrap_or("");
+        let target_entity = plan
+            .nodes
+            .get(target)
+            .and_then(|node| node.entity.as_deref())
+            .unwrap_or("");
         let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
 
-        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == hop.from_node {
+        let target_id = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+            Expr::col(center_alias, &fk.fk_column)
+        } else {
+            Expr::col(&fk.target_node, DEFAULT_PRIMARY_KEY)
+        };
+        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == *source {
             (
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                from_entity,
-                Expr::col(center_alias, &fk.fk_column),
-                to_entity,
+                source_entity,
+                target_id,
+                target_entity,
             )
         } else {
             (
-                Expr::col(center_alias, &fk.fk_column),
-                from_entity,
+                target_id,
+                source_entity,
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                to_entity,
+                target_entity,
             )
         };
 
@@ -292,6 +313,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        nodes,
         from,
         edge_aliases,
         where_parts,
@@ -324,7 +346,7 @@ fn fk_candidate_extra_predicates(plan: &Plan) -> Result<HashMap<String, Vec<Expr
         let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
-        if target_np.node_ids.is_empty() {
+        if target_np.node_ids.is_empty() || fk.referenced_column != DEFAULT_PRIMARY_KEY {
             continue;
         }
         let fk_alias = fk.fk_node.clone();
@@ -367,9 +389,10 @@ fn emit_join_target_candidate_ctes(
         let cte_name = candidate_cte_name(&fk.target_node);
         ctes.push(Cte::new(
             &cte_name,
-            node_ids_from_candidate_scan(
+            node_values_from_candidate_scan(
                 &fk.target_node,
                 table,
+                &fk.referenced_column,
                 target_np,
                 candidate_extra_predicates
                     .get(&fk.target_node)
@@ -383,31 +406,15 @@ fn emit_join_target_candidate_ctes(
 }
 
 /// Latest-row, `_deleted`-filtered `SELECT *` scan using `FINAL` for streaming
-/// dedup. `scope_prefix` is the tighter project/group prefix that lets
-/// ClickHouse seek the node PK to a contiguous range.
-fn node_scan(
-    np: &NodePlan,
-    _plan: &Plan,
-    scope_prefix: Option<&TraversalPath>,
-) -> Result<TableRef> {
+/// dedup. The security pass adds the scope prefix beside the authorization filter.
+fn node_scan(np: &NodePlan) -> Result<TableRef> {
     let alias = &np.alias;
     let table = np
         .table
         .as_deref()
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
 
-    let mut where_parts = latest_node_predicates(alias, np);
-    if np.has_traversal_path
-        && let Some(prefix) = scope_prefix
-    {
-        where_parts.push(Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                Expr::string(prefix.as_str()),
-            ],
-        ));
-    }
+    let where_parts = latest_node_predicates(alias, np);
 
     Ok(TableRef::subquery(
         Query {
@@ -427,11 +434,12 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
         .get(root_alias)
         .ok_or_else(|| QueryError::Lowering(format!("FK chain root '{root_alias}' not found")))?;
 
-    let mut from = node_scan(root_np, plan, plan.hops[0].scope_prefix.as_ref())?;
+    let mut from = node_scan(root_np)?;
     let mut selects = node_select_columns(root_alias, root_np);
     let mut edge_aliases = Vec::new();
 
     let mut reached: HashSet<&str> = HashSet::from([root_alias.as_str()]);
+    let mut nodes = HashMap::from([(root_alias.clone(), NodeBinding::table(root_alias))]);
     for (i, hop) in plan.hops.iter().enumerate() {
         let fk = hop
             .fk
@@ -448,23 +456,12 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
             QueryError::Lowering(format!("FK chain node '{new_alias}' not found"))
         })?;
 
-        let on = if fk.fk_node == hop.to_node {
-            Expr::eq(
-                Expr::col(&hop.to_node, &fk.fk_column),
-                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
-            )
-        } else {
-            Expr::eq(
-                Expr::col(&hop.from_node, &fk.fk_column),
-                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
-            )
-        };
-        from = TableRef::join(
-            JoinType::Inner,
-            from,
-            node_scan(new_np, plan, hop.scope_prefix.as_ref())?,
-            on,
+        let on = Expr::eq(
+            Expr::col(&fk.fk_node, &fk.fk_column),
+            Expr::col(&fk.target_node, &fk.referenced_column),
         );
+        from = TableRef::join(JoinType::Inner, from, node_scan(new_np)?, on);
+        nodes.insert(new_alias.clone(), NodeBinding::table(new_alias));
         selects.extend(node_select_columns(new_alias, new_np));
         reached.insert(hop.from_node.as_str());
         reached.insert(hop.to_node.as_str());
@@ -513,6 +510,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        nodes,
         from,
         edge_aliases,
         where_parts: Vec::new(),

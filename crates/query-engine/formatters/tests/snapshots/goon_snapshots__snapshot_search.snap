@@ -9,5 +9,5 @@ nodes:1
 edges:0
 @nodes
 MergeRequest(1):
-482821625 iid=247 state=opened created_at=2026-05-08T14:47:05.123456 title="Add per-activity reduction policy overrides"
+482821625 iid=247 state=opened created_at=2026-05-08T14:47:05.123456Z title="Add per-activity reduction policy overrides"
 @edges

@@ -12,7 +12,7 @@ pub enum Error {
     HealthCheck(#[from] health_check::Error),
 }
 
-pub async fn run(config: &AppConfig) -> Result<(), Error> {
+pub async fn run(config: &AppConfig, tls: Option<labkit::tls::ServerTls>) -> Result<(), Error> {
     let instances = build_clickhouse_instances(config);
     let work_queue = WorkQueueConfig {
         nats: config.nats.clone(),
@@ -30,7 +30,7 @@ pub async fn run(config: &AppConfig) -> Result<(), Error> {
     };
     let checker = HealthChecker::new(&config.health_check, instances, work_queue).await?;
 
-    run_server(config.health_check.bind_address, checker).await?;
+    run_server(config.health_check.bind_address, checker, tls).await?;
 
     Ok(())
 }

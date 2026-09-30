@@ -470,7 +470,11 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
         let oxc::ast::ast::BindingPattern::BindingIdentifier(binding) = &it.id else {
             return;
         };
-        let local_def = self.lookup_range_def(binding.span);
+        let local_def = binding.symbol_id.get().and_then(|symbol| {
+            self.def_idx_by_fqn
+                .get(&self.ctx.build_fqn(symbol))
+                .copied()
+        });
         let value = self.binding_value_for_initializer(
             it.init.as_ref(),
             it.type_annotation.as_deref(),

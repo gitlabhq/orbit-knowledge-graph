@@ -19,11 +19,11 @@ STAGING=$(mktemp -d)
 
 archive_for() {
   case "$1" in
-    darwin-arm64) echo "orbit-local-darwin-aarch64.tar.gz" ;;
-    darwin-x64)   echo "orbit-local-darwin-x86_64.tar.gz" ;;
-    linux-arm64)  echo "orbit-local-linux-musl-aarch64.tar.gz" ;;
-    linux-x64)    echo "orbit-local-linux-musl-x86_64.tar.gz" ;;
-    win32-x64)    echo "orbit-local-windows-x86_64.zip" ;;
+    darwin-arm64) echo "orbit-cli-darwin-aarch64.tar.gz" ;;
+    darwin-x64)   echo "orbit-cli-darwin-x86_64.tar.gz" ;;
+    linux-arm64)  echo "orbit-cli-linux-musl-aarch64.tar.gz" ;;
+    linux-x64)    echo "orbit-cli-linux-musl-x86_64.tar.gz" ;;
+    win32-x64)    echo "orbit-cli-windows-x86_64.zip" ;;
   esac
 }
 

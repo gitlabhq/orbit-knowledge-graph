@@ -55,6 +55,9 @@ pub enum Expr {
         expr: Box<Expr>,
         query: Box<Query>,
     },
+    /// Single-row, single-column subquery used as a value; ClickHouse folds it
+    /// to a constant before index analysis, so it still drives PK pruning.
+    Scalar(Box<Query>),
     Star,
 }
 
@@ -96,6 +99,7 @@ pub enum TableRef {
         table: String,
         alias: String,
         final_: bool,
+        relationship: Option<usize>,
     },
     Join {
         join_type: JoinType,
@@ -207,6 +211,14 @@ pub struct Query {
     pub union_all: Vec<Query>,
 }
 
+impl Query {
+    pub fn selects_alias(&self, alias: &str) -> bool {
+        self.select
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(alias))
+    }
+}
+
 impl Default for Query {
     fn default() -> Self {
         Self {
@@ -217,6 +229,7 @@ impl Default for Query {
                 table: String::new(),
                 alias: String::new(),
                 final_: false,
+                relationship: None,
             },
             where_clause: None,
             group_by: vec![],
@@ -418,11 +431,33 @@ impl Expr {
 }
 
 impl TableRef {
+    pub fn with_relationship(mut self, index: usize) -> Self {
+        self.set_relationship(index);
+        self
+    }
+
+    fn set_relationship(&mut self, index: usize) {
+        match self {
+            Self::Scan { relationship, .. } => *relationship = Some(index),
+            Self::Subquery { query, .. } => query.from.set_relationship(index),
+            Self::Union { queries, .. } => {
+                for query in queries {
+                    query.from.set_relationship(index);
+                }
+            }
+            Self::Join { left, right, .. } => {
+                left.set_relationship(index);
+                right.set_relationship(index);
+            }
+        }
+    }
+
     pub fn scan(table: impl Into<String>, alias: impl Into<String>) -> Self {
         TableRef::Scan {
             table: table.into(),
             alias: alias.into(),
             final_: false,
+            relationship: None,
         }
     }
 
@@ -431,6 +466,7 @@ impl TableRef {
             table: table.into(),
             alias: alias.into(),
             final_: true,
+            relationship: None,
         }
     }
 

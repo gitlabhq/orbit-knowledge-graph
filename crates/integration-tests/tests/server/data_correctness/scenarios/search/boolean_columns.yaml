@@ -10,6 +10,8 @@ query:
                  "node_ids": [3000, 3001]}],
       "limit": 10
     }
+  gql: |
+    MATCH (n:Note) WHERE n.id IN [3000, 3001] AND n.id >= 1 AND n.id <= 10000 RETURN n.note, n.confidential, n.internal LIMIT 10
 
 expect:
   node_count: 2
