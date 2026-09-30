@@ -14,7 +14,7 @@ query:
     RETURN canceling.id, canceled.id
 logical:
   expect:
-    - (Relationship canceled canceling Outgoing (Kinds AUTO_CANCELED_BY) (Hops 1 1))
+    - (Relationship canceled canceling Outgoing (Kinds AUTO_CANCELED_BY) (Hops 1 1) (Filters))
 physical:
   clickhouse:
     expect:

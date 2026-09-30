@@ -13,10 +13,12 @@ query:
 logical:
   expect:
     - (Node f File (Ids 1 2) (Columns path) ...)
+    - (OrderBy (Desc f id))
+    - (Limit 5)
 physical:
   clickhouse:
     expect:
-      - (Strategy (SingleNode (Project (Outputs (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
       - (IN (Column f id) (Literal "[1,2]"))
       - (OrderBy (Desc (Column f id)))
       - (Limit 5)
@@ -24,7 +26,7 @@ physical:
       - (Output f_id ...)
   duckdb:
     expect:
-      - (Strategy (SingleNode (Project (Outputs (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
       - (OrderBy (Desc (Column f id)))
       - (Limit 5)
     reject:

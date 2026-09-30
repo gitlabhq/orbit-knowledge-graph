@@ -14,14 +14,14 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (SingleNode (Project (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
       - (Scan gl_file f Final)
       - (Output f_path (Column f path))
       - '(= (Column f language) (Literal "\"rust\""))'
     reject: [(Join ...)]
   duckdb:
     expect:
-      - (Strategy (SingleNode (Project (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs (Output f_id (Column f id)) (Output f_path (Column f path))) (Filter _ (Read gl_file f Final)))))
       - (Output f_path (Column f path))
       - '(= (Column f language) (Literal "\"rust\""))'
     reject: [(Join ...)]

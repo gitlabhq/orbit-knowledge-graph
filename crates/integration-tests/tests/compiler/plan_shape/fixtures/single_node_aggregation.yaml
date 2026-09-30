@@ -14,16 +14,18 @@ query:
 logical:
   expect:
     - (Node d Definition (Ids 1 2) ...)
+    - (Groups (Group d name None d_name))
+    - (Measures (Measure count d Node n))
 physical:
   clickhouse:
     expect:
-      - (Strategy (SingleNode (Project (Outputs) (Filter _ (Read gl_definition d Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs) (Filter _ (Read gl_definition d Final)))))
       - (Output d_name (Column d name))
       - (Output n (Call COUNT))
       - (GroupBy (Column d name))
   duckdb:
     expect:
-      - (Strategy (SingleNode (Project (Outputs) (Filter _ (Read gl_definition d Final)))))
+      - (Strategy (SingleNode (SourceFragment (Outputs) (Filter _ (Read gl_definition d Final)))))
       - (Output d_name (Column d name))
       - (Output n (Call COUNT))
       - (GroupBy (Column d name))

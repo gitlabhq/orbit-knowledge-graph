@@ -1,0 +1,26 @@
+name: Relationship filters survive both frontends and physical emission
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
+        {"id": "callee", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [{"type": "CALLS", "from": "caller", "to": "callee", "filters": {"target_id": 2}}]
+    }
+  gql: |
+    MATCH (caller:Definition {id: 1})-[:CALLS {target_id: 2}]->(callee:Definition)
+    RETURN caller.id, callee.id
+logical:
+  expect:
+    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1) (Filters (Predicate target_id eq 2)))
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (Flat))
+      - (= (Column e0 target_id) (Literal 2))
+  duckdb:
+    expect:
+      - (Strategy (Flat))
+      - (= (Column e0 target_id) (Literal 2))

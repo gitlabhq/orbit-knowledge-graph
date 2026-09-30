@@ -4,7 +4,12 @@ use crate::passes::shared::{latest_node_predicates, node_select_columns};
 
 use super::NodePlan;
 
-pub enum PhysicalPlan {
+pub struct PhysicalPlan {
+    pub source: PhysicalSource,
+    pub outputs: Vec<SelectExpr>,
+}
+
+pub enum PhysicalSource {
     Scan {
         table: String,
         alias: String,
@@ -12,10 +17,6 @@ pub enum PhysicalPlan {
     },
     Filter {
         predicate: Expr,
-        input: Box<Self>,
-    },
-    Project {
-        columns: Vec<SelectExpr>,
         input: Box<Self>,
     },
 }
@@ -26,17 +27,17 @@ impl PhysicalPlan {
             .table
             .clone()
             .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        Ok(Self::Project {
-            columns: node_select_columns(&node.alias, node),
-            input: Box::new(Self::Filter {
+        Ok(Self {
+            outputs: node_select_columns(&node.alias, node),
+            source: PhysicalSource::Filter {
                 predicate: Expr::conjoin(latest_node_predicates(&node.alias, node))
                     .expect("current-row scan has a deletion predicate"),
-                input: Box::new(Self::Scan {
+                input: Box::new(PhysicalSource::Scan {
                     table,
                     alias: node.alias.clone(),
                     final_: true,
                 }),
-            }),
+            },
         })
     }
 }

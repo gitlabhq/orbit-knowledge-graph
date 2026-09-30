@@ -1,6 +1,7 @@
 use compiler::ast::{Expr, Node, Query, TableRef};
-use compiler::input::{ColumnSelection, Input};
+use compiler::input::{ColumnSelection, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::{FkShape, HydrationStrategy, Plan, Strategy};
+use std::collections::HashMap;
 
 use super::pattern::Expression as S;
 
@@ -9,8 +10,6 @@ pub fn logical(input: &Input) -> S {
         "Logical",
         std::iter::once(S::atom(input.query_type))
             .chain(input.nodes.iter().map(|node| {
-                let mut filters: Vec<_> = node.filters.iter().collect();
-                filters.sort_by_key(|(property, _)| *property);
                 S::node(
                     "Node",
                     [
@@ -27,29 +26,7 @@ pub fn logical(input: &Input) -> S {
                                 None => vec![],
                             },
                         ),
-                        S::node(
-                            "Filters",
-                            filters.into_iter().flat_map(|(property, filters)| {
-                                filters.iter().map(move |filter| {
-                                    S::node(
-                                        "Predicate",
-                                        [
-                                            S::atom(property),
-                                            S::atom(filter.op.map_or_else(
-                                                || "eq".to_string(),
-                                                |op| op.as_ref().to_string(),
-                                            )),
-                                            S::atom(
-                                                filter
-                                                    .value
-                                                    .as_ref()
-                                                    .map_or("null".into(), ToString::to_string),
-                                            ),
-                                        ],
-                                    )
-                                })
-                            }),
-                        ),
+                        filters(&node.filters),
                     ],
                 )
             }))
@@ -67,9 +44,100 @@ pub fn logical(input: &Input) -> S {
                         S::atom(direction),
                         S::node("Kinds", edge.types.iter().map(S::atom)),
                         S::node("Hops", [S::atom(edge.hops.min), S::atom(edge.hops.max)]),
+                        filters(&edge.filters),
                     ],
                 )
-            })),
+            }))
+            .chain([
+                S::node(
+                    "Groups",
+                    input.aggregation.group_by.iter().map(|group| {
+                        S::node(
+                            "Group",
+                            [
+                                S::atom(group.node()),
+                                S::atom(group.property().unwrap_or("Node")),
+                                S::atom(group.truncate().map_or("None", |unit| unit.name())),
+                                S::atom(group.output_name()),
+                            ],
+                        )
+                    }),
+                ),
+                S::node(
+                    "Measures",
+                    input.aggregation.metrics.iter().map(|metric| {
+                        S::node(
+                            "Measure",
+                            [
+                                S::atom(metric.expr.function()),
+                                S::atom(metric.expr.node()),
+                                S::atom(metric.expr.property().unwrap_or("Node")),
+                                S::atom(metric.output_name()),
+                            ],
+                        )
+                    }),
+                ),
+                S::node(
+                    "OrderBy",
+                    input.order_by.iter().map(|order| {
+                        S::node(
+                            if order.direction == OrderDirection::Desc {
+                                "Desc"
+                            } else {
+                                "Asc"
+                            },
+                            [S::atom(&order.node), S::atom(&order.property)],
+                        )
+                    }),
+                ),
+                S::node(
+                    "AggregateOrder",
+                    input.aggregation.sort.iter().map(|order| {
+                        S::node(
+                            if order.direction == OrderDirection::Desc {
+                                "Desc"
+                            } else {
+                                "Asc"
+                            },
+                            [S::atom(&order.column)],
+                        )
+                    }),
+                ),
+                S::node("Limit", [S::atom(input.limit)]),
+            ]),
+    )
+}
+
+fn filters(filters: &HashMap<String, Vec<InputFilter>>) -> S {
+    let mut ordered: Vec<_> = filters.iter().collect();
+    ordered.sort_by_key(|(property, _)| *property);
+    S::node(
+        "Filters",
+        ordered.into_iter().flat_map(|(property, filters)| {
+            filters.iter().map(move |filter| {
+                let value = match &filter.rhs_column {
+                    Some((node, column)) => S::node("Column", [S::atom(node), S::atom(column)]),
+                    None => S::atom(
+                        filter
+                            .value
+                            .as_ref()
+                            .map_or("null".into(), ToString::to_string),
+                    ),
+                };
+                S::node(
+                    "Predicate",
+                    [
+                        S::atom(property),
+                        S::atom(
+                            filter
+                                .op
+                                .map_or_else(|| "eq".into(), |op| op.as_ref().to_string()),
+                        ),
+                        value,
+                    ],
+                )
+            })
+        }),
     )
 }
 
@@ -134,9 +202,30 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
 }
 
 fn physical_tree(plan: &compiler::passes::plan::physical::PhysicalPlan) -> S {
-    use compiler::passes::plan::physical::PhysicalPlan;
+    S::node(
+        "SourceFragment",
+        [
+            S::node(
+                "Outputs",
+                plan.outputs.iter().map(|column| {
+                    S::node(
+                        "Output",
+                        [
+                            S::atom(column.alias.as_deref().unwrap_or("Unaliased")),
+                            expression(&column.expr),
+                        ],
+                    )
+                }),
+            ),
+            physical_source(&plan.source),
+        ],
+    )
+}
+
+fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S {
+    use compiler::passes::plan::physical::PhysicalSource;
     match plan {
-        PhysicalPlan::Scan {
+        PhysicalSource::Scan {
             table,
             alias,
             final_,
@@ -148,27 +237,9 @@ fn physical_tree(plan: &compiler::passes::plan::physical::PhysicalPlan) -> S {
                 S::atom(if *final_ { "Final" } else { "Plain" }),
             ],
         ),
-        PhysicalPlan::Filter { predicate, input } => {
-            S::node("Filter", [expression(predicate), physical_tree(input)])
+        PhysicalSource::Filter { predicate, input } => {
+            S::node("Filter", [expression(predicate), physical_source(input)])
         }
-        PhysicalPlan::Project { columns, input } => S::node(
-            "Project",
-            [
-                S::node(
-                    "Outputs",
-                    columns.iter().map(|column| {
-                        S::node(
-                            "Output",
-                            [
-                                S::atom(column.alias.as_deref().unwrap_or("Unaliased")),
-                                expression(&column.expr),
-                            ],
-                        )
-                    }),
-                ),
-                physical_tree(input),
-            ],
-        ),
     }
 }
 

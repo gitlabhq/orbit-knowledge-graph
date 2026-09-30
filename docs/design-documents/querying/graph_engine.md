@@ -70,9 +70,10 @@ The current ontology files, archives, DDL, and indexing declarations remain unch
 Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
 All later passes continue to use that AST.
 
-Single-node planning selects an executable scan, filter, and output-projection tree.
+Single-node planning selects an executable scan/filter source tree and a list of result outputs.
 The single-node emitter renders those operations without choosing the scan or predicates again.
 This tree supplies the source fragment; aggregation, ordering, and pagination still build on that fragment in their existing phases.
+The output list does not hide source columns from those phases or create another SQL scope.
 Other traversal strategies and graph families retain their specialized emitters.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
@@ -80,6 +81,7 @@ Neighbors, path finding, and hydration dispatch directly from their family-speci
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.
 Logical assertions inspect parsed, normalized Input before scope preparation.
+They include node and relationship filters, groups, measures, ordering, and limits.
 Physical assertions inspect the selected plan and emitted SQL AST before enforcement.
 The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
 `_` matches one expression and `...` matches a sequence of sibling expressions.

@@ -15,7 +15,7 @@ query:
 logical:
   expect:
     - (Node caller Definition (Ids 1) ...)
-    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1))
+    - (Relationship caller callee Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
 physical:
   clickhouse:
     expect:
