@@ -22,7 +22,7 @@ use crate::passes::shared::id_list_predicate;
 pub(super) fn emit_fk(plan: &Plan, shape: &FkShape) -> Result<EmitOutput> {
     match shape {
         FkShape::Star { center } => emit_star(plan, center),
-        FkShape::Chain => emit_chain(plan),
+        FkShape::Chain(root) => super::physical::emit(root),
     }
 }
 
@@ -403,119 +403,4 @@ fn emit_join_target_candidate_ctes(
         candidate_ctes.insert(fk.target_node.clone(), cte_name);
     }
     Ok(())
-}
-
-/// Latest-row, `_deleted`-filtered `SELECT *` scan using `FINAL` for streaming
-/// dedup. The security pass adds the scope prefix beside the authorization filter.
-fn node_scan(np: &NodePlan) -> Result<TableRef> {
-    let alias = &np.alias;
-    let table = np
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
-
-    let where_parts = latest_node_predicates(alias, np);
-
-    Ok(TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(table, alias),
-            where_clause: Expr::conjoin(where_parts),
-            ..Default::default()
-        },
-        alias,
-    ))
-}
-
-fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
-    let root_alias = &plan.hops[0].from_node;
-    let root_np = plan
-        .nodes
-        .get(root_alias)
-        .ok_or_else(|| QueryError::Lowering(format!("FK chain root '{root_alias}' not found")))?;
-
-    let mut from = node_scan(root_np)?;
-    let mut selects = node_select_columns(root_alias, root_np);
-    let mut edge_aliases = Vec::new();
-
-    let mut reached: HashSet<&str> = HashSet::from([root_alias.as_str()]);
-    let mut nodes = HashMap::from([(root_alias.clone(), NodeBinding::table(root_alias))]);
-    for (i, hop) in plan.hops.iter().enumerate() {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
-        // Join whichever endpoint isn't reached yet, so the chain emits in any
-        // orientation without a pre-sort.
-        let new_alias = if reached.contains(hop.from_node.as_str()) {
-            &hop.to_node
-        } else {
-            &hop.from_node
-        };
-        let new_np = plan.nodes.get(new_alias).ok_or_else(|| {
-            QueryError::Lowering(format!("FK chain node '{new_alias}' not found"))
-        })?;
-
-        let on = Expr::eq(
-            Expr::col(&fk.fk_node, &fk.fk_column),
-            Expr::col(&fk.target_node, &fk.referenced_column),
-        );
-        from = TableRef::join(JoinType::Inner, from, node_scan(new_np)?, on);
-        nodes.insert(new_alias.clone(), NodeBinding::table(new_alias));
-        selects.extend(node_select_columns(new_alias, new_np));
-        reached.insert(hop.from_node.as_str());
-        reached.insert(hop.to_node.as_str());
-
-        // Aggregations group by node properties only; per-hop edge columns would
-        // be unaggregated SELECT items. Emit them solely for traversal output.
-        if !matches!(plan.body, PlanBody::Traversal { .. }) {
-            continue;
-        }
-
-        // Emit edges in physical (source->target) orientation so a reversed hop
-        // still reports the same orientation as the edge-scan path.
-        let ea = format!("e{i}");
-        let (src_node, dst_node) = match hop.direction {
-            Direction::Incoming => (&hop.to_node, &hop.from_node),
-            Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
-        };
-        let entity = |alias: &str| {
-            plan.nodes
-                .get(alias)
-                .and_then(|n| n.entity.as_deref())
-                .unwrap_or("")
-        };
-        let rel_type = hop.rel_types.first().map(String::as_str).unwrap_or("");
-        selects.push(SelectExpr::new(
-            Expr::string(rel_type),
-            format!("{ea}_{EDGE_TYPE_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::col(src_node, DEFAULT_PRIMARY_KEY),
-            format!("{ea}_{EDGE_SRC_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::string(entity(src_node)),
-            format!("{ea}_{EDGE_SRC_TYPE_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::col(dst_node, DEFAULT_PRIMARY_KEY),
-            format!("{ea}_{EDGE_DST_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::string(entity(dst_node)),
-            format!("{ea}_{EDGE_DST_TYPE_SUFFIX}"),
-        ));
-        edge_aliases.push(ea);
-    }
-
-    Ok(EmitOutput {
-        nodes,
-        from,
-        edge_aliases,
-        where_parts: Vec::new(),
-        select: selects,
-        ctes: Vec::new(),
-        edge_if_predicates: None,
-    })
 }

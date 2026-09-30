@@ -75,6 +75,9 @@ The single-node emitter renders those operations without choosing the scan or pr
 This tree supplies the source fragment; aggregation, ordering, and pagination still build on that fragment in their existing phases.
 The output list does not hide source columns from those phases or create another SQL scope.
 Other traversal strategies and graph families retain their specialized emitters.
+FK-chain planning also uses the physical source tree, with explicit joins and scoped node scans.
+Each scoped scan resolves current rows and applies its predicates inside the derived table before joining.
+The shared emitter renders those joins and scopes; FK-star candidate narrowing remains specialized.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 

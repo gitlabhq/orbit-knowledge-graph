@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::TableRef;
+use crate::ast::{Expr, Query, SelectExpr, TableRef};
 use crate::error::Result;
 use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
 
@@ -35,6 +35,32 @@ fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             let mut output = emit_source(input);
             output.where_parts.push(predicate.clone());
             output
+        }
+        PhysicalSource::Scope { alias, input } => {
+            let mut output = emit_source(input);
+            output.from = TableRef::subquery(
+                Query {
+                    select: vec![SelectExpr::star()],
+                    from: output.from,
+                    where_clause: Expr::conjoin(std::mem::take(&mut output.where_parts)),
+                    ..Default::default()
+                },
+                alias,
+            );
+            output
+        }
+        PhysicalSource::Join {
+            kind,
+            condition,
+            left,
+            right,
+        } => {
+            let mut left = emit_source(left);
+            let right = emit_source(right);
+            left.from = TableRef::join(*kind, left.from, right.from, condition.clone());
+            left.where_parts.extend(right.where_parts);
+            left.nodes.extend(right.nodes);
+            left
         }
     }
 }

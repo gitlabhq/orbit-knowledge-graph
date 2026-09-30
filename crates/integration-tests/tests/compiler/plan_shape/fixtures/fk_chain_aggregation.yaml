@@ -1,0 +1,42 @@
+name: FK-chain aggregation executes physical node joins with scoped current-row filters
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed", "source": "merge_request_event"}},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "aggregations": [{"count": "f", "as": "appearances"}],
+      "group_by": ["f.old_path"],
+      "limit": 60
+    }
+  gql: |
+    MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
+      -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+    RETURN f.old_path, count(f) AS appearances LIMIT 60
+logical:
+  expect:
+    - (Groups (Group f old_path None f_old_path))
+    - (Measures (Measure count f Node appearances))
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (FkChain (SourceFragment (Outputs) (Join ...))))
+      - (Join INNER (= (Column pl merge_request_id) (Column mr id)) _ _)
+      - (Join INNER (= (Column mr latest_merge_request_diff_id) (Column d id)) _ _)
+      - (Join INNER (= (Column f merge_request_diff_id) (Column d id)) _ _)
+      - (Scope pl (Filter _ (Read gl_pipeline pl Final)))
+      - (Scope mr (Filter _ (Read gl_merge_request mr Final)))
+      - (GroupBy (Column f old_path))
+    reject:
+      - (Scan gl_edge ...)
+      - (Scan gl_ci_edge ...)
+      - (Output e0_type ...)

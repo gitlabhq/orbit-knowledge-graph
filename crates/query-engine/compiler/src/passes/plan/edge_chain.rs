@@ -200,7 +200,7 @@ pub enum FkShape {
     /// Every hop is FK-derived and consecutive hops share a node. The node
     /// tables are joined on their FK columns; the edges are a materialization
     /// of those FKs, so the chain skips all edge-table scans.
-    Chain,
+    Chain(Box<PhysicalPlan>),
 }
 
 pub fn plan<M>(
@@ -240,16 +240,8 @@ where
         }
     }
 
-    let mut strategy = if use_fk_elision && let Some(shape) = detect_fk(&hops, &nodes) {
-        Strategy::Fk(shape)
-    } else {
-        Strategy::Flat
-    };
-
     resolve_join_columns(&mut hops);
     resolve_cascade_anchors(&mut hops);
-
-    let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
 
     resolve_node_flags(&hops, &mut nodes, input);
 
@@ -292,13 +284,24 @@ where
                 .map(|sort_key| (table.clone(), sort_key.to_vec()))
         })
         .collect();
-    if hops.is_empty() {
+    let strategy = if hops.is_empty() {
         let node = nodes
             .values()
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        strategy = Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?));
-    }
+        Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?))
+    } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
+        Strategy::Fk(FkShape::Star { center })
+    } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
+        Strategy::Fk(FkShape::Chain(Box::new(PhysicalPlan::fk_chain(
+            &hops,
+            &nodes,
+            input.query_type == QueryType::Traversal,
+        )?)))
+    } else {
+        Strategy::Flat
+    };
+    let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
     let body = if input.query_type == QueryType::Aggregation {
         PlanBody::Aggregation {
             strategy,
@@ -535,19 +538,6 @@ fn elide_hops(
     }
 
     (keep_hops, elided_fks)
-}
-
-/// Star first (covers single-hop FK), then chain. Chain applies to aggregations
-/// too: it joins node tables on FK columns, which is the source of truth for a
-/// relationship whose edge rows can lag (e.g. stale `HAS_LATEST_DIFF` edges).
-fn detect_fk(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> Option<FkShape> {
-    if let Some(center) = detect_fk_star(hops) {
-        return Some(FkShape::Star { center });
-    }
-    if detect_fk_chain(hops, nodes) {
-        return Some(FkShape::Chain);
-    }
-    None
 }
 
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
@@ -817,7 +807,7 @@ fn compute_node_edge_mappings(
                 }
             }
         }
-        Strategy::Fk(FkShape::Chain) => {
+        Strategy::Fk(FkShape::Chain(_)) => {
             // Each node is joined as its own table, so it maps to its own PK.
             for hop in hops {
                 for node in [&hop.from_node, &hop.to_node] {

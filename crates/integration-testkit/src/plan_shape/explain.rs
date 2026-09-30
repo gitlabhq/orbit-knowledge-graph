@@ -149,7 +149,7 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
             Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
             Strategy::Flat => S::node("Flat", []),
             Strategy::Fk(FkShape::Star { center }) => S::node("FkStar", [S::atom(center)]),
-            Strategy::Fk(FkShape::Chain) => S::node("FkChain", []),
+            Strategy::Fk(FkShape::Chain(root)) => S::node("FkChain", [physical_tree(root)]),
         },
         PlanBody::Neighbors { .. } => S::node("Neighbors", []),
         PlanBody::PathFinding(_) => S::node("PathFinding", []),
@@ -240,6 +240,23 @@ fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S
         PhysicalSource::Filter { predicate, input } => {
             S::node("Filter", [expression(predicate), physical_source(input)])
         }
+        PhysicalSource::Scope { alias, input } => {
+            S::node("Scope", [S::atom(alias), physical_source(input)])
+        }
+        PhysicalSource::Join {
+            kind,
+            condition,
+            left,
+            right,
+        } => S::node(
+            "Join",
+            [
+                S::atom(kind),
+                expression(condition),
+                physical_source(left),
+                physical_source(right),
+            ],
+        ),
     }
 }
 
