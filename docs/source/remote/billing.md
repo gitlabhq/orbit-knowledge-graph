@@ -49,7 +49,6 @@ Access depends on the license tier of the instance instead of on a credit balanc
 For how to run GitLab Orbit on your own instance, see
 [GitLab Orbit on GitLab Self-Managed](../self-managed/_index.md).
 
-The rest of this page applies to GitLab.com.
 
 ## Credit consumption during beta
 
