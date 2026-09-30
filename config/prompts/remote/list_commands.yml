@@ -1,13 +1,15 @@
 name: list_commands
-version: 1.5.0
+version: 1.6.0
 variables: [commands, catalog]
 description: >-
-  Orbit is the GitLab Knowledge Graph. It answers code-structure and
-  cross-entity questions: callers, definitions, imports, blast radius,
-  relationship traversal, joins across entities or projects, grouped counts,
-  and repository maps. Examples: "who calls X", "what breaks if I change Y",
-  "which MRs touched files imported by Z". Use it even when the user does not
-  mention Orbit.
+  Orbit is the GitLab Knowledge Graph. It answers code-structure questions:
+  callers, definitions, imports, blast radius, and repository maps. It also
+  answers relationship and aggregation questions across users, MRs, work items,
+  pipelines, releases, and projects. It counts, ranks, and groups ("top N
+  projects by MR count"). It follows multi-hop chains, such as work item to MR
+  to pipeline to deployment. One graph query replaces many API calls.
+  Examples: "who calls X", "what breaks if I change Y", "which MRs touched
+  files imported by Z". Use it even when the user does not mention Orbit.
   {% if catalog %}The command catalog is included below as JSON. Call
   invoke_command with a command's name and put the inputs matching its
   input_schema inside invoke_command's parameters.

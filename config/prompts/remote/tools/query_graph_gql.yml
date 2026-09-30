@@ -1,11 +1,11 @@
 name: query_graph_gql
-version: 1.2.0
+version: 1.3.0
 summary: >-
   Traverse GitLab relationships and code structure with GQL text: callers,
   imports, blast radius, joins across entity types, grouped counts.
 description: >-
   Read-only GQL text (MATCH ... RETURN) over the GitLab Knowledge Graph. It
   finds callers, definitions, and imports, follows relationships, measures
-  blast radius, joins across entity types, and returns grouped counts. Before
+  blast radius, joins across entity types, and counts, ranks, and groups in one query. Before
   writing a query, run CALL db.schema(). Use CALL db.schema('NodeName') for one
   node.
