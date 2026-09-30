@@ -1,7 +1,7 @@
 //! A checkout on disk. Listing is cheap and reading is not, so discovery
-//! applies the header passes to every file, reads only the files those passes
-//! asked to see, and links every file that loads into the repository
-//! filesystem where it is. A file that will be parsed is read once, later, by
+//! applies the header passes to every file and reads only the files those
+//! passes asked to see; those bytes are stored, everything else that loads is
+//! linked where it is. A file that will be parsed is read once, later, by
 //! `load`, which runs the content passes on the same bytes it hands out.
 
 use std::io::Read;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 
-use super::{File, Inventory, Need, Pass, SourceError, Vfs, check};
+use super::{Decision, File, Inventory, Need, Pass, SourceError, Vfs, check};
 
 /// Every file below `root` with git's listing semantics: .gitignore,
 /// .git/info/exclude and dotfiles honored, ripgrep .ignore and ancestor
@@ -67,11 +67,21 @@ fn settle_header(
         true => File::symlink(path, metadata.len()),
         false => File::new(path, metadata.len()),
     };
-    if passes.header(&mut file)? == Need::Bytes && !file.symlink {
+    let need = passes.header(&mut file)?;
+    // A symlink is a node in the tree with no bytes of its own.
+    if file.symlink {
+        if file.decision != Decision::Drop {
+            file.decision = Decision::ListOnly;
+        }
+        return Ok(file);
+    }
+    if need == Need::Bytes {
         let bytes = read(&on_disk, file.size)?;
         check(passes, &mut file, &bytes);
-    }
-    if file.loads() && !file.symlink {
+        if file.loads() {
+            vfs.write(&file.path, bytes)?;
+        }
+    } else if file.loads() {
         vfs.link(&file.path, on_disk, file.size);
     }
     Ok(file)
@@ -100,15 +110,21 @@ fn read(on_disk: &Path, size: u64) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::{CapExceeded, Decision};
+    use crate::files::CapExceeded;
 
     /// Drops pngs and symlinks at the header, NUL-bearing files at the
-    /// content; the shape of the production `CodeFilter`.
+    /// content; wants to see manifests now. The shape of the production
+    /// `CodeFilter`.
     struct TestFilter;
     impl Pass for TestFilter {
         fn header(&self, f: &mut File) -> Result<Need, CapExceeded> {
             if f.symlink || f.path.ends_with(".png") {
                 f.decision = Decision::ListOnly;
+                return Ok(Need::Nothing);
+            }
+            if f.path.ends_with(".toml") {
+                f.decision = Decision::Load;
+                return Ok(Need::Bytes);
             }
             Ok(Need::Nothing)
         }
@@ -166,6 +182,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(root, "src/main.rs", b"fn main() {}");
+        write(root, "Cargo.toml", b"[package]");
         write(root, "assets/logo.png", b"\x89PNGdata");
         write(root, "model/weights.bin", b"\x00\x01blob");
         write(root, ".gitignore", b"ignored/\n");
@@ -180,19 +197,32 @@ mod tests {
         assert_eq!(decision(&inv, "assets/logo.png"), Decision::ListOnly);
         assert_eq!(decision(&inv, "link.rs"), Decision::ListOnly);
         assert_eq!(decision(&inv, "model/weights.bin"), Decision::Parse);
-        assert!(inv.iter().all(|e| !e.checked));
+        assert!(
+            inv.iter()
+                .filter(|e| e.decision == Decision::Parse)
+                .all(|e| !e.checked)
+        );
         assert!(vfs.is_file(Path::new("src/main.rs")));
         assert!(!vfs.exists(Path::new("assets/logo.png")));
         assert!(!vfs.exists(Path::new("link.rs")));
 
+        // A file the header pass asked to see was read once, at discovery;
+        // its bytes are stored, not linked to be read again.
+        let manifest = inv.iter().find(|e| e.path == "Cargo.toml").unwrap();
+        assert_eq!(
+            (manifest.decision, manifest.checked),
+            (Decision::Load, true)
+        );
+        assert!(vfs.content_id(Path::new("Cargo.toml")).is_some());
+        assert_eq!(
+            vfs.read_to_string(Path::new("Cargo.toml")).unwrap(),
+            "[package]"
+        );
+        assert_eq!(vfs.content_id(Path::new("src/main.rs")), None);
+
         for file in inv.iter_mut() {
             let bytes = load(&vfs, file, &TestFilter).unwrap();
-            assert_eq!(
-                bytes.is_some(),
-                file.decision == Decision::Parse,
-                "{}",
-                file.path
-            );
+            assert_eq!(bytes.is_some(), file.loads(), "{}", file.path);
         }
 
         assert_eq!(decision(&inv, "src/main.rs"), Decision::Parse);

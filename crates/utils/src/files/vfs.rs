@@ -132,8 +132,10 @@ impl Vfs {
     pub fn write(&self, path: &str, bytes: Vec<u8>) -> io::Result<()> {
         let key = key(Path::new(path)).ok_or_else(not_found)?;
         let id = ContentId::of(&bytes);
-        let known = lock(&self.blobs).contains_key(&id);
-        if !known {
+        // Charged and stored under one lock, so two workers writing the same
+        // content at once cannot both pay for it.
+        let mut blobs = lock(&self.blobs);
+        if let std::collections::hash_map::Entry::Vacant(slot) = blobs.entry(id) {
             let blob = match self.resident.add(bytes.len() as u64) {
                 Ok(()) => Blob::Memory(bytes.into()),
                 Err(_) => Blob::Spilled {
@@ -141,8 +143,9 @@ impl Vfs {
                     offset: self.scratch()?.append(&bytes)?,
                 },
             };
-            lock(&self.blobs).entry(id).or_insert(blob);
+            slot.insert(blob);
         }
+        drop(blobs);
         self.index(&key);
         lock(&self.paths).insert(key, Slot::Stored(id));
         Ok(())
@@ -433,6 +436,25 @@ mod tests {
         assert_eq!(vfs.metadata(Path::new("src/lib.rs")).unwrap().len, 13);
         assert_eq!(vfs.content_id(Path::new("src/lib.rs")), None);
         assert!(vfs.is_dir(Path::new("src")));
+    }
+
+    /// Eight workers writing the same 80 bytes at once must charge the
+    /// budget once; a budget of 100 leaves no room for a double charge.
+    #[test]
+    fn concurrent_writes_of_one_content_charge_the_budget_once() {
+        let vfs = Vfs::with_budget(Some(100));
+        let body = vec![b'x'; 80];
+        std::thread::scope(|scope| {
+            for worker in 0..8 {
+                let (vfs, body) = (&vfs, &body);
+                scope.spawn(move || vfs.write(&format!("w{worker}.js"), body.clone()).unwrap());
+            }
+        });
+        assert_eq!(vfs.len(), 8);
+        assert!(
+            vfs.scratch.get().is_none(),
+            "the shared content was charged more than once"
+        );
     }
 
     #[test]
