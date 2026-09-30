@@ -70,6 +70,17 @@ The current ontology files, archives, DDL, and indexing declarations remain unch
 Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
 All later passes continue to use that AST.
 
+Each edge-chain emitter builds node bindings as it emits scans and joins.
+Each binding contains the graph identity, visible table alias, and hydration path expression when available.
+Lowering resolves elided endpoints through their emitted holders or pinned literals.
+Filtering CTEs do not make a node table visible in the result query block.
+Result enforcement consumes these bindings instead of searching the SQL tree for aliases.
+It still adds required authorization scans and projects redaction columns.
+Neighbors emits direction-specific redaction columns in its own query arms.
+Its projected binding carries only an identity needed for an additional role scan, when required.
+Property comparisons and cursor identities reuse the resolved node bindings.
+Lowering rejects identities that have neither a visible source nor an elided pinned value.
+
 | # | Pass | Responsibility |
 |---|---|---|
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |

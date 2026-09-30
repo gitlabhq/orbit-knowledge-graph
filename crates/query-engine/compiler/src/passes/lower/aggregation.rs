@@ -2,6 +2,7 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
+use super::EmitOutput;
 use crate::passes::plan::{HydrationStrategy, Plan};
 use crate::passes::shared::requested_columns;
 
@@ -11,8 +12,8 @@ pub fn emit_aggregation(
     aggregations: &[InputAggregationMetric],
     group_by_keys: &[InputGroupByKey],
     agg_sort: Option<&InputAggSort>,
+    output: EmitOutput,
 ) -> Result<Node> {
-    let output = plan.emit_edge_chain()?;
     let if_cond = output.edge_if_predicates.clone();
     let (agg_select, group_by, order_by) = build_aggregation(
         plan,

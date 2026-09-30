@@ -4,6 +4,7 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::constants::*;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
 
@@ -18,16 +19,8 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
 
     if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
         let rhs = Expr::col(rhs_alias, rhs_prop);
-        let op = match filter.op {
-            None | Some(FilterOp::Eq) => Op::Eq,
-            Some(FilterOp::Ne) => Op::Ne,
-            Some(FilterOp::Gt) => Op::Gt,
-            Some(FilterOp::Gte) => Op::Ge,
-            Some(FilterOp::Lt) => Op::Lt,
-            Some(FilterOp::Lte) => Op::Le,
-            Some(_) => unreachable!("lowering rejects unsupported ops for property-to-property"),
-        };
-        return Expr::binary(op, col, rhs);
+        return comparison(col, filter.op.unwrap_or(FilterOp::Eq), rhs)
+            .expect("validated property comparison");
     }
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
@@ -83,6 +76,21 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
             vec![col, Expr::param(ChType::String, str_val())],
         ),
     }
+}
+
+pub fn comparison(left: Expr, operator: FilterOp, right: Expr) -> Result<Expr> {
+    let operator = match operator {
+        FilterOp::Eq => Op::Eq,
+        FilterOp::Ne => Op::Ne,
+        FilterOp::Gt => Op::Gt,
+        FilterOp::Gte => Op::Ge,
+        FilterOp::Lt => Op::Lt,
+        FilterOp::Lte => Op::Le,
+        _ => {
+            return Err(QueryError::Lowering("invalid property comparison".into()));
+        }
+    };
+    Ok(Expr::binary(operator, left, right))
 }
 
 pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {

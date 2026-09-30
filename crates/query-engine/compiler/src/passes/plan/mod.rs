@@ -74,12 +74,6 @@ pub fn denormalized_facts(
         .collect()
 }
 
-impl Plan {
-    pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
-        self.node_edge_mappings.clone()
-    }
-}
-
 pub enum PlanBody {
     Traversal,
     Aggregation {
