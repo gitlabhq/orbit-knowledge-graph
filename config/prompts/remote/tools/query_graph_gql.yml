@@ -1,11 +1,33 @@
 name: query_graph_gql
-version: 1.0.0
+version: 1.1.0
 summary: >-
   Traverse GitLab relationships and code structure with GQL text: callers,
   imports, blast radius, joins across entity types, grouped counts.
-description: >-
+description: |-
   Query GitLab relationships with read-only GQL text (MATCH ... RETURN).
   Use it for traversals, blast radius, joins, and grouped counts. Use normal
   GitLab tools for one known entity, a plain list or count, or a write. Before
-  writing a query, run CALL db.schema(). Use CALL db.schema('NodeName') for one
-  node.
+  writing a query, run CALL db.schema('NodeName') for each node you need.
+  CALL db.schema() lists every node and relationship type; run it at most once.
+
+  Rules:
+  - Bound at least one node with an ID or a literal filter, such as
+    (p:Project {full_path: 'gitlab-org/gitlab'}). LIMIT does not bound a scan.
+  - Declare each node's label where it first appears.
+  - Write relationship types after a colon: -[:AUTHORED]->.
+  - Use -> or <- between labeled nodes. Undirected -- is for neighbors only.
+  - Traversals are capped at three hops, such as -[:CONTAINS*1..3]->.
+  - WHERE joins predicates with AND. It supports =, <>, <, <=, >, >=, IN,
+    STARTS WITH, ENDS WITH, CONTAINS, IS NULL, and IS NOT NULL.
+  - String patterns need at least 3 characters.
+  - Aggregates are count, sum, avg, min, and max. Other return items are group
+    keys. Alias a metric to sort by it. ORDER BY takes one key.
+  - LIMIT and PAGE take 1 to 1000 rows. PAGE returns next_cursor.
+  - Continue with PAGE n AFTER 'cursor', and change nothing else in the query.
+  - OR, general NOT, DISTINCT, count(*), OPTIONAL MATCH, WITH, UNION, and SKIP
+    reject.
+  - Issues, epics, tasks, and incidents are the WorkItem node.
+
+  Example:
+  MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+  RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC LIMIT 10
