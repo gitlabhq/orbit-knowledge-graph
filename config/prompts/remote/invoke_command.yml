@@ -1,9 +1,8 @@
 name: invoke_command
-version: 1.3.0
+version: 1.4.0
 description: >-
-  Runs a command from the Orbit command catalog. Orbit has code structure,
-  blast radius, relationship traversal, joins across entities or projects, and
-  grouped count capabilities. It does not cover one known entity, a plain list
-  or count, or writes; use normal GitLab tools for those. Keep only
+  Runs a command from the Orbit command catalog. Orbit can answer
+  code-structure questions, blast radius, relationship traversal, joins across
+  entities or projects, and grouped counts. Keep only
   command_name and parameters at the top level. Put the command's own inputs
   inside parameters.
