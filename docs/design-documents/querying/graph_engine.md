@@ -74,6 +74,8 @@ Single-node planning selects an executable scan, filter, and output-projection t
 The single-node emitter renders those operations without choosing the scan or predicates again.
 This tree supplies the source fragment; aggregation, ordering, and pagination still build on that fragment in their existing phases.
 Other traversal strategies and graph families retain their specialized emitters.
+Traversal and aggregation own their edge-chain strategies in their plan-body variants.
+Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.

@@ -4,7 +4,7 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
 
-use super::{Plan, PlanBody, Strategy};
+use super::{Plan, PlanBody};
 use query_data_model::QueryDataModel;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -78,7 +78,6 @@ pub fn plan_hydration(
     Ok(Plan {
         nodes: HashMap::new(),
         hops: vec![],
-        strategy: Strategy::Family,
         node_edge_mappings: HashMap::new(),
         denormalized: HashMap::new(),
         table_columns: HashMap::new(),

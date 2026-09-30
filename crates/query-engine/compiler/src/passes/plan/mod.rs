@@ -34,7 +34,6 @@ pub type QueryPlan = Plan;
 pub struct Plan {
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
-    pub strategy: Strategy,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     /// Per-table column sets from the ontology. Used by the lowerer to
@@ -76,8 +75,11 @@ pub fn denormalized_facts(
 }
 
 pub enum PlanBody {
-    Traversal,
+    Traversal {
+        strategy: Strategy,
+    },
     Aggregation {
+        strategy: Strategy,
         aggregations: Vec<InputAggregationMetric>,
         agg_sort: Option<InputAggSort>,
     },

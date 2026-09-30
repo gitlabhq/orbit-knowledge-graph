@@ -163,7 +163,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
             // The aggregation's GROUP BY plus the `target.id = center.fk_column`
             // join already narrow the target, so a `_narrow_*` re-scan is redundant.
             let narrowed_by_center_join =
-                !matches!(plan.body, PlanBody::Traversal) && fk_alias == center_alias;
+                !matches!(plan.body, PlanBody::Traversal { .. }) && fk_alias == center_alias;
             // Narrow the target scan to the FK values the center references, else
             // it scans the full org (e.g. all Jobs) just to join a handful.
             let narrow = if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
@@ -238,7 +238,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
 
     // Synthesize per-hop edge columns for the formatter; aggregations need none.
     let mut edge_aliases = Vec::new();
-    if !matches!(plan.body, PlanBody::Traversal) {
+    if !matches!(plan.body, PlanBody::Traversal { .. }) {
         return Ok(EmitOutput {
             nodes,
             from,
@@ -468,7 +468,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
 
         // Aggregations group by node properties only; per-hop edge columns would
         // be unaggregated SELECT items. Emit them solely for traversal output.
-        if !matches!(plan.body, PlanBody::Traversal) {
+        if !matches!(plan.body, PlanBody::Traversal { .. }) {
             continue;
         }
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::input::*;
 
-use super::{EdgeTableConfig, NodePlan, PathFindingBody, Plan, PlanBody, Strategy, find_node};
+use super::{EdgeTableConfig, NodePlan, PathFindingBody, Plan, PlanBody, find_node};
 use query_data_model::QueryDataModel;
 
 pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
@@ -57,7 +57,6 @@ where
     Ok(Plan {
         nodes,
         hops: vec![],
-        strategy: Strategy::Family,
         node_edge_mappings: HashMap::new(),
         denormalized: HashMap::new(),
         table_columns: HashMap::new(),

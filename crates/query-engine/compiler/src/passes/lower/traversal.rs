@@ -4,7 +4,7 @@ use crate::input::*;
 
 use super::EmitOutput;
 use crate::constants::*;
-use crate::passes::plan::{Plan, Strategy};
+use crate::passes::plan::Plan;
 use crate::passes::shared::edge_select_columns;
 use crate::passes::shared::edge_select_columns_with_prefix;
 
@@ -15,7 +15,7 @@ pub fn emit_traversal(plan: &Plan, input: &Input, output: EmitOutput) -> Result<
             .as_deref()
             .is_some_and(|a| a.ends_with(EDGE_TYPE_SUFFIX))
     });
-    if !matches!(plan.strategy, Strategy::SingleNode(_)) && !already_has_edge_cols {
+    if !already_has_edge_cols {
         for (i, ea) in output.edge_aliases.iter().enumerate() {
             let is_multi = plan.hops.get(i).is_some_and(|h| h.max_hops > 1);
             if is_multi {

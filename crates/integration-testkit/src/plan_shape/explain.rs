@@ -74,12 +74,18 @@ pub fn logical(input: &Input) -> S {
 }
 
 pub fn physical(plan: &Plan, ast: &Node) -> S {
-    let strategy = match &plan.strategy {
-        Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
-        Strategy::Family => S::node("Family", []),
-        Strategy::Flat => S::node("Flat", []),
-        Strategy::Fk(FkShape::Star { center }) => S::node("FkStar", [S::atom(center)]),
-        Strategy::Fk(FkShape::Chain) => S::node("FkChain", []),
+    use compiler::passes::plan::PlanBody;
+    let strategy = match &plan.body {
+        PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
+        {
+            Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
+            Strategy::Flat => S::node("Flat", []),
+            Strategy::Fk(FkShape::Star { center }) => S::node("FkStar", [S::atom(center)]),
+            Strategy::Fk(FkShape::Chain) => S::node("FkChain", []),
+        },
+        PlanBody::Neighbors { .. } => S::node("Neighbors", []),
+        PlanBody::PathFinding(_) => S::node("PathFinding", []),
+        PlanBody::Hydration { .. } => S::node("Hydration", []),
     };
     let mut nodes: Vec<_> = plan.nodes.values().collect();
     nodes.sort_by_key(|node| &node.alias);

@@ -186,7 +186,6 @@ pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
     Flat,
     SingleNode(Box<PhysicalPlan>),
-    Family,
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
     /// nodes are joined; both shapes share one emit path (`lower::fk`).
@@ -266,15 +265,6 @@ where
         }
     }
 
-    let body = if input.query_type == QueryType::Aggregation {
-        PlanBody::Aggregation {
-            aggregations: input.aggregation.metrics.clone(),
-            agg_sort: input.aggregation.sort.clone(),
-        }
-    } else {
-        PlanBody::Traversal
-    };
-
     let table_names: HashSet<String> = input
         .nodes
         .iter()
@@ -309,10 +299,18 @@ where
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
         strategy = Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?));
     }
+    let body = if input.query_type == QueryType::Aggregation {
+        PlanBody::Aggregation {
+            strategy,
+            aggregations: input.aggregation.metrics.clone(),
+            agg_sort: input.aggregation.sort.clone(),
+        }
+    } else {
+        PlanBody::Traversal { strategy }
+    };
     Ok(Plan {
         nodes,
         hops,
-        strategy,
         node_edge_mappings,
         denormalized,
         table_columns,

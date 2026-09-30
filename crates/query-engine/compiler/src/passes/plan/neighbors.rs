@@ -5,7 +5,7 @@ use ontology::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::{EdgeTableConfig, NodePlan, Plan, PlanBody, Strategy};
+use super::{EdgeTableConfig, NodePlan, Plan, PlanBody};
 use crate::passes::shared::has_non_denorm_filters;
 use query_data_model::QueryDataModel;
 
@@ -88,7 +88,6 @@ where
     Ok(Plan {
         nodes,
         hops: vec![],
-        strategy: Strategy::Family,
         node_edge_mappings,
         denormalized,
         table_columns: HashMap::new(),

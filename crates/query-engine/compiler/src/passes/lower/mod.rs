@@ -111,15 +111,12 @@ pub struct LoweredQuery {
     pub metadata: LoweredMetadata,
 }
 
-impl Plan {
-    pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
-        match self.strategy {
-            Strategy::SingleNode(ref plan) => physical::emit(plan),
-            Strategy::Family => Err(QueryError::Lowering(
-                "graph family requires its own emitter".into(),
-            )),
-            Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
-            Strategy::Flat => flat_chain::emit_flat_chain(self),
+impl Strategy {
+    fn emit(&self, plan: &Plan) -> Result<EmitOutput> {
+        match self {
+            Strategy::SingleNode(root) => physical::emit(root),
+            Strategy::Fk(shape) => fk::emit_fk(plan, shape),
+            Strategy::Flat => flat_chain::emit_flat_chain(plan),
         }
     }
 }
@@ -212,16 +209,17 @@ impl EmitOutput {
 pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match &plan.body {
-        PlanBody::Traversal => {
-            let mut output = plan.emit_edge_chain()?;
+        PlanBody::Traversal { strategy } => {
+            let mut output = strategy.emit(plan)?;
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(plan, input, output)
         }
         PlanBody::Aggregation {
+            strategy,
             aggregations,
             agg_sort,
         } => {
-            let mut output = plan.emit_edge_chain()?;
+            let mut output = strategy.emit(plan)?;
             nodes = output.take_bindings(plan, input)?;
             aggregation::emit_aggregation(
                 plan,
