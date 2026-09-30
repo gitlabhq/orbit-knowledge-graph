@@ -15,18 +15,16 @@ Proposed
 
 ## Context
 
-Agents often hold a token such as `MergeRequest[123]` or a URL and need the
-entity plus its neighborhood: reviewers, linked issues, labels, milestone.
-Today that takes one Rails lookup plus one graph query per related thing.
+An agent that holds a token such as `MergeRequest[123]` or a URL needs the
+entity and its neighborhood: reviewers, linked issues, labels, milestone. Today
+that takes one Rails lookup plus one graph query per related thing.
 [#1262](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1262)
 tracks a Rails `context` endpoint that resolves tokens and returns PostgreSQL
 summaries. The prototype,
 [`gitlab-org/gitlab!254189`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189),
-is closed and motivated this ADR. The design now lives here, ahead of any
-further implementation.
+is closed. It motivated this ADR, and the design now lives here.
 
-The endpoint must optionally attach graph data, which raises a transport
-question. Two accepted ADRs constrain it:
+The endpoint must optionally attach graph data. Two accepted ADRs limit how:
 
 - [ADR 008](008_workhorse_query_acceleration.md): Workhorse owns the gRPC
   stream to GKG, so a graph query never holds a Puma worker for its whole
@@ -34,63 +32,77 @@ question. Two accepted ADRs constrain it:
 - [ADR 011](011_agent_command_surface.md): executing queries Rails-side buffers
   results in Puma and is not the path for agents.
 
-Measurements on a local stack support the design:
-
-- An unreadable center returns the same empty graph as a nonexistent ID, and
-  edges to unreadable neighbors are dropped from the node and edge lists. That
-  does not cover pagination metadata. Redacted rows still count toward the
-  query window. An unreadable neighbor at the limit boundary can change
-  `has_more`, `truncated`, and the row count. The Consequences section
-  records the fix as a dependency.
-- The unchanged Workhorse `SendQuery.Inject` ran 2 to 40 concurrent streams
-  with its redaction loop, making at most one redaction callback per stream.
-  Five queries took 0.4 s concurrently against 0.87 s sequentially.
-- A `neighbors` query over 20 merge requests returned 10 KB raw and 5.7 KB in
-  GOON. Prototype queries ran in 130 to 300 ms.
-- `neighbors` can return stale `HAS_HEAD_PIPELINE` and `HAS_LATEST_DIFF` edges,
-  and its `LIMIT` counts duplicate version rows. One hosted-graph example
-  returned 112 rows for 52 unique edges. This is a separate Orbit defect, and
-  the expansion design does not depend on it.
-
-The content of an expansion (which edges, which facets) is under active
-iteration by the Orbit team. This ADR does not fix it.
+On a local stack, the unchanged Workhorse `SendQuery.Inject` ran 2 to 40
+concurrent streams with its redaction loop. Five queries took 0.4 s
+concurrently against 0.87 s sequentially. One `neighbors` query over 20 merge
+requests returned 10 KB raw and 5.7 KB in GOON.
 
 ## Decision
 
 This ADR fixes the interface and the transport. It does not design the
-`expand_*` queries.
+`expand_*` queries. The Orbit team iterates on those and owns their content.
 
-### Request
+**Interface.** `POST /api/v4/orbit/context` takes `tokens`, an array of 1 to 20
+strings or `{token, expand}` objects. Top-level `expand` defaults to `false`,
+and a per-token value overrides it. The response is version 1.1.0. It carries
+the PostgreSQL summaries as before, plus `expansions`. That holds one
+deduplicated graph per entity type, each with a `status` and either a `result`
+or an `error`. An
+expansion failure never fails the summaries.
 
-`POST /api/v4/orbit/context`, replacing the prototype's `GET`:
+**Transport: Workhorse fan-out.** Rails resolves and authorizes the tokens and
+builds the response body. It hands Workhorse one send-data header holding that
+body (or the LLM text) and a list of `{key, named query}`. Workhorse opens one
+ordinary `ExecuteQuery` stream per key, in parallel. Each stream runs the
+unchanged redaction loop. Workhorse then fills in
+`expansions.<Type>.{status, result | error}` and writes the body. GKG only ever
+sees ordinary named queries. The client makes one call. We aim for 19.6. Until
+this ships, clients can call `expand_merge_request` and `expand_work_item`
+directly through `/api/v4/orbit/query/:name`.
 
-```json
-{"tokens": ["MergeRequest[529482712]",
-            {"token": "gitlab-org/gitlab#609451", "expand": true}],
- "expand": true,
- "response_format": "raw"}
-```
+**Expansion queries.** Orbit owns one named query per entity type. It takes
+`node_ids` (1 to 20) and returns a normal graph response. One request per type
+limits the content to what one named query can express. Fresh typed facets
+need either several queries per type (a contract change) or composite named
+queries (not built yet). Examples are a head pipeline and diff files.
+Rails keeps a static map from type to query name. An absent center is never an
+error.
 
-- `tokens` is always an array of 1 to 20 items. Each item is a string or
-  `{token, expand}`. There is no object keyed by token: it loses order in some
-  clients and collapses duplicates.
-- Top-level `expand` defaults to `false`. A per-token value overrides it.
-  Expansion adds latency and a GKG dependency, so it is opt-in.
-- Accepted token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs,
-  `path!iid` and `path#iid`. Group-level work items are in scope.
-- Supported types are `MergeRequest` and `WorkItem`. `Issue` is accepted as an
-  alias and resolves, is reported, and expands as `WorkItem`, so its graph is
-  under `expansions.WorkItem`. Other types return `unsupported_type`.
+**Leaks.** Rails never reveals an ID the caller cannot read. Every failure
+after a lookup starts returns the same `not_found`. Only found, readable records
+are expanded. The details block below lists every rule.
+
+**Truncation.** `limit` is global across all centers in a type, and redacted
+rows take up window slots. A center missing from a graph means "no readable
+neighbors" only when `pagination.truncated` is `false`. Otherwise the client
+must treat it as unknown.
+
+**Other decisions.** Billing is per sub-query. The explicit MCP tool and agent
+command are deferred.
+
+<details>
+<summary>Request and response fields</summary>
+
+- `tokens` is always an array. There is no object keyed by token.
+- Token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs, `path!iid`
+  and `path#iid`. Group-level work items are in scope.
+- Supported types are `MergeRequest` and `WorkItem`. `Issue` is an alias that
+  resolves, is reported, and expands as `WorkItem`, so its graph is under
+  `expansions.WorkItem`. Other types return `unsupported_type`.
 - Resolution applies both the per-resource ability (for example
   `read_work_item`) and the fine-grained token boundary. Group-level work items
   pass their group as the boundary.
-
-### Response, version 1.1.0
-
-Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
-`linked_merge_requests[]`). The response adds `resolved_token`,
-a top-level `expansions` object, and `namespace_path` inside `summary`
-(`project_path` is `null` for group-level work items).
+- Relative to 1.0.0, `ref` becomes `token` (also in `linked_issues[]` and
+  `linked_merge_requests[]`). The response adds `resolved_token`,
+  `expansions`, and `namespace_path` inside `summary`. `project_path` is `null`
+  for group-level work items.
+- `expansions` is always present (`{}` if nothing was requested). A type appears
+  only if a found record asked for expansion. A center is identified by the
+  edge endpoint pair (`from`, `from_id`) or (`to`, `to_id`), because IDs are per
+  type.
+- `expansions.<Type>.status` is `ok`, `no_expansion` (the type has no query) or
+  `error` with `error.code`. It is the only outcome signal. Entities carry no
+  expansion status.
 
 ```json
 {"version": "1.1.0",
@@ -102,207 +114,103 @@ a top-level `expansions` object, and `namespace_path` inside `summary`
    "WorkItem": {"status": "ok", "result": {"nodes": ["..."], "edges": ["..."]}}}}
 ```
 
-- `expansions` is always present (`{}` if nothing was requested) and holds one
-  deduplicated graph per entity type, not per entity. A center is identified
-  by the edge endpoint pair (`from`, `from_id`) or (`to`, `to_id`), because ids
-  are per type.
-- A type appears only if a found record asked for expansion.
-- `expansions.<Type>.status` is `ok`, `no_expansion` (the type has no query) or
-  `error` with `error.code`. It is the only outcome signal; entities carry no
-  expansion status. An expansion failure never fails the summaries.
+With `response_format: llm`, the response is `text/plain`: the Rails summary
+text, then one GOON section per expanded type. Raw results carry
+`format_version`. GOON carries `goon_version`
+([ADR 012](012_goon_format.md)).
 
-### Leak rules
+</details>
+
+<details>
+<summary>Leak rules</summary>
 
 - Error codes are `invalid_token`, `unsupported_type`, and `not_found`.
   `invalid_token` (unparseable token, other host) and `unsupported_type` are
   decided from the token text alone, before any lookup.
-- Once a lookup starts, every failure returns the identical `not_found` with
-  no extra fields. This covers an unknown project or group, an unknown iid,
-  and an unreadable record. It also covers a namespace of the wrong kind, such
-  as `group!5` or a project path in a `/groups/` URL.
+- Once a lookup starts, every failure returns the identical `not_found` with no
+  extra fields. This covers an unknown project or group, an unknown iid, and an
+  unreadable record. It also covers a namespace of the wrong kind, such as
+  `group!5` or a project path in a `/groups/` URL.
 - `resolved_token` appears only when `found` is `true`.
 - For every iid form (URL, `path!iid`, `path#iid`), `id` is `null` when `found`
   is `false`. For `Type[id]` and GID tokens, `id` only echoes what the caller
   sent. `type` is `null` for every unfound token.
 - `linked_issues[]`, `linked_merge_requests[]`, and reviewers include readable
   records only.
-- Expansion queries and payloads contain ids of found records only. This saves
+- Expansion queries and payloads contain IDs of found records only. This saves
   work and avoids cross-tenant timing on centers. It is defense in depth, not
-  the leak control.
-- Expansion pagination metadata has the same redaction exposure as any graph
-  query. See the dependency under Consequences.
+  the leak control. Redaction is.
 
-### Client rule: `result` or `request`
+</details>
 
-For each `expansions.<Type>`: if `result` is present, use it. Otherwise, if
-`request` is present, `POST` it (`{method, path, body}`) and read `.result`
-from the reply. A client that follows this rule works unchanged when the
-server moves between transports below.
+<details>
+<summary>Workhorse mechanics</summary>
 
-Under (b), `status: ok` means the request is ready, not that the query
-succeeded. The outcome is the HTTP status of the follow-up call, which can be a
-429 because it shares the `orbit_query` budget. A (b) entry looks like this:
+- Today `SendQuery` reports failures as plain-text 502 or 504 bodies, and a
+  deadline during the redaction callback is a 502. Filling
+  `expansions.<Type>.status` needs typed returns from the failure paths.
+- `maxStreamMessages` is 10 per stream. Each stream needs a request, one
+  redaction round, and a result, so the cap stays unchanged.
+- Workhorse has a 30 s default deadline and a 120 s maximum. Per-key timeouts
+  must stay below them.
+- The Rails body travels base64 in the send-data header. Workhorse sets no
+  explicit limit, so Go's default applies. This is unmeasured for 20 entities
+  and should be measured before shipping.
+- We estimate about 150 to 250 lines in Workhorse, 3 to 5 Workhorse days, and 2
+  Rails days. These are not measured.
 
-```json
-"MergeRequest": {"status": "ok",
-  "request": {"method": "POST",
-              "path": "/api/v4/orbit/query/expand_merge_request",
-              "body": {"parameters": {"node_ids": [529482712]},
-                       "response_format": "raw"}}}
-```
-
-The example response above is abbreviated and shows the (e) shape.
-
-Each expansion graph is per type and cannot attribute truncation to an entity.
-The named query `limit` is global across all centers, and redacted rows take up
-window slots. A center absent from a graph means "no readable neighbors" only
-when `pagination.truncated` is `false`. If it is `true`, the client must treat
-absent centers as unknown.
-
-### LLM format
-
-The client rule above applies to `response_format: raw`. With `llm`, the
-response is `text/plain`: the existing Rails summary text, then one GOON
-section per expanded type under (e). Under (b), the text lists per type the
-`POST` path and `node_ids` to run. The follow-up call with `llm` returns GOON
-text with no JSON wrapper, so there is no `.result` to read. Raw results
-carry `format_version`; GOON carries `goon_version`
-([ADR 012](012_goon_format.md)).
-
-### Expansion queries
-
-Orbit owns one named query per entity type, each taking `node_ids` (1 to 20
-integers) and returning a normal graph response. The Orbit team decides what
-they contain. Rails keeps a static map from type to query name, and an absent
-center is never an error.
-
-The contract has one request per type, so the content is limited to what one
-named query can express. Today that means `neighbors`-style traversals. Typed
-facets such as a fresh head pipeline or diff files need one of two things.
-Either several queries per type, which is a contract change, or composite named
-queries, which are not built yet. Composite named queries are the extension point on the Orbit side.
-Until they land, adding typed facets changes the contract.
-
-### Transport
-
-- **19.6 ships option (b).** Rails returns `expansions.<Type>.request`, a
-  ready-to-run `POST /api/v4/orbit/query/<name>` payload. The client posts it
-  through Workhorse, so ADR 008 holds. Raw REST users pay two round trips.
-- **End state is option (e), Workhorse fan-out.** Rails sends one send-data
-  header with its body and a list of named queries. Workhorse opens one
-  ordinary `ExecuteQuery` stream per query in parallel and runs the existing
-  redaction loop on each. It then writes the body with `expansions.<Type>`
-  filled with `result` or `error`. GKG sees only ordinary named queries. The
-  client makes one call and the server emits `result` only.
-- **(e) depends on the Workhorse maintainers accepting merge logic.** If they
-  object, fall back to option (c): GKG batch multiplexing, in which one
-  `named` request carries several sub-queries and GKG merges the results. The
-  client rule makes the switch invisible to clients.
-
-### Follow-up implementation requirements
-
-These apply to the Rails implementation that replaces the closed prototype:
-
-- Use `POST` with `tokens`/`token`, as above.
-- Use `token` and `version` 1.1.0. The prototype never merged, so nothing
-  ships as 1.0.0 on the default branch. Version 1.1.0 lets clients built against
-  the prototype detect that the contract changed.
-- Declare the `read_orbit` permission on `context`. Current master routes use
-  `read_orbit`; the prototype predates the rename and used
-  `read_knowledge_graph`.
-- Add `POST /orbit/context` to the fine-grained token documentation and route
-  configuration.
+</details>
 
 ## Consequences
 
-- **Puma and Workhorse budget.** Under (b) Puma serves one short `context`
-  request and then ordinary `query/:name` requests. Under (e) Puma serves one
-  `context` request plus one redaction callback per expanded type, the same
-  count as (c). Workhorse gains about 150 to 250 lines (typed errors, a fan-out
-  loop, a JSON merge). Expect 3 to 5 Workhorse days plus 2 Rails days; these
-  estimates are not measured.
-- **Typed errors in Workhorse.** Today `SendQuery` reports failures as
-  plain-text 502/504 bodies, and a deadline during the redaction callback is a
-  502. Filling `expansions.<Type>.status` requires typed returns from the
-  failure paths. The stream message cap of 10 is per stream and stays
-  unchanged under (e).
-- **Pins.** The raw (5.0.3) and GOON (4.0.3) output pins do not move. Each
-  raw `result` keeps its own `format_version`. Under (e) there is no new GKG pin:
-  Rails and Workhorse ship together and `version` 1.1.0 covers the body. Under
-  (c) GKG would own a merged-body shape and add a `context_output_format` pin.
-- **Billing.** Billing and analytics events are emitted per sub-query, which
-  matches usage. The billing owner should confirm this. Quota checks run once
-  per stream.
-- **Rate limit.** `orbit_query` allows 60 requests per minute per user. Under
-  (b), an expanding request costs 1 plus one per expanded type, for example 3
-  for a merge request plus a work item. Under (e) it costs 1. The
-  named-query route checks the limit before the enabled-namespace check, so
-  403 responses also consume budget. We accept this for v1 and document it.
-- **MCP tool deferred.** An explicit MCP tool and an agent command are out of
-  scope. The Rails service and resolver take plain values so the command
-  interceptor can reuse them later.
-- **Dependency: authorization-safe pagination.** Redacted rows count toward
-  the query window. The fallback `next_cursor` can anchor on a redacted row, so
-  `has_more`/`truncated`/cursors can reveal that a neighbor was redacted.
-  This affects every graph query today and is not introduced by this ADR; a
-  confidential issue tracks the GKG-side fix. The fix must keep `truncated` and
-  compute it from authorized rows, because the client rule relies on it. The
-  fix needs a test with a readable center and an unreadable neighbor at the
-  limit boundary. It covers pagination metadata only; timing is a separate
-  channel. `expand` does not wait for it: under (b) it reaches only routes that
-  are already callable.
-- **Header size under (e).** The Rails body travels base64 in the send-data
-  header. Workhorse sets no explicit limit, so Go's default applies. That is
-  unmeasured for 20 entities and should be measured before (e) ships.
-- **Follow-up work.** Rails: resolver, group-level work items, the requirements
-  above, `expand` plumbing behind a feature flag. Orbit: the per-type named
-  queries. Workhorse: fan-out under (e). CLI: remote routing for the shared
-  `orbit context` verb (!2523) must move from `GET` with `refs[]` to `POST`
-  with `tokens`. It must also use the 1.1.0 envelope and this ADR's token
-  forms. Whether `Type:ID` is an accepted token form is open. Independent: the
-  `neighbors` dedup and tombstone fix.
-- **Risk.** (e) needs an agreement outside this repository. Until then 19.6
-  works through (b) alone, and (b) stands by itself if the follow-up slips.
+- Puma serves one `context` request plus one redaction callback per expanded
+  type. Expansion costs one `orbit_query` hit (60 per minute per user), not one
+  per type. The named-query route checks the limit before the enabled-namespace
+  check, so 403 responses also use budget.
+- Workhorse gains merge logic and typed errors. Rails and Workhorse ship
+  together, so version 1.1.0 covers the whole body and no new GKG pin is needed.
+  The raw (5.0.3) and GOON (4.0.3) pins do not move.
+- Billing and analytics events are emitted per sub-query, which matches usage.
+  The billing owner should confirm this.
+- A confidential issue tracks authorization-safe pagination (`has_more`,
+  `truncated`, and cursors computed after redaction). It does not block this
+  ADR. The fix must keep `truncated`, because the truncation rule above relies
+  on it.
+- The Rails implementation that replaces the closed prototype must:
+  - Use `POST` with `tokens`/`token`, and version 1.1.0. The prototype never
+    merged, so 1.1.0 lets clients built against it detect the change.
+  - Declare the `read_orbit` permission on `context`. The prototype used
+    `read_knowledge_graph`.
+  - Add `POST /orbit/context` to the fine-grained token documentation and route
+    configuration.
+- Other follow-up work: the Rails resolver and group-level work items, the
+  per-type named queries in Orbit, and Workhorse fan-out. The CLI remote routing
+  in !2523 must move from `GET` with `refs[]` to `POST` with `tokens` and the
+  1.1.0 envelope. Whether `Type:ID` is an accepted token form is open.
 
 ## Alternatives considered
 
-### (a) Execute in-process from Rails
+### In-process execution in Rails
 
-Rails would call the GKG gRPC client directly. Accepted ADR 008 rejects this:
-each query holds a Puma worker for the whole stream, and ADR 011 adds that
-Rails-side execution buffers results. Nothing in production calls it, cold
-latency exceeds any safe low-urgency deadline, and a failed redaction would
-silently become deny-all. Rejected.
+Rails would call the GKG gRPC client directly. Accepted ADR 008 rules this out:
+each query holds a Puma worker for the whole stream.
 
-### (c) GKG batch multiplexing versus (e) Workhorse fan-out
+### GKG batch multiplexing
 
-| | (c) GKG batch | (e) Workhorse fan-out |
-| --- | --- | --- |
-| GKG changes | Executor refactor (shared stream), batch envelope, passthrough, pin | None beyond the named queries |
-| Rails summaries sent through GKG | Yes, needs security sign-off | No |
-| GKG version skew | Older GKG rejects the batch; needs a gate | None |
-| Summaries if an expansion fails | Stream failure loses everything unless Workhorse adds a fallback | Kept; the failure is `expansions.<Type>.status: error` |
-| Owner of the merged body | Two (Rails and GKG) | One (Rails and Workhorse) |
-| Billing, quota | N events, 1 quota check | N events, N quota checks |
-| Latency | Sequential unless redaction is serialized under a lock | Parallel by default |
-| Workhorse code | About 15 lines to write the body unwrapped | About 150 to 250 lines |
-| Main risk | Size of the GKG work | Maintainers may reject merge logic |
+One `named` request would carry several sub-queries and GKG would merge the
+results. It needs a GKG executor refactor, sends Rails summaries through GKG,
+and gives the body two owners. We would pick it if the Workhorse change is
+rejected.
 
-(c) also needs the redaction exchange serialized across sub-queries. It needs
-a cap of 8 pipelines under the stream message limit and a size cap on echoed
-Rails data. We prefer (e) and keep (c) as the fallback.
+### Client-side two-call composition
+
+The client calls `context`, then the `expand_*` queries itself. That costs two
+round trips. It stays available by calling the queries directly.
 
 ### Object keyed by token
 
-`{"tokens": {"<token>": {"expand": true}}}` loses order in some clients and
-collapses duplicate tokens. Array-only `tokens` is unambiguous.
-
-### Client-side composition
-
-Leave `context` with summaries only and let agents compose expansion queries.
-Every agent would then work out which queries suit which type, and the cost
-of one query per related thing stays. Option (b) is the compatible middle
-ground: the server names the query and the client only runs it.
+`{"tokens": {"<token>": {...}}}` loses order in some clients and collapses
+duplicate tokens. Array-only `tokens` is unambiguous.
 
 ## References
 
