@@ -56,18 +56,18 @@ body (or the LLM text) and a list of `{key, named query}`. Workhorse opens one
 ordinary `ExecuteQuery` stream per key, in parallel. Each stream runs the
 unchanged redaction loop. Workhorse then fills in
 `expansions.<Type>.{status, result | error}` and writes the body. GKG only ever
-sees ordinary named queries. The client makes one call. We aim for 19.6. `expand`
-stays behind a feature flag until fan-out ships. Once Orbit ships
-`expand_merge_request` and `expand_work_item`, clients can call them directly
-through `/api/v4/orbit/query/:name`.
+sees ordinary named queries. The client makes one call. We aim for 19.6.
+`expand` stays behind a feature flag until fan-out ships. While the flag is
+off, `expand: true` is accepted and ignored, and `expansions` is `{}`. Once
+Orbit ships `expand_merge_request` and `expand_work_item`, clients can call
+them directly through `/api/v4/orbit/query/:name`.
 
 **Expansion queries.** Orbit owns one named query per entity type. It takes
 `node_ids` (1 to 20 integers) and returns a normal graph response. One request
 per type limits the content to what one named query can express. Fresh typed
 facets, such as a head pipeline or diff files, need one of two things. Either
 several queries per type (a contract change) or composite named queries (not
-built yet).
-Rails keeps a static map from type to query name. An absent center is never an
+built yet). Rails keeps a static map from type to query name. An absent center is never an
 error.
 
 **Leaks.** Rails never reveals an ID the caller cannot read. Every failure
@@ -115,7 +115,8 @@ command are deferred.
                "type": "WorkItem", "id": 196910643, "found": true,
                "summary": {"...": "..."}}],
  "expansions": {
-   "WorkItem": {"status": "ok", "result": {"nodes": ["..."], "edges": ["..."]}}}}
+   "WorkItem": {"status": "ok",
+                "result": {"nodes": ["..."], "edges": ["..."]}}}}
 ```
 
 With `response_format: llm`, the response is `text/plain`: the Rails summary
@@ -161,8 +162,8 @@ A section holds either the GOON graph or a one-line status, `error <code>` or
 - Workhorse has a 30 s default deadline and a 120 s maximum. Per-key timeouts
   must stay below them.
 - The Rails body travels base64 in the send-data header. Workhorse sets no
-  explicit limit, so Go's default `MaxResponseHeaderBytes` of 10 MiB applies. This is unmeasured for 20 entities
-  and should be measured before shipping.
+  explicit limit, so Go's default `MaxResponseHeaderBytes` of 10 MiB applies.
+  This is unmeasured for 20 entities and should be measured before shipping.
 - We estimate about 150 to 250 lines in Workhorse, 3 to 5 Workhorse days, and 2
   Rails days. These are not measured.
 
@@ -185,8 +186,8 @@ A section holds either the GOON graph or a one-line status, `error <code>` or
 - A confidential issue tracks authorization-safe pagination (`has_more`,
   `truncated`, and cursors computed after redaction). It does not block this
   ADR, because `expand` runs only named queries a caller can already run
-  through `/orbit/query/:name`. The fix must keep `truncated`, because the truncation rule above relies
-  on it.
+  through `/orbit/query/:name`. The fix must keep `truncated`, because the
+  truncation rule above relies on it.
 - The Rails implementation that replaces the closed prototype must:
   - Use `POST` with `tokens`/`token`, and version 1.1.0. The prototype never
     merged, so 1.1.0 lets clients built against it detect the change.
