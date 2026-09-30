@@ -1,16 +1,16 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
     node_id_pin_predicates, push_edge_predicates,
 };
+use super::{EmitOutput, NodeBinding};
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
@@ -333,6 +333,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in plan".into()))?;
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
+    let mut nodes = HashMap::new();
 
     for (i, hop) in plan.hops.iter().enumerate() {
         let edge_alias = &edge_aliases[i];
@@ -345,101 +346,82 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             let Some(np) = plan.nodes.get(node_alias) else {
                 continue;
             };
-            match np.hydration {
-                HydrationStrategy::Join => {
-                    let narrow_source = if np.use_narrowing {
-                        let narrow_alias = format!("{edge_alias}n");
-                        let mut nw = Vec::new();
-                        push_edge_predicates(
-                            &mut nw,
-                            &narrow_alias,
-                            hop,
-                            &plan.nodes,
-                            &plan.table_columns,
-                            false,
-                        );
-                        emit_node_ids_on_edge(
-                            &mut nw,
-                            &narrow_alias,
-                            hop,
-                            &plan.nodes,
-                            start_col,
-                            end_col,
-                        );
-                        if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
-                            let jc = hop
-                                .join_prev
-                                .as_ref()
-                                .expect("cascade-anchored hop must have join_prev");
-                            nw.push(Expr::InSelect {
-                                expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
-                                query: Box::new(anchor_query),
-                            });
-                        }
-                        let narrow_query = Query {
-                            select: vec![SelectExpr::new(
-                                Expr::col(&narrow_alias, edge_col),
-                                DEFAULT_PRIMARY_KEY,
-                            )],
-                            from: TableRef::scan(&hop.edge_table, &narrow_alias)
-                                .with_relationship(hop.input_index),
-                            where_clause: Expr::conjoin(nw),
-                            ..Default::default()
-                        };
-                        let narrow_name = format!("_narrow_{}", np.alias);
-                        ctes.push(Cte::new(&narrow_name, narrow_query));
-                        Some(NarrowSource::Cte(narrow_name))
-                    } else {
-                        None
-                    };
-
-                    let table = np.table.as_deref().ok_or_else(|| {
-                        QueryError::Lowering(format!("node '{}' has no table", np.alias))
-                    })?;
-                    let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
-                        QueryError::Lowering(format!("no sort key for node table '{table}'"))
-                    })?;
-                    let (new_from, ns, nw) = emit_node_join_with_narrowing(
-                        from,
-                        np,
-                        edge_alias,
-                        edge_col,
-                        DEFAULT_PRIMARY_KEY,
-                        narrow_source,
-                        node_sort_key,
-                    )?;
-                    from = new_from;
-                    selects.extend(ns);
-                    where_parts.extend(nw);
-                }
-                HydrationStrategy::FilterOnly => {
-                    if filter_only_done.insert(node_alias.clone()) {
-                        let table = np.table.as_deref().ok_or_else(|| {
-                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
-                        })?;
-                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
-                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
-                        })?;
-                        let (new_from, ns, nw) = emit_node_join_with_narrowing(
-                            from,
-                            np,
-                            edge_alias,
-                            edge_col,
-                            DEFAULT_PRIMARY_KEY,
-                            None,
-                            node_sort_key,
-                        )?;
-                        from = new_from;
-                        selects.extend(ns);
-                        where_parts.extend(nw);
-                    }
-                }
-                HydrationStrategy::Skip => {}
+            let binding = nodes
+                .entry(node_alias.clone())
+                .or_insert_with(|| NodeBinding::source(edge_alias, edge_col, None));
+            if np.hydration == HydrationStrategy::Skip
+                || (np.hydration == HydrationStrategy::FilterOnly
+                    && !filter_only_done.insert(node_alias.clone()))
+            {
+                continue;
             }
+            let narrow_source = if np.hydration == HydrationStrategy::Join && np.use_narrowing {
+                let narrow_alias = format!("{edge_alias}n");
+                let mut nw = Vec::new();
+                push_edge_predicates(
+                    &mut nw,
+                    &narrow_alias,
+                    hop,
+                    &plan.nodes,
+                    &plan.table_columns,
+                    false,
+                );
+                emit_node_ids_on_edge(&mut nw, &narrow_alias, hop, &plan.nodes, start_col, end_col);
+                if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                    let jc = hop
+                        .join_prev
+                        .as_ref()
+                        .expect("cascade-anchored hop must have join_prev");
+                    nw.push(Expr::InSelect {
+                        expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
+                        query: Box::new(anchor_query),
+                    });
+                }
+                let narrow_query = Query {
+                    select: vec![SelectExpr::new(
+                        Expr::col(&narrow_alias, edge_col),
+                        DEFAULT_PRIMARY_KEY,
+                    )],
+                    from: TableRef::scan(&hop.edge_table, &narrow_alias)
+                        .with_relationship(hop.input_index),
+                    where_clause: Expr::conjoin(nw),
+                    ..Default::default()
+                };
+                let narrow_name = format!("_narrow_{}", np.alias);
+                ctes.push(Cte::new(&narrow_name, narrow_query));
+                Some(NarrowSource::Cte(narrow_name))
+            } else {
+                None
+            };
+
+            let table = np
+                .table
+                .as_deref()
+                .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
+            let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                QueryError::Lowering(format!("no sort key for node table '{table}'"))
+            })?;
+            let (new_from, ns, nw) = emit_node_join_with_narrowing(
+                from,
+                np,
+                edge_alias,
+                edge_col,
+                DEFAULT_PRIMARY_KEY,
+                narrow_source,
+                node_sort_key,
+            )?;
+            from = new_from;
+            let NodeBinding::Values { table_alias, .. } = binding else {
+                unreachable!()
+            };
+            *table_alias = Some(node_alias.clone());
+            selects.extend(ns);
+            where_parts.extend(nw);
         }
     }
 
     Ok(EmitOutput {
+        nodes,
         from,
         edge_aliases,
         where_parts,

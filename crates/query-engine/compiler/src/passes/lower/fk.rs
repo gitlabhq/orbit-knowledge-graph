@@ -11,11 +11,11 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
 
-use super::EmitOutput;
 use super::helpers::{
     NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing, latest_node_predicates,
     node_select_columns, node_values_from_candidate_scan,
 };
+use super::{EmitOutput, NodeBinding};
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
 
@@ -38,6 +38,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
+    let mut nodes = HashMap::from([(center_alias.to_string(), NodeBinding::table(center_alias))]);
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
@@ -220,12 +221,26 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
                 &mut ctes,
             )?);
         }
+        let (identity_alias, identity_column) = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
+            (fk_alias.as_str(), fk.fk_column.as_str())
+        } else {
+            (fk.target_node.as_str(), DEFAULT_PRIMARY_KEY)
+        };
+        nodes.insert(
+            fk.target_node.clone(),
+            NodeBinding::source(
+                identity_alias,
+                identity_column,
+                target_np.fk_needs_join.then(|| fk.target_node.clone()),
+            ),
+        );
     }
 
     // Synthesize per-hop edge columns for the formatter; aggregations need none.
     let mut edge_aliases = Vec::new();
     if !matches!(plan.body, PlanBody::Traversal) {
         return Ok(EmitOutput {
+            nodes,
             from,
             edge_aliases,
             where_parts,
@@ -298,6 +313,7 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        nodes,
         from,
         edge_aliases,
         where_parts,
@@ -423,6 +439,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut edge_aliases = Vec::new();
 
     let mut reached: HashSet<&str> = HashSet::from([root_alias.as_str()]);
+    let mut nodes = HashMap::from([(root_alias.clone(), NodeBinding::table(root_alias))]);
     for (i, hop) in plan.hops.iter().enumerate() {
         let fk = hop
             .fk
@@ -444,6 +461,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
             Expr::col(&fk.target_node, &fk.referenced_column),
         );
         from = TableRef::join(JoinType::Inner, from, node_scan(new_np)?, on);
+        nodes.insert(new_alias.clone(), NodeBinding::table(new_alias));
         selects.extend(node_select_columns(new_alias, new_np));
         reached.insert(hop.from_node.as_str());
         reached.insert(hop.to_node.as_str());
@@ -492,6 +510,7 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     }
 
     Ok(EmitOutput {
+        nodes,
         from,
         edge_aliases,
         where_parts: Vec::new(),
