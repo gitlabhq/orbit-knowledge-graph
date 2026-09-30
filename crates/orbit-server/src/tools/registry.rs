@@ -328,26 +328,35 @@ mod tests {
     }
 
     #[test]
-    fn descriptions_are_short_and_carry_no_schema() {
-        for definition in all_tools().into_iter().chain(all_commands()) {
-            assert!(
-                !definition.description.is_empty(),
-                "{} missing description",
-                definition.name
-            );
-            if definition.name != "list_commands" {
+    fn descriptions_are_bounded_and_carry_no_schema() {
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            for definition in ToolRegistry::tools_for(frontend)
+                .into_iter()
+                .chain(CommandRegistry::commands_for(frontend))
+            {
                 assert!(
-                    definition.description.len() < 400,
-                    "{} description is too long",
+                    !definition.description.is_empty(),
+                    "{frontend:?}: {} missing description",
+                    definition.name
+                );
+                if definition.name != "list_commands" {
+                    let budget = match (frontend, definition.name.as_str()) {
+                        (Frontend::Gql, "query_graph") => 512,
+                        _ => 400,
+                    };
+                    assert!(
+                        definition.description.len() < budget,
+                        "{frontend:?}: {} description exceeds {budget} bytes",
+                        definition.name
+                    );
+                }
+                assert!(
+                    !definition.description.contains("<toon>")
+                        && !definition.description.contains("Query DSL Schema"),
+                    "{frontend:?}: {} should keep large schemas out of the description",
                     definition.name
                 );
             }
-            assert!(
-                !definition.description.contains("<toon>")
-                    && !definition.description.contains("Query DSL Schema"),
-                "{} should keep large schemas out of the description",
-                definition.name
-            );
         }
     }
 
