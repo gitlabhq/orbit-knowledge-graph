@@ -191,7 +191,7 @@ pub fn populate_def_doc_sources(
     client: &DuckDbClient,
     doc_table: &str,
     ontology: &Ontology,
-    repository_root: &Path,
+    repository: &Vfs,
     project_id: i64,
     commit_sha: &str,
 ) -> Result<()> {
@@ -236,14 +236,12 @@ ORDER BY {file_path}, {id}",
     for index in 0..ids.len() {
         if current_path != paths[index] {
             current_path.clone_from(&paths[index]);
-            let path = repository_root.join(&current_path);
-            content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                eprintln!(
-                    "warning: skipping body search for {}: {error}",
-                    path.display()
-                );
-                String::new()
-            });
+            content = repository
+                .read_to_string(Path::new(&current_path))
+                .unwrap_or_else(|error| {
+                    eprintln!("warning: skipping body search for {current_path}: {error}");
+                    String::new()
+                });
         }
         let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
             (Ok(start), Ok(end)) if start < content.len() => content

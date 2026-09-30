@@ -178,6 +178,7 @@ impl RepositoryResolver {
 #[cfg(test)]
 mod tests {
     use std::io::Write as _;
+    use std::path::Path;
 
     use super::*;
     use crate::modules::code::metrics::CodeMetrics;
@@ -316,29 +317,26 @@ mod tests {
 
     fn create_resolver(
         service: Arc<ScriptedRepositoryService>,
-    ) -> (tempfile::TempDir, RepositoryResolver) {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let metrics = CodeMetrics::default();
+    ) -> RepositoryResolver {
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            temp_dir.path().to_path_buf(),
             u64::MAX,
             0,
-            metrics,
+            u64::MAX,
+            CodeMetrics::default(),
         ));
-        let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
-        (temp_dir, resolver)
+        RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache)
     }
 
     #[tokio::test]
     async fn resolve_downloads_archive() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.path().join("src/main.rs")).unwrap();
+        assert!(path.files.exists(Path::new("src/main.rs")));
+        let content = path.files.read_to_string(Path::new("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
 
@@ -346,48 +344,34 @@ mod tests {
     async fn resolve_always_downloads_fresh_copy() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert!(path1.path().join("src/main.rs").exists());
+        assert!(path1.files.exists(Path::new("src/main.rs")));
 
         service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
         let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path2.path().join("src/new.rs").exists());
-        assert!(!path2.path().join("src/main.rs").exists());
+        assert!(path2.files.exists(Path::new("src/new.rs")));
+        assert!(!path2.files.exists(Path::new("src/main.rs")));
     }
 
     #[tokio::test]
     async fn resolve_uses_branch_when_no_commit_sha() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "main");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
-    }
-
-    #[tokio::test]
-    async fn dropping_repository_removes_downloaded_files() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let path = repo.path().to_path_buf();
-        assert!(path.exists());
-
-        drop(repo);
-        assert!(!path.exists());
+        assert!(path.files.exists(Path::new("src/main.rs")));
     }
 
     #[tokio::test]
     async fn resolve_same_commit_downloads_every_time() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("abc123")).await.unwrap();
         resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -399,11 +383,11 @@ mod tests {
     #[tokio::test]
     async fn resolve_works_after_drop() {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "v1")], "commit1");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         let repo1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(repo1.path().join("src/main.rs")).unwrap(),
+            repo1.files.read_to_string(Path::new("src/main.rs")).unwrap(),
             "v1"
         );
         drop(repo1);
@@ -411,7 +395,7 @@ mod tests {
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
         let repo2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(repo2.path().join("src/main.rs")).unwrap(),
+            repo2.files.read_to_string(Path::new("src/main.rs")).unwrap(),
             "v2"
         );
     }
@@ -420,7 +404,7 @@ mod tests {
     async fn resolve_propagates_download_error() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         service.set_fail_downloads(true);
         let result = resolver.resolve(1, "main", Some("abc123")).await;
@@ -433,7 +417,7 @@ mod tests {
         let service = ScriptedRepositoryService::with_download_error(|| {
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::NotFound(42))
         });
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
 
@@ -454,7 +438,7 @@ mod tests {
                 status: 500,
             })
         });
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
 
@@ -470,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_maps_empty_archive_body_to_empty_repository() {
         let service = ScriptedRepositoryService::with_raw_archive(Vec::new());
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
 
@@ -491,7 +475,7 @@ mod tests {
         let service = ScriptedRepositoryService::with_download_error(|| {
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized)
         });
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
         assert!(matches!(err, ResolveError::Other(_)), "got {err:?}");
@@ -502,11 +486,11 @@ mod tests {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         service.set_transient_failures(2);
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
+        assert!(path.files.exists(Path::new("src/main.rs")));
         assert_eq!(service.download_count(), 3);
     }
 
@@ -514,7 +498,7 @@ mod tests {
     async fn resolve_gives_up_after_exhausting_download_retries() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         service.set_fail_downloads(true);
         let result = resolver.resolve(1, "main", Some("abc123")).await;
@@ -530,17 +514,14 @@ mod tests {
     async fn multiple_projects_are_independent() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         let repo1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
         let repo2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
 
-        assert_ne!(repo1.path(), repo2.path());
-        assert!(repo1.path().join("src/main.rs").exists());
-        assert!(repo2.path().join("src/main.rs").exists());
-
-        let path2 = repo2.path().to_path_buf();
+        assert!(repo1.files.exists(Path::new("src/main.rs")));
+        assert!(repo2.files.exists(Path::new("src/main.rs")));
         drop(repo1);
-        assert!(path2.exists());
+        assert!(repo2.files.exists(Path::new("src/main.rs")));
     }
 }

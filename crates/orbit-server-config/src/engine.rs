@@ -226,9 +226,12 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     pub max_files: usize,
     /// Post-filter retained bytes above which a repository is skipped entirely
-    /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
-    /// concurrency can rise without exhausting the pod volume. 0 = no limit.
+    /// (indexed empty, then checkpointed). 0 = no limit.
     pub max_total_bytes: u64,
+    /// Bytes of a repository's source kept in memory per job; past it, source
+    /// spills to one anonymous scratch file on disk. Identical files count
+    /// once. 0 = spill everything.
+    pub source_memory_budget_bytes: u64,
     pub worker_threads: usize,
     pub max_concurrent_languages: usize,
     /// Global per-file resolution timeout in milliseconds.

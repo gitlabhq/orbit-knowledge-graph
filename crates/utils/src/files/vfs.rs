@@ -41,6 +41,15 @@ impl ContentId {
     }
 }
 
+impl std::fmt::Debug for Vfs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Vfs")
+            .field("files", &self.len())
+            .field("distinct_contents", &lock(&self.blobs).len())
+            .finish()
+    }
+}
+
 pub struct Vfs {
     paths: Mutex<FxHashMap<String, Slot>>,
     blobs: Mutex<FxHashMap<ContentId, Blob>>,

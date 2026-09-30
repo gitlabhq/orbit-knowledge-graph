@@ -517,7 +517,13 @@
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.",
+          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). 0 = no limit.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source_memory_budget_bytes": {
+          "description": "Bytes of a repository's source kept in memory per job; past it, source\nspills to one anonymous scratch file on disk. Identical files count\nonce. 0 = spill everything.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
@@ -637,6 +643,7 @@
         "max_file_size_bytes",
         "max_files",
         "max_total_bytes",
+        "source_memory_budget_bytes",
         "worker_threads",
         "max_concurrent_languages",
         "per_file_timeout_ms",

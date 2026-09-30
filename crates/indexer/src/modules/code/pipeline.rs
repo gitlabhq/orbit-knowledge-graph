@@ -648,13 +648,13 @@ impl CodeIndexer {
         });
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path().to_path_buf();
+        let files = repository.files.clone();
         let file_inventory = repository.file_inventory.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
                 Pipeline::run_with_tracer(
-                    &repo_dir,
+                    files,
                     file_inventory,
                     config,
                     tracer,

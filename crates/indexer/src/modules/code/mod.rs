@@ -77,16 +77,12 @@ pub async fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let local_cache = LocalRepositoryCache::new(
-        LocalRepositoryCache::default_dir(),
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
         code_indexing_task_config.pipeline.max_file_size_bytes,
         code_indexing_task_config.pipeline.max_total_bytes,
+        code_indexing_task_config.pipeline.source_memory_budget_bytes,
         metrics.clone(),
-    );
-    if let Err(error) = local_cache.purge_all().await {
-        tracing::warn!(%error, "failed to purge repository cache on startup");
-    }
-    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(local_cache);
+    ));
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
