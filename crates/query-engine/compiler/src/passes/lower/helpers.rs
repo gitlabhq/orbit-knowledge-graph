@@ -14,8 +14,8 @@ use crate::passes::shared::{
     rel_kind_filter, rel_kind_filter_values,
 };
 
-/// The candidate-id prefilter runs these before `FINAL`, so it may over-select
-/// stale rows; the outer latest-row scan re-applies them after `FINAL`.
+/// The candidate-id prefilter runs these before dedup, so it may over-select
+/// stale rows; the target scan re-applies them after latest-row dedup.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
@@ -28,6 +28,25 @@ pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
         predicates.push(id_range_predicate(alias, range));
     }
     predicates.push(deleted_false(alias));
+    predicates
+}
+
+fn sort_key_predicates(alias: &str, np: &NodePlan, sort_key: &[String]) -> Vec<Expr> {
+    let in_sort_key = |column: &str| sort_key.iter().any(|key| key == column);
+    let mut predicates: Vec<Expr> = np
+        .filters
+        .iter()
+        .filter(|(prop, filter)| in_sort_key(prop) && filter.filter.rhs_column.is_none())
+        .map(|(prop, filter)| filter_to_expr(alias, prop, filter))
+        .collect();
+    if in_sort_key(DEFAULT_PRIMARY_KEY) {
+        if !np.node_ids.is_empty() {
+            predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+        }
+        if let Some(ref range) = np.id_range {
+            predicates.push(id_range_predicate(alias, range));
+        }
+    }
     predicates
 }
 
@@ -71,38 +90,27 @@ pub(super) fn emit_node_join_with_narrowing(
     });
 
     let selects = node_select_columns(alias, np);
-    let mut wheres = latest_node_predicates(alias, np);
-    let narrowed = in_predicate.is_some();
-    if let Some(in_predicate) = in_predicate {
-        wheres.push(in_predicate);
-    }
-
-    // Broad target: FINAL streams deduped rows in PK order so the top-level LIMIT
-    // short-circuits the join. Narrowed target: candidate set is tiny, LIMIT 1 BY is cheaper.
-    let node_scan = if narrowed {
-        let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                order_by,
-                limit_by,
-                ..Default::default()
-            },
+    let scan = match in_predicate {
+        Some(predicate) => limit_by_scan(
+            table,
             alias,
-        )
-    } else {
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan_final(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                ..Default::default()
-            },
-            alias,
-        )
+            vec![SelectExpr::star()],
+            sort_key,
+            std::iter::once(predicate)
+                .chain(sort_key_predicates(alias, np, sort_key))
+                .collect(),
+        ),
+        None => TableRef::scan_final(table, alias),
     };
+    let node_scan = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: scan,
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
+        },
+        alias,
+    );
 
     let joined = TableRef::join(
         JoinType::Inner,

@@ -1,0 +1,29 @@
+description: A narrowed Project join does not resurrect a version before its tombstone; the MR id range keeps the flat-chain narrowing path
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_group:
+      - { id: 970, name: root, full_path: root, traversal_path: "1/970/" }
+    gl_project:
+      - { id: 9700, name: project, full_path: "root/project", traversal_path: "1/970/9700/", _version: "2024-01-01 00:00:00", _deleted: false }
+      - { id: 9700, name: project, full_path: "root/project", traversal_path: "1/970/9700/", _version: "2024-06-01 00:00:00", _deleted: true }
+    gl_merge_request:
+      - { id: 9710, title: a, project_id: 9700, traversal_path: "1/970/9700/" }
+    gl_merge_request_diff:
+      - { id: 9720, merge_request_id: 9710, state: collected, traversal_path: "1/970/9700/" }
+    gl_edge:
+      - { source_id: 970, source_kind: Group, relationship_kind: CONTAINS, target_id: 9700, target_kind: Project, traversal_path: "1/970/" }
+      - { source_id: 9710, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, traversal_path: "1/970/9700/" }
+    gl_diff_edge:
+      - { source_id: 9710, source_kind: MergeRequest, relationship_kind: HAS_DIFF, target_id: 9720, target_kind: MergeRequestDiff, traversal_path: "1/970/9700/" }
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
+     "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":10}
+  gql: |
+    MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
+    WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
+expect:
+  sql_contains: ["_narrow_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)"]
+  skip_requirements: ["node_ids", "filter:title"]
+  row_count: 0
