@@ -1,0 +1,30 @@
+name: A shared filter-only node defines authoritative keys on its first hop
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
+        {"id": "c", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ]
+    }
+  gql: |
+    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition)
+    RETURN a.id, b.id, c.id
+logical:
+  expect:
+    - (Node a Definition (Ids 12000) ...)
+physical:
+  clickhouse:
+    expect:
+      - (Keys b (SourceFragment _ (Filter _ (Read gl_definition b Final))))
+      - (FilterSteps (Hop 0 (Definitions b) (Predicates (InCte (Column e0 target_id) _filter_b id))) (Hop 1 (Definitions) (Predicates)))
+      - (InCte (Column e0p target_id) _filter_b id)
+  duckdb:
+    expect:
+      - (FilterSteps (Hop 0 (Definitions a b) (Predicates ...)) (Hop 1 (Definitions) (Predicates (InCte (Column e1 source_id) _filter_b id))))

@@ -17,14 +17,14 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (Flat (MultiHop (Filter _ (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _))))))
+      - (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _))
       - (Join INNER (AND (AND (= (Column e1 target_id) (Column e2 source_id)) _) _) _ _)
     reject:
       - (Output depth (Literal 1))
       - (Output depth (Literal 3))
   duckdb:
     expect:
-      - (Strategy (Flat (MultiHop (Filter _ (Union e0 _)))))
+      - (Union e0 _)
       - (Output depth (Literal 2))
     reject:
       - (Output depth (Literal 1))

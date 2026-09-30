@@ -18,9 +18,9 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (Flat (Plain)))
+      - (Strategy (Flat (Filter ...)))
       - (= (Column e0 target_id) (Literal 2))
   duckdb:
     expect:
-      - (Strategy (Flat (Plain)))
+      - (Strategy (Flat (Filter ...)))
       - (= (Column e0 target_id) (Literal 2))

@@ -18,7 +18,7 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (Flat (Latest (Key ...))))
+      - (Strategy (Flat (Latest e0 (Key ...) (Filter ...))))
       - (Scan gl_code_edge e0 Plain)
       - (LimitBy 1 ...)
       - (Output n (Call countIf ...))

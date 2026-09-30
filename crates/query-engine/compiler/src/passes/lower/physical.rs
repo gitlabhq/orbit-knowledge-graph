@@ -64,17 +64,11 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             final_,
             relationship,
         } => EmitOutput {
-            from: {
-                let scan = if *final_ {
-                    TableRef::scan_final(table, alias)
-                } else {
-                    TableRef::scan(table, alias)
-                };
-                if let Some(index) = relationship {
-                    scan.with_relationship(*index)
-                } else {
-                    scan
-                }
+            from: TableRef::Scan {
+                table: table.clone(),
+                alias: alias.clone(),
+                final_: *final_,
+                relationship: *relationship,
             },
             nodes: HashMap::from([(alias.clone(), NodeBinding::table(alias))]),
             edge_aliases: vec![],

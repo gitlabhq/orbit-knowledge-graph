@@ -6,6 +6,7 @@ mod cascade;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;
+mod flat;
 mod hops;
 pub mod hydration;
 pub mod neighbors;

@@ -1,0 +1,30 @@
+description: A grouped CALLS target uses edge-derived keys with the filtered caller's cascade
+config:
+  security:
+    paths: ["1/100/1000/"]
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "filters": {"name": "compile"}, "columns": ["name"]},
+        {"id": "b", "entity": "Definition", "columns": ["name"]},
+        {"id": "c", "entity": "Definition", "columns": ["name"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ],
+      "group_by": ["c"],
+      "aggregations": [{"count": "a", "as": "callers"}]
+    }
+  gql: |
+    MATCH (a:Definition {name: 'compile'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
+    RETURN c{.id, .name}, count(a) AS callers
+expect:
+  skip_requirements: ["filter:name"]
+  row_count: 1
+  groups:
+    c:
+      rows:
+        - { entity: Definition, id: 12002, values: { callers: 1 } }

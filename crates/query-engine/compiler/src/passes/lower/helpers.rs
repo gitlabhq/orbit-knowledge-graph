@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -79,31 +77,4 @@ pub(super) fn limit_by_scan(
         ..Default::default()
     };
     TableRef::subquery(query, alias)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_filter_narrowing(
-    where_parts: &mut Vec<Expr>,
-    hop: &Hop,
-    plan: &physical::FlatPlan,
-    edge_alias: &str,
-    start_col: &str,
-    end_col: &str,
-    ctes: &mut Vec<Cte>,
-    narrowed: &mut HashSet<String>,
-) {
-    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-        let Some(keys) = plan.narrowing.get(node_alias) else {
-            continue;
-        };
-        let cte_name = format!("_filter_{node_alias}");
-        if narrowed.insert(node_alias.clone()) {
-            ctes.push(Cte::new(&cte_name, super::physical::query(keys)));
-        }
-        where_parts.push(Expr::InSubquery {
-            expr: Box::new(Expr::col(edge_alias, id_col)),
-            cte_name,
-            column: "id".to_string(),
-        });
-    }
 }

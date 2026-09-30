@@ -17,12 +17,12 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (Flat (MultiHop (Filter _ (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 1)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 3)) ...) _))))))
+      - (Union e0 (SourceFragment (Outputs ... (Output depth (Literal 1)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 2)) ...) _) (SourceFragment (Outputs ... (Output depth (Literal 3)) ...) _))
       - (Output source_tags (Column e1 source_tags))
       - (Output target_tags (Column e3 target_tags))
       - (Output hop_e0_path_nodes (Column e0 path_nodes))
   duckdb:
     expect:
-      - (Strategy (Flat (MultiHop (Filter _ (Union e0 _ _ _)))))
+      - (Union e0 _ _ _)
       - (Output depth (Literal 3))
       - (Output hop_e0_path_nodes (Column e0 path_nodes))

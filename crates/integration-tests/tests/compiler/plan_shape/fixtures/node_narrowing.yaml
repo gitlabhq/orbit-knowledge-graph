@@ -1,0 +1,38 @@
+name: Joined node narrowing plans an edge key scan with its upstream cascade
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "filters": {"name": "caller"}, "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "columns": ["id"]},
+        {"id": "c", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ],
+      "order_by": "c.id"
+    }
+  gql: |
+    MATCH (a:Definition {name: 'caller'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
+    RETURN a.id, b.id, c.id ORDER BY c.id
+logical:
+  expect:
+    - (OrderBy (Asc c id))
+    - (Relationship a b Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
+physical:
+  clickhouse:
+    expect:
+      - (Node a gl_definition FilterOnly)
+      - (Keys a (SourceFragment _ (Filter _ (Read gl_definition a Final))))
+      - (FilterSteps (Hop 0 (Definitions a) (Predicates (InCte (Column e0 source_id) _filter_a id))) (Hop 1 (Definitions) (Predicates)))
+      - (NodeKeys c (SourceFragment (Outputs (Output id (Column e1n target_id))) (KeyFilter (Column e1n source_id) _ (Filter _ (Read gl_code_edge e1n Plain)))))
+      - (Cte _narrow_c (Query ... (Scan gl_code_edge e1n Plain) ...))
+      - (InCte (Column c id) _narrow_c id)
+      - (InCte (Column e0p source_id) _filter_a id)
+  duckdb:
+    expect:
+      - (Node c gl_definition Join)
+    reject:
+      - (NodeKeys ...)

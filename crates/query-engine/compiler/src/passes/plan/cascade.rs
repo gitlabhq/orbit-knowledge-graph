@@ -4,7 +4,7 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::edge_predicates::push_filtered_edge_predicates;
 use super::physical::{PhysicalPlan, PhysicalSource};
-use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
+use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan};
 use crate::ast::{Expr, SelectExpr};
 
 pub(super) fn plan(
@@ -14,13 +14,7 @@ pub(super) fn plan(
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     narrowing: &HashMap<String, PhysicalPlan>,
 ) -> Vec<Option<PhysicalPlan>> {
-    let filtered = |alias: &String| {
-        narrowing.contains_key(alias)
-            || (hops.len() >= 2
-                && nodes
-                    .get(alias)
-                    .is_some_and(|node| node.hydration == HydrationStrategy::FilterOnly))
-    };
+    let filtered = |alias: &String| narrowing.contains_key(alias);
     let mut cascades: Vec<Option<PhysicalPlan>> = Vec::with_capacity(hops.len());
     for (index, hop) in hops.iter().enumerate() {
         let Some(join) = hop
@@ -66,27 +60,8 @@ pub(super) fn plan(
                 });
             }
         }
-        let mut source = PhysicalSource::Filter {
-            predicate: Expr::conjoin(predicates).expect("edge predicates"),
-            input: Box::new(PhysicalSource::Scan {
-                table: previous.edge_table.clone(),
-                alias: alias.clone(),
-                final_: false,
-                relationship: Some(previous.input_index),
-            }),
-        };
-        if let Some(upstream) = upstream {
-            source = PhysicalSource::KeyFilter {
-                value: Expr::col(
-                    &alias,
-                    &previous.join_prev.as_ref().expect("cascade join").curr_col,
-                ),
-                keys: Box::new(upstream.clone()),
-                input: Box::new(source),
-            };
-        }
         cascades.push(Some(PhysicalPlan {
-            source,
+            source: PhysicalSource::edge_keys(previous, &alias, predicates, upstream.as_ref()),
             outputs: vec![SelectExpr::col(&alias, &join.prev_col)],
         }));
     }

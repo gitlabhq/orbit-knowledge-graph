@@ -147,24 +147,7 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
         {
             Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
-            Strategy::Flat(flat) => S::node(
-                "Flat",
-                flat.reads.iter().map(|read| {
-                    use compiler::passes::plan::physical::EdgeRead;
-                    match read {
-                        EdgeRead::Plain => S::node("Plain", []),
-                        EdgeRead::Final { narrow_inside } => {
-                            S::node("Final", [S::node("NarrowInside", [S::atom(narrow_inside)])])
-                        }
-                        EdgeRead::Latest { sort_key } => {
-                            S::node("Latest", [S::node("Key", sort_key.iter().map(S::atom))])
-                        }
-                        EdgeRead::MultiHop(source) => {
-                            S::node("MultiHop", [physical_source(source)])
-                        }
-                    }
-                }),
-            ),
+            Strategy::Flat(flat) => S::node("Flat", [physical_source(&flat.source)]),
             Strategy::Fk(FkShape::Star { center, .. }) => S::node("FkStar", [S::atom(center)]),
             Strategy::Fk(FkShape::Chain(root)) => S::node("FkChain", [physical_tree(root)]),
         },
@@ -210,13 +193,41 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
                         strategy: Strategy::Flat(flat),
                         ..
                     } => {
-                        let mut definitions: Vec<_> = flat.narrowing.iter().collect();
-                        definitions.sort_by_key(|(alias, _)| *alias);
+                        let mut definitions: Vec<_> = flat
+                            .narrowing
+                            .iter()
+                            .map(|(alias, keys)| ("Keys", alias, keys))
+                            .chain(
+                                flat.node_narrowing
+                                    .iter()
+                                    .map(|(alias, keys)| ("NodeKeys", alias, keys)),
+                            )
+                            .collect();
+                        definitions.sort_by_key(|(kind, alias, _)| (*kind, *alias));
                         definitions
                             .into_iter()
-                            .map(|(alias, keys)| {
-                                S::node("Keys", [S::atom(alias), physical_tree(keys)])
+                            .map(|(kind, alias, keys)| {
+                                S::node(kind, [S::atom(alias), physical_tree(keys)])
                             })
+                            .chain(std::iter::once(S::node(
+                                "FilterSteps",
+                                flat.filters.iter().enumerate().map(|(index, filters)| {
+                                    S::node(
+                                        "Hop",
+                                        [
+                                            S::atom(index),
+                                            S::node(
+                                                "Definitions",
+                                                filters.definitions.iter().map(S::atom),
+                                            ),
+                                            S::node(
+                                                "Predicates",
+                                                filters.predicates.iter().map(expression),
+                                            ),
+                                        ],
+                                    )
+                                }),
+                            )))
                             .collect()
                     }
                     PlanBody::Traversal {

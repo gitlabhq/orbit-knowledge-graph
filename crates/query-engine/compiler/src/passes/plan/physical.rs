@@ -12,12 +12,21 @@ use crate::passes::shared::{
 };
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
+use super::edge_predicates::{node_id_pin_predicates, push_edge_predicates};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
 
 pub struct FlatPlan {
-    pub reads: Vec<EdgeRead>,
+    pub source: PhysicalSource,
+    pub edge_if_predicates: Option<Expr>,
     pub narrowing: HashMap<String, PhysicalPlan>,
+    pub node_narrowing: HashMap<String, PhysicalPlan>,
     pub cascades: Vec<Option<PhysicalPlan>>,
+    pub filters: Vec<HopFilters>,
+}
+
+pub struct HopFilters {
+    pub definitions: Vec<String>,
+    pub predicates: Vec<Expr>,
 }
 
 impl FlatPlan {
@@ -34,6 +43,15 @@ impl FlatPlan {
             let Some(node) = nodes.get(alias) else {
                 continue;
             };
+            if node.hydration == HydrationStrategy::FilterOnly && hops.len() >= 2 {
+                if !narrowing.contains_key(alias) {
+                    narrowing.insert(
+                        alias.clone(),
+                        PhysicalPlan::filtered_keys(node, DEFAULT_PRIMARY_KEY)?,
+                    );
+                }
+                continue;
+            }
             if node.hydration != HydrationStrategy::Join
                 || !node.has_selective_filters()
                 || narrowing.contains_key(alias)
@@ -52,15 +70,7 @@ impl FlatPlan {
                         "no sort key for node table '{table}'; cannot plan narrowing"
                     ))
                 })?;
-            let mut keys =
-                PhysicalPlan::filtered_keys(node, ontology::constants::DEFAULT_PRIMARY_KEY)?;
-            let PhysicalSource::Filter { input, .. } = &mut keys.source else {
-                unreachable!()
-            };
-            let PhysicalSource::Scan { final_, .. } = input.as_mut() else {
-                unreachable!()
-            };
-            *final_ = false;
+            let mut keys = PhysicalPlan::candidate_keys(node, DEFAULT_PRIMARY_KEY, vec![])?;
             keys.source = PhysicalSource::Latest {
                 alias: alias.clone(),
                 sort_key: sort_key.clone(),
@@ -68,61 +78,84 @@ impl FlatPlan {
             };
             narrowing.insert(alias.clone(), keys);
         }
+        let cascades = super::cascade::plan(hops, nodes, table_columns, denormalized, &narrowing);
+        let mut emitted = HashSet::new();
+        let filters: Vec<_> = hops
+            .iter()
+            .enumerate()
+            .map(|(index, hop)| {
+                let mut definitions = Vec::new();
+                let mut predicates = Vec::new();
+                let (start, end) = hop.direction.edge_columns();
+                for filter_only in [false, true] {
+                    for (alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
+                        if !narrowing.contains_key(alias)
+                            || (nodes[alias].hydration == HydrationStrategy::FilterOnly)
+                                != filter_only
+                        {
+                            continue;
+                        }
+                        let first_use = emitted.insert(alias.clone());
+                        if first_use {
+                            definitions.push(alias.clone());
+                        }
+                        if first_use || !filter_only {
+                            predicates.push(Expr::InSubquery {
+                                expr: Box::new(Expr::col(format!("e{index}"), column)),
+                                cte_name: format!("_filter_{alias}"),
+                                column: DEFAULT_PRIMARY_KEY.into(),
+                            });
+                        }
+                    }
+                }
+                HopFilters {
+                    definitions,
+                    predicates,
+                }
+            })
+            .collect();
+        let mut node_narrowing = HashMap::new();
+        for (index, hop) in hops.iter().enumerate() {
+            let (start, end) = hop.direction.edge_columns();
+            for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
+                if !nodes.get(node_alias).is_some_and(|node| {
+                    node.hydration == HydrationStrategy::Join && node.use_narrowing
+                }) || node_narrowing.contains_key(node_alias)
+                {
+                    continue;
+                }
+                let alias = format!("e{index}n");
+                let mut predicates = Vec::new();
+                push_edge_predicates(&mut predicates, &alias, hop, nodes, table_columns, false);
+                predicates.extend(node_id_pin_predicates(&alias, hop, nodes));
+                let source =
+                    PhysicalSource::edge_keys(hop, &alias, predicates, cascades[index].as_ref());
+                let outputs = vec![SelectExpr::new(
+                    Expr::col(&alias, column),
+                    DEFAULT_PRIMARY_KEY,
+                )];
+                node_narrowing.insert(node_alias.clone(), PhysicalPlan { source, outputs });
+            }
+        }
+        let (source, edge_if_predicates) = super::flat::edge_source(
+            hops,
+            aggregate,
+            sort_keys,
+            nodes,
+            table_columns,
+            denormalized,
+            &filters,
+            &cascades,
+        )?;
         Ok(Self {
-            reads: edge_reads(hops, aggregate, sort_keys, nodes)?,
-            cascades: super::cascade::plan(hops, nodes, table_columns, denormalized, &narrowing),
+            source,
+            edge_if_predicates,
+            cascades,
             narrowing,
+            node_narrowing,
+            filters,
         })
     }
-}
-
-pub enum EdgeRead {
-    Plain,
-    Final { narrow_inside: bool },
-    Latest { sort_key: Vec<String> },
-    MultiHop(Box<PhysicalSource>),
-}
-
-pub fn edge_reads(
-    hops: &[Hop],
-    aggregate: bool,
-    sort_keys: &HashMap<String, Vec<String>>,
-    nodes: &HashMap<String, NodePlan>,
-) -> Result<Vec<EdgeRead>> {
-    hops.iter()
-        .enumerate()
-        .map(|(index, hop)| {
-            Ok(if hop.max_hops > 1 {
-                EdgeRead::MultiHop(Box::new(super::hops::multi_hop(
-                    hop,
-                    &format!("e{index}"),
-                    nodes,
-                )))
-            } else if hops.len() > 1 {
-                let (start, end) = hop.direction.edge_columns();
-                EdgeRead::Final {
-                    narrow_inside: sort_keys.get(&hop.edge_table).is_some_and(|keys| {
-                        keys.iter().take(4).any(|key| key == start || key == end)
-                    }),
-                }
-            } else if aggregate {
-                let sort_key = sort_keys
-                    .get(&hop.edge_table)
-                    .filter(|key| !key.is_empty())
-                    .ok_or_else(|| {
-                        QueryError::Lowering(format!(
-                            "no sort key for edge table '{}'; cannot plan latest rows",
-                            hop.edge_table
-                        ))
-                    })?;
-                EdgeRead::Latest {
-                    sort_key: sort_key.clone(),
-                }
-            } else {
-                EdgeRead::Plain
-            })
-        })
-        .collect()
 }
 
 #[derive(Clone)]
@@ -168,6 +201,49 @@ pub enum PhysicalSource {
         alias: String,
         input: Box<Self>,
     },
+}
+
+impl PhysicalSource {
+    pub(super) fn filter(self, predicates: Vec<Expr>) -> Self {
+        predicates
+            .into_iter()
+            .fold(self, |input, predicate| Self::Filter {
+                predicate,
+                input: Box::new(input),
+            })
+    }
+
+    pub(super) fn cascade(self, hop: &Hop, alias: &str, upstream: Option<&PhysicalPlan>) -> Self {
+        match upstream {
+            Some(keys) => Self::KeyFilter {
+                value: Expr::col(
+                    alias,
+                    &hop.join_prev.as_ref().expect("cascade join").curr_col,
+                ),
+                keys: Box::new(keys.clone()),
+                input: Box::new(self),
+            },
+            None => self,
+        }
+    }
+
+    pub(super) fn edge_keys(
+        hop: &Hop,
+        alias: &str,
+        predicates: Vec<Expr>,
+        upstream: Option<&PhysicalPlan>,
+    ) -> Self {
+        let source = Self::Filter {
+            predicate: Expr::conjoin(predicates).expect("edge predicates"),
+            input: Box::new(Self::Scan {
+                table: hop.edge_table.clone(),
+                alias: alias.into(),
+                final_: false,
+                relationship: Some(hop.input_index),
+            }),
+        };
+        source.cascade(hop, alias, upstream)
+    }
 }
 
 impl PhysicalPlan {
