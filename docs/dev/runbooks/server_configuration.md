@@ -544,6 +544,8 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 
 In `license_checksum` mode the gate sends the instance's license checksum as `X-License-Token`. GitLab adds it to the Orbit JWT as the `license_checksum` claim when the instance has an online cloud license. No CDot credentials are deployed. Requests without the claim skip the check and are allowed with a warning (`decision=skipped` on `gkg.billing.quota.decisions`). A CDot `401` (expired or unknown license) fails open with a warning and is not cached. Cached decisions are not keyed on the license, so a renewal can take up to one cache TTL to take effect. Orbit pods need egress to `customers_dot_url`. The claim travels inside the JWT, so use TLS between GitLab and Orbit when that traffic leaves a trusted network.
 
+Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` query parameter, so CDot logs can be traced back to Orbit requests.
+
 ## Object storage
 
 Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores, Google Cloud Storage, or a local directory.
