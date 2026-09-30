@@ -1,0 +1,39 @@
+name: Selective flat chain retains current-row scans and a dependent cascade anchor
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1], "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "columns": ["id"]},
+        {"id": "c", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ]
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
+    RETURN a.id, b.id, c.id
+logical:
+  expect:
+    - (Node a Definition (Ids 1) ...)
+    - (Relationship a b Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
+    - (Relationship b c Outgoing (Kinds CALLS) (Hops 1 1) (Filters))
+physical:
+  clickhouse:
+    expect:
+      - (Strategy (Flat))
+      - (Hop b c gl_code_edge (Depth 1 1) (Cascade true))
+      - (Join INNER (= (Column e0 target_id) (Column e1 source_id)) _ _)
+      - (Scan gl_code_edge e0 Final)
+      - (Scan gl_code_edge e1 Final)
+      - (InQuery (Column e1 source_id) (Query ... (Scan gl_code_edge e0p Plain) ...))
+  duckdb:
+    expect:
+      - (Strategy (Flat))
+      - (Join INNER (= (Column e0 target_id) (Column e1 source_id)) _ _)
+      - (Node a gl_definition Join)
+      - (Node b gl_definition Join)
+      - (Node c gl_definition Join)
