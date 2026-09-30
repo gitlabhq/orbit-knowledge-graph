@@ -40,7 +40,6 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
-    cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -70,16 +69,15 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
-        let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
         // 0 keeps the unlimited default that tests without extraction caps rely on.
         let max_file_size = match pipeline_config.max_file_size_bytes {
             0 => u64::MAX,
             n => n,
         };
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            cache_dir.path().to_path_buf(),
             max_file_size,
             pipeline_config.max_total_bytes,
+            pipeline_config.source_memory_budget_bytes,
             metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
@@ -109,12 +107,7 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
-            cache_dir,
         }
-    }
-
-    pub fn cache_dir_path(&self) -> &std::path::Path {
-        self.cache_dir.path()
     }
 
     pub fn code_indexing_task_handler_with_writer(
@@ -129,9 +122,9 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            self.cache_dir.path().to_path_buf(),
             u64::MAX,
             0,
+            u64::MAX,
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
