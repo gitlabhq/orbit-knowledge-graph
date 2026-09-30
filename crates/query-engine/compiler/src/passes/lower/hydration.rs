@@ -21,35 +21,6 @@ use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
-#[derive(Clone, Copy)]
-struct HydrationPathFilterContext {
-    array_exists_path_threshold: usize,
-}
-
-impl Default for HydrationPathFilterContext {
-    fn default() -> Self {
-        Self {
-            array_exists_path_threshold: ARRAY_EXISTS_PATH_THRESHOLD,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HydrationPathFilterShape {
-    OrStartsWith,
-    ArrayExists,
-}
-
-impl HydrationPathFilterContext {
-    fn shape_for(self, is_dynamic: bool, path_count: usize) -> HydrationPathFilterShape {
-        if is_dynamic && path_count > self.array_exists_path_threshold {
-            HydrationPathFilterShape::ArrayExists
-        } else {
-            HydrationPathFilterShape::OrStartsWith
-        }
-    }
-}
-
 pub fn emit_hydration(
     nodes: &[HydrationNodePlan],
     limit: u32,
@@ -181,10 +152,10 @@ fn traversal_path_filter(
         Some(budget) => generalize_to_budget(leaves, budget),
         None => leaves,
     };
-    let ctx = HydrationPathFilterContext::default();
-    match ctx.shape_for(is_dynamic, leaves.len()) {
-        HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
-        HydrationPathFilterShape::ArrayExists => Some(array_exists_starts_with(alias, &leaves)),
+    if is_dynamic && leaves.len() > ARRAY_EXISTS_PATH_THRESHOLD {
+        Some(array_exists_starts_with(alias, &leaves))
+    } else {
+        or_starts_with(alias, &leaves)
     }
 }
 
