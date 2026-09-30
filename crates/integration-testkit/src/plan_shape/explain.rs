@@ -159,7 +159,9 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
                         EdgeRead::Latest { sort_key } => {
                             S::node("Latest", [S::node("Key", sort_key.iter().map(S::atom))])
                         }
-                        EdgeRead::MultiHop => S::node("MultiHop", []),
+                        EdgeRead::MultiHop(source) => {
+                            S::node("MultiHop", [physical_source(source)])
+                        }
                     }
                 }),
             ),
@@ -240,6 +242,10 @@ fn physical_tree(plan: &compiler::passes::plan::physical::PhysicalPlan) -> S {
 fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S {
     use compiler::passes::plan::physical::PhysicalSource;
     match plan {
+        PhysicalSource::Union { alias, arms, .. } => S::node(
+            "Union",
+            std::iter::once(S::atom(alias)).chain(arms.iter().map(physical_tree)),
+        ),
         PhysicalSource::Scan {
             table,
             alias,

@@ -303,6 +303,7 @@ where
             &hops,
             input.query_type == QueryType::Aggregation,
             &table_sort_keys,
+            &nodes,
         )?)
     };
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);

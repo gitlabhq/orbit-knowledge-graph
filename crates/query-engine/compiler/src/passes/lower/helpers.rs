@@ -4,15 +4,13 @@ use std::collections::HashSet;
 use ontology::constants::*;
 
 use crate::ast::*;
-use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::input::*;
 
 use crate::passes::plan::*;
 use crate::passes::shared::latest_row_dedup;
 use crate::passes::shared::{
     deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
-    rel_kind_filter, rel_kind_filter_values,
+    rel_kind_filter,
 };
 pub(super) use crate::passes::shared::{latest_node_predicates, node_select_columns};
 
@@ -419,163 +417,4 @@ pub(super) fn emit_filter_narrowing(
         });
     }
     Ok(())
-}
-
-pub(super) fn build_multi_hop_union(
-    hop: &Hop,
-    alias: &str,
-    nodes: &HashMap<String, NodePlan>,
-) -> (TableRef, Vec<Expr>) {
-    let start = hop.min_hops.max(1);
-    let (start_col, end_col) = hop.direction.edge_columns();
-    let end_type_col = match hop.direction {
-        Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
-        Direction::Incoming => SOURCE_KIND_COLUMN,
-    };
-
-    let type_filter = rel_kind_filter_values(&hop.rel_types);
-
-    let queries: Vec<Query> = (start..=hop.max_hops)
-        .map(|depth| {
-            build_depth_arm(
-                depth,
-                &hop.edge_table,
-                start_col,
-                end_col,
-                end_type_col,
-                hop.direction,
-                &type_filter,
-            )
-        })
-        .collect();
-
-    let union = TableRef::union_all(queries, alias).with_relationship(hop.input_index);
-
-    // For incoming edges, the from_node is on the target side and the
-    // to_node is on the source side (the depth arm already swaps the
-    // projected source/target columns, so the outer alias exposes
-    // source_id/source_kind as the "start" of the incoming traversal).
-    let mut where_parts = Vec::new();
-    let (from_kind_col, to_kind_col) = match hop.direction {
-        Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
-        Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
-    };
-    for (node_alias, kind_col) in [(&hop.from_node, from_kind_col), (&hop.to_node, to_kind_col)] {
-        if let Some(np) = nodes.get(node_alias)
-            && let Some(ref entity) = np.entity
-        {
-            where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
-        }
-    }
-    where_parts.push(deleted_false(alias));
-
-    (union, where_parts)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_depth_arm(
-    depth: u32,
-    edge_table: &str,
-    start_col: &str,
-    end_col: &str,
-    end_type_col: &str,
-    direction: Direction,
-    type_filter: &Option<Vec<String>>,
-) -> Query {
-    let mut from = TableRef::scan(edge_table, "e1");
-    let mut where_parts = Vec::new();
-    if let Some(types) = type_filter
-        && let Some(f) = Expr::col_in(
-            "e1",
-            RELATIONSHIP_KIND_COLUMN,
-            ChType::String,
-            types
-                .iter()
-                .map(|t| serde_json::Value::String(t.clone()))
-                .collect(),
-        )
-    {
-        where_parts.push(f);
-    }
-    where_parts.push(deleted_false("e1"));
-    let where_clause = Expr::conjoin(where_parts);
-
-    for i in 2..=depth {
-        let prev = format!("e{}", i - 1);
-        let curr = format!("e{i}");
-        let right = TableRef::scan(edge_table, &curr);
-        let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
-        join_on = Expr::and(join_on, deleted_false(&curr));
-        if let Some(types) = type_filter
-            && let Some(tc) = Expr::col_in(
-                &curr,
-                RELATIONSHIP_KIND_COLUMN,
-                ChType::String,
-                types
-                    .iter()
-                    .map(|t| serde_json::Value::String(t.clone()))
-                    .collect(),
-            )
-        {
-            join_on = Expr::and(join_on, tc);
-        }
-        from = TableRef::join(JoinType::Inner, from, right, join_on);
-    }
-
-    let last = format!("e{depth}");
-
-    let (rel_kind, src_id, src_kind, src_tags, tgt_id, tgt_kind, tgt_tags) = match direction {
-        Direction::Outgoing | Direction::Both => (
-            Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
-            Expr::col("e1", SOURCE_ID_COLUMN),
-            Expr::col("e1", SOURCE_KIND_COLUMN),
-            Expr::col("e1", SOURCE_TAGS_COLUMN),
-            Expr::col(&last, TARGET_ID_COLUMN),
-            Expr::col(&last, TARGET_KIND_COLUMN),
-            Expr::col(&last, TARGET_TAGS_COLUMN),
-        ),
-        Direction::Incoming => (
-            Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
-            Expr::col(&last, SOURCE_ID_COLUMN),
-            Expr::col(&last, SOURCE_KIND_COLUMN),
-            Expr::col(&last, SOURCE_TAGS_COLUMN),
-            Expr::col("e1", TARGET_ID_COLUMN),
-            Expr::col("e1", TARGET_KIND_COLUMN),
-            Expr::col("e1", TARGET_TAGS_COLUMN),
-        ),
-    };
-
-    let path_nodes = Expr::func(
-        "array",
-        (1..=depth)
-            .map(|i| {
-                let e = format!("e{i}");
-                Expr::func(
-                    "tuple",
-                    vec![Expr::col(&e, end_col), Expr::col(&e, end_type_col)],
-                )
-            })
-            .collect(),
-    );
-
-    Query {
-        select: vec![
-            SelectExpr::col("e1", start_col),
-            SelectExpr::col(&last, end_col),
-            SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
-            SelectExpr::new(src_id, SOURCE_ID_COLUMN),
-            SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
-            SelectExpr::new(src_tags, SOURCE_TAGS_COLUMN),
-            SelectExpr::new(tgt_id, TARGET_ID_COLUMN),
-            SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
-            SelectExpr::new(tgt_tags, TARGET_TAGS_COLUMN),
-            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
-            SelectExpr::col("e1", DELETED_COLUMN),
-            SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN),
-        ],
-        from,
-        where_clause,
-        ..Default::default()
-    }
 }

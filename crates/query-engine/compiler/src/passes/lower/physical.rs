@@ -15,6 +15,33 @@ pub(super) fn emit(plan: &PhysicalPlan) -> Result<EmitOutput> {
 
 pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
     match plan {
+        PhysicalSource::Union {
+            alias,
+            arms,
+            relationship,
+        } => {
+            let queries = arms
+                .iter()
+                .map(|arm| {
+                    let output = emit_source(&arm.source);
+                    Query {
+                        select: arm.outputs.clone(),
+                        from: output.from,
+                        where_clause: Expr::conjoin(output.where_parts),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            EmitOutput {
+                from: TableRef::union_all(queries, alias).with_relationship(*relationship),
+                nodes: HashMap::new(),
+                edge_aliases: vec![],
+                where_parts: vec![],
+                select: vec![],
+                ctes: vec![],
+                edge_if_predicates: None,
+            }
+        }
         PhysicalSource::Scan {
             table,
             alias,

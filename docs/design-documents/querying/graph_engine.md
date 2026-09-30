@@ -81,6 +81,8 @@ The shared emitter renders those joins and scopes; FK-star candidate narrowing r
 Flat-chain planning selects a read mode for each hop: plain, FINAL, latest-row LIMIT BY, or bounded multi-hop expansion.
 It also selects whether narrowing predicates belong inside a FINAL scan from the leading sort-key columns.
 Flat-chain lowering constructs its specialized predicates and executes the selected single-hop reads through the shared physical emitter.
+Bounded traversal hops are planned as physical unions of depth arms with explicit joins and outputs.
+The union carries the original relationship index so scope predicates still reach each underlying scan.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 

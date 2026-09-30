@@ -6,9 +6,9 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
-    node_id_pin_predicates, push_edge_predicates,
+    NarrowSource, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
+    emit_node_ids_on_edge, emit_node_join_with_narrowing, node_id_pin_predicates,
+    push_edge_predicates,
 };
 use super::{EmitOutput, NodeBinding};
 use crate::passes::plan::physical::{EdgeRead, PhysicalSource};
@@ -161,7 +161,7 @@ pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOut
     for (i, (hop, read)) in plan.hops.iter().zip(reads).enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
-        let is_multi_hop = matches!(read, EdgeRead::MultiHop);
+        let is_multi_hop = matches!(read, EdgeRead::MultiHop(_));
         let scan = |final_| PhysicalSource::Scan {
             table: hop.edge_table.clone(),
             alias: alias.clone(),
@@ -244,11 +244,11 @@ pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOut
                 });
             }
 
-            let edge_source = if is_multi_hop {
-                let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
-                where_parts.extend(union_wheres);
+            let edge_source = if let EdgeRead::MultiHop(source) = read {
+                let output = super::physical::emit_source(source);
+                where_parts.extend(output.where_parts);
                 where_parts.extend(narrow_in);
-                union
+                output.from
             } else if let EdgeRead::Final { narrow_inside } = read {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
                 if *narrow_inside {

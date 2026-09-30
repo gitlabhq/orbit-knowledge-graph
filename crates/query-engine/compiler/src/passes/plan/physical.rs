@@ -15,18 +15,24 @@ pub enum EdgeRead {
     Plain,
     Final { narrow_inside: bool },
     Latest { sort_key: Vec<String> },
-    MultiHop,
+    MultiHop(Box<PhysicalSource>),
 }
 
 pub fn edge_reads(
     hops: &[Hop],
     aggregate: bool,
     sort_keys: &HashMap<String, Vec<String>>,
+    nodes: &HashMap<String, NodePlan>,
 ) -> Result<Vec<EdgeRead>> {
     hops.iter()
-        .map(|hop| {
+        .enumerate()
+        .map(|(index, hop)| {
             Ok(if hop.max_hops > 1 {
-                EdgeRead::MultiHop
+                EdgeRead::MultiHop(Box::new(super::hops::multi_hop(
+                    hop,
+                    &format!("e{index}"),
+                    nodes,
+                )))
             } else if hops.len() > 1 {
                 let (start, end) = hop.direction.edge_columns();
                 EdgeRead::Final {
@@ -60,6 +66,11 @@ pub struct PhysicalPlan {
 }
 
 pub enum PhysicalSource {
+    Union {
+        alias: String,
+        arms: Vec<PhysicalPlan>,
+        relationship: usize,
+    },
     Scan {
         table: String,
         alias: String,
