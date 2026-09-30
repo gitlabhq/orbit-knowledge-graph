@@ -2,7 +2,7 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
-    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite, Sources,
+    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite,
 };
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
@@ -28,12 +28,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    let (repo, entries) = inventory::walk(root).unwrap();
-    let sources = Sources {
-        repo,
-        entries: entries.into_inner(),
-    };
-    Pipeline::new(Context::new(env), sources)
+    Pipeline::new(Context::new(env), inventory::walk(root).unwrap())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))

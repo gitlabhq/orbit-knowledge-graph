@@ -1,11 +1,9 @@
-//! A file the inventory lists but the repository filesystem cannot produce
-//! is a fault for that file alone; every other file still parses.
+//! A linked file that vanishes from disk before its parser reads it is a
+//! fault for that file alone; every other file still parses.
 
 use std::sync::Arc;
 
-use code_graph::v2::{
-    Decision, File, GraphConverter, Inventory, OnBatch, Pipeline, PipelineConfig, Vfs,
-};
+use code_graph::v2::{GraphConverter, OnBatch, Pipeline, PipelineConfig, Vfs};
 
 struct NoopConverter;
 
@@ -18,28 +16,20 @@ impl GraphConverter for NoopConverter {
     }
 }
 
-fn js_entry(path: &str) -> File {
-    File {
-        path: path.to_string(),
-        size: 20,
-        decision: Decision::Parse,
-        label: Default::default(),
-        symlink: false,
-        checked: true,
-    }
-}
-
 #[test]
-fn a_missing_file_faults_alone() {
+fn a_vanished_file_faults_alone() {
+    let dir = tempfile::tempdir().unwrap();
     let repo = Vfs::default();
-    repo.write("present.js", b"export const x = 1;\n".to_vec())
-        .unwrap();
-    let inventory = Inventory::new(vec![js_entry("present.js"), js_entry("absent.js")]);
+    for name in ["present.js", "absent.js"] {
+        let on_disk = dir.path().join(name);
+        std::fs::write(&on_disk, b"export const x = 1;\n").unwrap();
+        repo.link(name, on_disk, 20).unwrap();
+    }
+    std::fs::remove_file(dir.path().join("absent.js")).unwrap();
     let on_batch: Arc<OnBatch> = Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
 
     let result = Pipeline::run(
         Arc::new(repo),
-        Arc::new(inventory),
         PipelineConfig::default(),
         Arc::new(NoopConverter),
         on_batch,

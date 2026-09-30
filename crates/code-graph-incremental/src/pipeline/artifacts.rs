@@ -1,32 +1,28 @@
 //! What flows through the pipeline. Each artifact is a checkpoint: holding
 //! one says which phases may follow.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use crate::inventory::FileReason;
 use arrow::record_batch::RecordBatch;
-use orbit_utils::files::{File, Vfs};
+use orbit_utils::files::Vfs;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{SourceFile, State};
 use crate::tree::{Edge, Tree};
 
-/// A repository's classified files; parse entries are read from `repo` as
-/// workers take them.
-pub struct Sources {
-    pub repo: Arc<Vfs>,
-    pub entries: Vec<File>,
-}
+/// A repository, its files decided; parse entries are read as workers take
+/// them.
+pub type Sources = Arc<Vfs>;
 
-/// Files changed since the graph was built, already classified.
+/// Files changed since the graph was built: the changed ones as a
+/// repository of their own, the removed ones by path.
 pub struct Changes {
-    pub changed: Vec<File>,
+    pub changed: Arc<Vfs>,
     pub removed: Vec<String>,
 }
 
 pub struct ReindexInput {
     pub state: State,
-    pub repo: Arc<Vfs>,
     pub changes: Changes,
 }
 
@@ -41,16 +37,13 @@ pub struct Workset<C> {
 
 pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
 
-/// What the inventory held besides parseable code: manifests for the
-/// resolver, every other file with the reason it was not parsed, and each
-/// parse candidate's size so a killed or unreadable one still gets a row.
-#[derive(Default)]
+/// What the repository held besides parseable code: manifests for the
+/// resolver, and each parse candidate's size so a killed or unreadable one
+/// still gets a row. The repository itself answers for every other file.
 pub struct Listed {
+    pub(super) repo: Arc<Vfs>,
     pub(super) manifests: Vec<SourceFile>,
-    pub(super) files: Vec<(String, u64, FileReason)>,
     pub(super) candidates: FxHashMap<String, u64>,
-    /// Candidates the content passes turned down when a worker read them.
-    pub(super) rejected: Arc<Mutex<Vec<(String, u64, FileReason)>>>,
 }
 
 /// The tree-sitter tree, source attached.

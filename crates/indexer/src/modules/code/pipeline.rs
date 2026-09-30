@@ -422,7 +422,8 @@ impl CodeIndexer {
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
         let parseable = repository
-            .file_inventory
+            .files
+            .files()
             .iter()
             .filter(|e| {
                 e.decision == code_graph::v2::Decision::Parse
@@ -649,19 +650,9 @@ impl CodeIndexer {
 
         let code_graph_start = Instant::now();
         let files = repository.files.clone();
-        let file_inventory = repository.file_inventory.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                Pipeline::run_with_tracer(
-                    files,
-                    file_inventory,
-                    config,
-                    tracer,
-                    converter,
-                    on_batch,
-                )
-            })
+            span.in_scope(|| Pipeline::run_with_tracer(files, config, tracer, converter, on_batch))
         })
         .await;
         let result = match parsed {

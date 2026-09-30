@@ -255,7 +255,6 @@ fn looks_binary(prefix: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::v2::config::detect_language_from_path;
-    use orbit_utils::files::check;
 
     fn file(path: &str, size: u64) -> File {
         File::new(path.into(), size)
@@ -271,7 +270,7 @@ mod tests {
         let mut file = file(path, content.len() as u64);
         let need = f.header(&mut file).unwrap();
         if need == Need::Bytes || file.decision == Decision::Parse {
-            check(f, &mut file, content);
+            f.content(&mut file, content);
         }
         file
     }
@@ -305,7 +304,7 @@ mod tests {
         let f = filter();
         let mut source = file("src/main.rs", 100);
         assert_eq!(f.header(&mut source).unwrap(), Need::Nothing);
-        assert_eq!((source.decision, source.checked), (Decision::Parse, false));
+        assert_eq!(source.decision, Decision::Parse);
 
         let mut manifest = file("Cargo.toml", 100);
         assert_eq!(f.header(&mut manifest).unwrap(), Need::Bytes);

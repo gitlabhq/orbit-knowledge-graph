@@ -53,9 +53,9 @@ pub fn run_incremental_suite(yaml: &str) {
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
 
-    let (files, inventory) = inventory::walk(repo.path()).expect("walk fixtures");
-    let graph = templates::index(Context::new(&env), files, inventory.into_inner())
-        .expect("suite exceeded the total budget");
+    let files = inventory::walk(repo.path()).expect("walk fixtures");
+    let graph =
+        templates::index(Context::new(&env), files).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
     let mut env = env;
 
@@ -72,13 +72,11 @@ pub fn run_incremental_suite(yaml: &str) {
         let mut changed = write_fixtures(&step.add, repo.path());
         changed.extend(write_fixtures(&step.modify, repo.path()));
         let changed = changed.into_iter().map(|(path, _)| path).collect();
-        let (files, changed) =
-            inventory::classify(repo.path(), changed).expect("classify changed files");
         let changes = Changes {
-            changed: changed.into_inner(),
+            changed: inventory::classify(repo.path(), changed).expect("classify changed files"),
             removed: step.remove.clone(),
         };
-        let graph = templates::reindex(Context::new(&env), state, files, changes)
+        let graph = templates::reindex(Context::new(&env), state, changes)
             .expect("suite exceeded the total budget");
         let (next, step_failures) = check(graph, &ontology, &step.tests);
         state = next;

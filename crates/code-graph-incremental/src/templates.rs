@@ -3,30 +3,19 @@
 
 use std::sync::Arc;
 
-use orbit_utils::files::{File, Vfs};
+use orbit_utils::files::Vfs;
 
 use crate::error::Error;
 use crate::pipeline::{
     Canonicalize, Changes, Context, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
-    ReindexInput, Remap, Resolve, Resolved, Rewrite, Sources, State,
+    ReindexInput, Remap, Resolve, Resolved, Rewrite, State,
 };
 
 /// Every file of the repository: parse entries go through parse, rewrite,
 /// link and cross-file resolution; everything else becomes a `File` row
 /// carrying the reason it was not parsed.
-pub fn index<'e, S>(
-    context: Context<'e>,
-    repo: Arc<Vfs>,
-    inventory: S,
-) -> Result<Pipeline<'e, Resolved>, Error>
-where
-    S: IntoIterator<Item = File>,
-{
-    let sources = Sources {
-        repo,
-        entries: inventory.into_iter().collect(),
-    };
-    Pipeline::new(context, sources)
+pub fn index<'e>(context: Context<'e>, repo: Arc<Vfs>) -> Result<Pipeline<'e, Resolved>, Error> {
+    Pipeline::new(context, repo)
         .then(Prepare)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
@@ -38,14 +27,9 @@ where
 pub fn reindex<'e>(
     context: Context<'e>,
     state: State,
-    repo: Arc<Vfs>,
     changes: Changes,
 ) -> Result<Pipeline<'e, Resolved>, Error> {
-    let input = ReindexInput {
-        state,
-        repo,
-        changes,
-    };
+    let input = ReindexInput { state, changes };
     Pipeline::new(context, input)
         .then(Remap)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?

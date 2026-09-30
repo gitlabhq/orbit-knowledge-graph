@@ -18,7 +18,7 @@ pub use error::{
 };
 pub use pipeline::{
     BatchTx, CancellationToken, Decision, FamilyFileCount, FamilyFileInput, FamilyPipeline, File,
-    FileInput, FileTimingEntry, GenericPipeline, GraphStatsCounters, Inventory, LanguageContext,
+    FileInput, FileTimingEntry, GenericPipeline, GraphStatsCounters, LanguageContext,
     LanguagePipeline, LanguageTimings, PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig,
     PipelineContext, PipelineResult, ProgressObserver, ProgressPhase, SilentProgress, Vfs,
 };

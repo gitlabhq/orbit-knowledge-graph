@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use futures::StreamExt;
-use orbit_utils::files::{Inventory, SourceError, Vfs, tar};
+use orbit_utils::files::{SourceError, Vfs, tar};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
@@ -29,12 +29,11 @@ pub enum RepositoryCacheError {
     RepositoryTooLarge,
 }
 
-/// A repository's files, in memory up to the budget and spilled past it, plus
-/// the inventory of everything the archive held.
+/// A repository's files: a node for everything the archive held, bytes in
+/// memory up to the budget and spilled past it for what loads.
 #[derive(Debug)]
 pub struct CachedRepository {
     pub files: Arc<Vfs>,
-    pub file_inventory: Arc<Inventory>,
 }
 
 #[async_trait]
@@ -82,18 +81,19 @@ impl RepositoryCache for LocalRepositoryCache {
             to_cap(self.max_total_bytes),
             detect_language_from_path,
         );
-        let files = Arc::new(Vfs::with_budget(Some(self.memory_budget)));
+        let filter = Arc::new(filter);
+        let files = Arc::new(Vfs::new(filter.clone(), Some(self.memory_budget)));
         let extracted = tokio::task::spawn_blocking({
             let files = files.clone();
             move || {
                 let bridge = SyncIoBridge::new_with_handle(reader, handle);
-                tar::extract(bridge, &filter, &files).map(|inventory| (inventory, filter))
+                tar::extract(bridge, &files)
             }
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?;
 
-        let (file_inventory, filter) = extracted.map_err(|e| match e {
+        extracted.map_err(|e| match e {
             SourceError::Empty => RepositoryCacheError::EmptyArchive,
             SourceError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
             SourceError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
@@ -104,10 +104,7 @@ impl RepositoryCache for LocalRepositoryCache {
                 .record_archive_entry_skipped(reason.into(), tally.count, tally.bytes);
         }
 
-        Ok(CachedRepository {
-            files,
-            file_inventory: Arc::new(file_inventory),
-        })
+        Ok(CachedRepository { files })
     }
 }
 
@@ -250,24 +247,25 @@ mod tests {
             .await
             .unwrap();
         let inventory_paths: Vec<_> = path
-            .file_inventory
-            .iter()
-            .map(|entry| entry.path.as_str())
+            .files
+            .files()
+            .into_iter()
+            .map(|entry| entry.path)
             .collect();
         assert!(
-            inventory_paths.contains(&"assets/logo.png"),
+            inventory_paths.iter().any(|p| p == "assets/logo.png"),
             "filtered files should still be present in archive inventory"
         );
         assert!(
-            inventory_paths.contains(&"README.md"),
+            inventory_paths.iter().any(|p| p == "README.md"),
             "retained non-parsable files should be present in archive inventory"
         );
 
         assert!(path.files.exists(Path::new("src/main.rs")));
-        assert!(!path.files.exists(Path::new("assets/logo.png")));
-        assert!(!path.files.exists(Path::new("static/banner.gif")));
-        assert!(!path.files.exists(Path::new("fonts/Inter.woff2")));
-        assert!(!path.files.exists(Path::new("dist/build.zip")));
+        assert!(path.files.read(Path::new("assets/logo.png")).is_err());
+        assert!(path.files.read(Path::new("static/banner.gif")).is_err());
+        assert!(path.files.read(Path::new("fonts/Inter.woff2")).is_err());
+        assert!(path.files.read(Path::new("dist/build.zip")).is_err());
         assert!(path.files.exists(Path::new("Cargo.toml")));
         assert!(path.files.exists(Path::new("Cargo.lock")));
         assert!(path.files.exists(Path::new("package.json")));
@@ -292,14 +290,12 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
-                .any(|entry| entry.path == "big.rs"),
+            path.files.exists(Path::new("big.rs")),
             "oversize files should still be present in archive inventory"
         );
         assert!(path.files.exists(Path::new("small.rs")));
         assert!(
-            !path.files.exists(Path::new("big.rs")),
+            path.files.read(Path::new("big.rs")).is_err(),
             "files larger than max_file_size must not be written to disk"
         );
     }
@@ -321,22 +317,19 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
-                .any(|entry| entry.path == "data/train.csv"),
+            path.files.exists(Path::new("data/train.csv")),
             "LFS pointers should still be present in archive inventory"
         );
         assert_eq!(
-            path.file_inventory
-                .iter()
-                .find(|entry| entry.path == "data/train.csv")
+            path.files
+                .file(Path::new("data/train.csv"))
                 .unwrap()
                 .label
                 .skip,
             Some(SkipReason::LfsPointer)
         );
         assert!(path.files.exists(Path::new("src/main.rs")));
-        assert!(!path.files.exists(Path::new("data/train.csv")));
+        assert!(path.files.read(Path::new("data/train.csv")).is_err());
     }
 
     #[tokio::test]
@@ -353,14 +346,12 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
-                .any(|entry| entry.path == "model/weights.onnx"),
+            path.files.exists(Path::new("model/weights.onnx")),
             "binary files should still be present in archive inventory"
         );
         assert!(path.files.exists(Path::new("src/main.rs")));
         assert!(
-            !path.files.exists(Path::new("model/weights.onnx")),
+            path.files.read(Path::new("model/weights.onnx")).is_err(),
             "binary content must not be written to disk"
         );
     }

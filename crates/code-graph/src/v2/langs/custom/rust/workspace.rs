@@ -304,18 +304,16 @@ fn read_repo_or_sysroot(
 }
 
 pub(super) fn discover_manifest_paths(repo: &RepoFs) -> Vec<PathBuf> {
-    let mut manifests = repo
-        .paths()
+    repo.files()
         .into_iter()
-        .filter(|path| {
-            Path::new(path)
+        .filter(|file| file.loads())
+        .filter(|file| {
+            Path::new(&file.path)
                 .file_name()
                 .is_some_and(|name| name == "Cargo.toml")
         })
-        .map(|path| Path::new(VIRTUAL_ROOT).join(path))
-        .collect::<Vec<_>>();
-    manifests.sort();
-    manifests
+        .map(|file| Path::new(VIRTUAL_ROOT).join(file.path))
+        .collect()
 }
 
 pub(super) fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {

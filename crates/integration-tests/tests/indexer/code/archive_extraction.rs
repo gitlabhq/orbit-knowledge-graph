@@ -6,7 +6,7 @@ use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
-use code_graph::v2::{GraphConverter, Inventory, Pipeline, PipelineConfig, SinkError, Vfs};
+use code_graph::v2::{GraphConverter, Pipeline, PipelineConfig, SinkError, Vfs};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use orbit_utils::files::tar;
@@ -57,7 +57,7 @@ impl GraphConverter for CapturingConverter {
     }
 }
 
-async fn extract_via_archive_endpoint(entries: &[Entry<'_>]) -> (Arc<Vfs>, Inventory) {
+async fn extract_via_archive_endpoint(entries: &[Entry<'_>]) -> Arc<Vfs> {
     use axum::Router;
     use axum::body::Body;
     use axum::http::header;
@@ -95,22 +95,28 @@ async fn extract_via_archive_endpoint(entries: &[Entry<'_>]) -> (Arc<Vfs>, Inven
             .map(|r| r.map_err(std::io::Error::other)),
     );
     let handle = tokio::runtime::Handle::current();
-    let files = Arc::new(Vfs::default());
-    let inventory = tokio::task::spawn_blocking({
+    let filter = CodeFilter::new(None, None, detect_language_from_path);
+    let files = Arc::new(Vfs::new(filter, None));
+    tokio::task::spawn_blocking({
         let files = files.clone();
         move || {
-            let filter = CodeFilter::new(None, None, detect_language_from_path);
             let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
-            tar::extract(bridge, &filter, &files).unwrap()
+            tar::extract(bridge, &files).unwrap()
         }
     })
     .await
     .unwrap();
     server.abort();
-    (files, inventory)
+    files
 }
 
-async fn run_pipeline(files: Arc<Vfs>, file_inventory: Inventory) -> CapturedPipelineRun {
+/// A node the repository lists but keeps no bytes for.
+fn listed_only(files: &Vfs, path: &str) -> bool {
+    files.exists(Path::new(path))
+        && files.read(Path::new(path)).unwrap_err().kind() == std::io::ErrorKind::Unsupported
+}
+
+async fn run_pipeline(files: Arc<Vfs>) -> CapturedPipelineRun {
     let capturer = Arc::new(CapturingConverter {
         graphs: Mutex::new(Vec::new()),
     });
@@ -120,7 +126,6 @@ async fn run_pipeline(files: Arc<Vfs>, file_inventory: Inventory) -> CapturedPip
             Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
         Pipeline::run(
             files,
-            Arc::new(file_inventory),
             PipelineConfig::default(),
             capturer_for_pipeline as Arc<dyn GraphConverter>,
             on_batch,
@@ -208,15 +213,15 @@ async fn cargo_workspace_resolves_through_archive_endpoint() {
         Entry::File("root/assets/logo.png", b"\x89PNG"),
         Entry::File("root/dist/build.zip", b"PK"),
     ];
-    let (files, file_inventory) = extract_via_archive_endpoint(&entries).await;
+    let files = extract_via_archive_endpoint(&entries).await;
 
     assert!(files.exists(Path::new("Cargo.toml")));
     assert!(files.exists(Path::new("crates/lib/Cargo.toml")));
     assert!(files.exists(Path::new("crates/app/Cargo.toml")));
-    assert!(!files.exists(Path::new("assets/logo.png")));
-    assert!(!files.exists(Path::new("dist/build.zip")));
+    assert!(listed_only(&files, "assets/logo.png"));
+    assert!(listed_only(&files, "dist/build.zip"));
 
-    let run = run_pipeline(files, file_inventory).await;
+    let run = run_pipeline(files).await;
     assert!(
         has_def(&run.graphs, "crates/lib/src/lib.rs", "greet"),
         "Rust workspace resolver missed lib::greet"
@@ -234,17 +239,12 @@ async fn excluded_archive_entries_are_not_materialized_or_parsed() {
         Entry::File("root/assets/logo.png", b"\x89PNG"),
         Entry::File("root/dist/build.zip", b"PK"),
     ];
-    let (files, file_inventory) = extract_via_archive_endpoint(&entries).await;
-    let inventory_paths: Vec<_> = file_inventory.iter().map(|e| e.path.as_str()).collect();
-    assert!(inventory_paths.contains(&"src/app.ts"));
-    assert!(inventory_paths.contains(&"assets/logo.png"));
-    assert!(inventory_paths.contains(&"dist/build.zip"));
+    let files = extract_via_archive_endpoint(&entries).await;
+    assert!(files.read(Path::new("src/app.ts")).is_ok());
+    assert!(listed_only(&files, "assets/logo.png"));
+    assert!(listed_only(&files, "dist/build.zip"));
 
-    assert!(files.exists(Path::new("src/app.ts")));
-    assert!(!files.exists(Path::new("assets/logo.png")));
-    assert!(!files.exists(Path::new("dist/build.zip")));
-
-    let run = run_pipeline(files, file_inventory).await;
+    let run = run_pipeline(files).await;
     assert_eq!(run.files_discovered, 3);
     assert_eq!(run.files_indexed, 3);
     assert_eq!(run.files_parsed, 1);
@@ -276,12 +276,12 @@ async fn lfs_pointers_are_nodes_but_never_parsed() {
         Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
         Entry::File("root/src/model.ts", pointer),
     ];
-    let (files, file_inventory) = extract_via_archive_endpoint(&entries).await;
+    let files = extract_via_archive_endpoint(&entries).await;
 
     assert!(files.exists(Path::new("src/app.ts")));
-    assert!(!files.exists(Path::new("src/model.ts")));
+    assert!(listed_only(&files, "src/model.ts"));
 
-    let run = run_pipeline(files, file_inventory).await;
+    let run = run_pipeline(files).await;
     assert_eq!(run.files_discovered, 2);
     assert_eq!(run.files_indexed, 2);
     assert_eq!(run.files_parsed, 1);
@@ -314,14 +314,14 @@ async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
         Entry::File("root/static/banner.gif", b"GIF89a"),
         Entry::File("root/fonts/Inter.woff2", b""),
     ];
-    let (files, file_inventory) = extract_via_archive_endpoint(&entries).await;
+    let files = extract_via_archive_endpoint(&entries).await;
 
     assert!(files.exists(Path::new("package.json")));
     assert!(files.exists(Path::new("tsconfig.json")));
-    assert!(!files.exists(Path::new("static/banner.gif")));
-    assert!(!files.exists(Path::new("fonts/Inter.woff2")));
+    assert!(listed_only(&files, "static/banner.gif"));
+    assert!(listed_only(&files, "fonts/Inter.woff2"));
 
-    let run = run_pipeline(files, file_inventory).await;
+    let run = run_pipeline(files).await;
     assert!(
         has_def(&run.graphs, "src/utils.ts", "helper"),
         "JS resolver missed utils::helper"

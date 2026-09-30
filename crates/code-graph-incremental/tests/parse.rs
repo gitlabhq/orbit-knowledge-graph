@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Workset};
+use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Workset};
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
 use code_graph_incremental::{Context, Env, Limits, Pipeline, inventory};
@@ -15,12 +15,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
-    let (repo, entries) = inventory::walk(root).unwrap();
-    let sources = Sources {
-        repo,
-        entries: entries.into_inner(),
-    };
-    Pipeline::new(Context::new(env), sources)
+    Pipeline::new(Context::new(env), inventory::walk(root).unwrap())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse))
@@ -45,7 +40,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let path = format!("a.{}", entry.extensions()[0]);
         write_all(repo.path(), &[(&path, b"x")]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let classified = inventory::walk(repo.path()).unwrap().1[0].decision;
+        let classified = inventory::walk(repo.path()).unwrap().files()[0].decision;
 
         let parsed = parse_repo(&env, repo.path());
 
@@ -117,12 +112,9 @@ fn classify_agrees_with_walk() {
     write_all(repo.path(), &files);
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
-    let walked = inventory::walk(repo.path()).unwrap().1.into_inner();
+    let walked = inventory::walk(repo.path()).unwrap().files();
     let paths = walked.iter().map(|e| e.path.clone()).collect();
-    let classified = inventory::classify(repo.path(), paths)
-        .unwrap()
-        .1
-        .into_inner();
+    let classified = inventory::classify(repo.path(), paths).unwrap().files();
 
     assert_eq!(walked.len(), files.len() + 1);
     assert_eq!(strip(walked), strip(classified));

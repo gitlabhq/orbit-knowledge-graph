@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 
-use orbit_utils::files::{Decision, File, Vfs, disk};
+use orbit_utils::files::{Decision, Vfs};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -35,25 +35,22 @@ impl Phase<Sources> for Prepare {
     }
 
     fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
-        let Sources { repo, entries } = sources;
         Ok(workset(
             context.env,
             State::new(context.env),
-            repo,
-            entries,
+            sources,
             FxHashSet::default(),
         ))
     }
 }
 
 /// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `repo` when a worker takes them. Everything else is listed now:
-/// manifests for the resolver, and every file as a `File` row.
+/// from `repo` when a worker takes them. Manifests are read now for the
+/// resolver; every other file is a row the repository already holds.
 fn workset(
     env: &Env,
     state: State,
     repo: Arc<Vfs>,
-    entries: Vec<File>,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let manifest_names = &env.resolve.config.parse_files;
@@ -61,55 +58,40 @@ fn workset(
         let name = path.rsplit('/').next().unwrap_or(path);
         manifest_names.iter().any(|pf| pf.name == name)
     };
-    let mut listed = Listed::default();
-    let mut candidates = Vec::new();
-    for file in entries {
-        let manifest = file.decision != Decision::ListOnly && is_manifest(&file.path);
+    let mut manifests = Vec::new();
+    let mut candidates = FxHashMap::default();
+    let mut items = Vec::new();
+    for file in repo.files() {
+        let manifest = file.loads() && is_manifest(&file.path);
         let in_family = SupportLang::from_path(&file.path).is_some_and(|l| env.in_family(l));
         if file.decision == Decision::Parse && in_family && !manifest {
-            listed.candidates.insert(file.path.clone(), file.size);
-            candidates.push(file);
-            continue;
-        }
-        let content = manifest
-            .then(|| repo.read_to_string(Path::new(&file.path)).ok())
-            .flatten();
-        let reason = match (file.decision, file.label.skip) {
-            (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
-            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
-            _ => FileReason::None,
-        };
-        if let Some(content) = content {
-            listed.manifests.push(SourceFile {
-                path: file.path.clone(),
+            candidates.insert(file.path.clone(), file.size);
+            items.push(file.path);
+        } else if manifest && let Ok(content) = repo.read_to_string(Path::new(&file.path)) {
+            manifests.push(SourceFile {
+                path: file.path,
                 content,
             });
         }
-        listed.files.push((file.path, file.size, reason));
     }
     // A candidate is read once, here, by the worker that parses it; the
-    // content passes run on those bytes and may still turn the file down.
-    let passes = crate::inventory::code_filter();
-    let rejected = listed.rejected.clone();
-    let items = candidates.into_iter().filter_map(move |mut file| {
-        let bytes = disk::load(&repo, &mut file, &passes).ok()?;
-        let Some(bytes) = bytes else {
-            let reason = file.label.skip.map_or(FileReason::None, FileReason::Filter);
-            let mut rejected = rejected.lock().unwrap_or_else(|e| e.into_inner());
-            rejected.push((file.path, file.size, reason));
-            return None;
-        };
+    // repository's passes may still turn it down on that read, and then it
+    // is a row with a reason, not a tree.
+    let source = repo.clone();
+    let items = items.into_iter().filter_map(move |path| {
+        let bytes = source.source(Path::new(&path)).ok()?;
         let content = String::from_utf8(bytes.to_vec()).ok()?;
-        Some(SourceFile {
-            path: file.path,
-            content,
-        })
+        Some(SourceFile { path, content })
     });
     Workset {
         state,
         items: Box::new(items),
         dirty,
-        listed,
+        listed: Listed {
+            repo,
+            manifests,
+            candidates,
+        },
     }
 }
 
@@ -126,23 +108,25 @@ impl Phase<ReindexInput> for Remap {
     }
 
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
-        let ReindexInput {
-            mut state,
-            repo,
-            changes,
-        } = input;
+        let ReindexInput { mut state, changes } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        let changed: Vec<String> = changes
+            .changed
+            .files()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
         let dirty_labels: FxHashSet<&str> = changes
             .removed
             .iter()
+            .chain(changed.iter())
             .map(String::as_str)
-            .chain(changes.changed.iter().map(|f| f.path.as_str()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        Ok(workset(context.env, state, repo, changes.changed, dirty))
+        Ok(workset(context.env, state, changes.changed, dirty))
     }
 }
 
@@ -380,28 +364,35 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             }));
         }
         let Listed {
+            repo,
             manifests,
-            mut files,
             mut candidates,
-            rejected,
         } = listed;
-        let rejected = std::mem::take(&mut *rejected.lock().unwrap_or_else(|e| e.into_inner()));
-        for (path, _, _) in &rejected {
-            candidates.remove(path);
-        }
-        files.extend(rejected);
         for manifest in manifests {
             state.configs.retain(|c| c.path != manifest.path);
             state.configs.push(manifest);
         }
         let lang = &context.env.lang;
-        for (path, size, reason) in files {
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
-        }
-        for tree in &state.trees {
-            candidates.remove(&tree.label);
+        let parsed: FxHashSet<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        // Every file the repository holds gets a row; a parse candidate that
+        // never became a tree is either still a candidate (killed or
+        // unreadable, below) or was turned down on its read and says why.
+        for file in repo.files() {
+            if parsed.contains(&file.path) {
+                candidates.remove(&file.path);
+                continue;
+            }
+            if file.decision == Decision::Parse && candidates.contains_key(&file.path) {
+                continue;
+            }
+            candidates.remove(&file.path);
+            let reason = file.label.skip.map_or(FileReason::None, FileReason::Filter);
+            state.trees.push(Tree::unparsed(
+                lang,
+                &file.path,
+                file.size,
+                &reason.to_string(),
+            ));
         }
         for killed in &context.report.skipped {
             if let Some(size) = candidates.remove(&killed.path) {

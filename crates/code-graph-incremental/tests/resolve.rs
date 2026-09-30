@@ -2,7 +2,7 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
-    Canonicalize, Each, Insert, Link, Parse, Prepare, Resolve, Resolved, Rewrite, Sources,
+    Canonicalize, Each, Insert, Link, Parse, Prepare, Resolve, Resolved, Rewrite,
 };
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
@@ -38,12 +38,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let (repo, entries) = inventory::walk(root).unwrap();
-    let sources = Sources {
-        repo,
-        entries: entries.into_inner(),
-    };
-    let (context, resolved) = Pipeline::new(Context::new(env), sources)
+    let (context, resolved) = Pipeline::new(Context::new(env), inventory::walk(root).unwrap())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
