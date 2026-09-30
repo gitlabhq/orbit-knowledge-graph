@@ -16,6 +16,9 @@
 
 pub mod disk;
 pub mod tar;
+pub mod vfs;
+
+pub use vfs::{ContentId, DirEntry, FileSystem, Metadata, Vfs};
 
 use std::ops::Deref;
 use std::path::{Component, Path};
