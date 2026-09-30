@@ -133,11 +133,13 @@ Two control points keep this safe:
 
 The MCP wrapper (`API::Orbit::McpHandlers::CallTool`) advertises either the legacy tool set or the new `list_commands`/`invoke_command` pair, controlled by a feature flag (see [Feature flag rollout](#feature-flag-rollout)). Agents discover the command catalog by calling `list_commands` once at the start of a session.
 
+GKG inlines the catalog in the `list_commands` description when the caller's JWT `source_type` is `dws`. Each command appears with its description and input schema as compact JSON. Duo Agent Platform agents then call `invoke_command` without a discovery turn. Other callers keep the short description.
+
 ### Discovery and invocation contract for agents
 
 The ai-assist Orbit agent prompt encodes the contract that agents are expected to follow ([!5446](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446)):
 
-1. Call `orbit_list_commands` once per session.
+1. Call `orbit_list_commands` once per session. DWS callers already receive the catalog in the tool description, so this step is redundant for them.
 2. Before the first query, call `orbit_invoke_command` with `command_name=get_query_dsl` and `command_name=get_graph_schema`. Do not guess node, edge, or property names from GitLab API terminology.
 3. Call `orbit_invoke_command` with `command_name=query_graph` for queries.
 4. On a schema-violation error, re-fetch `get_graph_schema` with the relevant node expanded before retrying.

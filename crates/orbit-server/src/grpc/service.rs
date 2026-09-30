@@ -19,7 +19,7 @@ use tracing::{Instrument, info, instrument};
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
-use crate::auth::{Claims, JwtValidator, build_security_context};
+use crate::auth::{Claims, JwtValidator, SourceType, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
@@ -213,8 +213,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let tools = ToolRegistry::tools_for(
+        let inline_catalog = ctx.claims.source_type == SourceType::Dws;
+        let tools = ToolRegistry::tools_with_catalog(
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+            inline_catalog,
         )
         .into_iter()
         .map(proto_tool_definition)
@@ -1013,11 +1015,16 @@ mod tests {
     }
 
     fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
+        authed_request_from(message, user_id, SourceType::Rest)
+    }
+
+    fn authed_request_from<T>(message: T, user_id: u64, source_type: SourceType) -> Request<T> {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             iat: now,
             exp: now + 3600,
             user_id,
+            source_type,
             ..test_claims()
         };
         let token = encode(
