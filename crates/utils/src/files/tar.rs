@@ -193,32 +193,23 @@ fn inflate<R: Read>(
             }
             continue;
         }
-        if entry_type == ::tar::EntryType::Regular {
-            let mut file = File::new(path, entry.size());
-            let need = passes.header(&mut file)?;
-            if need == Need::Nothing && !file.loads() {
-                if file.decision != Decision::Drop {
-                    inflated.files.push(file);
-                }
-                continue;
-            }
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            if workers.send(Pending { file, dest, bytes }).is_err() {
-                return Ok(inflated);
+        // Directories exist because files are written into them; other
+        // entry types have no place in a checkout.
+        if entry_type != ::tar::EntryType::Regular {
+            continue;
+        }
+        let mut file = File::new(path, entry.size());
+        let need = passes.header(&mut file)?;
+        if need == Need::Nothing && !file.loads() {
+            if file.decision != Decision::Drop {
+                inflated.files.push(file);
             }
             continue;
         }
-        let unpacked = crate::fs::resolve_dest_within(target, &dest)
-            .and_then(|dest_canonical| entry.unpack(&dest_canonical).map(|_| ()));
-        match unpacked {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Err(SourceError::Io(e));
-            }
-            Err(e) => {
-                warn!(entry = %relative_path.display(), error = %e, "skipping archive entry that could not be unpacked");
-            }
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes)?;
+        if workers.send(Pending { file, dest, bytes }).is_err() {
+            return Ok(inflated);
         }
     }
     Ok(inflated)
