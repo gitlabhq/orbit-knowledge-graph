@@ -22,6 +22,9 @@ logical:
 physical:
   clickhouse:
     expect:
+      - (Definitions (Keys _candidate_p _) (Keys _candidate_mr _))
+      - (CenterFilter (InCte (Column mr id) _candidate_mr id))
+      - (Target p (Reference _candidate_p))
       - (Cte _candidate_p (Query ... (Scan gl_project p Plain) (Where (AND (= (Column p star_count) (Literal 1)) (= (Column p _deleted) (Literal false)))) ...))
       - (Subquery p (Query (Ctes) (Select (Output Unaliased Star)) (Subquery p (Query ... (Scan gl_project p Plain) (Where (InCte (Column p id) _candidate_p id)) ... (LimitBy 1 (Column p traversal_path) (Column p id)))) (Where (AND (= (Column p star_count) (Literal 1)) (= (Column p _deleted) (Literal false)))) ...))
     reject:

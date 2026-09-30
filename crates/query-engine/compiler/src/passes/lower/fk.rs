@@ -4,7 +4,7 @@
 //! columns the formatter expects.
 
 use ontology::constants::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::constants::*;
@@ -16,18 +16,18 @@ use super::helpers::{
     node_select_columns,
 };
 use super::{EmitOutput, NodeBinding};
-use crate::passes::plan::physical::PhysicalPlan;
+use crate::passes::plan::fk::{StarCandidates, TargetNarrowing};
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
 
 pub(super) fn emit_fk(plan: &Plan, shape: &FkShape) -> Result<EmitOutput> {
     match shape {
-        FkShape::Star { center } => emit_star(plan, center),
+        FkShape::Star { center, candidates } => emit_star(plan, center, candidates),
         FkShape::Chain(root) => super::physical::emit(root),
     }
 }
 
-fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
+fn emit_star(plan: &Plan, center_alias: &str, candidates: &StarCandidates) -> Result<EmitOutput> {
     let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
         QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
     })?;
@@ -38,68 +38,14 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut center_where_parts = latest_node_predicates(center_alias, center_np);
     let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
-    let mut ctes = Vec::new();
+    let mut ctes: Vec<_> = candidates
+        .definitions
+        .iter()
+        .map(|(name, keys)| Cte::new(name, super::physical::query(keys)))
+        .collect();
     let mut nodes = HashMap::from([(center_alias.to_string(), NodeBinding::table(center_alias))]);
-    let mut candidate_ctes = HashMap::new();
-    let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
-
-    emit_join_target_candidate_ctes(
-        plan,
-        &mut ctes,
-        &mut candidate_ctes,
-        &candidate_extra_predicates,
-    )?;
-
-    for hop in &plan.hops {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
-        let fk_alias = if fk.fk_node == center_alias {
-            center_alias.to_string()
-        } else {
-            fk.fk_node.clone()
-        };
-        if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
-            candidate_extra_predicates
-                .entry(fk_alias)
-                .or_default()
-                .push(Expr::InSubquery {
-                    expr: Box::new(Expr::col(&fk.fk_node, &fk.fk_column)),
-                    cte_name: cte_name.clone(),
-                    column: DEFAULT_PRIMARY_KEY.to_string(),
-                });
-        }
-    }
-
-    let joins_latest_node = plan.hops.iter().any(|hop| {
-        hop.fk
-            .as_ref()
-            .and_then(|fk| plan.nodes.get(&fk.target_node))
-            .is_some_and(|np| np.fk_needs_join)
-    });
-    let center_has_extra_predicates = candidate_extra_predicates
-        .get(center_alias)
-        .is_some_and(|predicates| !predicates.is_empty());
-    if joins_latest_node && center_has_extra_predicates {
-        let cte_name = candidate_cte_name(center_alias);
-        ctes.push(Cte::new(
-            &cte_name,
-            super::physical::query(&PhysicalPlan::candidate_keys(
-                center_np,
-                DEFAULT_PRIMARY_KEY,
-                candidate_extra_predicates
-                    .get(center_alias)
-                    .cloned()
-                    .unwrap_or_default(),
-            )?),
-        ));
-        candidate_ctes.insert(center_alias.to_string(), cte_name.clone());
-        center_where_parts.push(Expr::InSubquery {
-            expr: Box::new(Expr::col(center_alias, DEFAULT_PRIMARY_KEY)),
-            cte_name,
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        });
+    if let Some(predicate) = &candidates.center_filter {
+        center_where_parts.push(predicate.clone());
     }
 
     for hop in &plan.hops {
@@ -159,36 +105,16 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         }
 
         if target_np.fk_needs_join {
-            // The aggregation's GROUP BY plus the `target.id = center.fk_column`
-            // join already narrow the target, so a `_narrow_*` re-scan is redundant.
-            let narrowed_by_center_join =
-                !matches!(plan.body, PlanBody::Traversal { .. }) && fk_alias == center_alias;
-            // Narrow the target scan to the FK values the center references, else
-            // it scans the full org (e.g. all Jobs) just to join a handful.
-            let narrow = if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
-                Some(NarrowSource::Cte(cte_name.clone()))
-            } else if !narrowed_by_center_join
-                && target_np.filters.is_empty()
-                && target_np.node_ids.is_empty()
-                && target_np.id_range.is_none()
-                && center_np.has_selective_filters()
-            {
-                let narrow_name = format!("_narrow_{}", fk.target_node);
-                ctes.push(Cte::new(
-                    &narrow_name,
-                    super::physical::query(&PhysicalPlan::candidate_keys(
-                        center_np,
-                        &fk.fk_column,
-                        candidate_extra_predicates
-                            .get(center_alias)
-                            .cloned()
-                            .unwrap_or_default(),
-                    )?),
-                ));
-                Some(NarrowSource::Cte(narrow_name))
-            } else {
-                None
-            };
+            let narrow = candidates.targets.get(&fk.target_node).map(|target| {
+                let name = match target {
+                    TargetNarrowing::Reference(name) => name,
+                    TargetNarrowing::Define { name, keys } => {
+                        ctes.push(Cte::new(name, super::physical::query(keys)));
+                        name
+                    }
+                };
+                NarrowSource::Cte(name.clone())
+            });
             // No traversal_path equality on FK JOINs: entities at different depths
             // have different TP prefixes (WorkItem '1/100/' vs Project '1/100/1000/').
             let target_table = target_np.table.as_deref().ok_or_else(|| {
@@ -318,81 +244,4 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         ctes,
         edge_if_predicates: None,
     })
-}
-
-fn candidate_cte_name(alias: &str) -> String {
-    format!("_candidate_{alias}")
-}
-
-fn candidate_selective(np: &NodePlan, extra_predicates: &HashMap<String, Vec<Expr>>) -> bool {
-    !np.filters.is_empty()
-        || !np.node_ids.is_empty()
-        || np.id_range.is_some()
-        || extra_predicates
-            .get(&np.alias)
-            .is_some_and(|predicates| !predicates.is_empty())
-}
-
-fn fk_candidate_extra_predicates(plan: &Plan) -> Result<HashMap<String, Vec<Expr>>> {
-    let mut predicates: HashMap<String, Vec<Expr>> = HashMap::new();
-    for hop in &plan.hops {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
-        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
-            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
-        })?;
-        if target_np.node_ids.is_empty() || fk.referenced_column != DEFAULT_PRIMARY_KEY {
-            continue;
-        }
-        let fk_alias = fk.fk_node.clone();
-        predicates
-            .entry(fk_alias)
-            .or_default()
-            .push(id_list_predicate(
-                &fk.fk_node,
-                &fk.fk_column,
-                &target_np.node_ids,
-            ));
-    }
-    Ok(predicates)
-}
-
-fn emit_join_target_candidate_ctes(
-    plan: &Plan,
-    ctes: &mut Vec<Cte>,
-    candidate_ctes: &mut HashMap<String, String>,
-    candidate_extra_predicates: &HashMap<String, Vec<Expr>>,
-) -> Result<()> {
-    let mut emitted = HashSet::new();
-    for hop in &plan.hops {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
-        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
-            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
-        })?;
-        if !target_np.fk_needs_join || !emitted.insert(fk.target_node.clone()) {
-            continue;
-        }
-        if !candidate_selective(target_np, candidate_extra_predicates) {
-            continue;
-        }
-        let cte_name = candidate_cte_name(&fk.target_node);
-        ctes.push(Cte::new(
-            &cte_name,
-            super::physical::query(&PhysicalPlan::candidate_keys(
-                target_np,
-                &fk.referenced_column,
-                candidate_extra_predicates
-                    .get(&fk.target_node)
-                    .cloned()
-                    .unwrap_or_default(),
-            )?),
-        ));
-        candidate_ctes.insert(fk.target_node.clone(), cte_name);
-    }
-    Ok(())
 }

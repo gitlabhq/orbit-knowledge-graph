@@ -3,6 +3,7 @@
 //! enforces that emit functions only access their own variant's data.
 
 pub mod edge_chain;
+pub mod fk;
 mod hops;
 pub mod hydration;
 pub mod neighbors;

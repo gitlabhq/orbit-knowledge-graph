@@ -196,7 +196,10 @@ pub enum Strategy {
 pub enum FkShape {
     /// All hops have FKs on the same center node. The center node drives a
     /// single scan; other nodes JOIN via the center's FK columns.
-    Star { center: String },
+    Star {
+        center: String,
+        candidates: super::fk::StarCandidates,
+    },
     /// Every hop is FK-derived and consecutive hops share a node. The node
     /// tables are joined on their FK columns; the edges are a materialization
     /// of those FKs, so the chain skips all edge-table scans.
@@ -291,7 +294,13 @@ where
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
         Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?))
     } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
-        Strategy::Fk(FkShape::Star { center })
+        let candidates = super::fk::StarCandidates::plan(
+            &center,
+            &hops,
+            &nodes,
+            input.query_type == QueryType::Traversal,
+        )?;
+        Strategy::Fk(FkShape::Star { center, candidates })
     } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
         Strategy::Fk(FkShape::Chain(Box::new(PhysicalPlan::fk_chain(
             &hops,
@@ -791,7 +800,7 @@ fn compute_node_edge_mappings(
     let mut mappings = HashMap::new();
 
     match strategy {
-        Strategy::Fk(FkShape::Star { center }) => {
+        Strategy::Fk(FkShape::Star { center, .. }) => {
             mappings.insert(
                 center.clone(),
                 (center.clone(), DEFAULT_PRIMARY_KEY.to_string()),

@@ -92,6 +92,8 @@ Flat plans also contain the selective joined-node narrowing definitions, includi
 Lowering emits each definition on first use and connects the hop's membership predicate without reselecting eligible nodes.
 FK candidate prefilters also use physical key plans, with plain reads distinct from authoritative FINAL reads.
 Their consumers retain latest-row resolution and exact predicate rechecks.
+The selected FK-star plan owns candidate definitions in dependency order, the center membership predicate, and each joined target's narrowing source.
+Lowering renders those definitions and references without repeating candidate eligibility decisions.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 
