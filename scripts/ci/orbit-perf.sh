@@ -36,13 +36,22 @@ fi
 # Blocks until the MR image is pushed (built in parallel by docker-build-mr).
 wait_for_image() {
   [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
+  # Log in like the other registry scripts, so an auth failure can't pass for "not pushed yet".
+  if [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
+    echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null
+  fi
   log "     waiting for image ${GKG_IMAGE}:${GKG_IMAGE_TAG} (built by docker-build-mr)"
+  local start=$SECONDS
   for i in $(seq 1 90); do
     if mise -C "$CAPRONI_DIR" exec -- docker manifest inspect "${GKG_IMAGE}:${GKG_IMAGE_TAG}" >/dev/null 2>&1; then
-      log "     image ready after $(( (i - 1) * 10 ))s"
+      if [ "$i" -eq 1 ]; then
+        log "     image already pushed"
+      else
+        log "     image pushed after waiting $(( SECONDS - start ))s"
+      fi
       return 0
     fi
-    [ $(( i % 6 )) -eq 0 ] && log "     still waiting for image ($(( i * 10 ))s)"
+    [ $(( i % 6 )) -eq 0 ] && log "     still waiting for image ($(( SECONDS - start ))s so far)"
     sleep 10
   done
   log "     image not pushed after 15 min; did docker-build-mr fail or was it not played?"
