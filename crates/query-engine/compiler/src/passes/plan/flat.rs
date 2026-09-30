@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::ast::{Expr, JoinType, SelectExpr};
+use crate::ast::{Expr, SelectExpr};
 use crate::error::{QueryError, Result};
 use crate::passes::shared::{deleted_false, filter_to_expr};
 
@@ -36,7 +36,7 @@ pub(super) fn plan(facts: PlanningFacts<'_>, aggregate: bool) -> Result<Executio
 
 impl FlatBuilder<'_> {
     fn build(mut self, aggregate: bool) -> Result<ExecutionPlan> {
-        let mut source = None;
+        let mut source: Option<PhysicalSource> = None;
         let mut edge_if_predicates = None;
         let mut cascades = Vec::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
@@ -50,15 +50,13 @@ impl FlatBuilder<'_> {
                         .join_prev
                         .as_ref()
                         .expect("non-first hop must have join_prev");
-                    PhysicalSource::Join {
-                        kind: JoinType::Inner,
-                        condition: Expr::eq(
+                    previous.inner_join(
+                        edge,
+                        Expr::eq(
                             Expr::col(&join.prev_alias, &join.prev_col),
                             Expr::col(format!("e{index}"), &join.curr_col),
                         ),
-                        left: Box::new(previous),
-                        right: Box::new(edge),
-                    }
+                    )
                 }
                 None => edge,
             });
@@ -125,15 +123,13 @@ impl FlatBuilder<'_> {
                 let scan =
                     PhysicalPlan::node_scan(node, membership, self.facts.node_sort_key(node)?)?;
                 plan.outputs.extend(scan.outputs);
-                plan.source = PhysicalSource::Join {
-                    kind: JoinType::Inner,
-                    condition: Expr::eq(
+                plan.source = plan.source.inner_join(
+                    scan.source,
+                    Expr::eq(
                         Expr::col(alias, DEFAULT_PRIMARY_KEY),
                         Expr::col(edge, column),
                     ),
-                    left: Box::new(plan.source),
-                    right: Box::new(scan.source),
-                };
+                );
             }
         }
         Ok(plan)

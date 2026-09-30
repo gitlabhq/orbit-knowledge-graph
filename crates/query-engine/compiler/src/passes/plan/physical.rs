@@ -80,6 +80,15 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
+    pub(super) fn inner_join(self, right: Self, condition: Expr) -> Self {
+        Self::Join {
+            kind: JoinType::Inner,
+            condition,
+            left: Box::new(self),
+            right: Box::new(right),
+        }
+    }
+
     fn node(node: &NodePlan, final_: bool) -> Result<Self> {
         Ok(Self::Scan {
             table: node.table.clone().ok_or_else(|| {
@@ -245,15 +254,13 @@ impl PhysicalPlan {
                 &hop.from_node
             };
             let next = Self::node_scan(node(alias)?, None, &[])?;
-            plan.source = PhysicalSource::Join {
-                kind: JoinType::Inner,
-                condition: Expr::eq(
+            plan.source = plan.source.inner_join(
+                next.source,
+                Expr::eq(
                     Expr::col(&fk.fk_node, &fk.fk_column),
                     Expr::col(&fk.target_node, &fk.referenced_column),
                 ),
-                left: Box::new(plan.source),
-                right: Box::new(next.source),
-            };
+            );
             plan.outputs.extend(next.outputs);
             reached.insert(hop.from_node.as_str());
             reached.insert(hop.to_node.as_str());

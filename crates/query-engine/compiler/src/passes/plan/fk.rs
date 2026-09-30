@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::ast::{Expr, JoinType, SelectExpr};
+use crate::ast::{Expr, SelectExpr};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
@@ -145,15 +145,13 @@ pub(super) fn star(
                 QueryError::Lowering(format!("no sort key for node table '{table}'"))
             })?;
             let scan = PhysicalPlan::node_scan(target, membership, sort_key)?;
-            plan.source = PhysicalSource::Join {
-                kind: JoinType::Inner,
-                condition: Expr::eq(
+            plan.source = plan.source.inner_join(
+                scan.source,
+                Expr::eq(
                     Expr::col(&target.alias, &fk.referenced_column),
                     Expr::col(&fk.fk_node, &fk.fk_column),
                 ),
-                left: Box::new(plan.source),
-                right: Box::new(scan.source),
-            };
+            );
             plan.outputs.extend(scan.outputs);
         } else if target.hydration == HydrationStrategy::FilterOnly {
             let name = format!("_filter_{}", target.alias);

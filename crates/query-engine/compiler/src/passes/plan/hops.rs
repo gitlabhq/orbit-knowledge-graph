@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ontology::constants::*;
 
-use crate::ast::{Expr, JoinType, SelectExpr};
+use crate::ast::{Expr, SelectExpr};
 use crate::constants::{DEPTH_COLUMN, PATH_NODES_COLUMN};
 use crate::input::Direction;
 use crate::passes::shared::{deleted_false, rel_kind_filter};
@@ -67,12 +67,7 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         if let Some(kind) = rel_kind_filter(&current, &hop.rel_types) {
             condition = Expr::and(condition, kind);
         }
-        source = PhysicalSource::Join {
-            kind: JoinType::Inner,
-            condition,
-            left: Box::new(source),
-            right: Box::new(scan(&current)),
-        };
+        source = source.inner_join(scan(&current), condition);
     }
     let last = format!("e{depth}");
     let (source_alias, target_alias, kind_alias) = match hop.direction {
