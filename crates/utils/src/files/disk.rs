@@ -1,6 +1,6 @@
 //! A checkout on disk. Listing is cheap and reading is not, so every file
 //! found is offered to the repository filesystem by where it is; the
-//! filesystem reads it now only if a pass asks, and links it otherwise.
+//! filesystem reads it now only if a pass asks, and links it either way.
 
 use std::path::Path;
 
@@ -142,9 +142,15 @@ mod tests {
         assert_eq!(decision("link.rs"), Decision::ListOnly);
         assert_eq!(decision("model/weights.bin"), Decision::Parse);
         assert_eq!(vfs.content_id(Path::new("src/main.rs")), None, "linked");
-        assert!(
-            vfs.content_id(Path::new("Cargo.toml")).is_some(),
-            "read once at discovery because a pass asked"
+        assert_eq!(
+            decision("Cargo.toml"),
+            Decision::Load,
+            "decided at discovery"
+        );
+        assert_eq!(
+            vfs.content_id(Path::new("Cargo.toml")),
+            None,
+            "but not copied"
         );
 
         assert!(vfs.source(Path::new("src/main.rs")).is_ok());

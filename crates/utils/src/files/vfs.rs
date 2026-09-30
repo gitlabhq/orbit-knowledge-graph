@@ -295,8 +295,10 @@ impl Offer<'_> {
         Ok(())
     }
 
-    /// The file stays on disk; it is read now only if a pass asked.
-    pub fn on_disk(self, on_disk: std::path::PathBuf) -> Result<(), SourceError> {
+    /// The file stays on disk, where it already is storage. If a pass asked
+    /// to see it, it is read now for the decision and the bytes are let go;
+    /// otherwise the parser's first read decides.
+    pub fn on_disk(mut self, on_disk: std::path::PathBuf) -> Result<(), SourceError> {
         if !self.loads() {
             self.without_bytes();
             return Ok(());
@@ -306,7 +308,10 @@ impl Offer<'_> {
             return Ok(());
         }
         let bytes = std::fs::read(&on_disk)?;
-        self.with_bytes(bytes)
+        self.vfs.passes.content(&mut self.file, &bytes);
+        let slot = self.file.loads().then_some(Slot::Linked(on_disk));
+        self.vfs.keep(self.file, slot, true);
+        Ok(())
     }
 
     /// No bytes: a node in the tree, nothing more.
@@ -637,8 +642,9 @@ mod tests {
     }
 
     /// A checkout is linked, not copied; a linked file the passes want to
-    /// see is read once at link time, the rest on the parser's first read,
-    /// where the passes may still turn it down and the node records it.
+    /// see is read at link time for the decision only, the rest on the
+    /// parser's first read, where the passes may still turn it down and the
+    /// node records it.
     #[test]
     fn a_linked_checkout_is_checked_on_first_read() {
         let dir = tempfile::tempdir().unwrap();
@@ -661,10 +667,12 @@ mod tests {
         }
 
         assert_eq!(vfs.content_id(Path::new("lib.rs")), None, "linked, unread");
-        assert!(
-            vfs.content_id(Path::new("Cargo.toml")).is_some(),
-            "read once at link"
+        assert_eq!(
+            vfs.content_id(Path::new("Cargo.toml")),
+            None,
+            "decided at link, then linked"
         );
+        assert_eq!(decision(&vfs, "Cargo.toml"), Decision::Load);
         assert_eq!(decision(&vfs, "blob.rs"), Decision::Parse, "not yet read");
 
         assert_eq!(&*vfs.source(Path::new("lib.rs")).unwrap(), b"pub fn f() {}");
