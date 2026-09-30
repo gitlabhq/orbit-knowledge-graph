@@ -247,7 +247,7 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
-    pub(super) fn filter(self, predicates: Vec<Expr>) -> Self {
+    pub(crate) fn filter(self, predicates: Vec<Expr>) -> Self {
         predicates
             .into_iter()
             .fold(self, |input, predicate| Self::Filter {

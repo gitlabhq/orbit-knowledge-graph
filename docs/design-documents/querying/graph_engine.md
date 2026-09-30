@@ -97,6 +97,7 @@ FK-star planning builds the center scan, target joins, filter references, bindin
 Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
+Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.

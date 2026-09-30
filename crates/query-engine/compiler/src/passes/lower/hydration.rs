@@ -14,9 +14,8 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use crate::passes::plan::HydrationNodePlan;
+use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
 use crate::passes::shared::deleted_false;
-
-use super::helpers::limit_by_scan;
 
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
@@ -62,9 +61,9 @@ pub fn emit_hydration(
         .map(|n| emit_arm(n, is_dynamic, path_segment_budget));
     let mut first = arms
         .next()
-        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
+        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
     for arm in arms {
-        first.union_all.push(arm?);
+        first.union_all.push(arm);
     }
     first.limit = Some(limit);
     Ok(Node::Query(Box::new(first)))
@@ -74,7 +73,7 @@ fn emit_arm(
     node: &HydrationNodePlan,
     is_dynamic: bool,
     path_segment_budget: Option<usize>,
-) -> Result<Query> {
+) -> Query {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -126,19 +125,32 @@ fn emit_arm(
             inner_select.push(SelectExpr::col(alias, col));
         }
     }
-    let from = limit_by_scan(&node.table, alias, inner_select, &node.sort_key, scan_where);
-    let deleted = deleted_false(alias);
-
-    Ok(Query {
+    let keys = PhysicalPlan {
+        outputs: inner_select,
+        source: PhysicalSource::Latest {
+            alias: alias.clone(),
+            sort_key: node.sort_key.clone(),
+            input: Box::new(
+                PhysicalSource::Scan {
+                    table: node.table.clone(),
+                    alias: alias.clone(),
+                    final_: false,
+                    relationship: None,
+                }
+                .filter(scan_where),
+            ),
+        },
+    };
+    Query {
         select: vec![
             SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
             SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
             SelectExpr::new(json_expr, format!("{alias}_props")),
         ],
-        from,
-        where_clause: Some(deleted),
+        from: TableRef::subquery(super::physical::query(&keys), alias),
+        where_clause: Some(deleted_false(alias)),
         ..Default::default()
-    })
+    }
 }
 
 /// Build a traversal-path predicate from collected paths.

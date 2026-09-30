@@ -1,7 +1,6 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
-mod helpers;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
