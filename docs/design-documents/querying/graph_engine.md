@@ -78,6 +78,9 @@ Other traversal strategies and graph families retain their specialized emitters.
 FK-chain planning also uses the physical source tree, with explicit joins and scoped node scans.
 Each scoped scan resolves current rows and applies its predicates inside the derived table before joining.
 The shared emitter renders those joins and scopes; FK-star candidate narrowing remains specialized.
+Flat-chain planning selects a read mode for each hop: plain, FINAL, latest-row LIMIT BY, or bounded multi-hop expansion.
+It also selects whether narrowing predicates belong inside a FINAL scan from the leading sort-key columns.
+Flat-chain lowering constructs its specialized predicates and executes the selected single-hop reads through the shared physical emitter.
 Traversal and aggregation own their edge-chain strategies in their plan-body variants.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 

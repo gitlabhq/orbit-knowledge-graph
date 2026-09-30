@@ -38,6 +38,19 @@ pub(crate) fn node_select_columns(alias: &str, node: &NodePlan) -> Vec<SelectExp
         .collect()
 }
 
+pub(crate) fn latest_row_dedup(
+    alias: &str,
+    sort_key: &[String],
+) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
+    let keys: Vec<_> = sort_key
+        .iter()
+        .map(|column| Expr::col(alias, column))
+        .collect();
+    let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
+    order.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    (order, Some((1, keys)))
+}
+
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
     Table(&'a str),

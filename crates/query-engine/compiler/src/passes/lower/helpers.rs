@@ -9,6 +9,7 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use crate::passes::plan::*;
+use crate::passes::shared::latest_row_dedup;
 use crate::passes::shared::{
     deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
     rel_kind_filter, rel_kind_filter_values,
@@ -228,38 +229,6 @@ pub(super) fn push_edge_predicates(
             }
         }
     }
-}
-
-// FINAL streams the latest edge version in bounded memory; argMax GROUP BY held every key resident and OOM'd on fat rels.
-pub(super) fn dedup_edge_scan(
-    edge_table: &str,
-    alias: &str,
-    inner_predicates: Vec<Expr>,
-) -> TableRef {
-    let mut where_parts = inner_predicates;
-    where_parts.push(deleted_false(alias));
-    TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(edge_table, alias),
-            where_clause: Expr::conjoin(where_parts),
-            ..Default::default()
-        },
-        alias,
-    )
-}
-
-fn latest_row_dedup(
-    alias: &str,
-    sort_key: &[String],
-) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-    (order_by, Some((1, limit_by_cols)))
 }
 
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery

@@ -11,6 +11,49 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::{Hop, NodePlan};
 
+pub enum EdgeRead {
+    Plain,
+    Final { narrow_inside: bool },
+    Latest { sort_key: Vec<String> },
+    MultiHop,
+}
+
+pub fn edge_reads(
+    hops: &[Hop],
+    aggregate: bool,
+    sort_keys: &HashMap<String, Vec<String>>,
+) -> Result<Vec<EdgeRead>> {
+    hops.iter()
+        .map(|hop| {
+            Ok(if hop.max_hops > 1 {
+                EdgeRead::MultiHop
+            } else if hops.len() > 1 {
+                let (start, end) = hop.direction.edge_columns();
+                EdgeRead::Final {
+                    narrow_inside: sort_keys.get(&hop.edge_table).is_some_and(|keys| {
+                        keys.iter().take(4).any(|key| key == start || key == end)
+                    }),
+                }
+            } else if aggregate {
+                let sort_key = sort_keys
+                    .get(&hop.edge_table)
+                    .filter(|key| !key.is_empty())
+                    .ok_or_else(|| {
+                        QueryError::Lowering(format!(
+                            "no sort key for edge table '{}'; cannot plan latest rows",
+                            hop.edge_table
+                        ))
+                    })?;
+                EdgeRead::Latest {
+                    sort_key: sort_key.clone(),
+                }
+            } else {
+                EdgeRead::Plain
+            })
+        })
+        .collect()
+}
+
 pub struct PhysicalPlan {
     pub source: PhysicalSource,
     pub outputs: Vec<SelectExpr>,
@@ -35,6 +78,11 @@ pub enum PhysicalSource {
         condition: Expr,
         left: Box<Self>,
         right: Box<Self>,
+    },
+    Latest {
+        sort_key: Vec<String>,
+        alias: String,
+        input: Box<Self>,
     },
 }
 

@@ -6,12 +6,14 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
+    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
+    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
     node_id_pin_predicates, push_edge_predicates,
 };
 use super::{EmitOutput, NodeBinding};
+use crate::passes::plan::physical::{EdgeRead, PhysicalSource};
 use crate::passes::plan::*;
+use crate::passes::shared::deleted_false;
 use crate::passes::shared::filter_to_expr;
 
 /// Build a cascade anchor subquery for hop `i`, recursing through the chain
@@ -139,8 +141,12 @@ fn collect_edge_predicates(
     Ok(())
 }
 
-pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
-    let is_aggregation = matches!(plan.body, PlanBody::Aggregation { .. });
+pub(super) fn emit_flat_chain(plan: &Plan, reads: &[EdgeRead]) -> Result<EmitOutput> {
+    if reads.len() != plan.hops.len() {
+        return Err(QueryError::Lowering(
+            "each flat-chain hop requires a planned read".into(),
+        ));
+    }
     let dedup_edges = plan.hops.len() >= 2;
 
     let mut where_parts = Vec::new();
@@ -152,28 +158,17 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut filter_only_done: HashSet<String> = HashSet::new();
     let mut edge_if_predicates: Option<Expr> = None;
 
-    for (i, hop) in plan.hops.iter().enumerate() {
+    for (i, (hop, read)) in plan.hops.iter().zip(reads).enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
-        let is_multi_hop = hop.max_hops > 1;
+        let is_multi_hop = matches!(read, EdgeRead::MultiHop);
+        let scan = |final_| PhysicalSource::Scan {
+            table: hop.edge_table.clone(),
+            alias: alias.clone(),
+            final_,
+        };
 
-        // Single-hop aggregation: use LIMIT BY dedup with -If combinators
-        // instead of FINAL.
-        let use_limit_by = is_aggregation && !dedup_edges && !is_multi_hop;
-
-        if use_limit_by {
-            let Some(sort_key) = plan.table_sort_keys.get(&hop.edge_table) else {
-                return Err(QueryError::Lowering(format!(
-                    "no sort key for edge table '{}'; cannot emit LIMIT BY dedup",
-                    hop.edge_table
-                )));
-            };
-            if sort_key.is_empty() {
-                return Err(QueryError::Lowering(format!(
-                    "sort key for edge table '{}' is empty; cannot emit LIMIT BY dedup",
-                    hop.edge_table
-                )));
-            }
+        if let EdgeRead::Latest { sort_key } = read {
             let mut inner_preds = Vec::new();
             collect_edge_predicates(
                 &mut inner_preds,
@@ -189,15 +184,18 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
 
+            let source = PhysicalSource::Latest {
+                sort_key: sort_key.clone(),
+                alias: alias.clone(),
+                input: Box::new(PhysicalSource::Filter {
+                    predicate: Expr::conjoin(inner_preds).expect("edge predicates"),
+                    input: Box::new(scan(false)),
+                }),
+            };
             from = Some(
-                limit_by_scan(
-                    &hop.edge_table,
-                    &alias,
-                    vec![SelectExpr::star()],
-                    sort_key,
-                    inner_preds,
-                )
-                .with_relationship(hop.input_index),
+                super::physical::emit_source(&source)
+                    .from
+                    .with_relationship(hop.input_index),
             );
         } else {
             let mut narrow_in: Vec<Expr> = Vec::new();
@@ -246,30 +244,34 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 });
             }
 
-            let edge_pk_leading: Vec<&str> = plan
-                .table_sort_keys
-                .get(&hop.edge_table)
-                .map(|k| k.iter().take(4).map(String::as_str).collect())
-                .unwrap_or_default();
-            let push_narrow_inner =
-                edge_pk_leading.contains(&start_col) || edge_pk_leading.contains(&end_col);
-
             let edge_source = if is_multi_hop {
                 let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
                 where_parts.extend(union_wheres);
                 where_parts.extend(narrow_in);
                 union
-            } else if dedup_edges {
+            } else if let EdgeRead::Final { narrow_inside } = read {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
-                if push_narrow_inner {
+                if *narrow_inside {
                     inner.extend(narrow_in);
                 } else {
                     where_parts.extend(narrow_in);
                 }
-                dedup_edge_scan(&hop.edge_table, &alias, inner).with_relationship(hop.input_index)
+                inner.push(deleted_false(&alias));
+                let source = PhysicalSource::Scope {
+                    alias: alias.clone(),
+                    input: Box::new(PhysicalSource::Filter {
+                        predicate: Expr::conjoin(inner).expect("deletion predicate"),
+                        input: Box::new(scan(true)),
+                    }),
+                };
+                super::physical::emit_source(&source)
+                    .from
+                    .with_relationship(hop.input_index)
             } else {
                 where_parts.extend(narrow_in);
-                TableRef::scan(&hop.edge_table, &alias).with_relationship(hop.input_index)
+                super::physical::emit_source(&scan(false))
+                    .from
+                    .with_relationship(hop.input_index)
             };
 
             if let Some(prev_from) = from.take() {

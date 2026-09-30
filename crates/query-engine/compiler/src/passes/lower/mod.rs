@@ -116,7 +116,7 @@ impl Strategy {
         match self {
             Strategy::SingleNode(root) => physical::emit(root),
             Strategy::Fk(shape) => fk::emit_fk(plan, shape),
-            Strategy::Flat => flat_chain::emit_flat_chain(plan),
+            Strategy::Flat(reads) => flat_chain::emit_flat_chain(plan, reads),
         }
     }
 }

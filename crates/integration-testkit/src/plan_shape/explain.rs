@@ -147,7 +147,22 @@ pub fn physical(plan: &Plan, ast: &Node) -> S {
         PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
         {
             Strategy::SingleNode(root) => S::node("SingleNode", [physical_tree(root)]),
-            Strategy::Flat => S::node("Flat", []),
+            Strategy::Flat(reads) => S::node(
+                "Flat",
+                reads.iter().map(|read| {
+                    use compiler::passes::plan::physical::EdgeRead;
+                    match read {
+                        EdgeRead::Plain => S::node("Plain", []),
+                        EdgeRead::Final { narrow_inside } => {
+                            S::node("Final", [S::node("NarrowInside", [S::atom(narrow_inside)])])
+                        }
+                        EdgeRead::Latest { sort_key } => {
+                            S::node("Latest", [S::node("Key", sort_key.iter().map(S::atom))])
+                        }
+                        EdgeRead::MultiHop => S::node("MultiHop", []),
+                    }
+                }),
+            ),
             Strategy::Fk(FkShape::Star { center }) => S::node("FkStar", [S::atom(center)]),
             Strategy::Fk(FkShape::Chain(root)) => S::node("FkChain", [physical_tree(root)]),
         },
@@ -243,6 +258,18 @@ fn physical_source(plan: &compiler::passes::plan::physical::PhysicalSource) -> S
         PhysicalSource::Scope { alias, input } => {
             S::node("Scope", [S::atom(alias), physical_source(input)])
         }
+        PhysicalSource::Latest {
+            alias,
+            sort_key,
+            input,
+        } => S::node(
+            "Latest",
+            [
+                S::atom(alias),
+                S::node("Key", sort_key.iter().map(S::atom)),
+                physical_source(input),
+            ],
+        ),
         PhysicalSource::Join {
             kind,
             condition,

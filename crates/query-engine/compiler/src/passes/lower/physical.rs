@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::ast::{Expr, Query, SelectExpr, TableRef};
 use crate::error::Result;
 use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
+use crate::passes::shared::latest_row_dedup;
 
 use super::{EmitOutput, NodeBinding};
 
@@ -12,7 +13,7 @@ pub(super) fn emit(plan: &PhysicalPlan) -> Result<EmitOutput> {
     Ok(output)
 }
 
-fn emit_source(plan: &PhysicalSource) -> EmitOutput {
+pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
     match plan {
         PhysicalSource::Scan {
             table,
@@ -61,6 +62,26 @@ fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             left.where_parts.extend(right.where_parts);
             left.nodes.extend(right.nodes);
             left
+        }
+        PhysicalSource::Latest {
+            sort_key,
+            alias,
+            input,
+        } => {
+            let mut output = emit_source(input);
+            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+            output.from = TableRef::subquery(
+                Query {
+                    select: vec![SelectExpr::star()],
+                    from: output.from,
+                    where_clause: Expr::conjoin(std::mem::take(&mut output.where_parts)),
+                    order_by,
+                    limit_by,
+                    ..Default::default()
+                },
+                alias,
+            );
+            output
         }
     }
 }

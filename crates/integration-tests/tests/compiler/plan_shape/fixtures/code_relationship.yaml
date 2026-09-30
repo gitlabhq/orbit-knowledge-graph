@@ -19,12 +19,12 @@ logical:
 physical:
   clickhouse:
     expect:
-      - (Strategy (Flat))
+      - (Strategy (Flat (Plain)))
       - (Scan gl_code_edge e0 Plain)
       - (= (Column e0 source_id) (Literal 1))
   duckdb:
     expect:
-      - (Strategy (Flat))
+      - (Strategy (Flat (Plain)))
       - (Scan gl_edge e0 Plain)
       - (Node caller gl_definition Join)
       - (Node callee gl_definition Join)
