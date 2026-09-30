@@ -28,8 +28,24 @@ chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c
 # ---------------------------------------------------------------------------
 log "[1/4] bringing up gitlab-dev-stack + Orbit in the background"
 mise -C "$CAPRONI_DIR" install
+# MR runs test the MR's own image; main keeps the tag in values/gkg.yaml.
+if [ -n "${GKG_IMAGE_TAG:-}" ]; then
+  sed -i "s|^  tag: .*|  tag: \"${GKG_IMAGE_TAG}\"|" "$CAPRONI_DIR/values/gkg.yaml"
+  log "     gkg image tag: ${GKG_IMAGE_TAG}"
+fi
+# Blocks until the MR image is pushed (built in parallel by orbit-perf:mr-image).
+wait_for_image() {
+  [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
+  for _ in $(seq 1 90); do
+    mise -C "$CAPRONI_DIR" exec -- docker manifest inspect "${GKG_IMAGE}:${GKG_IMAGE_TAG}" >/dev/null 2>&1 && return 0
+    sleep 10
+  done
+  echo "image ${GKG_IMAGE}:${GKG_IMAGE_TAG} not pushed after 15 min; did orbit-perf:mr-image fail?" >&2
+  return 1
+}
 UP_LOG="$ROOT/caproni-up.log"
 (
+  wait_for_image
   cap --debug up
   kc wait -n gitlab --for=condition=Ready pod \
     -l app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver --timeout=600s
@@ -166,10 +182,17 @@ export GKG_JWT_SECRET
 GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
 [ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
 
+REPORT="$ROOT/loadtest-results.md"
+{
+  echo "## Orbit perf: gRPC load test"
+  echo
+  echo "Commit \`${CI_COMMIT_SHORT_SHA:-local}\` · image \`${GKG_IMAGE_TAG:-dev}\` · [job](${CI_JOB_URL:-}) · synth \`${SYNTH_CONFIG}\`"
+  echo
+} > "$REPORT"
 xtask loadtest \
   --endpoint http://127.0.0.1:50054 \
   --rounds "$ROUNDS" \
   --concurrency "$CONCURRENCY" \
-  | tee "$ROOT/loadtest-results.md"
+  | tee -a "$REPORT"
 
 log "done. results in loadtest-results.md"

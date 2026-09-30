@@ -1,26 +1,16 @@
 # Orbit performance test: seeds a synthetic graph into a real caproni + Orbit
 # stack and replays the query corpus over gRPC (scripts/ci/orbit-perf.sh).
-# Default branch only, never on MRs: it stands up a full cluster.
-orbit-perf:
+# Main: every commit, serialized. MRs: orbit-perf:mr, automatic when the query
+# path changes, manual otherwise; it posts the report as an MR comment.
+.orbit-perf-base:
   extends:
     - .job-template
     - .sccache-template
   stage: benchmark
-  needs: []
-  # Each run is a full cluster and one datapoint: never cancel, never overlap.
-  interruptible: false
-  resource_group: orbit-perf
   timeout: 2h
   tags: [saas-linux-large-amd64]
   services:
     - docker:dind
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    # Solo schedules also run on the default branch.
-    - !reference [.skip-on-solo-schedule, rules]
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      allow_failure: true
   variables:
     # docker:dind, mirrors caproni .integration-base
     DOCKER_HOST: tcp://docker:2376
@@ -37,3 +27,81 @@ orbit-perf:
     when: always
     paths:
       - loadtest-results.md
+
+orbit-perf:
+  extends: .orbit-perf-base
+  needs: []
+  # Each run is a full cluster and one datapoint: never cancel, never overlap.
+  interruptible: false
+  resource_group: orbit-perf
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    # Solo schedules also run on the default branch.
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      allow_failure: true
+
+# Paths that affect query performance; a change here runs the MR job automatically.
+.orbit-perf-query-path-changes:
+  changes:
+    - crates/query-engine/**/*
+    - crates/query-data-model/**/*
+    - crates/clickhouse-client/**/*
+    - crates/ontology/**/*
+    - crates/orbit-server/src/pipeline/**/*
+    - crates/orbit-server/src/redaction/**/*
+    - config/ontology/**/*
+    - config/graph.sql
+    - crates/integration-tests/tests/server/performance/**/*
+    - crates/xtask/src/loadtest.rs
+    - crates/xtask/src/synth/**/*
+    - scripts/ci/orbit-perf.sh
+    - scripts/ci/orbit-perf/**/*
+    - .gitlab/ci/orbit-perf.yml
+
+.orbit-perf-mr-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - if: $CI_MERGE_REQUEST_SOURCE_PROJECT_ID != $CI_PROJECT_ID
+      when: manual
+      allow_failure: true
+    - changes: !reference [.orbit-perf-query-path-changes, changes]
+      allow_failure: true
+    - when: manual
+      allow_failure: true
+
+# Builds the MR's gkg image; docker-build-mr itself stays manual.
+orbit-perf:mr-image:
+  extends: docker-build-mr
+  interruptible: true
+  rules: !reference [.orbit-perf-mr-rules, rules]
+
+orbit-perf:mr:
+  extends: .orbit-perf-base
+  # No needs on orbit-perf:mr-image: the script waits for the image in the
+  # background so the build overlaps compile and data generation.
+  needs: []
+  interruptible: true
+  # One run per MR at a time; never queues behind main or other MRs.
+  resource_group: orbit-perf-mr-$CI_MERGE_REQUEST_IID
+  timeout: 45m
+  variables:
+    GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
+    GKG_IMAGE_TAG: develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64
+  rules: !reference [.orbit-perf-mr-rules, rules]
+  after_script:
+    - |
+      if [ ! -s loadtest-results.md ]; then
+        echo "Skipping MR comment: no loadtest-results.md."
+      elif [ -z "${BENCHMARK_GITLAB_TOKEN:-}" ]; then
+        echo "Skipping MR comment: BENCHMARK_GITLAB_TOKEN unavailable."
+      else
+        mise exec -- gitlab-xtasks comment post --type add-or-edit \
+          --unique-id orbit-perf-loadtest-comment \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path loadtest-results.md || echo "MR comment post failed (non-fatal)."
+      fi
