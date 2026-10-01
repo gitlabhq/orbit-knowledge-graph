@@ -1,7 +1,7 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{AggFunction, ColumnSelection, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::physical::{PhysicalPlan, PhysicalSource};
-use compiler::passes::plan::{FkShape, Plan, PlanBody, Strategy};
+use compiler::passes::plan::{Plan, PlanBody};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -187,33 +187,29 @@ fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Ve
 
 pub fn physical(plan: &Plan, ast: &Node) -> (Tree, Tree) {
     let planned = match &plan.body {
-        PlanBody::Traversal { strategy } | PlanBody::Aggregation { strategy, .. } => match strategy
-        {
-            Strategy::SingleNode(root) | Strategy::Fk(FkShape::Chain(root)) => physical_tree(root),
-            Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }) => {
-                let source = Tree::node(
-                    Operator::Project,
-                    projections(&execution.outputs),
-                    vec![physical_source(&execution.source)],
-                );
-                if execution.definitions.is_empty() {
-                    source
-                } else {
-                    Tree::node(
-                        Operator::With,
-                        "",
-                        execution
-                            .definitions
-                            .iter()
-                            .map(|(name, keys)| {
-                                Tree::node(Operator::Cte, name, vec![physical_tree(keys)])
-                            })
-                            .chain([source])
-                            .collect(),
-                    )
-                }
+        PlanBody::Traversal { execution } | PlanBody::Aggregation { execution, .. } => {
+            let source = Tree::node(
+                Operator::Project,
+                projections(&execution.outputs),
+                vec![physical_source(&execution.source)],
+            );
+            if execution.definitions.is_empty() {
+                source
+            } else {
+                Tree::node(
+                    Operator::With,
+                    "",
+                    execution
+                        .definitions
+                        .iter()
+                        .map(|(name, keys)| {
+                            Tree::node(Operator::Cte, name, vec![physical_tree(keys)])
+                        })
+                        .chain([source])
+                        .collect(),
+                )
             }
-        },
+        }
         PlanBody::Neighbors { .. } => leaf(Operator::Neighbors, ""),
         PlanBody::PathFinding(_) => leaf(Operator::PathFinding, ""),
         PlanBody::Hydration { .. } => leaf(Operator::Hydration, ""),
