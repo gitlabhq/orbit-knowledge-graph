@@ -3,9 +3,8 @@ use std::collections::HashSet;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::ast::{Expr, SelectExpr};
+use super::requirements::{Column, OutputValue, Predicate, Projection, live, property_filter};
 use crate::error::{QueryError, Result};
-use crate::passes::shared::{deleted_false, filter_to_expr};
 
 use super::HydrationStrategy;
 use super::context::PlanningContext;
@@ -48,9 +47,9 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         .expect("non-first hop must have join_prev");
                     previous.inner_join(
                         edge,
-                        Expr::eq(
-                            Expr::col(&join.prev_alias, &join.prev_col),
-                            Expr::col(format!("e{index}"), &join.curr_col),
+                        (
+                            Column::new(&join.prev_alias, &join.prev_col),
+                            Column::new(format!("e{index}"), &join.curr_col),
                         ),
                     )
                 }
@@ -105,8 +104,8 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                             predicates,
                             cascades[index].as_ref(),
                         ),
-                        outputs: vec![SelectExpr::new(
-                            Expr::col(&scan_alias, column),
+                        outputs: vec![Projection::new(
+                            OutputValue::Column(Column::new(&scan_alias, column)),
                             DEFAULT_PRIMARY_KEY,
                         )],
                     };
@@ -121,9 +120,9 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 plan.outputs.extend(scan.outputs);
                 plan.source = plan.source.inner_join(
                     scan.source,
-                    Expr::eq(
-                        Expr::col(alias, DEFAULT_PRIMARY_KEY),
-                        Expr::col(edge, column),
+                    (
+                        Column::new(alias, DEFAULT_PRIMARY_KEY),
+                        Column::new(edge, column),
                     ),
                 );
             }
@@ -131,7 +130,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         Ok(plan)
     }
 
-    fn filter_keys(&mut self, index: usize) -> Result<Vec<Expr>> {
+    fn filter_keys(&mut self, index: usize) -> Result<Vec<Predicate>> {
         let hop = &self.facts.hops[index];
         let (start, end) = hop.direction.edge_columns();
         let mut predicates = Vec::new();
@@ -210,16 +209,16 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         }
         Some(PhysicalPlan {
             source: PhysicalSource::edge_keys(previous, &alias, predicates, upstream),
-            outputs: vec![SelectExpr::col(&alias, &join.prev_col)],
+            outputs: vec![Projection::col(&alias, &join.prev_col)],
         })
     }
 
     fn edge(
         &mut self,
         index: usize,
-        membership: Vec<Expr>,
+        membership: Vec<Predicate>,
         cascade: Option<&PhysicalPlan>,
-    ) -> Result<(PhysicalSource, Option<Expr>)> {
+    ) -> Result<(PhysicalSource, Option<Vec<Predicate>>)> {
         let hop = &self.facts.hops[index];
         let alias = format!("e{index}");
         let scan = |final_| PhysicalSource::Scan {
@@ -236,7 +235,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
             predicates.extend(membership);
-            let condition = Expr::conjoin(predicates.clone());
+            let condition = Some(predicates.clone());
             return Ok((
                 PhysicalSource::Latest {
                     sort_key: sort_key.to_vec(),
@@ -266,7 +265,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             };
             let scoped = PhysicalSource::Scope {
                 alias: alias.clone(),
-                input: Box::new(input.filter(vec![deleted_false(&alias)])),
+                input: Box::new(input.filter(vec![live(&alias)])),
             };
             if narrow_inside {
                 scoped
@@ -284,7 +283,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         predicates.extend(
             hop.filters
                 .iter()
-                .map(|(property, filter)| filter_to_expr(&alias, property, filter)),
+                .map(|(property, filter)| property_filter(&alias, property, filter)),
         );
         self.facts
             .push_denorm_tags(&mut predicates, hop, &alias, &mut self.tagged);

@@ -269,7 +269,7 @@ where
             .or_insert((holder, column));
     }
     Ok(if input.query_type == QueryType::Aggregation {
-        let result = context.aggregation(execution.edge_if_predicates.take().as_ref());
+        let result = context.aggregation(execution.edge_if_predicates.take());
         QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
     } else {
         QueryPlan::Traversal(context.finish(Traversal { execution }))

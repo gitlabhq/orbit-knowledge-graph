@@ -3,11 +3,10 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::ast::{Expr, SelectExpr};
+use super::requirements::{Column, OutputValue, Predicate, Projection, id_list};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
-use crate::passes::shared::id_list_predicate;
 
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
@@ -30,7 +29,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         edge_aliases: Vec::new(),
         edge_if_predicates: None,
     };
-    let mut extra: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut extra: HashMap<String, Vec<Predicate>> = HashMap::new();
     for hop in hops {
         let fk = hop
             .fk
@@ -38,14 +37,11 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             .ok_or_else(|| QueryError::Lowering("FK star hop missing metadata".into()))?;
         let target = context.node(&fk.target_node)?;
         if !target.node_ids.is_empty() && fk.referenced_column == DEFAULT_PRIMARY_KEY {
-            extra
-                .entry(fk.fk_node.clone())
-                .or_default()
-                .push(id_list_predicate(
-                    &fk.fk_node,
-                    &fk.fk_column,
-                    &target.node_ids,
-                ));
+            extra.entry(fk.fk_node.clone()).or_default().push(id_list(
+                &fk.fk_node,
+                &fk.fk_column,
+                &target.node_ids,
+            ));
         }
     }
     let center_pins = extra.get(center).cloned().unwrap_or_default();
@@ -105,11 +101,9 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             && !target.node_ids.is_empty()
             && fk.referenced_column == DEFAULT_PRIMARY_KEY
         {
-            plan.source = plan.source.filter(vec![id_list_predicate(
-                &fk.fk_node,
-                &fk.fk_column,
-                &target.node_ids,
-            )]);
+            plan.source =
+                plan.source
+                    .filter(vec![id_list(&fk.fk_node, &fk.fk_column, &target.node_ids)]);
         }
         if target.fk_needs_join {
             let name = if let Some(name) = references.get(&fk.target_node) {
@@ -134,9 +128,9 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             let scan = PhysicalPlan::node_scan(target, membership, context.node_sort_key(target)?)?;
             plan.source = plan.source.inner_join(
                 scan.source,
-                Expr::eq(
-                    Expr::col(&target.alias, &fk.referenced_column),
-                    Expr::col(&fk.fk_node, &fk.fk_column),
+                (
+                    Column::new(&target.alias, &fk.referenced_column),
+                    Column::new(&fk.fk_node, &fk.fk_column),
                 ),
             );
             plan.outputs.extend(scan.outputs);
@@ -166,11 +160,11 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         for (index, hop) in hops.iter().enumerate() {
             let fk = hop.fk.as_ref().expect("validated FK star hop");
             let target_id = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
-                Expr::col(center, &fk.fk_column)
+                Column::new(center, &fk.fk_column)
             } else {
-                Expr::col(&fk.target_node, DEFAULT_PRIMARY_KEY)
+                Column::new(&fk.target_node, DEFAULT_PRIMARY_KEY)
             };
-            let center_id = Expr::col(center, DEFAULT_PRIMARY_KEY);
+            let center_id = Column::new(center, DEFAULT_PRIMARY_KEY);
             let (from_id, to_id) = if fk.fk_node == hop.from_node {
                 (center_id, target_id)
             } else {
@@ -215,9 +209,9 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
         let next = PhysicalPlan::node_scan(context.node(alias)?, None, &[])?;
         plan.source = plan.source.inner_join(
             next.source,
-            Expr::eq(
-                Expr::col(&fk.fk_node, &fk.fk_column),
-                Expr::col(&fk.target_node, &fk.referenced_column),
+            (
+                Column::new(&fk.fk_node, &fk.fk_column),
+                Column::new(&fk.target_node, &fk.referenced_column),
             ),
         );
         plan.outputs.extend(next.outputs);
@@ -229,8 +223,8 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
                 hop,
                 index,
                 &context.nodes,
-                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
-                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+                Column::new(&hop.from_node, DEFAULT_PRIMARY_KEY),
+                Column::new(&hop.to_node, DEFAULT_PRIMARY_KEY),
             ));
         }
     }
@@ -241,9 +235,9 @@ fn edge_outputs(
     hop: &Hop,
     index: usize,
     nodes: &HashMap<String, NodePlan>,
-    from_id: Expr,
-    to_id: Expr,
-) -> [SelectExpr; 5] {
+    from_id: Column,
+    to_id: Column,
+) -> [Projection; 5] {
     let (source, source_id, target, target_id) = match hop.direction {
         Direction::Incoming => (&hop.to_node, to_id, &hop.from_node, from_id),
         Direction::Outgoing | Direction::Both => (&hop.from_node, from_id, &hop.to_node, to_id),
@@ -251,18 +245,18 @@ fn edge_outputs(
     [
         (
             EDGE_TYPE_SUFFIX,
-            Expr::string(hop.rel_types.first().map(String::as_str).unwrap_or("")),
+            OutputValue::Text(hop.rel_types.first().cloned().unwrap_or_default()),
         ),
-        (EDGE_SRC_SUFFIX, source_id),
+        (EDGE_SRC_SUFFIX, OutputValue::Column(source_id)),
         (
             EDGE_SRC_TYPE_SUFFIX,
-            Expr::string(nodes[source].entity.as_deref().unwrap_or("")),
+            OutputValue::Text(nodes[source].entity.clone().unwrap_or_default()),
         ),
-        (EDGE_DST_SUFFIX, target_id),
+        (EDGE_DST_SUFFIX, OutputValue::Column(target_id)),
         (
             EDGE_DST_TYPE_SUFFIX,
-            Expr::string(nodes[target].entity.as_deref().unwrap_or("")),
+            OutputValue::Text(nodes[target].entity.clone().unwrap_or_default()),
         ),
     ]
-    .map(|(suffix, value)| SelectExpr::new(value, format!("e{index}_{suffix}")))
+    .map(|(suffix, value)| Projection::new(value, format!("e{index}_{suffix}")))
 }

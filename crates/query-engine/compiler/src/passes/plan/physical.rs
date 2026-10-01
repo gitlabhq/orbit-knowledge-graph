@@ -1,18 +1,17 @@
-use crate::ast::{Expr, JoinType, SelectExpr};
-use crate::error::{QueryError, Result};
-use crate::passes::shared::{
-    filter_to_expr, id_list_predicate, id_range_predicate, latest_node_predicates,
-    node_select_columns,
+use super::requirements::{
+    Column, OutputValue, Predicate, Projection, id_list, node_outputs, node_predicates,
+    property_filter,
 };
+use crate::error::{QueryError, Result};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
-    pub edge_if_predicates: Option<Expr>,
+    pub edge_if_predicates: Option<Vec<Predicate>>,
     pub definitions: Vec<(String, PhysicalPlan)>,
-    pub outputs: Vec<SelectExpr>,
+    pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,
     pub edge_aliases: Vec<String>,
 }
@@ -35,24 +34,24 @@ impl BindingSource {
     }
 }
 
-pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Expr {
-    Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, column)),
-        cte_name: name,
-        column: DEFAULT_PRIMARY_KEY.into(),
+pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Predicate {
+    Predicate::Membership {
+        column: Column::new(alias, column),
+        definition: name,
+        key: DEFAULT_PRIMARY_KEY.into(),
     }
 }
 
 #[derive(Clone)]
 pub struct PhysicalPlan {
     pub source: PhysicalSource,
-    pub outputs: Vec<SelectExpr>,
+    pub outputs: Vec<Projection>,
 }
 
 #[derive(Clone)]
 pub enum PhysicalSource {
     KeyFilter {
-        value: Expr,
+        value: Column,
         keys: Box<PhysicalPlan>,
         input: Box<Self>,
     },
@@ -68,7 +67,7 @@ pub enum PhysicalSource {
         relationship: Option<usize>,
     },
     Filter {
-        predicate: Expr,
+        predicates: Vec<Predicate>,
         input: Box<Self>,
     },
     Scope {
@@ -76,8 +75,8 @@ pub enum PhysicalSource {
         input: Box<Self>,
     },
     Join {
-        kind: JoinType,
-        condition: Expr,
+        endpoints: (Column, Column),
+        predicates: Vec<Predicate>,
         left: Box<Self>,
         right: Box<Self>,
     },
@@ -89,10 +88,10 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
-    pub(super) fn inner_join(self, right: Self, condition: Expr) -> Self {
+    pub(super) fn inner_join(self, right: Self, endpoints: (Column, Column)) -> Self {
         Self::Join {
-            kind: JoinType::Inner,
-            condition,
+            endpoints,
+            predicates: vec![],
             left: Box::new(self),
             right: Box::new(right),
         }
@@ -109,26 +108,25 @@ impl PhysicalSource {
         })
     }
 
-    fn where_all(self, predicates: Vec<Expr>) -> Self {
+    fn where_all(self, predicates: Vec<Predicate>) -> Self {
         Self::Filter {
-            predicate: Expr::conjoin(predicates).expect("node scan predicates"),
+            predicates,
             input: Box::new(self),
         }
     }
 
-    pub(crate) fn filter(self, predicates: Vec<Expr>) -> Self {
-        predicates
-            .into_iter()
-            .fold(self, |input, predicate| Self::Filter {
-                predicate,
-                input: Box::new(input),
-            })
+    pub(crate) fn filter(self, predicates: Vec<Predicate>) -> Self {
+        if predicates.is_empty() {
+            self
+        } else {
+            self.where_all(predicates)
+        }
     }
 
     pub(super) fn cascade(self, hop: &Hop, alias: &str, upstream: Option<&PhysicalPlan>) -> Self {
         match upstream {
             Some(keys) => Self::KeyFilter {
-                value: Expr::col(
+                value: Column::new(
                     alias,
                     &hop.join_prev.as_ref().expect("cascade join").curr_col,
                 ),
@@ -142,11 +140,11 @@ impl PhysicalSource {
     pub(super) fn edge_keys(
         hop: &Hop,
         alias: &str,
-        predicates: Vec<Expr>,
+        predicates: Vec<Predicate>,
         upstream: Option<&PhysicalPlan>,
     ) -> Self {
         let source = Self::Filter {
-            predicate: Expr::conjoin(predicates).expect("edge predicates"),
+            predicates,
             input: Box::new(Self::Scan {
                 table: hop.edge_table.clone(),
                 alias: alias.into(),
@@ -159,7 +157,7 @@ impl PhysicalSource {
 }
 
 impl PhysicalPlan {
-    pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Expr>) -> Result<Self> {
+    pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Predicate>) -> Result<Self> {
         Self::keys(node, column, false, extra)
     }
 
@@ -167,13 +165,13 @@ impl PhysicalPlan {
         Self::keys(node, column, true, vec![])
     }
 
-    fn keys(node: &NodePlan, column: &str, final_: bool, extra: Vec<Expr>) -> Result<Self> {
-        let mut predicates = latest_node_predicates(&node.alias, node);
+    fn keys(node: &NodePlan, column: &str, final_: bool, extra: Vec<Predicate>) -> Result<Self> {
+        let mut predicates = node_predicates(node);
         predicates.extend(extra);
         Ok(Self {
             source: PhysicalSource::node(node, final_)?.where_all(predicates),
-            outputs: vec![SelectExpr::new(
-                Expr::col(&node.alias, column),
+            outputs: vec![Projection::new(
+                OutputValue::Column(Column::new(&node.alias, column)),
                 DEFAULT_PRIMARY_KEY,
             )],
         })
@@ -181,7 +179,7 @@ impl PhysicalPlan {
 
     pub fn node_scan(
         node: &NodePlan,
-        narrowing: Option<Expr>,
+        narrowing: Option<Predicate>,
         sort_key: &[String],
     ) -> Result<Self> {
         let mut source = PhysicalSource::node(node, narrowing.is_none())?;
@@ -199,18 +197,18 @@ impl PhysicalPlan {
                     .filter(|(column, filter)| {
                         sort_key.contains(column) && filter.filter.rhs_column.is_none()
                     })
-                    .map(|(column, filter)| filter_to_expr(&node.alias, column, filter)),
+                    .map(|(column, filter)| property_filter(&node.alias, column, filter)),
             );
             if sort_key.iter().any(|column| column == DEFAULT_PRIMARY_KEY) {
                 if !node.node_ids.is_empty() {
-                    predicates.push(id_list_predicate(
-                        &node.alias,
-                        DEFAULT_PRIMARY_KEY,
-                        &node.node_ids,
-                    ));
+                    predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
                 }
                 if let Some(range) = &node.id_range {
-                    predicates.push(id_range_predicate(&node.alias, range));
+                    predicates.push(Predicate::IdRange {
+                        column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                        start: range.start,
+                        end: range.end,
+                    });
                 }
             }
             source = PhysicalSource::Latest {
@@ -222,17 +220,16 @@ impl PhysicalPlan {
         Ok(Self {
             source: PhysicalSource::Scope {
                 alias: node.alias.clone(),
-                input: Box::new(source.where_all(latest_node_predicates(&node.alias, node))),
+                input: Box::new(source.where_all(node_predicates(node))),
             },
-            outputs: node_select_columns(&node.alias, node),
+            outputs: node_outputs(node),
         })
     }
 
     pub fn single_node(node: &NodePlan) -> Result<Self> {
         Ok(Self {
-            outputs: node_select_columns(&node.alias, node),
-            source: PhysicalSource::node(node, true)?
-                .where_all(latest_node_predicates(&node.alias, node)),
+            outputs: node_outputs(node),
+            source: PhysicalSource::node(node, true)?.where_all(node_predicates(node)),
         })
     }
 }

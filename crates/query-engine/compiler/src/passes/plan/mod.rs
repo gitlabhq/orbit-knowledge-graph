@@ -9,6 +9,7 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 pub mod physical;
+pub mod requirements;
 
 use std::collections::{HashMap, HashSet};
 

@@ -67,8 +67,8 @@ Foreign-key facts identify the source or target endpoint that holds the key, its
 The endpoint remains unambiguous for self-relationships and incoming traversals.
 Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
-Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
-All later passes continue to use that AST.
+Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
+All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 
 Single-node planning selects an executable scan/filter source tree and a list of result outputs.
 The single-node emitter renders those operations without choosing the scan or predicates again.
@@ -102,8 +102,9 @@ It appends candidate and narrowing definitions directly to the execution plan in
 Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
 Traversal and aggregation own execution plans in their plan-body variants. Lowering does not dispatch on the strategy that produced them.
 Aggregation planning resolves measure arguments, grouping columns, output aliases, and aggregate ordering through the shared context.
-It consumes the source plan's conditional predicate and preserves the existing count rules and time-bucket casts.
-Lowering assembles the resolved aggregate result with the emitted source without repeating metadata lookups.
+It records resolved measures, grouping columns, time buckets, and the source plan's conditional requirements.
+Lowering constructs aggregate calls and time-bucket casts without repeating metadata lookups.
+Ranges remain range requirements until lowering expands their comparisons. Joins carry endpoint columns and optional row requirements.
 All query families share one planning context and return a typed `Plan<T>` through the runtime `QueryPlan` enum.
 The context owns temporary query facts and transfers common metadata into the finished plan.
 Neighbors planning selects the fused scan when eligible; its lowerer renders the selected access path.

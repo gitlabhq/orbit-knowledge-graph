@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use ontology::constants::*;
 
-use crate::ast::{Expr, SelectExpr};
+use super::requirements::{Column, OutputValue, Predicate, Projection, live, relationship_kinds};
 use crate::constants::{DEPTH_COLUMN, PATH_NODES_COLUMN};
 use crate::input::Direction;
-use crate::passes::shared::{deleted_false, rel_kind_filter};
 
 use super::physical::{PhysicalPlan, PhysicalSource};
 use super::{Hop, NodePlan};
@@ -25,12 +24,15 @@ pub(super) fn multi_hop(
     let mut predicates = Vec::new();
     for (node, column) in [(&hop.from_node, from_kind), (&hop.to_node, to_kind)] {
         if let Some(entity) = nodes.get(node).and_then(|node| node.entity.as_ref()) {
-            predicates.push(Expr::eq(Expr::col(alias, column), Expr::string(entity)));
+            predicates.push(Predicate::EntityKind {
+                column: Column::new(alias, column),
+                entity: entity.clone(),
+            });
         }
     }
-    predicates.push(deleted_false(alias));
+    predicates.push(live(alias));
     PhysicalSource::Filter {
-        predicate: Expr::conjoin(predicates).expect("hop has a deletion predicate"),
+        predicates,
         input: Box::new(PhysicalSource::Union {
             alias: alias.into(),
             arms,
@@ -52,59 +54,57 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         final_: false,
     };
     let mut predicate = vec![];
-    if let Some(kind) = rel_kind_filter("e1", &hop.rel_types) {
+    if let Some(kind) = relationship_kinds("e1", &hop.rel_types) {
         predicate.push(kind);
     }
-    predicate.push(deleted_false("e1"));
+    predicate.push(live("e1"));
     let mut source = scan("e1");
     for index in 2..=depth {
         let previous = format!("e{}", index - 1);
         let current = format!("e{index}");
-        let mut condition = Expr::and(
-            Expr::eq(Expr::col(&previous, end), Expr::col(&current, start)),
-            deleted_false(&current),
-        );
-        if let Some(kind) = rel_kind_filter(&current, &hop.rel_types) {
-            condition = Expr::and(condition, kind);
+        let mut predicates = vec![live(&current)];
+        if let Some(kind) = relationship_kinds(&current, &hop.rel_types) {
+            predicates.push(kind);
         }
-        source = source.inner_join(scan(&current), condition);
+        source = PhysicalSource::Join {
+            endpoints: (Column::new(&previous, end), Column::new(&current, start)),
+            predicates,
+            left: Box::new(source),
+            right: Box::new(scan(&current)),
+        };
     }
     let last = format!("e{depth}");
     let (source_alias, target_alias, kind_alias) = match hop.direction {
         Direction::Outgoing | Direction::Both => ("e1", last.as_str(), "e1"),
         Direction::Incoming => (last.as_str(), "e1", last.as_str()),
     };
-    let path = Expr::func(
-        "array",
+    let path = OutputValue::Path(
         (1..=depth)
             .map(|index| {
                 let alias = format!("e{index}");
-                Expr::func(
-                    "tuple",
-                    vec![Expr::col(&alias, end), Expr::col(&alias, end_kind)],
-                )
+                (Column::new(&alias, end), Column::new(&alias, end_kind))
             })
             .collect(),
     );
     PhysicalPlan {
         source: PhysicalSource::Filter {
-            predicate: Expr::conjoin(predicate).expect("hop has a deletion predicate"),
+            predicates: predicate,
             input: Box::new(source),
         },
         outputs: vec![
-            SelectExpr::col("e1", start),
-            SelectExpr::col(&last, end),
-            SelectExpr::col(kind_alias, RELATIONSHIP_KIND_COLUMN),
-            SelectExpr::col(source_alias, SOURCE_ID_COLUMN),
-            SelectExpr::col(source_alias, SOURCE_KIND_COLUMN),
-            SelectExpr::col(source_alias, SOURCE_TAGS_COLUMN),
-            SelectExpr::col(target_alias, TARGET_ID_COLUMN),
-            SelectExpr::col(target_alias, TARGET_KIND_COLUMN),
-            SelectExpr::col(target_alias, TARGET_TAGS_COLUMN),
-            SelectExpr::new(path, PATH_NODES_COLUMN),
-            SelectExpr::new(Expr::int(i64::from(depth)), DEPTH_COLUMN),
-            SelectExpr::col("e1", DELETED_COLUMN),
-            SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN),
+            Projection::col("e1", start),
+            Projection::col(&last, end),
+            Projection::col(kind_alias, RELATIONSHIP_KIND_COLUMN),
+            Projection::col(source_alias, SOURCE_ID_COLUMN),
+            Projection::col(source_alias, SOURCE_KIND_COLUMN),
+            Projection::col(source_alias, SOURCE_TAGS_COLUMN),
+            Projection::col(target_alias, TARGET_ID_COLUMN),
+            Projection::col(target_alias, TARGET_KIND_COLUMN),
+            Projection::col(target_alias, TARGET_TAGS_COLUMN),
+            Projection::new(path, PATH_NODES_COLUMN),
+            Projection::new(OutputValue::Depth(depth), DEPTH_COLUMN),
+            Projection::col("e1", DELETED_COLUMN),
+            Projection::col("e1", TRAVERSAL_PATH_COLUMN),
         ],
     }
 }

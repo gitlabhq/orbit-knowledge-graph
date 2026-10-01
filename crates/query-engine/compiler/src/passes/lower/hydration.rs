@@ -14,8 +14,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use crate::passes::plan::HydrationNodePlan;
-use crate::passes::plan::physical::{PhysicalPlan, PhysicalSource};
-use crate::passes::shared::deleted_false;
+use crate::passes::shared::{deleted_false, latest_row_dedup};
 
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
@@ -96,21 +95,14 @@ fn emit_arm(
             inner_select.push(SelectExpr::col(alias, col));
         }
     }
-    let keys = PhysicalPlan {
-        outputs: inner_select,
-        source: PhysicalSource::Latest {
-            alias: alias.clone(),
-            sort_key: node.sort_key.clone(),
-            input: Box::new(
-                PhysicalSource::Scan {
-                    table: node.table.clone(),
-                    alias: alias.clone(),
-                    final_: false,
-                    relationship: None,
-                }
-                .filter(scan_where),
-            ),
-        },
+    let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
+    let keys = Query {
+        select: inner_select,
+        from: TableRef::scan(&node.table, alias),
+        where_clause: Expr::conjoin(scan_where),
+        order_by,
+        limit_by,
+        ..Default::default()
     };
     Query {
         select: vec![
@@ -118,7 +110,7 @@ fn emit_arm(
             SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
             SelectExpr::new(json_expr, format!("{alias}_props")),
         ],
-        from: TableRef::subquery(super::physical::query(&keys), alias),
+        from: TableRef::subquery(keys, alias),
         where_clause: Some(deleted_false(alias)),
         ..Default::default()
     }
