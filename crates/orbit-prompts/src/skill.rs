@@ -33,16 +33,23 @@ pub fn validate_skill_pair(
     let local_manifest = local
         .get(MANIFEST)
         .ok_or_else(|| format!("{} is missing {MANIFEST}", local_root.display()))?;
-    parse_skill_frontmatter(remote_manifest, "orbit")?;
     parse_skill_frontmatter(local_manifest, "orbit-cli")?;
-    let slots = parse_markers(remote_manifest, MarkerTree::Remote)?;
     let sections = parse_markers(local_manifest, MarkerTree::Local)?;
-    if slots != sections {
-        let missing_sections: Vec<_> = slots.difference(&sections).cloned().collect();
-        let missing_slots: Vec<_> = sections.difference(&slots).cloned().collect();
-        return Err(format!(
-            "skill placeholders and local sections do not match; placeholders without sections: {missing_sections:?}; sections without placeholders: {missing_slots:?}"
-        ));
+    for (path, manifest) in [(MANIFEST, remote_manifest)].into_iter().chain(
+        remote
+            .get("SKILL.gql.md")
+            .map(|manifest| ("SKILL.gql.md", manifest)),
+    ) {
+        parse_skill_frontmatter(manifest, "orbit").map_err(|error| format!("{path}: {error}"))?;
+        let slots = parse_markers(manifest, MarkerTree::Remote)
+            .map_err(|error| format!("{path}: {error}"))?;
+        if slots != sections {
+            let missing_sections: Vec<_> = slots.difference(&sections).cloned().collect();
+            let missing_slots: Vec<_> = sections.difference(&slots).cloned().collect();
+            return Err(format!(
+                "{path}: skill placeholders and local sections do not match; placeholders without sections: {missing_sections:?}; sections without placeholders: {missing_slots:?}"
+            ));
+        }
     }
 
     let union: BTreeSet<_> = remote.keys().chain(local.keys()).cloned().collect();
@@ -470,15 +477,16 @@ mod tests {
         ] {
             let root = fixture();
             let manifest = std::fs::read_to_string(root.path().join("remote/SKILL.md")).unwrap();
-            std::fs::write(
-                root.path().join("remote/SKILL.md"),
-                manifest.replacen(original, replacement, 1),
-            )
-            .unwrap();
-            let result = validate(root.path());
-            assert!(result.is_err(), "accepted replacement {replacement:?}");
-            let error = result.unwrap_err();
-            assert!(error.contains(expected_error), "{error}");
+            for path in ["remote/SKILL.md", "remote/SKILL.gql.md"] {
+                std::fs::write(
+                    root.path().join(path),
+                    manifest.replacen(original, replacement, 1),
+                )
+                .unwrap();
+                let error = validate(root.path()).unwrap_err();
+                assert!(error.contains(expected_error), "{path}: {error}");
+                std::fs::write(root.path().join(path), &manifest).unwrap();
+            }
         }
     }
 
@@ -574,6 +582,17 @@ mod tests {
             validate(root.path())
                 .unwrap_err()
                 .contains("placeholders and local sections do not match")
+        );
+        let root = fixture();
+        std::fs::write(
+            root.path().join("remote/SKILL.gql.md"),
+            remote_manifest("no placeholder\n"),
+        )
+        .unwrap();
+        let error = validate(root.path()).unwrap_err();
+        assert!(
+            error.contains("SKILL.gql.md: skill placeholders"),
+            "{error}"
         );
     }
 

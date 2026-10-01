@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.32.3
+version: 0.33.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -122,7 +122,8 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 
 | Topic | Location |
 |---|---|
-| First-run setup, exit codes, errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
+| First-run setup, exit codes, service health, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
+| Empty results and query validation errors | [`references/recipes.md`](references/recipes.md#troubleshooting) |
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |

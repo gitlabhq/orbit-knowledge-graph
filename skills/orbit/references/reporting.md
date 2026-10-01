@@ -10,7 +10,7 @@ of truth. Always present results with their coverage caveats. See
    historical file coverage (`HAS_LATEST_DIFF` vs `HAS_DIFF`) and time-bounded
    aggregates. When a query falls into one, append a one-line caveat to the
    answer, not a buried footnote.
-2. **Show the query.** Include the JSON request body (collapsed if long) so the
+2. **Show the query.** Include the query body or GQL text (collapsed if long) so the
    user can audit the traversal.
 3. **Do not invent a "Methodology" header that implies rigor the data
    lacks.** Use one only when the query itself is non-obvious. It is not a

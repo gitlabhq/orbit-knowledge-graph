@@ -313,19 +313,21 @@ fn handle_doc_code_block(
     let first_token = tokens.first().map(String::as_str);
     let marked = tokens.iter().any(|token| token == DOC_QUERY_MARKER);
 
-    if !block.closed && (marked || matches!(first_token, Some("json" | "bash" | "sh" | "shell"))) {
+    if !block.closed
+        && (marked || matches!(first_token, Some("json" | "gql" | "bash" | "sh" | "shell")))
+    {
         failures.push(format!("{path_label}:{line}: unclosed Markdown code fence"));
         return;
     }
 
     if marked {
         match normalize_marked_doc_query(first_token, &block.literal) {
-            Ok(query) => {
+            Ok((query, frontend)) => {
                 cases.push(SmokeCase {
                     key: format!("{path_label}:{line}"),
                     query,
                     expects_error: false,
-                    frontend: Frontend::JsonDsl,
+                    frontend,
                 });
             }
             Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
@@ -352,11 +354,16 @@ fn handle_doc_code_block(
     }
 }
 
-fn normalize_marked_doc_query(first_token: Option<&str>, body: &str) -> Result<String, String> {
+fn normalize_marked_doc_query(
+    first_token: Option<&str>,
+    body: &str,
+) -> Result<(String, Frontend), String> {
     match first_token {
-        Some("json") => normalize_doc_query(body),
+        Some("json") => Ok((normalize_doc_query(body)?, Frontend::JsonDsl)),
+        Some("gql") if !body.trim().is_empty() => Ok((body.trim().to_string(), Frontend::Gql)),
+        Some("gql") => Err("marked fence does not contain an Orbit query".to_string()),
         _ => Err(format!(
-            "`{DOC_QUERY_MARKER}` fences must use `json` as the first info token"
+            "`{DOC_QUERY_MARKER}` fences must use `json` or `gql` as the first info token"
         )),
     }
 }
