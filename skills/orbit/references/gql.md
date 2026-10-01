@@ -1,6 +1,6 @@
 # Orbit GQL reference
 
-Read-only graph queries in GQL text, based on openCypher. Pass each query
+Read-only graph queries in openCypher-based GQL text. Pass each query
 inline, for example `glab orbit query "MATCH ... RETURN ..."`. See
 [`SKILL.md`](../SKILL.md#running-a-query) for input forms.
 

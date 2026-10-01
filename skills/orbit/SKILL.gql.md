@@ -28,7 +28,7 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ## Query language
 
-Queries are read-only GQL text (`MATCH ... RETURN`). `glab orbit dsl` is unavailable.
+Queries are read-only openCypher-based GQL text (`MATCH ... RETURN`). `glab orbit dsl` is unavailable.
 
 ## Discovery
 
@@ -103,7 +103,7 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 | Topic | Location |
 |---|---|
 | First-run setup, exit codes, catalog, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| GQL syntax, paste-ready queries, and GQL errors | [`references/gql.md`](references/gql.md) |
+| openCypher-based GQL syntax, paste-ready queries, and errors | [`references/gql.md`](references/gql.md) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |
