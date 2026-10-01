@@ -74,6 +74,34 @@ text into a query.
 Continue with `PAGE rows AFTER 'next_cursor'`. The cursor binds to the query
 text, so change nothing else between pages.
 
+If the response reports `pagination.truncated` (the default `llm` output prints
+`truncated:true`), more rows matched than were returned. Raise the limit,
+narrow the filters, or page with `PAGE`. Do not present a truncated result as
+the full answer.
+
+## Token search
+
+`token_match(property, 'token')`, `all_tokens(property, 'tokens ...')`, and
+`any_tokens(property, 'tokens ...')` match whole tokens through a text index.
+They are faster than `CONTAINS` on large tables. They work in `WHERE`, combined
+with `AND`, only on text-indexed properties. Other properties reject with a
+validation error. Token values need at least 3 characters. These are the most
+useful indexed properties:
+
+| Node | Properties |
+|---|---|
+| `Definition` | `name`, `fqn`, `file_path` |
+| `File` | `name`, `path` |
+| `MergeRequest` | `title`, `description`, `source_branch`, `target_branch` |
+| `MergeRequestDiffFile` | `old_path`, `new_path` |
+| `WorkItem` | `title`, `description` |
+| `Note` | `note` |
+| `Pipeline` | `ref` |
+| `User` | `name`, `username` |
+
+Tokens match whole words, not substrings, so use `CONTAINS` for a fragment of
+a word. A token predicate counts as a literal filter, so it can anchor a node.
+
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
@@ -170,6 +198,46 @@ The merge request that renamed a file to this path stores the path only in
 `new_path`. To include it, rerun with `{new_path: 'app/models/user.rb'}` and
 add `f.old_path` to `RETURN`, which gives the old name to query for history from
 before the rename.
+
+### Subclasses of a class
+
+`EXTENDS` points from child to parent and collapses class extension, interface
+implementation, and struct embedding. Use `Definition.fqn` for namespaced
+parents. A bounded variable-length hop reaches indirect descendants:
+
+```gql orbit-query
+MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'ApplicationRecord'})
+RETURN child.name, child.fqn, child.file_path
+LIMIT 100
+```
+
+### Callers of a function
+
+`CALLS` points from the caller to the callee. Match `fqn` exactly as stored:
+methods join the class with the language's separator, not Ruby's `Class#method`
+notation. The separator is `::` for Ruby and Rust and `.` for Python and Java,
+so `MergeRequests::RefreshService#execute` is stored as
+`MergeRequests::RefreshService::execute`.
+
+```gql orbit-query
+MATCH (caller:Definition)-[:CALLS]->(callee:Definition {fqn: 'MergeRequests::RefreshService::execute'})
+RETURN caller.name, caller.fqn, caller.file_path
+LIMIT 100
+```
+
+An empty result usually means the `fqn` does not match. Check it first with
+`token_match(d.name, 'execute')` on a `Definition`, or an `fqn STARTS WITH`
+filter. Only after that, suspect that the language or project is not indexed.
+
+### Merge requests whose title mentions any of several words
+
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 77960826})
+WHERE any_tokens(mr.title, 'flaky retry') AND mr.state = 'merged'
+RETURN mr.iid, mr.title
+ORDER BY mr.created_at DESC
+LIMIT 20
+```
 
 ### Everything connected to one node
 

@@ -18,14 +18,16 @@ The GitLab Orbit skill gives AI coding agents structured guidance for querying t
 GitLab Orbit graph. It includes:
 
 - **Query recipes** - paste-ready queries for common questions (blast
-  radius, pipeline history, contributor patterns).
+  radius, pipeline history, contributor patterns, class hierarchies, callers,
+  and the merge requests that touched a file).
 - **Query language reference** - the full query language so agents compose
   valid queries on the first attempt. GitLab serves the JSON Query DSL or GQL
-  guidance, whichever query mode is enabled for you.
-- **Troubleshooting** - exit codes, empty-result diagnostics, and common
-  pitfalls.
-- **Repository map helpers** - scripts that summarize codebase structure from
-  a local checkout or from GitLab Orbit Remote.
+  guidance, whichever query mode is enabled for you. Both cover token search
+  and result truncation.
+- **Troubleshooting** - exit codes and the named-query catalog for both modes.
+  Empty-result and validation diagnostics are specific to each mode.
+- **Repository map helpers** - `glab orbit repo-map` summarizes a local
+  checkout. The remote repository map script is served only in JSON mode.
 
 The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 [GitLab Orbit Local](local/_index.md).

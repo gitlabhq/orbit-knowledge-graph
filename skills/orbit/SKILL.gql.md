@@ -65,6 +65,8 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Pipelines for a merge request need `WHERE pl.source = 'merge_request_event'`.
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. It repeats a file or merge request once per diff snapshot. To list the files of one merge request, use [this recipe](references/gql.md#files-a-merge-request-touched). To list the merge requests that touched one file, use [this one](references/gql.md#merge-requests-that-touched-a-file).
+- Code questions (subclasses, callers) and word search use `Definition` with `EXTENDS`/`CALLS` and `token_match`/`any_tokens`/`all_tokens`; see [the recipes](references/gql.md#subclasses-of-a-class) and [token search](references/gql.md#token-search).
+- If a response reports `pagination.truncated` (or `truncated:true` in `llm` output), more rows matched than were returned; say so.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 
