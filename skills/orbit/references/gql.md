@@ -113,8 +113,8 @@ LIMIT 10
 ### Pipelines that ran for one merge request
 
 ```gql orbit-query
-MATCH (mr:MergeRequest {id: 482908721})-[:TRIGGERED]->(pl:Pipeline)
-WHERE pl.source = 'merge_request_event'
+MATCH (pl:Pipeline)
+WHERE pl.merge_request_id = 482908721 AND pl.source = 'merge_request_event'
 RETURN pl.id, pl.status, pl.ref
 ORDER BY pl.created_at DESC
 LIMIT 10
