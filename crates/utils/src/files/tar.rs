@@ -110,9 +110,27 @@ fn inflate<'a, R: Read>(
         let Some(entry) = vfs.stat(&path, archived.size(), is_symlink)? else {
             continue;
         };
-        // A symlink is a node with no bytes of its own; so is a file the
-        // header already settled, whose body is not worth inflating.
-        if is_symlink || !(entry.loads() || entry.needs_bytes()) {
+        if is_symlink {
+            // A hard link names another archive entry under the archive
+            // root; a symlink's target is already relative to the link.
+            let target = archived
+                .link_name()
+                .map_err(std::io::Error::other)?
+                .map(|t| t.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let target = match entry_type == ::tar::EntryType::Link {
+                true => format!(
+                    "/{}",
+                    strip_archive_root(Path::new(&target), &mut archive_root)?.display()
+                ),
+                false => target,
+            };
+            entry.symlink(&target);
+            continue;
+        }
+        // A file the header already settled is a node whose body is not
+        // worth inflating.
+        if !(entry.loads() || entry.needs_bytes()) {
             entry.list();
             continue;
         }
@@ -331,10 +349,11 @@ mod tests {
         assert!(err.to_string().contains("path traversal"), "got: {err}");
     }
 
-    /// A symlink is a node in the tree with no bytes, wherever it points; there
-    /// is no disk for it to escape.
+    /// A symlink is a node that is never parsed; a path through it reads as
+    /// its target. One that points out of the repository reads as nothing:
+    /// there is no disk for it to escape.
     #[test]
-    fn symlinks_are_listed_and_never_read() {
+    fn symlinks_are_listed_and_followed_within_the_repository() {
         let vfs = Vfs::new(ParseAll, None);
         let data = build_archive(&[
             Entry::File("root/src/lib.rs", b"real content"),
@@ -347,11 +366,13 @@ mod tests {
         let decision = |p: &str| vfs.file(Path::new(p)).unwrap().decision;
         assert_eq!(decision("bin/run"), Decision::ListOnly);
         assert_eq!(decision("escape"), Decision::ListOnly);
-        assert!(listed_only(&vfs, "bin/run"));
-        assert!(listed_only(&vfs, "escape"));
         assert_eq!(
-            vfs.read_to_string(Path::new("src/lib.rs")).unwrap(),
+            vfs.read_to_string(Path::new("bin/run")).unwrap(),
             "real content"
+        );
+        assert_eq!(
+            vfs.read(Path::new("escape")).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
         );
     }
 

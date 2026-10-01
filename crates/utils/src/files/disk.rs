@@ -91,9 +91,15 @@ fn put(root: &Path, path: &str, vfs: &Vfs) -> Result<(), SourceError> {
             return Ok(());
         }
     };
-    match metadata.is_symlink() {
-        true => vfs.list(path, metadata.len(), true),
-        false => vfs.link(path, on_disk, metadata.len()),
+    if !metadata.is_symlink() {
+        return vfs.link(path, on_disk, metadata.len());
+    }
+    match std::fs::read_link(&on_disk) {
+        Ok(target) => vfs.symlink(path, &target.to_string_lossy()),
+        Err(e) => {
+            warn!(path, error = %e, "skipping a symlink that vanished during discovery");
+            Ok(())
+        }
     }
 }
 
@@ -188,6 +194,11 @@ mod tests {
         assert!(!vfs.exists(Path::new("ignored/secret.rs")));
         assert_eq!(decision("assets/logo.png"), Decision::ListOnly);
         assert_eq!(decision("link.rs"), Decision::ListOnly);
+        assert_eq!(
+            vfs.read_to_string(Path::new("link.rs")).unwrap(),
+            "fn main() {}",
+            "a symlink reads as its target"
+        );
         assert_eq!(decision("model/weights.bin"), Decision::Parse);
         assert_eq!(vfs.content_id(Path::new("src/main.rs")), None, "linked");
         assert_eq!(

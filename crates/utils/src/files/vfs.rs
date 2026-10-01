@@ -56,6 +56,9 @@ impl ContentId {
 pub struct Vfs {
     passes: Arc<dyn Pass>,
     nodes: Mutex<FxHashMap<String, Node>>,
+    /// Symlink path → its target, so a path through one can be followed
+    /// without touching the node map for every component.
+    links: Mutex<FxHashMap<String, String>>,
     blobs: Mutex<FxHashMap<ContentId, Blob>>,
     children: Mutex<FxHashMap<String, FxHashMap<String, bool>>>,
     resident: Counter,
@@ -82,12 +85,17 @@ struct Node {
     checked: bool,
 }
 
-/// Where a loading file's bytes are.
+/// Where a file's bytes are: stored, on disk, or wherever its link points.
 #[derive(Debug, Clone)]
 enum Slot {
     Stored(ContentId),
     Linked(std::path::PathBuf),
+    /// A symlink; its target lives in `Vfs::links`.
+    Link,
 }
+
+/// How many links a path may pass through before it is a loop.
+const MAX_LINK_DEPTH: usize = 40;
 
 /// Where a distinct content is.
 #[derive(Debug, Clone)]
@@ -145,6 +153,7 @@ impl Vfs {
         Self {
             passes: Arc::new(passes),
             nodes: Mutex::default(),
+            links: Mutex::default(),
             blobs: Mutex::default(),
             children: Mutex::default(),
             resident: Counter::new("resident_bytes", budget),
@@ -197,10 +206,19 @@ impl Vfs {
         }
     }
 
-    /// A file with no bytes: a symlink, say. A node, nothing more.
-    pub fn list(&self, path: &str, size: u64, symlink: bool) -> Result<(), SourceError> {
-        if let Some(entry) = self.stat(path, size, symlink)? {
+    /// A file with no bytes of its own. A node, nothing more.
+    pub fn list(&self, path: &str, size: u64) -> Result<(), SourceError> {
+        if let Some(entry) = self.stat(path, size, false)? {
             entry.list();
+        }
+        Ok(())
+    }
+
+    /// A symlink: a node that is never parsed, and a path that reads as
+    /// whatever `target` names inside the repository.
+    pub fn symlink(&self, path: &str, target: &str) -> Result<(), SourceError> {
+        if let Some(entry) = self.stat(path, 0, true)? {
+            entry.symlink(target);
         }
         Ok(())
     }
@@ -330,14 +348,22 @@ impl Entry<'_> {
         }
         self.vfs.keep(self.file, None, true);
     }
+
+    /// A link to `target`, relative to the link's directory or to the root.
+    pub fn symlink(mut self, target: &str) {
+        self.file.decision = Decision::ListOnly;
+        lock(&self.vfs.links).insert(self.file.path.clone(), target.to_string());
+        self.vfs.keep(self.file, Some(Slot::Link), true);
+    }
 }
 
 /// Reading, with `std::fs` semantics: a missing path is `NotFound`, reading a
 /// directory is an error, a file kept without bytes is `Unsupported`,
-/// `read_dir` lists direct children in no particular order.
+/// `read_dir` lists direct children in no particular order, and every verb
+/// but `symlink_metadata` and `read_link` follows symlinks.
 impl Vfs {
     pub fn read(&self, path: &Path) -> io::Result<Arc<[u8]>> {
-        let key = key(path).ok_or_else(not_found)?;
+        let key = self.resolve(path)?;
         let node = lock(&self.nodes).get(&key).cloned();
         match node {
             Some(Node {
@@ -358,7 +384,7 @@ impl Vfs {
     /// The parser's read: the content passes see a linked file's bytes on
     /// this first read and may turn it down, which the node then records.
     pub fn source(&self, path: &Path) -> Result<Arc<[u8]>, Unread> {
-        let key = key(path).ok_or_else(|| Unread::Unreadable(not_found()))?;
+        let key = self.resolve(path).map_err(Unread::Unreadable)?;
         let node = lock(&self.nodes).get(&key).cloned();
         let Some(node) = node else {
             return Err(Unread::Unreadable(not_found()));
@@ -397,11 +423,17 @@ impl Vfs {
                 }
             }
             Slot::Linked(on_disk) => std::fs::read(on_disk).map(Into::into),
+            Slot::Link => Err(not_found()),
         }
     }
 
     pub fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        let key = key(path).ok_or_else(not_found)?;
+        self.symlink_metadata(Path::new(&self.resolve(path)?))
+    }
+
+    /// The node at `path` itself, a symlink included.
+    pub fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
+        let key = self.resolve_parents(path)?;
         if let Some(node) = lock(&self.nodes).get(&key) {
             return Ok(Metadata {
                 len: node.file.size,
@@ -419,8 +451,62 @@ impl Vfs {
         Err(not_found())
     }
 
-    pub fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    /// Where a symlink points, as written.
+    pub fn read_link(&self, path: &Path) -> io::Result<std::path::PathBuf> {
+        let key = self.resolve_parents(path)?;
+        lock(&self.links)
+            .get(&key)
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{key} is not a symlink"),
+                )
+            })
+    }
+
+    /// One spelling per file: `/`-rooted, no `.` or `..`, no symlink left in
+    /// the path. `NotFound` if nothing is there.
+    pub fn canonicalize(&self, path: &Path) -> io::Result<std::path::PathBuf> {
+        let key = self.resolve(path)?;
+        self.symlink_metadata(Path::new(&key))?;
+        Ok(Path::new("/").join(key))
+    }
+
+    /// The key a path names once every symlink in it is followed.
+    fn resolve(&self, path: &Path) -> io::Result<String> {
+        let mut key = key(path).ok_or_else(not_found)?;
+        let links = lock(&self.links);
+        if links.is_empty() {
+            return Ok(key);
+        }
+        for _ in 0..MAX_LINK_DEPTH {
+            match follow_first_link(&key, &links) {
+                Some(next) => key = next?,
+                None => return Ok(key),
+            }
+        }
+        Err(io::Error::other(format!(
+            "{} passes through too many symlinks",
+            path.display()
+        )))
+    }
+
+    /// Like `resolve`, but a symlink as the last component stays itself.
+    fn resolve_parents(&self, path: &Path) -> io::Result<String> {
         let key = key(path).ok_or_else(not_found)?;
+        let Some((parent, name)) = key.rsplit_once('/') else {
+            return Ok(key);
+        };
+        let parent = self.resolve(Path::new(parent))?;
+        Ok(match parent.is_empty() {
+            true => name.to_string(),
+            false => format!("{parent}/{name}"),
+        })
+    }
+
+    pub fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+        let key = self.resolve(path)?;
         match lock(&self.children).get(&key) {
             Some(children) => Ok(children
                 .iter()
@@ -496,18 +582,53 @@ fn reason(label: &Label) -> String {
         .map_or_else(|| "no bytes".to_string(), |s: SkipReason| s.to_string())
 }
 
-/// A repo-relative `/`-joined key; the repository root is `""`. `None` if
-/// the path climbs out of the repository.
+/// A repo-relative `/`-joined key; the repository root is `""`. `.` and `..`
+/// resolve lexically; `None` if the path climbs above the root.
 fn key(path: &Path) -> Option<String> {
-    let mut parts = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
     for component in path.components() {
         match component {
             Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-            Component::CurDir | Component::RootDir => {}
-            Component::ParentDir | Component::Prefix(_) => return None,
+            Component::CurDir => {}
+            Component::RootDir => parts.clear(),
+            Component::ParentDir => {
+                parts.pop()?;
+            }
+            Component::Prefix(_) => return None,
         }
     }
     Some(parts.join("/"))
+}
+
+/// Replace the first symlink component of `key` with its target: the rest of
+/// the key follows. `None` when no component is a symlink; an error when the
+/// target climbs out of the repository.
+fn follow_first_link(key: &str, links: &FxHashMap<String, String>) -> Option<io::Result<String>> {
+    let mut end = 0;
+    loop {
+        end = match key[end..].find('/') {
+            Some(i) => end + i,
+            None => key.len(),
+        };
+        let prefix = &key[..end];
+        if let Some(target) = links.get(prefix) {
+            let rest = &key[end..];
+            let parent = prefix.rsplit_once('/').map_or("", |(parent, _)| parent);
+            let resolved = match target.starts_with('/') {
+                true => Path::new(target).to_path_buf(),
+                false => Path::new(parent).join(target),
+            };
+            return Some(
+                super::vfs::key(&resolved)
+                    .map(|k| format!("{k}{rest}"))
+                    .ok_or_else(not_found),
+            );
+        }
+        if end == key.len() {
+            return None;
+        }
+        end += 1;
+    }
 }
 
 fn not_found() -> io::Error {
@@ -589,6 +710,11 @@ mod tests {
         assert!(vfs.is_dir(Path::new("/")));
         assert!(!vfs.exists(Path::new("src/missing.rs")));
         assert!(!vfs.exists(Path::new("../escape.rs")));
+        assert!(!vfs.exists(Path::new("src/../../escape.rs")));
+        assert!(
+            vfs.is_file(Path::new("src/lib/../main.rs")),
+            "`..` inside the root is a path"
+        );
         assert_eq!(
             names(vfs.read_dir(Path::new("/")).unwrap()),
             [("README.md".into(), false), ("src".into(), true)]
@@ -626,7 +752,7 @@ mod tests {
         vfs.write("model/weights.bin", b"\x00\x01".to_vec())
             .unwrap();
         vfs.write("build.log", b"noise".to_vec()).unwrap();
-        vfs.list("link.rs", 0, true).unwrap();
+        vfs.symlink("link.rs", "src/main.rs").unwrap();
 
         let rows: Vec<(String, Decision)> = vfs
             .files()
@@ -643,7 +769,12 @@ mod tests {
             ]
         );
         assert!(vfs.exists(Path::new("assets/logo.png")));
-        assert!(vfs.metadata(Path::new("link.rs")).unwrap().is_symlink);
+        assert!(
+            vfs.symlink_metadata(Path::new("link.rs"))
+                .unwrap()
+                .is_symlink
+        );
+        assert!(!vfs.metadata(Path::new("link.rs")).unwrap().is_symlink);
         assert_eq!(
             vfs.read(Path::new("model/weights.bin")).unwrap_err().kind(),
             io::ErrorKind::Unsupported
@@ -774,6 +905,88 @@ mod tests {
             vfs.scratch.get().is_none(),
             "the shared content was charged more than once"
         );
+    }
+
+    /// A symlink is never parsed, but a path through it reads as its target,
+    /// as it would on disk: files, directories, and chains alike.
+    #[test]
+    fn symlinks_are_followed_inside_the_repository() {
+        let vfs = Vfs::new(TestFilter, None);
+        vfs.write("shared/skills/a/SKILL.md", b"# a".to_vec())
+            .unwrap();
+        vfs.write("Gemfile", b"source 'x'".to_vec()).unwrap();
+        vfs.symlink("Gemfile.next", "Gemfile").unwrap();
+        vfs.symlink(".agents/skills", "../shared/skills").unwrap();
+        vfs.symlink("bin/run", "../Gemfile.next").unwrap();
+        vfs.symlink("abs", "/Gemfile").unwrap();
+
+        assert_eq!(
+            &*vfs.read(Path::new("Gemfile.next")).unwrap(),
+            b"source 'x'"
+        );
+        assert_eq!(
+            &*vfs.read(Path::new("bin/run")).unwrap(),
+            b"source 'x'",
+            "a chain"
+        );
+        assert_eq!(
+            &*vfs.read(Path::new("abs")).unwrap(),
+            b"source 'x'",
+            "rooted target"
+        );
+        assert_eq!(
+            vfs.read_to_string(Path::new("/.agents/skills/a/SKILL.md"))
+                .unwrap(),
+            "# a",
+            "a path through a symlinked directory"
+        );
+        assert!(vfs.is_dir(Path::new(".agents/skills")));
+        assert_eq!(vfs.read_dir(Path::new(".agents/skills")).unwrap().len(), 1);
+        assert_eq!(
+            vfs.canonicalize(Path::new("./bin/../bin/run")).unwrap(),
+            Path::new("/Gemfile")
+        );
+        assert_eq!(
+            vfs.read_link(Path::new("bin/run")).unwrap(),
+            Path::new("../Gemfile.next")
+        );
+        assert_eq!(
+            decision(&vfs, "Gemfile.next"),
+            Decision::ListOnly,
+            "never parsed"
+        );
+        assert!(
+            vfs.source(Path::new("Gemfile.next")).is_ok(),
+            "but readable"
+        );
+    }
+
+    /// There is nothing outside the repository for a symlink to reach, and
+    /// a loop ends instead of hanging.
+    #[test]
+    fn symlinks_cannot_escape_and_loops_end() {
+        let vfs = Vfs::default();
+        vfs.write("a.txt", b"a".to_vec()).unwrap();
+        vfs.symlink("etc", "../../etc/passwd").unwrap();
+        vfs.symlink("root_etc", "/etc/passwd").unwrap();
+        vfs.symlink("dangling", "nowhere").unwrap();
+        vfs.symlink("ping", "pong").unwrap();
+        vfs.symlink("pong", "ping").unwrap();
+
+        for path in ["etc", "root_etc", "dangling"] {
+            assert_eq!(
+                vfs.read(Path::new(path)).unwrap_err().kind(),
+                io::ErrorKind::NotFound,
+                "{path}"
+            );
+            assert!(
+                vfs.symlink_metadata(Path::new(path)).unwrap().is_symlink,
+                "{path} is still a node"
+            );
+        }
+        assert!(vfs.read(Path::new("ping")).is_err());
+        assert!(vfs.read(Path::new("ping/deeper")).is_err());
+        assert_eq!(&*vfs.read(Path::new("a.txt")).unwrap(), b"a");
     }
 
     #[test]

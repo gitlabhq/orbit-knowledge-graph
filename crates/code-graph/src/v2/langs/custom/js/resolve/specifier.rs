@@ -1,5 +1,4 @@
 use crate::utils::Range;
-use crate::v2::pipeline::VIRTUAL_ROOT;
 use orbit_utils::files::Vfs;
 use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
 use rayon::prelude::*;
@@ -28,8 +27,8 @@ const MAX_RESOLVER_READ_BYTES: u64 = 512 * 1024;
 type ResolvedBinding = (String, ExportedBinding);
 
 /// The repository filesystem as oxc's resolver wants to see it. Paths are
-/// virtual and absolute under `/`; there are no symlinks to follow and
-/// nothing outside the repository to reach.
+/// virtual and absolute under `/`; symlinks resolve inside the repository
+/// and there is nothing outside it to reach.
 #[derive(Clone)]
 struct RepoFileSystem(Arc<Vfs>);
 
@@ -65,22 +64,28 @@ impl FileSystem for RepoFileSystem {
 
     fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
         let meta = self.0.metadata(path)?;
-        Ok(FileMetadata::new(!meta.is_dir, meta.is_dir, false))
+        Ok(FileMetadata::new(
+            !meta.is_dir,
+            meta.is_dir,
+            meta.is_symlink,
+        ))
     }
 
     fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
-        self.metadata(path)
+        let meta = self.0.symlink_metadata(path)?;
+        Ok(FileMetadata::new(
+            !meta.is_dir && !meta.is_symlink,
+            meta.is_dir,
+            meta.is_symlink,
+        ))
     }
 
-    fn read_link(&self, _path: &Path) -> Result<PathBuf, oxc_resolver::ResolveError> {
-        Err(io::Error::new(io::ErrorKind::NotFound, "the repository has no symlinks").into())
+    fn read_link(&self, path: &Path) -> Result<PathBuf, oxc_resolver::ResolveError> {
+        Ok(self.0.read_link(path)?)
     }
 
-    /// One spelling per file: absolute under `/`, no `.` or `..`. There are
-    /// no symlinks to follow.
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        let canonical = super::evaluator::normalize_path(Path::new(VIRTUAL_ROOT).join(path));
-        self.0.metadata(&canonical).map(|_| canonical)
+        self.0.canonicalize(path)
     }
 }
 
@@ -583,11 +588,13 @@ mod tests {
             "export const ok = true;"
         );
         assert!(fs.metadata(Path::new("/src")).unwrap().is_dir());
+        fs.0.symlink("alias.js", "src/index.js").unwrap();
         for spelling in [
             "/src/index.js",
             "src/index.js",
             "/src/./index.js",
             "/lib/../src/index.js",
+            "/alias.js",
         ] {
             assert_eq!(
                 fs.canonicalize(Path::new(spelling)).unwrap(),

@@ -1850,7 +1850,7 @@ mod tests {
         let vfs = Arc::new(Vfs::default());
         for file in files {
             match file.decision {
-                Decision::ListOnly => vfs.list(&file.path, file.size, file.symlink),
+                Decision::ListOnly => vfs.list(&file.path, file.size),
                 _ => vfs.link(&file.path, root.join(&file.path), file.size),
             }
             .unwrap();
