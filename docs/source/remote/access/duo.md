@@ -145,5 +145,3 @@ Planning and work items:
   by default for large results. Ask explicitly: "Show me the source of this function."
 - Code Review Flow does not use GitLab Orbit. To use GitLab Orbit in code review, use a
   [custom flow](#use-gitlab-orbit-in-a-custom-flow).
-- Definitions and cross-file references are available only for
-  [supported languages](../../indexed-data.md#supported-languages).
