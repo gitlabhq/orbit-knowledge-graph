@@ -1,6 +1,6 @@
 //! Skills stay outside the agent command registry because they are passive artifacts.
 //! Version is not a content hash: concurrent bumps or an explicit skip can reuse it.
-//! GQL callers get `SKILL.gql.md` as the manifest; every other file is shared.
+//! GQL callers get `SKILL.gql.md` as the manifest and a different file set; see `served_in`.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;

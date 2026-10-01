@@ -11,10 +11,16 @@ for meaningful behavior changes.
 
 ## Query modes
 
-Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode; every other
-file is shared. Keep its front matter in step with `SKILL.md`, and set its
-version to the `SKILL.md` version plus `+gql` so caches never mix the two. The
-`orbit-server` skill tests fail if they drift.
+Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode. GQL mode also
+gets `references/gql.md` and withholds the JSON-only files listed in
+`served_in` (`crates/orbit-server/src/skills/mod.rs`): `query_language.md`,
+`recipes.md`, `troubleshooting_json.md`, `remote_repo_map.md`, and
+`scripts/remote_repo_map.py`. Every other file is shared, so keep it
+mode-neutral and link only to files both trees serve. Keep the GQL front matter
+identical to `SKILL.md` except for the version. Set its version to the
+`SKILL.md` version plus `+gql` so caches never mix the two. The build fails if
+either rule breaks. The `orbit-server` skill tests also fail if a served file
+links to a file its tree does not serve.
 
 ## Syncing the query-language reference
 
