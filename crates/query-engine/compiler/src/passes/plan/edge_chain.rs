@@ -243,7 +243,7 @@ where
         nodes: &nodes,
         denormalized: &denormalized,
     };
-    let execution = if hops.is_empty() {
+    let mut execution = if hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
         super::fk::star(&context, &center)?
@@ -269,15 +269,16 @@ where
     for (target, holder, column) in elided_fks {
         node_edge_mappings.entry(target).or_insert((holder, column));
     }
-    let execution = Box::new(execution);
     let body = if input.query_type == QueryType::Aggregation {
+        let result = context.aggregation(execution.edge_if_predicates.take().as_ref());
         PlanBody::Aggregation {
-            execution,
-            aggregations: input.aggregation.metrics.clone(),
-            agg_sort: input.aggregation.sort.clone(),
+            execution: Box::new(execution),
+            result,
         }
     } else {
-        PlanBody::Traversal { execution }
+        PlanBody::Traversal {
+            execution: Box::new(execution),
+        }
     };
     Ok(Plan {
         nodes,

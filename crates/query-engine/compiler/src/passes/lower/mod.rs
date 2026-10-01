@@ -1,6 +1,5 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
-pub mod aggregation;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
@@ -111,10 +110,6 @@ pub struct EmitOutput {
     pub select: Vec<SelectExpr>,
     pub ctes: Vec<Cte>,
     pub nodes: HashMap<String, NodeBinding>,
-    /// Edge predicates for `-If` aggregate combinators. When set, the
-    /// aggregation pass emits `countIf(cond)` / `sumIf(col, cond)` / etc.
-    /// and the predicates are already in the LIMIT BY subquery's WHERE.
-    pub edge_if_predicates: Option<Expr>,
 }
 
 impl EmitOutput {
@@ -197,21 +192,15 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(plan, input, output)
         }
-        PlanBody::Aggregation {
-            execution,
-            aggregations,
-            agg_sort,
-        } => {
+        PlanBody::Aggregation { execution, result } => {
             let mut output = physical::execute(execution);
             nodes = output.take_bindings(plan, input)?;
-            aggregation::emit_aggregation(
-                plan,
-                input,
-                aggregations,
-                &input.aggregation.group_by,
-                agg_sort.as_ref(),
-                output,
-            )
+            Ok(Node::Query(Box::new(output.into_query(
+                result.select.clone(),
+                result.group_by.clone(),
+                result.order_by.clone(),
+                input.limit,
+            ))))
         }
         PlanBody::Neighbors {
             center,

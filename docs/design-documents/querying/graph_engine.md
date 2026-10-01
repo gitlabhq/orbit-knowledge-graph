@@ -101,6 +101,9 @@ FK-star planning builds the center scan, target joins, filter references, bindin
 It appends candidate and narrowing definitions directly to the execution plan in dependency order.
 Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
 Traversal and aggregation own execution plans in their plan-body variants. Lowering does not dispatch on the strategy that produced them.
+Aggregation planning resolves measure arguments, grouping columns, output aliases, and aggregate ordering through the shared context.
+It consumes the source plan's conditional predicate and preserves the existing count rules and time-bucket casts.
+Lowering assembles the resolved aggregate result with the emitted source without repeating metadata lookups.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
 
