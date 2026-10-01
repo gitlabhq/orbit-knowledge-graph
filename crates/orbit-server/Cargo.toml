@@ -79,6 +79,7 @@ tower = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }

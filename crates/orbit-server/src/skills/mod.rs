@@ -29,17 +29,26 @@ static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
         .expect("embedded Orbit GQL skill passed manifest and tree validation at build time")
 });
 
+const GQL_ONLY: &[&str] = &["references/gql.md"];
+const JSON_ONLY: &[&str] = &[
+    "references/query_language.md",
+    "references/recipes.md",
+    "references/remote_repo_map.md",
+    "references/troubleshooting_json.md",
+    "scripts/remote_repo_map.py",
+];
+
 fn served_in(path: &str, frontend: Frontend) -> bool {
-    match path {
-        GQL_MANIFEST => false,
-        "references/gql.md" => frontend == Frontend::Gql,
-        "references/query_language.md"
-        | "references/recipes.md"
-        | "references/troubleshooting_json.md"
-        | "references/remote_repo_map.md"
-        | "scripts/remote_repo_map.py" => frontend == Frontend::JsonDsl,
-        _ => true,
+    if path == GQL_MANIFEST {
+        return false;
     }
+    if GQL_ONLY.contains(&path) {
+        return frontend == Frontend::Gql;
+    }
+    if JSON_ONLY.contains(&path) {
+        return frontend == Frontend::JsonDsl;
+    }
+    true
 }
 
 fn catalog(frontend: Frontend) -> &'static SkillCatalog {
@@ -212,6 +221,55 @@ mod tests {
                 .iter()
                 .all(|file| file.path != "references/recipes.md")
         );
+    }
+
+    fn served_paths(frontend: Frontend) -> Vec<String> {
+        get_skill("orbit", frontend, false)
+            .unwrap()
+            .files
+            .unwrap()
+            .into_iter()
+            .map(|file| file.path)
+            .collect()
+    }
+
+    #[test]
+    fn gql_callers_get_exactly_the_gql_file_set() {
+        assert_eq!(
+            served_paths(Frontend::Gql),
+            [
+                "SKILL.md",
+                "references/gql.md",
+                "references/local_repo_map.md",
+                "references/maintaining.md",
+                "references/reporting.md",
+                "references/troubleshooting.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_path_named_in_served_in_exists_in_the_embedded_skill() {
+        for path in GQL_ONLY.iter().chain(JSON_ONLY) {
+            assert!(SkillAssets::get(path).is_some(), "{path} is not embedded");
+        }
+        assert!(SkillAssets::get(GQL_MANIFEST).is_some());
+    }
+
+    #[test]
+    fn every_served_tree_links_only_to_files_it_serves() {
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let files: BTreeMap<_, _> = get_skill("orbit", frontend, false)
+                .unwrap()
+                .files
+                .unwrap()
+                .into_iter()
+                .map(|file| (file.path, file.content))
+                .collect();
+            let available = files.keys().cloned().collect();
+            orbit_prompts::validate_links(&format!("{frontend:?}"), &files, &available)
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
     }
 
     #[test]
