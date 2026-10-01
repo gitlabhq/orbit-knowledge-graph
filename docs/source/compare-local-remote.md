@@ -275,4 +275,3 @@ You use the same skill for GitLab Orbit Remote and Local, but the guidance diffe
 
 For more information, see
 [set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md).
-
