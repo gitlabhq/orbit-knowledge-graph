@@ -3,10 +3,9 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::EmitOutput;
+use super::sql::{edge_select_columns, edge_select_columns_with_prefix};
 use crate::constants::*;
 use crate::passes::plan::{Plan, Traversal};
-use crate::passes::shared::edge_select_columns;
-use crate::passes::shared::edge_select_columns_with_prefix;
 
 pub fn emit_traversal(plan: &Plan<Traversal>, input: &Input, output: EmitOutput) -> Result<Node> {
     let mut select = Vec::new();

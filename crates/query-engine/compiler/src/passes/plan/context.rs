@@ -47,7 +47,6 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             bindings: vec![BindingSource::table(&node.alias)],
             definitions: vec![],
             edge_aliases: vec![],
-            edge_if_predicates: None,
         })
     }
 

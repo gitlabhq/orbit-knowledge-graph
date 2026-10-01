@@ -108,9 +108,9 @@ impl NodePlan {
             table: model.entity_table(entity).map(String::from),
             selectivity: Selectivity::from_node(node),
             hydration: HydrationStrategy::Skip,
-            filters: crate::passes::shared::ordered_filters(
+            filters: super::helpers::ordered_filters(
                 filters,
-                crate::passes::shared::FilterOwner::Entity(entity_id),
+                super::helpers::FilterOwner::Entity(entity_id),
                 model,
             ),
             node_ids: node.node_ids.clone(),
@@ -241,7 +241,7 @@ where
     context.hops = hops;
     context.nodes = nodes;
     context.denormalized = denormalized;
-    let mut execution = if context.hops.is_empty() {
+    let execution = if context.hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
@@ -269,7 +269,7 @@ where
             .or_insert((holder, column));
     }
     Ok(if input.query_type == QueryType::Aggregation {
-        let result = context.aggregation(execution.edge_if_predicates.take());
+        let result = context.aggregation(&execution);
         QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
     } else {
         QueryPlan::Traversal(context.finish(Traversal { execution }))
@@ -341,9 +341,9 @@ where
                             .variant_scope(kind, to_entity, from_entity)
                             .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
                 });
-            let filters = crate::passes::shared::ordered_filters(
+            let filters = super::helpers::ordered_filters(
                 &rel.filters,
-                crate::passes::shared::FilterOwner::Table(&edge_table),
+                super::helpers::FilterOwner::Table(&edge_table),
                 model,
             );
             Hop {

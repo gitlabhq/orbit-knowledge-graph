@@ -1,12 +1,13 @@
 use query_data_model::QueryDataModel;
 
+use super::helpers::requested_columns;
 use crate::input::{
     AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
-use crate::passes::shared::requested_columns;
 
 use super::HydrationStrategy;
 use super::context::PlanningContext;
+use super::physical::{ExecutionPlan, PhysicalSource};
 use super::requirements::{Column, Predicate};
 
 #[derive(Clone, PartialEq)]
@@ -30,13 +31,34 @@ pub struct AggregationPlan {
 }
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
-    pub fn aggregation(&self, condition: Option<Vec<Predicate>>) -> AggregationPlan {
+    pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
+        let mut source = &execution.source;
+        while let PhysicalSource::Join { left, .. } = source {
+            source = left;
+        }
+        let condition = match source {
+            PhysicalSource::Latest { input, .. } => match input.as_ref() {
+                PhysicalSource::Filter { predicates, input }
+                    if matches!(
+                        input.as_ref(),
+                        PhysicalSource::Scan {
+                            relationship: Some(_),
+                            ..
+                        }
+                    ) =>
+                {
+                    predicates.clone()
+                }
+                _ => vec![],
+            },
+            _ => vec![],
+        };
         let mut plan = AggregationPlan {
             groups: vec![],
             group_outputs: vec![],
             measures: vec![],
-            condition: condition.unwrap_or_default(),
+            condition,
             order: aggregation.sort.clone(),
         };
         for (group, alias) in aggregation

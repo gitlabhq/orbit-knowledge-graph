@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -7,6 +5,7 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
+use crate::passes::plan::helpers::denorm_tag_values;
 
 pub(crate) fn latest_row_dedup(
     alias: &str,
@@ -19,11 +18,6 @@ pub(crate) fn latest_row_dedup(
     let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
     order.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
     (order, Some((1, keys)))
-}
-
-pub enum FilterOwner<'a> {
-    Entity(query_data_model::EntityId),
-    Table(&'a str),
 }
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
@@ -128,52 +122,6 @@ pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
     )
 }
 
-pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
-    id_list_predicate(alias, DEFAULT_PRIMARY_KEY, ids)
-}
-
-pub fn ordered_filters(
-    filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>,
-    owner: FilterOwner<'_>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<(String, BoundFilter)> {
-    let mut properties: Vec<_> = filters.iter().collect();
-    properties.sort_unstable_by_key(|(property, _)| *property);
-    properties
-        .into_iter()
-        .flat_map(|(property, filters)| {
-            let metadata = match owner {
-                FilterOwner::Entity(entity) => model
-                    .property_for_entity_id(entity, property)
-                    .map(|property| (Some(property.id), Some(property.data_type))),
-                FilterOwner::Table(table) => Some((None, model.table_column_type(table, property))),
-            };
-            let (property_id, data_type) = metadata.unwrap_or_default();
-            filters.iter().map(move |filter| {
-                (
-                    property.clone(),
-                    BoundFilter {
-                        filter: filter.clone(),
-                        property: property_id,
-                        data_type,
-                        selectivity: property_id
-                            .map(|property| model.property_selectivity(property))
-                            .unwrap_or_default(),
-                    },
-                )
-            })
-        })
-        .collect()
-}
-
-pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
-    match columns {
-        Some(ColumnSelection::List(cols)) => cols.clone(),
-        Some(ColumnSelection::All) => vec!["*".to_string()],
-        None => vec![],
-    }
-}
-
 pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
     edge_select_columns_with_prefix(alias, alias)
 }
@@ -204,14 +152,6 @@ pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
     }
 }
 
-pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
-    if super::normalize::is_wildcard(types) {
-        None
-    } else {
-        Some(types.to_vec())
-    }
-}
-
 pub fn deleted_false(alias: &str) -> Expr {
     Expr::eq(
         Expr::col(alias, DELETED_COLUMN),
@@ -220,7 +160,7 @@ pub fn deleted_false(alias: &str) -> Expr {
 }
 
 pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
-    if super::normalize::is_wildcard(types) {
+    if crate::passes::normalize::is_wildcard(types) {
         return None;
     }
     if types.len() == 1 {
@@ -238,26 +178,6 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
                 .map(|t| serde_json::Value::String(t.clone()))
                 .collect(),
         )
-    }
-}
-
-// Match the indexer's stored token (`concat(key, ':', CAST(col AS VARCHAR))`):
-// bool renders `true`/`false`, number its decimal form. `as_str()` matches only
-// strings, so a boolean filter otherwise compiled to an unmatchable `key:`.
-fn tag_value_string(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => String::new(),
-    }
-}
-
-fn tag_value_opt(v: &serde_json::Value) -> Option<String> {
-    match v {
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
-        other => Some(tag_value_string(other)),
     }
 }
 
@@ -285,52 +205,29 @@ pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Ex
     }
 }
 
-pub(crate) fn denorm_tag_values(tag_key: &str, filter: &InputFilter) -> Option<Vec<String>> {
-    match filter.op {
-        None | Some(FilterOp::Eq) => {
-            let val = filter
-                .value
-                .as_ref()
-                .map(tag_value_string)
-                .unwrap_or_default();
-            Some(vec![format!("{tag_key}:{val}")])
-        }
-        Some(FilterOp::In) => {
-            let values = filter.value.as_ref().and_then(|v| v.as_array())?;
-            let tags: Vec<String> = values
-                .iter()
-                .filter_map(|v| tag_value_opt(v).map(|s| format!("{tag_key}:{s}")))
-                .collect();
-            (!tags.is_empty()).then_some(tags)
-        }
-        _ => None,
-    }
-}
-
 /// When multiple tables are involved, each UNION arm projects only the
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
 /// don't cause a ClickHouse "UNION different number of columns" error.
 pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
-        TableRef::scan(&tables[0], alias)
-    } else {
-        let inner_alias = format!("_{alias}");
-        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
-            .iter()
-            .map(|col| SelectExpr::col(&inner_alias, *col))
-            .collect();
-        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
-        let arms: Vec<Query> = tables
-            .iter()
-            .map(|table| Query {
-                select: common_cols.clone(),
-                from: TableRef::scan(table, &inner_alias),
-                ..Default::default()
-            })
-            .collect();
-        TableRef::union_all(arms, alias)
+        return TableRef::scan(&tables[0], alias);
     }
+    let inner_alias = format!("_{alias}");
+    let columns: Vec<_> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .chain([&DELETED_COLUMN])
+        .map(|column| SelectExpr::col(&inner_alias, *column))
+        .collect();
+    let queries = tables
+        .iter()
+        .map(|table| Query {
+            select: columns.clone(),
+            from: TableRef::scan(table, &inner_alias),
+            ..Default::default()
+        })
+        .collect();
+    TableRef::union_all(queries, alias)
 }
 
 /// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
@@ -393,29 +290,4 @@ pub fn dedup_subquery(
         },
         deleted_false(alias),
     )
-}
-
-pub fn has_non_denorm_filters(
-    filters: &[(String, BoundFilter)],
-    denormalized: &HashMap<
-        query_data_model::DenormalizedKey,
-        query_data_model::DenormalizedProperty,
-    >,
-) -> bool {
-    filters.iter().any(|(_, filter)| {
-        let Some(property) = filter.property else {
-            return true;
-        };
-        [
-            query_data_model::DenormalizedDirection::Source,
-            query_data_model::DenormalizedDirection::Target,
-        ]
-        .into_iter()
-        .all(|direction| {
-            !denormalized.contains_key(&query_data_model::DenormalizedKey {
-                property,
-                direction,
-            })
-        })
-    })
 }

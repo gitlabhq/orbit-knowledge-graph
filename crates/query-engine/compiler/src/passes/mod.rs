@@ -16,5 +16,4 @@ pub mod response_policy;
 pub mod restrict;
 pub mod security;
 pub mod settings;
-pub mod shared;
 pub mod validate;

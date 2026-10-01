@@ -4,8 +4,8 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::context::PlanningContext;
+use super::helpers::has_non_denorm_filters;
 use super::{EdgeTableConfig, Neighbors, Plan};
-use crate::passes::shared::has_non_denorm_filters;
 use query_data_model::QueryDataModel;
 
 pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<Neighbors>>

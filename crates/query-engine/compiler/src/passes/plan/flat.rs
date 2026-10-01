@@ -32,13 +32,11 @@ pub(super) fn plan<M: QueryDataModel + ?Sized>(
 impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
     fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
-        let mut edge_if_predicates = None;
         let mut cascades = Vec::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
             let membership = self.filter_keys(index)?;
             let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref));
-            let (edge, condition) = self.edge(index, membership, cascade.as_ref())?;
-            edge_if_predicates = condition.or(edge_if_predicates);
+            let edge = self.edge(index, membership, cascade.as_ref())?;
             source = Some(match source {
                 Some(previous) => {
                     let join = hop
@@ -65,7 +63,6 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             edge_aliases: (0..self.facts.hops.len())
                 .map(|index| format!("e{index}"))
                 .collect(),
-            edge_if_predicates,
         };
         let mut visited = HashSet::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
@@ -218,7 +215,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         index: usize,
         membership: Vec<Predicate>,
         cascade: Option<&PhysicalPlan>,
-    ) -> Result<(PhysicalSource, Option<Vec<Predicate>>)> {
+    ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
         let alias = format!("e{index}");
         let scan = |final_| PhysicalSource::Scan {
@@ -235,15 +232,11 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
             predicates.extend(membership);
-            let condition = Some(predicates.clone());
-            return Ok((
-                PhysicalSource::Latest {
-                    sort_key: sort_key.to_vec(),
-                    alias: alias.clone(),
-                    input: Box::new(scan(false).filter(predicates)),
-                },
-                condition,
-            ));
+            return Ok(PhysicalSource::Latest {
+                sort_key: sort_key.to_vec(),
+                alias: alias.clone(),
+                input: Box::new(scan(false).filter(predicates)),
+            });
         }
         let edge = if multi_hop {
             super::hops::multi_hop(hop, &alias, &self.facts.nodes)
@@ -290,6 +283,6 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         if !dedup || multi_hop {
             predicates.extend(self.facts.node_id_predicates(&alias, hop));
         }
-        Ok((edge.filter(predicates), None))
+        Ok(edge.filter(predicates))
     }
 }

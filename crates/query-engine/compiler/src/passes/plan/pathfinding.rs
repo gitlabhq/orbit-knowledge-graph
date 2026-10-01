@@ -34,7 +34,7 @@ where
         } else {
             model.graph().relationship_names(None, Some(entity))
         };
-        crate::passes::shared::rel_kind_filter_values(&relationships)
+        super::helpers::rel_kind_filter_values(&relationships)
     };
     let forward_first_hop_filter = start_node
         .entity
