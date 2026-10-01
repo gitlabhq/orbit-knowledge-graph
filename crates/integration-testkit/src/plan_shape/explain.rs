@@ -1,7 +1,8 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
-use compiler::input::{AggFunction, ColumnSelection, Input, InputFilter, OrderDirection};
+use compiler::input::{AggFunction, ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
+use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -161,34 +162,97 @@ fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Ve
     ordered
         .into_iter()
         .flat_map(|(property, filters)| {
-            filters.iter().map(move |filter| {
-                let value = filter.rhs_column.as_ref().map_or_else(
-                    || literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null)),
-                    |(node, column)| format!("{node}.{column}"),
-                );
-                let operator = filter
-                    .op
-                    .map_or_else(|| "eq".into(), |op| op.as_ref().to_string());
-                let operator = match operator.as_str() {
-                    "eq" => "=",
-                    "ne" => "!=",
-                    "gt" => ">",
-                    "gte" => ">=",
-                    "lt" => "<",
-                    "lte" => "<=",
-                    "in" => "IN",
-                    other => other,
-                };
-                format!("{alias}.{property} {operator} {value}")
-            })
+            filters
+                .iter()
+                .map(move |filter| property_filter(alias, property, filter))
         })
         .collect()
+}
+
+fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String {
+    let value = filter.rhs_column.as_ref().map_or_else(
+        || literal(filter.value.as_ref().unwrap_or(&serde_json::Value::Null)),
+        |(node, column)| format!("{node}.{column}"),
+    );
+    let op = filter.op.unwrap_or(FilterOp::Eq);
+    let operator = match op {
+        FilterOp::Eq => "=",
+        FilterOp::Ne => "!=",
+        FilterOp::Gt => ">",
+        FilterOp::Gte => ">=",
+        FilterOp::Lt => "<",
+        FilterOp::Lte => "<=",
+        FilterOp::In => "IN",
+        _ => op.as_ref(),
+    };
+    format!("{alias}.{property} {operator} {value}")
 }
 
 pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     let planned = match plan {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
-        QueryPlan::Aggregation(plan) => execution_tree(&plan.operation.execution),
+        QueryPlan::Aggregation(plan) => {
+            let result = &plan.operation.result;
+            let group = |value: &compiler::passes::plan::aggregation::Group| {
+                let column = planned_column(&value.column);
+                value.truncate.map_or_else(
+                    || column.clone(),
+                    |unit| format!("bucket({}, {column})", unit.name()),
+                )
+            };
+            let condition = if result.condition.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " FILTER [{}]",
+                    result
+                        .condition
+                        .iter()
+                        .flat_map(planned_predicate)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let items = result
+                .groups
+                .iter()
+                .map(|value| format!("group {}", group(value)))
+                .chain(
+                    result
+                        .group_outputs
+                        .iter()
+                        .map(|(value, name)| format!("{} AS {name}", group(value))),
+                )
+                .chain(result.measures.iter().map(|measure| {
+                    let argument = measure
+                        .argument
+                        .as_ref()
+                        .map(planned_column)
+                        .unwrap_or_default();
+                    format!(
+                        "{}({argument}){condition} AS {}",
+                        measure.function.to_string().to_uppercase(),
+                        measure.name
+                    )
+                }))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let tree = Tree::node(
+                Operator::Aggregate,
+                items,
+                vec![execution_source(&plan.operation.execution)],
+            );
+            let tree = sort(
+                tree,
+                result.order.iter().map(|order| {
+                    (
+                        order.column.clone(),
+                        order.direction == OrderDirection::Desc,
+                    )
+                }),
+            );
+            definitions(&plan.operation.execution, tree)
+        }
         QueryPlan::Neighbors(_) => leaf(Operator::Neighbors, ""),
         QueryPlan::PathFinding(_) => leaf(Operator::PathFinding, ""),
         QueryPlan::Hydration(_) => leaf(Operator::Hydration, ""),
@@ -201,11 +265,18 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    let source = Tree::node(
+    definitions(execution, execution_source(execution))
+}
+
+fn execution_source(execution: &ExecutionPlan) -> Tree {
+    Tree::node(
         Operator::Project,
-        projections(&execution.outputs),
+        planned_projections(&execution.outputs),
         vec![physical_source(&execution.source)],
-    );
+    )
+}
+
+fn definitions(execution: &ExecutionPlan, source: Tree) -> Tree {
     if execution.definitions.is_empty() {
         source
     } else {
@@ -225,7 +296,7 @@ fn execution_tree(execution: &ExecutionPlan) -> Tree {
 fn physical_tree(plan: &PhysicalPlan) -> Tree {
     Tree::node(
         Operator::Project,
-        projections(&plan.outputs),
+        planned_projections(&plan.outputs),
         vec![physical_source(&plan.source)],
     )
 }
@@ -243,12 +314,13 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             final_,
             ..
         } => scan(table, alias, *final_),
-        PhysicalSource::Filter { predicate, input } => {
-            filter(conjuncts(predicate), physical_source(input))
-        }
+        PhysicalSource::Filter { predicates, input } => filter(
+            predicates.iter().flat_map(planned_predicate).collect(),
+            physical_source(input),
+        ),
         PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
             Operator::SemiJoin,
-            format!("{} IN subquery", expression(value)),
+            format!("{} IN subquery", planned_column(value)),
             vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {
@@ -271,16 +343,108 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             vec![physical_source(input)],
         ),
         PhysicalSource::Join {
-            kind,
-            condition,
+            endpoints,
+            predicates,
             left,
             right,
         } => Tree::node(
             Operator::Join,
-            join_head(&kind.to_string(), condition),
+            planned_join(endpoints, predicates),
             vec![physical_source(left), physical_source(right)],
         ),
     }
+}
+
+fn planned_column(value: &Column) -> String {
+    format!("{}.{}", value.source, value.name)
+}
+
+fn planned_join((left, right): &(Column, Column), predicates: &[Predicate]) -> String {
+    let equality = format!("{} = {}", planned_column(left), planned_column(right));
+    let condition = if predicates.is_empty() {
+        equality
+    } else {
+        std::iter::once(equality)
+            .chain(predicates.iter().flat_map(planned_predicate))
+            .map(|value| format!("({value})"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+    format!("ON {condition}")
+}
+
+fn planned_predicate(value: &Predicate) -> Vec<String> {
+    let membership = |column: String, values: Vec<String>| {
+        if let [value] = values.as_slice() {
+            format!("{column} = {value}")
+        } else {
+            format!("{column} IN [{}]", values.join(", "))
+        }
+    };
+    match value {
+        Predicate::Property { column, filter, .. } => {
+            vec![property_filter(&column.source, &column.name, filter)]
+        }
+        Predicate::Ids { column, values } => vec![membership(
+            planned_column(column),
+            values.iter().map(ToString::to_string).collect(),
+        )],
+        Predicate::IdRange { column, start, end } => vec![
+            format!("{} >= {start}", planned_column(column)),
+            format!("{} <= {end}", planned_column(column)),
+        ],
+        Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
+        Predicate::EntityKind { column, entity } => vec![format!(
+            "{} = {}",
+            planned_column(column),
+            text_literal(entity)
+        )],
+        Predicate::RelationshipKinds { alias, kinds } => vec![membership(
+            format!("{alias}.relationship_kind"),
+            kinds.iter().map(|kind| text_literal(kind)).collect(),
+        )],
+        Predicate::Tags { column, values } => vec![format!(
+            "{} HAS ANY [{}]",
+            planned_column(column),
+            values
+                .iter()
+                .map(|value| text_literal(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )],
+        Predicate::Membership {
+            column,
+            definition,
+            key,
+        } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
+    }
+}
+
+fn planned_projections(values: &[Projection]) -> String {
+    values
+        .iter()
+        .map(|projection| {
+            let value = match &projection.value {
+                OutputValue::Column(value) => planned_column(value),
+                OutputValue::Text(value) => text_literal(value),
+                OutputValue::Depth(value) => value.to_string(),
+                OutputValue::Path(steps) => format!(
+                    "path[{}]",
+                    steps
+                        .iter()
+                        .map(|(id, kind)| format!(
+                            "({}, {})",
+                            planned_column(id),
+                            planned_column(kind)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            format!("{value} AS {}", projection.name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn scan(table: &str, alias: &str, final_: bool) -> Tree {
@@ -304,11 +468,13 @@ fn join_head(kind: &str, condition: &Expr) -> String {
     )
 }
 
+fn text_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 fn literal(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::String(value) => {
-            format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
-        }
+        serde_json::Value::String(value) => text_literal(value),
         serde_json::Value::Array(values) => format!(
             "[{}]",
             values.iter().map(literal).collect::<Vec<_>>().join(", ")
@@ -348,20 +514,6 @@ fn expression(value: &Expr) -> String {
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
         Expr::Scalar(_) => "scalar(subquery)".into(),
         Expr::Star => "*".into(),
-    }
-}
-
-fn conjuncts(value: &Expr) -> Vec<String> {
-    match value {
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => conjuncts(left)
-            .into_iter()
-            .chain(conjuncts(right))
-            .collect(),
-        _ => vec![expression(value)],
     }
 }
 
@@ -451,24 +603,13 @@ fn query(value: &Query) -> Tree {
     if value.distinct {
         tree = Tree::node(Operator::Distinct, "", vec![tree]);
     }
-    if !value.order_by.is_empty() {
-        tree = Tree::node(
-            Operator::Sort,
-            value
-                .order_by
-                .iter()
-                .map(|order| {
-                    format!(
-                        "{}{}",
-                        expression(&order.expr),
-                        if order.desc { " DESC" } else { "" }
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-            vec![tree],
-        );
-    }
+    tree = sort(
+        tree,
+        value
+            .order_by
+            .iter()
+            .map(|order| (expression(&order.expr), order.desc)),
+    );
     if let Some((limit, keys)) = &value.limit_by {
         tree = Tree::node(
             Operator::Deduplicate,
@@ -506,11 +647,28 @@ fn query(value: &Query) -> Tree {
     tree
 }
 
+fn sort(input: Tree, keys: impl Iterator<Item = (String, bool)>) -> Tree {
+    let keys: Vec<_> = keys
+        .map(|(value, descending)| format!("{value}{}", if descending { " DESC" } else { "" }))
+        .collect();
+    if keys.is_empty() {
+        input
+    } else {
+        Tree::node(Operator::Sort, keys.join(", "), vec![input])
+    }
+}
+
 #[test]
 fn exact_assertions_preserve_nested_filter_order() {
     let predicates = [
-        Expr::eq(Expr::col("p", "id"), Expr::int(1)),
-        Expr::eq(Expr::col("p", "star_count"), Expr::int(2)),
+        Predicate::Ids {
+            column: Column::new("p", "id"),
+            values: vec![1],
+        },
+        Predicate::Ids {
+            column: Column::new("p", "star_count"),
+            values: vec![2],
+        },
     ];
     let source = predicates.iter().fold(
         PhysicalSource::Scan {
@@ -520,7 +678,7 @@ fn exact_assertions_preserve_nested_filter_order() {
             relationship: None,
         },
         |input, predicate| PhysicalSource::Filter {
-            predicate: predicate.clone(),
+            predicates: vec![predicate.clone()],
             input: Box::new(input),
         },
     );
@@ -532,7 +690,11 @@ fn exact_assertions_preserve_nested_filter_order() {
         .check(&physical_source(&source), "planned")
         .unwrap();
     let emitted = query_filter(
-        &Expr::conjoin(predicates.to_vec()).unwrap(),
+        &Expr::conjoin(vec![
+            Expr::eq(Expr::col("p", "id"), Expr::int(1)),
+            Expr::eq(Expr::col("p", "star_count"), Expr::int(2)),
+        ])
+        .unwrap(),
         scan("gl_project", "p", false),
     );
     assertions.check(&emitted, "emitted").unwrap();

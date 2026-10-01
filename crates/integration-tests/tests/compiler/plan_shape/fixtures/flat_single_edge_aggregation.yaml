@@ -20,6 +20,7 @@ physical:
     planned:
       expect:
         - (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS e0))))
+        - (Aggregate COUNT() FILTER [e0.relationship_kind = 'CALLS', e0.source_kind = 'Definition', e0.target_kind = 'Definition', e0._deleted = false, e0.source_id = 1] AS n (_))
       reject:
         - (Deduplicate Final (Scan Table(gl_code_edge) AS e0))
     emitted:
