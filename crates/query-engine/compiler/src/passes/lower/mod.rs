@@ -12,7 +12,7 @@ use crate::input::*;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 
-use super::plan::{Plan, PlanBody};
+use super::plan::{Plan, QueryPlan};
 use super::shared;
 
 #[derive(Clone, Default)]
@@ -113,9 +113,9 @@ pub struct EmitOutput {
 }
 
 impl EmitOutput {
-    fn take_bindings(
+    fn take_bindings<T>(
         &mut self,
-        plan: &Plan,
+        plan: &Plan<T>,
         input: &Input,
     ) -> Result<HashMap<String, NodeBinding>> {
         for node in input
@@ -184,16 +184,17 @@ impl EmitOutput {
     }
 }
 
-pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
+pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
-    let mut node = match &plan.body {
-        PlanBody::Traversal { execution } => {
-            let mut output = physical::execute(execution);
+    let mut node = match plan {
+        QueryPlan::Traversal(plan) => {
+            let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(plan, input, output)
         }
-        PlanBody::Aggregation { execution, result } => {
-            let mut output = physical::execute(execution);
+        QueryPlan::Aggregation(plan) => {
+            let result = &plan.operation.result;
+            let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
             Ok(Node::Query(Box::new(output.into_query(
                 result.select.clone(),
@@ -202,31 +203,17 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
                 input.limit,
             ))))
         }
-        PlanBody::Neighbors {
-            center,
-            direction,
-            edge,
-            has_non_denorm,
-            center_tp_lookup,
-        } => {
-            let (query, binding) = neighbors::emit_neighbors(
-                plan,
-                input,
-                center,
-                *direction,
-                edge,
-                *has_non_denorm,
-                center_tp_lookup.as_ref(),
-            )?;
-            nodes.insert(center.clone(), binding);
+        QueryPlan::Neighbors(plan) => {
+            let (query, binding) = neighbors::emit_neighbors(plan, input)?;
+            nodes.insert(plan.operation.center.clone(), binding);
             Ok(query)
         }
-        PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, input, pf),
-        PlanBody::Hydration { nodes, options } => hydration::emit_hydration(
-            nodes,
+        QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
+        QueryPlan::Hydration(plan) => hydration::emit_hydration(
+            &plan.operation.nodes,
             input.limit,
-            options.dynamic,
-            options.path_segment_budget,
+            plan.operation.options.dynamic,
+            plan.operation.options.path_segment_budget,
         ),
     }?;
 
@@ -255,7 +242,7 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     }
 
     let edges = plan
-        .hops
+        .hops()
         .iter()
         .enumerate()
         .map(|(index, hop)| {
@@ -286,11 +273,11 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
                 vec![Expr::col("paths", crate::constants::edge_kinds_column())],
             )),
         ],
-        QueryType::Neighbors => match &plan.body {
-            PlanBody::Neighbors {
-                center, direction, ..
-            } if *direction == Direction::Both => vec![
-                OrderExpr::asc(Expr::ident(crate::constants::redaction_id_column(center))),
+        QueryType::Neighbors => match plan {
+            QueryPlan::Neighbors(plan) if plan.operation.direction == Direction::Both => vec![
+                OrderExpr::asc(Expr::ident(crate::constants::redaction_id_column(
+                    &plan.operation.center,
+                ))),
                 OrderExpr::asc(Expr::ident(crate::constants::neighbor_id_column())),
                 OrderExpr::asc(Expr::ident(crate::constants::relationship_type_column())),
                 OrderExpr::asc(Expr::ident(crate::constants::neighbor_is_outgoing_column())),
@@ -310,16 +297,22 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
             .filter_map(|node| nodes.get(&node.id))
             .map(|binding| OrderExpr::asc(binding.identity().clone()))
             .collect(),
-        _ => plan
-            .node_edge_mappings
-            .iter()
-            .filter_map(|(node, source)| {
-                nodes.get(node).map(|binding| (source, binding.identity()))
-            })
-            .collect::<BTreeMap<_, _>>()
-            .into_values()
-            .map(|identity| OrderExpr::asc(identity.clone()))
-            .collect(),
+        _ => {
+            let mappings = match plan {
+                QueryPlan::Traversal(plan) => &plan.node_edge_mappings,
+                QueryPlan::Aggregation(plan) => &plan.node_edge_mappings,
+                _ => unreachable!("only edge-chain queries use mapped ordering"),
+            };
+            mappings
+                .iter()
+                .filter_map(|(node, source)| {
+                    nodes.get(node).map(|binding| (source, binding.identity()))
+                })
+                .collect::<BTreeMap<_, _>>()
+                .into_values()
+                .map(|identity| OrderExpr::asc(identity.clone()))
+                .collect()
+        }
     };
     Ok(LoweredQuery {
         ast: node,

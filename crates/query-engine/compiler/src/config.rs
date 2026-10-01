@@ -445,7 +445,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     }
 
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    if query_plan.hops.len() >= 3 {
+    if query_plan.hops().len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries

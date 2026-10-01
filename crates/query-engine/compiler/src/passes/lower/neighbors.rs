@@ -10,21 +10,24 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::passes::plan::{EdgeTableConfig, Plan};
+use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 use crate::passes::shared::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
-pub fn emit_neighbors(
-    plan: &Plan,
-    input: &Input,
-    center_alias: &str,
-    direction: Direction,
-    edge: &EdgeTableConfig,
-    has_non_denorm: bool,
-    center_tp_lookup: Option<&(String, String)>,
-) -> Result<(Node, NodeBinding)> {
+pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
+    let Neighbors {
+        center: center_alias,
+        direction,
+        edge,
+        has_non_denorm,
+        center_tp_lookup,
+        fused_table,
+    } = &plan.operation;
+    let direction = *direction;
+    let has_non_denorm = *has_non_denorm;
+    let center_tp_lookup = center_tp_lookup.as_ref();
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -35,13 +38,6 @@ pub fn emit_neighbors(
     let center_node_ids = cnp.node_ids.clone();
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
-    let edge_table: Vec<String> = {
-        let mut t = edge.outgoing_tables.clone();
-        t.extend(edge.incoming_tables.iter().cloned());
-        t.sort();
-        t.dedup();
-        t
-    };
     let edge_alias = "e";
 
     fn build_center_dedup(
@@ -257,17 +253,7 @@ pub fn emit_neighbors(
         }
     };
 
-    // When the center is default-PK with no non-denormalized filters and a single
-    // physical edge table, each arm degenerates to a plain edge scan, so both
-    // directions collapse into ONE scan: each matching row emits its applicable
-    // neighbor row(s) via arrayJoin over the matched direction tuples. A self-loop
-    // (source==target==center) matches both arms and still yields two rows.
-    let fused_both_eligible = direction == Direction::Both
-        && !has_non_denorm
-        && center_uses_default_pk
-        && edge_table.len() == 1;
-
-    let query = if fused_both_eligible {
+    let query = if let Some(table) = fused_table {
         let mut q = build_fused_both_arm(
             &center_id,
             &center_entity,
@@ -276,7 +262,7 @@ pub fn emit_neighbors(
             &center_filters,
             plan,
             edge,
-            &edge_table[0],
+            table,
             edge_alias,
         );
         q.order_by = order_by;
@@ -325,7 +311,7 @@ fn build_fused_both_arm(
     center_has_tp: bool,
     center_node_ids: &[i64],
     center_filters: &[(String, crate::passes::plan::BoundFilter)],
-    plan: &Plan,
+    plan: &Plan<Neighbors>,
     edge: &EdgeTableConfig,
     edge_table: &str,
     edge_alias: &str,

@@ -8,7 +8,8 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::{
-    BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Plan, PlanBody,
+    Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
+    QueryPlan, Traversal,
 };
 use query_data_model::QueryDataModel;
 
@@ -182,15 +183,16 @@ pub enum HydrationStrategy {
     Skip,
 }
 
-pub fn plan<M>(
-    input: &Input,
-    model: &M,
+pub(super) fn plan<M>(
+    mut context: PlanningContext<'_, M>,
     use_fk_elision: bool,
     table_scans: &HashSet<String>,
-) -> Result<Plan>
+) -> Result<QueryPlan>
 where
     M: QueryDataModel + ?Sized,
 {
+    let input = context.input;
+    let model = context.model;
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
 
@@ -236,26 +238,20 @@ where
         }
     }
 
-    let context = PlanningContext {
-        input,
-        model,
-        hops: &hops,
-        nodes: &nodes,
-        denormalized: &denormalized,
-    };
-    let mut execution = if hops.is_empty() {
+    context.hops = hops;
+    context.nodes = nodes;
+    context.denormalized = denormalized;
+    let mut execution = if context.hops.is_empty() {
         context.single_node()?
-    } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
+    } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
-    } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
+    } else if use_fk_elision && detect_fk_chain(&context.hops, &context.nodes) {
         super::fk::chain(&context)?
     } else {
         super::flat::plan(&context)?
     };
-    let mut node_edge_mappings = if hops.is_empty() {
-        HashMap::new()
-    } else {
-        execution
+    if !context.hops.is_empty() {
+        context.node_edge_mappings = execution
             .bindings
             .iter()
             .map(|binding| {
@@ -264,28 +260,19 @@ where
                     (binding.alias.clone(), binding.column.clone()),
                 )
             })
-            .collect()
-    };
-    for (target, holder, column) in elided_fks {
-        node_edge_mappings.entry(target).or_insert((holder, column));
+            .collect();
     }
-    let body = if input.query_type == QueryType::Aggregation {
+    for (target, holder, column) in elided_fks {
+        context
+            .node_edge_mappings
+            .entry(target)
+            .or_insert((holder, column));
+    }
+    Ok(if input.query_type == QueryType::Aggregation {
         let result = context.aggregation(execution.edge_if_predicates.take().as_ref());
-        PlanBody::Aggregation {
-            execution: Box::new(execution),
-            result,
-        }
+        QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
     } else {
-        PlanBody::Traversal {
-            execution: Box::new(execution),
-        }
-    };
-    Ok(Plan {
-        nodes,
-        hops,
-        node_edge_mappings,
-        denormalized,
-        body,
+        QueryPlan::Traversal(context.finish(Traversal { execution }))
     })
 }
 

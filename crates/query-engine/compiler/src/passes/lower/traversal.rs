@@ -4,11 +4,11 @@ use crate::input::*;
 
 use super::EmitOutput;
 use crate::constants::*;
-use crate::passes::plan::Plan;
+use crate::passes::plan::{Plan, Traversal};
 use crate::passes::shared::edge_select_columns;
 use crate::passes::shared::edge_select_columns_with_prefix;
 
-pub fn emit_traversal(plan: &Plan, input: &Input, output: EmitOutput) -> Result<Node> {
+pub fn emit_traversal(plan: &Plan<Traversal>, input: &Input, output: EmitOutput) -> Result<Node> {
     let mut select = Vec::new();
     let already_has_edge_cols = output.select.iter().any(|s| {
         s.alias

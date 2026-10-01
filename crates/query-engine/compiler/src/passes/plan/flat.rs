@@ -231,17 +231,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
         if !multi_hop && !dedup && self.facts.aggregate() {
-            let sort_key = self
-                .facts
-                .model
-                .table_sort_key(&hop.edge_table)
-                .filter(|key| !key.is_empty())
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!(
-                        "no sort key for edge table '{}'; cannot plan latest rows",
-                        hop.edge_table
-                    ))
-                })?;
+            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
             let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
@@ -257,7 +247,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             ));
         }
         let edge = if multi_hop {
-            super::hops::multi_hop(hop, &alias, self.facts.nodes)
+            super::hops::multi_hop(hop, &alias, &self.facts.nodes)
                 .filter(membership)
                 .cascade(hop, &alias, cascade)
         } else if dedup {

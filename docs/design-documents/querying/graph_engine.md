@@ -104,7 +104,10 @@ Traversal and aggregation own execution plans in their plan-body variants. Lower
 Aggregation planning resolves measure arguments, grouping columns, output aliases, and aggregate ordering through the shared context.
 It consumes the source plan's conditional predicate and preserves the existing count rules and time-bucket casts.
 Lowering assembles the resolved aggregate result with the emitted source without repeating metadata lookups.
-Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
+All query families share one planning context and return a typed `Plan<T>` through the runtime `QueryPlan` enum.
+The context owns temporary query facts and transfers common metadata into the finished plan.
+Neighbors planning selects the fused scan when eligible; its lowerer renders the selected access path.
+Path finding and hydration retain their family-specific algorithms and share node and catalog lookup helpers.
 Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
