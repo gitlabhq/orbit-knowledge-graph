@@ -73,9 +73,14 @@ fn write_schema_version(version: u32) -> Result<()> {
     .with_context(|| format!("writing {path}"))
 }
 
+#[derive(serde::Deserialize)]
+struct SchemaVersion {
+    schema: u32,
+}
+
 fn schema_version_at(base: &str) -> Option<u32> {
     Some(
-        orbit_versions::parse(&git_show(base, VERSIONS_REPO_PATH)?)
+        orbit_utils::yaml::from_str::<SchemaVersion>(&git_show(base, VERSIONS_REPO_PATH)?)
             .ok()?
             .schema,
     )
@@ -457,6 +462,25 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_version_ignores_unrelated_pins() {
+        for yaml in [
+            "schema: 100\n",
+            "schema: 100\nraw_output_format: 5.0.3\n",
+            "schema: 100\ngql_output_format: 1.0.0\nfuture_pin: {version: 2}\n",
+        ] {
+            assert_eq!(
+                orbit_utils::yaml::from_str::<SchemaVersion>(yaml)
+                    .unwrap()
+                    .schema,
+                100
+            );
+        }
+        for yaml in ["gql_output_format: 1.0.0", "schema: -1", "schema: bogus"] {
+            assert!(orbit_utils::yaml::from_str::<SchemaVersion>(yaml).is_err());
+        }
+    }
 
     #[test]
     fn parse_explicit_scope_accepts_none() {

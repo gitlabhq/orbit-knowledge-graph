@@ -47,7 +47,9 @@ use crate::proto::{
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
-use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{
+    FormatName, GoonFormatter, GqlFormatter, GraphFormatter, ResultFormatter,
+};
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
     match QueryLanguage::try_from(language) {
@@ -85,11 +87,11 @@ fn named_language(frontend: Frontend) -> named_queries::Language {
 
 fn schema_query_result(
     response: &SchemaResponse,
-    use_llm_format: bool,
+    text_format: bool,
 ) -> Result<ExecuteQueryResult, PipelineError> {
     use crate::proto::execute_query_result::Content;
 
-    let content = if use_llm_format {
+    let content = if text_format {
         ToolService::encode_schema_toon(response)
             .map(Content::FormattedText)
             .map_err(|error| PipelineError::custom(error.to_string()))?
@@ -108,6 +110,28 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
         FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Gql => ProtoFormatName::Gql,
+    }
+}
+
+fn query_formatter(format: i32) -> Result<&'static dyn ResultFormatter, Status> {
+    match ResponseFormat::try_from(format) {
+        Ok(ResponseFormat::Llm) => Ok(&GoonFormatter),
+        Ok(ResponseFormat::Gql) => Ok(&GqlFormatter),
+        Ok(ResponseFormat::Raw) => Ok(&GraphFormatter),
+        Err(_) => Err(Status::invalid_argument(format!(
+            "Unknown response format: {format}"
+        ))),
+    }
+}
+
+fn query_result_content(
+    formatted: serde_json::Value,
+) -> crate::proto::execute_query_result::Content {
+    use crate::proto::execute_query_result::Content;
+    match formatted {
+        serde_json::Value::String(text) => Content::FormattedText(text),
+        json => Content::ResultJson(json.to_string()),
     }
 }
 
@@ -379,6 +403,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     None => return,
                 };
 
+                let formatter = match query_formatter(req.format) {
+                    Ok(formatter) => formatter,
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
+                    }
+                };
+                let text_format = formatter.format_name() != FormatName::Raw;
+
                 let resolved = resolve_raw_query(
                     req.query_type,
                     req.query,
@@ -398,8 +431,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 info!(query_len = query.text.len(), "Executing query");
 
-                let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
                     .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
@@ -407,32 +438,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 let result = result.and_then(|output| match output {
                     QueryServiceOutput::Schema(response) => {
-                        schema_query_result(&response, use_llm_format)
+                        schema_query_result(&response, text_format)
                     }
                     QueryServiceOutput::Graph(output) => {
-                        use crate::proto::execute_query_result::Content;
-
-                        let (formatted, format_version, format_name) = if use_llm_format {
-                            GoonFormatter.format_stamped(&output)
-                        } else {
-                            GraphFormatter.format_stamped(&output)
-                        };
-
-                        let content = if use_llm_format {
-                            // GoonFormatter::format returns Value::String(raw_goon_bytes).
-                            // `to_string()` on a Value JSON-encodes it (adds quotes + \n
-                            // escapes). Workhorse then JSON-encodes again when wrapping
-                            // into the {result, ...} envelope, producing literal `\n` in
-                            // the UI. Extract the inner string so the gRPC field carries
-                            // raw goon text.
-                            let text = match formatted {
-                                serde_json::Value::String(s) => s,
-                                other => other.to_string(),
-                            };
-                            Some(Content::FormattedText(text))
-                        } else {
-                            Some(Content::ResultJson(formatted.to_string()))
-                        };
+                        let (formatted, format_version, format_name) =
+                            formatter.format_stamped(&output);
+                        let content = Some(query_result_content(formatted));
 
                         let metadata = Some(QueryMetadata {
                             query_type: output.query_type,
@@ -1010,6 +1021,68 @@ mod tests {
 
     fn authed_request<T>(message: T) -> Request<T> {
         authed_request_for_user(message, 1)
+    }
+
+    #[test]
+    fn query_formatter_dispatches_on_response_format() {
+        let cases = [
+            (
+                ResponseFormat::Raw as i32,
+                FormatName::Raw,
+                ProtoFormatName::Raw,
+            ),
+            (
+                ResponseFormat::Llm as i32,
+                FormatName::Goon,
+                ProtoFormatName::Goon,
+            ),
+            (
+                ResponseFormat::Gql as i32,
+                FormatName::Gql,
+                ProtoFormatName::Gql,
+            ),
+        ];
+        for (format, expected, proto) in cases {
+            let name = query_formatter(format).unwrap().format_name();
+            assert_eq!(name, expected, "format {format}");
+            assert_eq!(proto_format_name(name), proto, "format {format}");
+        }
+    }
+
+    #[test]
+    fn query_format_rejects_unknown_values_and_preserves_text() {
+        use crate::proto::execute_query_result::Content;
+        for format in [-1, 99] {
+            assert_eq!(
+                query_formatter(format).err().unwrap().code(),
+                tonic::Code::InvalidArgument
+            );
+        }
+        let text = "| path |\n| (:User {id: 1}) |\n";
+        assert_eq!(
+            query_result_content(text.into()),
+            Content::FormattedText(text.into())
+        );
+        let raw = serde_json::json!({"nodes": []});
+        assert_eq!(
+            query_result_content(raw.clone()),
+            Content::ResultJson(raw.to_string())
+        );
+
+        let schema = ontology::introspection::build_schema_response(
+            &test_ontology(),
+            Default::default(),
+            &[],
+        );
+        let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
+        let result =
+            schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();
+        assert_eq!(
+            result.content,
+            Some(Content::FormattedText(
+                ToolService::encode_schema_toon(&schema).unwrap()
+            ))
+        );
     }
 
     fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
