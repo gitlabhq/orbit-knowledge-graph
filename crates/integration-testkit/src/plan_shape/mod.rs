@@ -171,7 +171,7 @@ fn check<M: QueryDataModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input) -> compiler::Result<plan::Plan>,
+    build: impl Fn(&Input) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(

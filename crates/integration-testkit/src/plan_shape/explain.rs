@@ -1,7 +1,7 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{AggFunction, ColumnSelection, Input, InputFilter, OrderDirection};
-use compiler::passes::plan::physical::{PhysicalPlan, PhysicalSource};
-use compiler::passes::plan::{Plan, PlanBody};
+use compiler::passes::plan::QueryPlan;
+use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -185,40 +185,41 @@ fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Ve
         .collect()
 }
 
-pub fn physical(plan: &Plan, ast: &Node) -> (Tree, Tree) {
-    let planned = match &plan.body {
-        PlanBody::Traversal { execution } | PlanBody::Aggregation { execution, .. } => {
-            let source = Tree::node(
-                Operator::Project,
-                projections(&execution.outputs),
-                vec![physical_source(&execution.source)],
-            );
-            if execution.definitions.is_empty() {
-                source
-            } else {
-                Tree::node(
-                    Operator::With,
-                    "",
-                    execution
-                        .definitions
-                        .iter()
-                        .map(|(name, keys)| {
-                            Tree::node(Operator::Cte, name, vec![physical_tree(keys)])
-                        })
-                        .chain([source])
-                        .collect(),
-                )
-            }
-        }
-        PlanBody::Neighbors { .. } => leaf(Operator::Neighbors, ""),
-        PlanBody::PathFinding(_) => leaf(Operator::PathFinding, ""),
-        PlanBody::Hydration { .. } => leaf(Operator::Hydration, ""),
+pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
+    let planned = match plan {
+        QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
+        QueryPlan::Aggregation(plan) => execution_tree(&plan.operation.execution),
+        QueryPlan::Neighbors(_) => leaf(Operator::Neighbors, ""),
+        QueryPlan::PathFinding(_) => leaf(Operator::PathFinding, ""),
+        QueryPlan::Hydration(_) => leaf(Operator::Hydration, ""),
     };
     let emitted = match ast {
         Node::Query(value) => query(value),
         Node::Insert(_) => leaf(Operator::Insert, ""),
     };
     (planned, emitted)
+}
+
+fn execution_tree(execution: &ExecutionPlan) -> Tree {
+    let source = Tree::node(
+        Operator::Project,
+        projections(&execution.outputs),
+        vec![physical_source(&execution.source)],
+    );
+    if execution.definitions.is_empty() {
+        source
+    } else {
+        Tree::node(
+            Operator::With,
+            "",
+            execution
+                .definitions
+                .iter()
+                .map(|(name, keys)| Tree::node(Operator::Cte, name, vec![physical_tree(keys)]))
+                .chain([source])
+                .collect(),
+        )
+    }
 }
 
 fn physical_tree(plan: &PhysicalPlan) -> Tree {
