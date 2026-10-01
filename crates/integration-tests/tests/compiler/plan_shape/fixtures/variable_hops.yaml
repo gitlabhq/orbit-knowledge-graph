@@ -20,9 +20,11 @@ physical:
       expect:
         - (Union ALL AS e0 (Project 1 AS depth, ... (_)) (Project 2 AS depth, ... (_)) (Project 3 AS depth, ... (_)))
         - (Project e1.source_tags AS source_tags, e3.target_tags AS target_tags, ... (_))
+        - (Project path[(e1.target_id, e1.target_kind), (e2.target_id, e2.target_kind), (e3.target_id, e3.target_kind)] AS path_nodes, ... (_))
     emitted:
       expect:
         - (Project e0.path_nodes AS hop_e0_path_nodes, ... (_))
+        - (Project array(tuple(e1.target_id, e1.target_kind), tuple(e2.target_id, e2.target_kind), tuple(e3.target_id, e3.target_kind)) AS path_nodes, ... (_))
   duckdb:
     planned:
       expect:
