@@ -45,17 +45,16 @@ pub(crate) fn filter_expression(
     }
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
-    let str_val = || filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
     let typed = |v: serde_json::Value| -> Expr { Expr::param(data_type_to_ch(data_type), v) };
 
-    match filter.op {
-        None | Some(FilterOp::Eq) => Expr::eq(col, typed(val())),
-        Some(FilterOp::Ne) => Expr::binary(Op::Ne, col, typed(val())),
-        Some(FilterOp::Gt) => Expr::binary(Op::Gt, col, typed(val())),
-        Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, typed(val())),
-        Some(FilterOp::Lt) => Expr::binary(Op::Lt, col, typed(val())),
-        Some(FilterOp::Lte) => Expr::binary(Op::Le, col, typed(val())),
-        Some(FilterOp::In) => {
+    match filter.op.unwrap_or(FilterOp::Eq) {
+        op @ (FilterOp::Eq
+        | FilterOp::Ne
+        | FilterOp::Gt
+        | FilterOp::Gte
+        | FilterOp::Lt
+        | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
+        FilterOp::In => {
             if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
                 Expr::col_in(alias, prop, data_type_to_ch(data_type), arr.clone())
                     .unwrap_or_else(|| Expr::param(ChType::Bool, false))
@@ -63,32 +62,25 @@ pub(crate) fn filter_expression(
                 Expr::param(ChType::Bool, false)
             }
         }
-        Some(FilterOp::Contains) => Expr::func(
-            "positionCaseInsensitive",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::StartsWith) => Expr::func(
-            "startsWith",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::EndsWith) => Expr::func(
-            "endsWith",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
-        Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
-        Some(FilterOp::TokenMatch) => Expr::func(
-            "hasToken",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AllTokens) => Expr::func(
-            "hasAllTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AnyTokens) => Expr::func(
-            "hasAnyTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
+        FilterOp::IsNull => Expr::unary(Op::IsNull, col),
+        FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
+        op => {
+            let function = match op {
+                FilterOp::Contains => "positionCaseInsensitive",
+                FilterOp::StartsWith => "startsWith",
+                FilterOp::EndsWith => "endsWith",
+                FilterOp::TokenMatch => "hasToken",
+                FilterOp::AllTokens => "hasAllTokens",
+                FilterOp::AnyTokens => "hasAnyTokens",
+                _ => unreachable!(),
+            };
+            let value = filter
+                .value
+                .as_ref()
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            Expr::func(function, vec![col, Expr::param(ChType::String, value)])
+        }
     }
 }
 
