@@ -306,8 +306,8 @@ impl PipelineContext {
         self.vfs
             .source(Path::new(&input.path))
             .map_err(|unread| match unread {
-                orbit_utils::files::Unread::Listed(label) => Unread::Skip(
-                    FileSkip::Filter(label.skip.unwrap_or(SkipReason::NonRegularFile)),
+                orbit_utils::files::Unread::Listed(skip) => Unread::Skip(
+                    FileSkip::Filter(skip.unwrap_or(SkipReason::NonRegularFile)),
                     String::new(),
                 ),
                 orbit_utils::files::Unread::Unreadable(e) => {
@@ -646,7 +646,7 @@ impl Default for PipelineConfig {
     }
 }
 
-pub use orbit_utils::files::{Decision, File, Pass, SkipReason, Vfs};
+pub use orbit_utils::files::{Decision, Entry, File, Pass, SkipReason, Vfs};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -1027,7 +1027,7 @@ impl Pipeline {
         if !file_inventory.is_empty() {
             let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
             for entry in file_inventory.iter() {
-                if let Some(skip) = entry.label.skip {
+                if let Some(skip) = entry.skip {
                     reasons.insert(entry.path.as_str(), FileReason::Filter(skip));
                 }
             }
@@ -1850,7 +1850,9 @@ mod tests {
         let vfs = Arc::new(Vfs::default());
         for file in files {
             match file.decision {
-                Decision::ListOnly => vfs.list(&file.path, file.size),
+                Decision::ListOnly => vfs
+                    .stat(&file.path, file.size, false)
+                    .map(|entry| entry.map(Entry::list).unwrap_or_default()),
                 _ => vfs.link(&file.path, root.join(&file.path), file.size),
             }
             .unwrap();
@@ -1929,7 +1931,7 @@ mod tests {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig::default(),
@@ -1961,7 +1963,7 @@ mod tests {
                 path: "openapi_v3.yaml".into(),
                 size: YAML_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig::default(),
@@ -1992,7 +1994,7 @@ mod tests {
                 path: "main.py".into(),
                 size: source.len() as u64,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig {
@@ -2035,14 +2037,14 @@ mod tests {
                     path: "a.py".into(),
                     size: 22,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
                 File {
                     path: "b.py".into(),
                     size: 22,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
             ],
@@ -2077,7 +2079,7 @@ mod tests {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig::default(),
@@ -2115,7 +2117,7 @@ mod tests {
                 path: "main.go".into(),
                 size: 27,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig::default(),
@@ -2147,35 +2149,35 @@ mod tests {
                 path: "src/main.py".into(),
                 size: 17,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             },
             File {
                 path: "README.md".into(),
                 size: 12,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             },
             File {
                 path: "config/app.toml".into(),
                 size: 9,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             },
             File {
                 path: "assets/logo.png".into(),
                 size: 128,
                 decision: Decision::ListOnly,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             },
             File {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
                 decision: Decision::ListOnly,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             },
         ];
@@ -2232,7 +2234,7 @@ mod tests {
                 path: "listed.py".into(),
                 size: 19,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             }],
             PipelineConfig::default(),
@@ -2406,28 +2408,28 @@ namespace MyApp {
                     path: "app.py".into(),
                     size: 0,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
                 File {
                     path: "Service.java".into(),
                     size: 0,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
                 File {
                     path: "App.kt".into(),
                     size: 0,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
                 File {
                     path: "Controller.cs".into(),
                     size: 0,
                     decision: Decision::Parse,
-                    label: Default::default(),
+                    skip: None,
                     symlink: false,
                 },
             ],
@@ -2559,7 +2561,7 @@ namespace MyApp {
                 path: name.to_string(),
                 size: content.len() as u64,
                 decision: Decision::Parse,
-                label: Default::default(),
+                skip: None,
                 symlink: false,
             })
             .collect();

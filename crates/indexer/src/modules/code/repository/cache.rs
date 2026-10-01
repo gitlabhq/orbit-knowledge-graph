@@ -321,11 +321,7 @@ mod tests {
             "LFS pointers should still be present in archive inventory"
         );
         assert_eq!(
-            path.files
-                .file(Path::new("data/train.csv"))
-                .unwrap()
-                .label
-                .skip,
+            path.files.file(Path::new("data/train.csv")).unwrap().skip,
             Some(SkipReason::LfsPointer)
         );
         assert!(path.files.exists(Path::new("src/main.rs")));

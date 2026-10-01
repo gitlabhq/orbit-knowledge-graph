@@ -128,7 +128,7 @@ fn strip(entries: Vec<File>) -> Vec<(String, u64, String, Option<String>)> {
                 e.path,
                 e.size,
                 e.decision.to_string(),
-                e.label.skip.map(|s| s.to_string()),
+                e.skip.map(|s| s.to_string()),
             )
         })
         .collect()

@@ -9,9 +9,7 @@ use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use orbit_utils::files::{
-    CapExceeded, ContentClass, Counter, Decision, File, Need, Pass, SkipReason,
-};
+use orbit_utils::files::{CapExceeded, Counter, Decision, File, Need, Pass, SkipReason};
 use rustc_hash::FxHashMap;
 
 use super::Language;
@@ -71,38 +69,29 @@ impl CodeFilter {
             .collect()
     }
 
-    fn skip(&self, file: &mut File, reason: SkipReason, content: ContentClass) {
+    fn skip(&self, file: &mut File, reason: SkipReason) {
         let mut skips = self.skips.lock().unwrap_or_else(|e| e.into_inner());
         let tally = skips.entry(reason).or_default();
         tally.count += 1;
         tally.bytes += file.size;
         file.decision = Decision::ListOnly;
-        file.label.skip = Some(reason);
-        file.label.content = content;
-        file.label.detail = None;
-    }
-
-    fn extension(path: &str) -> Option<String> {
-        Path::new(path)
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned())
+        file.skip = Some(reason);
     }
 }
 
 impl Pass for CodeFilter {
     fn header(&self, file: &mut File) -> Result<Need, CapExceeded> {
         self.total_bytes.add(file.size)?;
-        file.label.extension = Self::extension(&file.path);
         if file.symlink {
-            self.skip(file, SkipReason::NonRegularFile, ContentClass::NonRegular);
+            self.skip(file, SkipReason::NonRegularFile);
             return Ok(Need::Nothing);
         }
         if self.max_file_size.is_some_and(|cap| file.size > cap) {
-            self.skip(file, SkipReason::Oversize, ContentClass::Unknown);
+            self.skip(file, SkipReason::Oversize);
             return Ok(Need::Nothing);
         }
         if is_excluded_from_indexing(Path::new(&file.path)) {
-            self.skip(file, SkipReason::ExcludedExtension, ContentClass::Unknown);
+            self.skip(file, SkipReason::ExcludedExtension);
             return Ok(Need::Nothing);
         }
         // Source is read by its parser, which checks it then; anything else
@@ -110,12 +99,10 @@ impl Pass for CodeFilter {
         match (self.detect_language)(&file.path).is_some() {
             true => {
                 file.decision = Decision::Parse;
-                file.label.content = ContentClass::Code;
                 Ok(Need::Nothing)
             }
             false => {
                 file.decision = Decision::Load;
-                file.label.content = ContentClass::Text;
                 Ok(Need::Bytes)
             }
         }
@@ -123,18 +110,18 @@ impl Pass for CodeFilter {
 
     fn content(&self, file: &mut File, content: &[u8]) {
         if is_lfs_pointer(content) {
-            return self.skip(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
+            return self.skip(file, SkipReason::LfsPointer);
         }
         let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
         if looks_binary(sniff) {
-            return self.skip(file, SkipReason::Binary, ContentClass::Binary);
+            return self.skip(file, SkipReason::Binary);
         }
         // Parsers all need `&str`; validate once here so they can assume UTF-8.
         if std::str::from_utf8(content).is_err() {
-            return self.skip(file, SkipReason::NotUtf8, ContentClass::Binary);
+            return self.skip(file, SkipReason::NotUtf8);
         }
         if let Some(reason) = minified_skip(content) {
-            self.skip(file, reason, ContentClass::MinifiedCode);
+            self.skip(file, reason);
         }
     }
 }
@@ -283,20 +270,20 @@ mod tests {
     fn labels_settled_files() {
         let f = filter();
         let png = settle(&f, "logo.png", b"");
-        assert_eq!(png.label.skip, Some(SkipReason::ExcludedExtension));
+        assert_eq!(png.skip, Some(SkipReason::ExcludedExtension));
 
         let bin = settle(&f, "x.bin2", b"a\x00b");
-        assert_eq!(bin.label.skip, Some(SkipReason::Binary));
-        assert_eq!(bin.label.content, ContentClass::Binary);
+        assert_eq!(bin.skip, Some(SkipReason::Binary));
 
         let source = settle(&f, "main.rs", b"fn main() {}\n");
-        assert_eq!(source.label.skip, None);
-        assert_eq!(source.label.content, ContentClass::Code);
+        assert_eq!(source.skip, None);
 
-        let mut link = File::symlink("link.rs".into(), 5);
+        let mut link = File {
+            symlink: true,
+            ..file("link.rs", 5)
+        };
         f.header(&mut link).unwrap();
-        assert_eq!(link.label.skip, Some(SkipReason::NonRegularFile));
-        assert_eq!(link.label.content, ContentClass::NonRegular);
+        assert_eq!(link.skip, Some(SkipReason::NonRegularFile));
     }
 
     #[test]
@@ -337,8 +324,7 @@ mod tests {
         for path in ["data/train.csv", "src/model.py"] {
             let pointer = settle(&f, path, POINTER);
             assert_eq!(pointer.decision, Decision::ListOnly, "{path}");
-            assert_eq!(pointer.label.skip, Some(SkipReason::LfsPointer));
-            assert_eq!(pointer.label.content, ContentClass::LfsPointer);
+            assert_eq!(pointer.skip, Some(SkipReason::LfsPointer));
         }
     }
 

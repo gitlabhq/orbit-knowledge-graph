@@ -399,7 +399,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 continue;
             }
             candidates.remove(&file.path);
-            let reason = file.label.skip.map_or(FileReason::None, FileReason::Filter);
+            let reason = file.skip.map_or(FileReason::None, FileReason::Filter);
             state.trees.push(Tree::unparsed(
                 lang,
                 &file.path,

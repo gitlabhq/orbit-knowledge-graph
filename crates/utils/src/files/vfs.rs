@@ -16,7 +16,7 @@ use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
-use super::{Counter, Decision, File, Label, Need, Pass, SkipReason, SourceError};
+use super::{Counter, Decision, File, Need, Pass, SkipReason, SourceError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Metadata {
@@ -31,25 +31,21 @@ pub struct DirEntry {
     pub is_dir: bool,
 }
 
-/// Why a parser got no source: the passes turned the file down (its label
-/// says why), or its bytes could not be read.
+/// Why a parser got no source: the passes turned the file down (and said
+/// why), or its bytes could not be read.
 #[derive(Debug)]
 pub enum Unread {
-    Listed(Label),
+    Listed(Option<SkipReason>),
     Unreadable(io::Error),
 }
 
 /// SHA-256 of a file's bytes: the identity content is stored under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ContentId([u8; 32]);
+pub(crate) struct ContentId([u8; 32]);
 
 impl ContentId {
     fn of(bytes: &[u8]) -> Self {
         Self(Sha256::digest(bytes).into())
-    }
-
-    pub fn to_hex(self) -> String {
-        self.0.iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 
@@ -172,9 +168,9 @@ impl Vfs {
         let Some(key) = key(Path::new(path)) else {
             return Ok(None);
         };
-        let mut file = match symlink {
-            true => File::symlink(key, size),
-            false => File::new(key, size),
+        let mut file = File {
+            symlink,
+            ..File::new(key, size)
         };
         let need = self.passes.header(&mut file)?;
         Ok((file.decision != Decision::Drop).then_some(Entry {
@@ -204,14 +200,6 @@ impl Vfs {
             Some(entry) => entry.link(on_disk),
             None => Ok(()),
         }
-    }
-
-    /// A file with no bytes of its own. A node, nothing more.
-    pub fn list(&self, path: &str, size: u64) -> Result<(), SourceError> {
-        if let Some(entry) = self.stat(path, size, false)? {
-            entry.list();
-        }
-        Ok(())
     }
 
     /// A symlink: a node that is never parsed, and a path that reads as
@@ -371,7 +359,7 @@ impl Vfs {
             }) => self.bytes(&slot),
             Some(Node { file, .. }) => Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                format!("{key} is listed only: {}", reason(&file.label)),
+                format!("{key} is listed only: {}", reason(file.skip)),
             )),
             None if lock(&self.children).contains_key(&key) => Err(io::Error::new(
                 io::ErrorKind::IsADirectory,
@@ -390,7 +378,7 @@ impl Vfs {
             return Err(Unread::Unreadable(not_found()));
         };
         let Some(slot) = node.slot else {
-            return Err(Unread::Listed(node.file.label));
+            return Err(Unread::Listed(node.file.skip));
         };
         let bytes = self.bytes(&slot).map_err(Unread::Unreadable)?;
         if node.checked {
@@ -399,7 +387,7 @@ impl Vfs {
         let mut file = node.file;
         self.passes.content(&mut file, &bytes);
         let loads = file.loads();
-        let label = file.label.clone();
+        let skip = file.skip;
         // The node exists and is indexed; only its decision changes.
         if let Some(node) = lock(&self.nodes).get_mut(&key) {
             node.file = file;
@@ -408,7 +396,7 @@ impl Vfs {
         }
         match loads {
             true => Ok(bytes),
-            false => Err(Unread::Listed(label)),
+            false => Err(Unread::Listed(skip)),
         }
     }
 
@@ -568,7 +556,8 @@ impl Vfs {
 
     /// The identity of a stored file's content; `None` for linked files,
     /// whose bytes were never read, and for files kept without bytes.
-    pub fn content_id(&self, path: &Path) -> Option<ContentId> {
+    #[cfg(test)]
+    pub(crate) fn content_id(&self, path: &Path) -> Option<ContentId> {
         match lock(&self.nodes).get(&key(path)?)?.slot {
             Some(Slot::Stored(id)) => Some(id),
             _ => None,
@@ -576,10 +565,8 @@ impl Vfs {
     }
 }
 
-fn reason(label: &Label) -> String {
-    label
-        .skip
-        .map_or_else(|| "no bytes".to_string(), |s: SkipReason| s.to_string())
+fn reason(skip: Option<SkipReason>) -> String {
+    skip.map_or_else(|| "no bytes".to_string(), |s| s.to_string())
 }
 
 /// A repo-relative `/`-joined key; the repository root is `""`. `.` and `..`
@@ -651,10 +638,10 @@ mod tests {
         fn header(&self, f: &mut File) -> Result<Need, CapExceeded> {
             if f.symlink {
                 f.decision = Decision::ListOnly;
-                f.label.skip = Some(SkipReason::NonRegularFile);
+                f.skip = Some(SkipReason::NonRegularFile);
             } else if f.path.ends_with(".png") {
                 f.decision = Decision::ListOnly;
-                f.label.skip = Some(SkipReason::ExcludedExtension);
+                f.skip = Some(SkipReason::ExcludedExtension);
             } else if f.path.ends_with(".toml") {
                 f.decision = Decision::Load;
                 return Ok(Need::Bytes);
@@ -664,7 +651,7 @@ mod tests {
         fn content(&self, f: &mut File, bytes: &[u8]) {
             if bytes.contains(&0) {
                 f.decision = Decision::ListOnly;
-                f.label.skip = Some(SkipReason::Binary);
+                f.skip = Some(SkipReason::Binary);
             }
         }
     }
@@ -781,7 +768,7 @@ mod tests {
         );
         assert!(matches!(
             vfs.source(Path::new("assets/logo.png")),
-            Err(Unread::Listed(label)) if label.skip == Some(SkipReason::ExcludedExtension)
+            Err(Unread::Listed(Some(SkipReason::ExcludedExtension)))
         ));
         assert!(!vfs.exists(Path::new("build.log")));
         assert_eq!(lock(&vfs.blobs).len(), 1, "only the parse file cost bytes");
@@ -824,7 +811,7 @@ mod tests {
         assert_eq!(&*vfs.source(Path::new("lib.rs")).unwrap(), b"pub fn f() {}");
         assert!(matches!(
             vfs.source(Path::new("blob.rs")),
-            Err(Unread::Listed(label)) if label.skip == Some(SkipReason::Binary)
+            Err(Unread::Listed(Some(SkipReason::Binary)))
         ));
         assert_eq!(decision(&vfs, "blob.rs"), Decision::ListOnly);
         assert_eq!(

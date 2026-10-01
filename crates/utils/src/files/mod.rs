@@ -18,7 +18,7 @@ pub mod disk;
 pub mod tar;
 pub mod vfs;
 
-pub use vfs::{ContentId, DirEntry, Entry, Metadata, Unread, Vfs};
+pub use vfs::{DirEntry, Entry, Metadata, Unread, Vfs};
 
 /// Why a file was not loaded. Snake_case for metric labels.
 #[derive(
@@ -45,28 +45,6 @@ pub enum SkipReason {
     LfsPointer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ContentClass {
-    #[default]
-    Unknown,
-    Text,
-    Code,
-    Binary,
-    MinifiedCode,
-    LfsPointer,
-    NonRegular,
-}
-
-/// What the passes learned about a file.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Label {
-    pub skip: Option<SkipReason>,
-    pub content: ContentClass,
-    /// Fine-grained content type from an external classifier such as Magika.
-    pub detail: Option<String>,
-    pub extension: Option<String>,
-}
-
 /// What happens to a file. `Parse` and `Load` both keep the bytes; only
 /// `Parse` reaches a parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, strum::Display, strum::AsRefStr)]
@@ -86,7 +64,8 @@ pub struct File {
     pub size: u64,
     pub symlink: bool,
     pub decision: Decision,
-    pub label: Label,
+    /// Why it is only listed, when it is.
+    pub skip: Option<SkipReason>,
 }
 
 impl File {
@@ -96,14 +75,7 @@ impl File {
             size,
             symlink: false,
             decision: Decision::Parse,
-            label: Label::default(),
-        }
-    }
-
-    pub fn symlink(path: String, size: u64) -> Self {
-        Self {
-            symlink: true,
-            ..Self::new(path, size)
+            skip: None,
         }
     }
 
@@ -153,16 +125,6 @@ impl<A: Pass, B: Pass> Pass for Then<A, B> {
     fn content(&self, file: &mut File, bytes: &[u8]) {
         self.0.content(file, bytes);
         self.1.content(file, bytes);
-    }
-}
-
-impl<P: Pass + ?Sized> Pass for &P {
-    fn header(&self, file: &mut File) -> Result<Need, CapExceeded> {
-        (**self).header(file)
-    }
-
-    fn content(&self, file: &mut File, bytes: &[u8]) {
-        (**self).content(file, bytes)
     }
 }
 

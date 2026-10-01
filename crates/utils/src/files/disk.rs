@@ -127,7 +127,7 @@ mod tests {
         fn content(&self, f: &mut File, content: &[u8]) {
             if content.contains(&0) {
                 f.decision = Decision::ListOnly;
-                f.label.skip = Some(SkipReason::Binary);
+                f.skip = Some(SkipReason::Binary);
             }
         }
     }
