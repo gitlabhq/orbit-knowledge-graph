@@ -100,3 +100,20 @@ This issue occurs when the account has the Reporter role.
 GitLab Orbit removes security entities from the results and from aggregate counts.
 
 To resolve this issue, give the account the Security Manager role in the group.
+
+## GitLab Orbit tools are missing from a custom flow
+
+A custom flow runs, but the agent does not have the `orbit_list_commands` or
+`orbit_invoke_command` tools. The flow does not show an error.
+
+This issue occurs when the flow configuration does not list the GitLab Orbit
+tools, or when the user who triggered the flow has not turned on GitLab Orbit.
+
+<!-- vale orbit.StandaloneProductName = NO -->
+
+To resolve this issue, add the tools to the flow `toolset`. Then ask the user to
+select **Use Orbit in GitLab Duo** and **Other Foundational Agents** in their preferences.
+
+<!-- vale orbit.StandaloneProductName = YES -->
+
+For more information, see [Use GitLab Orbit in a custom flow](access/duo.md#use-gitlab-orbit-in-a-custom-flow).
