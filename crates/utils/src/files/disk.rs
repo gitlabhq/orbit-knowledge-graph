@@ -2,6 +2,7 @@
 //! found is linked into the repository filesystem where it is; the
 //! filesystem reads it now only if a pass needs to, and links it either way.
 
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -31,9 +32,21 @@ pub fn discover(root: &Path, vfs: &Vfs) -> Result<(), SourceError> {
             Box::new(|entry| {
                 let entry = match entry {
                     Ok(entry) => entry,
-                    Err(e) => {
-                        warn!(error = %e, "skipping an entry the walk could not read");
+                    // A live checkout moves under us: something gone since
+                    // it was listed is skipped. Anything else (a directory
+                    // we may not read, an I/O fault) would make the graph
+                    // claim a repository it did not see, so the run fails.
+                    Err(e)
+                        if e.io_error()
+                            .is_some_and(|io| io.kind() == ErrorKind::NotFound) =>
+                    {
+                        warn!(error = %e, "skipping an entry that vanished during the walk");
                         return WalkState::Continue;
+                    }
+                    Err(e) => {
+                        *failed.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(SourceError::Io(std::io::Error::other(e)));
+                        return WalkState::Quit;
                     }
                 };
                 let Some(kind) = entry.file_type() else {
@@ -195,6 +208,28 @@ mod tests {
             vfs.read_to_string(Path::new("Cargo.toml")).unwrap(),
             "[package]"
         );
+    }
+
+    /// A directory the walk may not read is not a smaller repository; it is
+    /// a failed run.
+    #[test]
+    #[cfg(unix)]
+    fn an_unreadable_directory_fails_the_walk() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(root, "src/main.rs", b"fn main() {}");
+        write(root, "secret/hidden.rs", b"fn hidden() {}");
+        let locked = root.join("secret");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read_dir(&locked).is_ok() {
+            return; // running as root: permissions do not bind, nothing to test
+        }
+
+        let result = discover(root, &Vfs::default());
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err(), "an unreadable subtree must fail the run");
     }
 
     #[test]
