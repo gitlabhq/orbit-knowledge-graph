@@ -9,6 +9,7 @@ use crate::marker::{MarkerTree, parse_markers};
 use crate::{CLAP_HELP_COMMAND, parse_skill_frontmatter};
 
 const MANIFEST: &str = "SKILL.md";
+const GQL_MANIFEST: &str = "SKILL.gql.md";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SkillValidation {
@@ -45,6 +46,10 @@ pub fn validate_skill_pair(
         ));
     }
 
+    if let Some(gql_manifest) = remote.get(GQL_MANIFEST) {
+        validate_gql_manifest(remote_manifest, gql_manifest, &slots)?;
+    }
+
     let union: BTreeSet<_> = remote.keys().chain(local.keys()).cloned().collect();
     validate_links("remote", &remote, &union)?;
     validate_links("local", &local, &union)?;
@@ -66,6 +71,48 @@ pub fn validate_skill_pair(
     }
 
     Ok(SkillValidation { remote_commands })
+}
+
+fn validate_gql_manifest(
+    remote_manifest: &str,
+    gql_manifest: &str,
+    slots: &BTreeSet<String>,
+) -> Result<(), String> {
+    let remote = parse_skill_frontmatter(remote_manifest, "orbit")?;
+    let gql = parse_skill_frontmatter(gql_manifest, "orbit")
+        .map_err(|error| format!("{GQL_MANIFEST}: {error}"))?;
+    let mut expected = remote.version;
+    expected.build = semver::BuildMetadata::new("gql").map_err(|error| error.to_string())?;
+    if gql.version != expected {
+        return Err(format!(
+            "{GQL_MANIFEST} version {} must be the {MANIFEST} version plus +gql ({expected})",
+            gql.version
+        ));
+    }
+    if frontmatter_without_version(remote_manifest) != frontmatter_without_version(gql_manifest) {
+        return Err(format!(
+            "{GQL_MANIFEST} front matter must match {MANIFEST} except for version"
+        ));
+    }
+    let gql_slots = parse_markers(gql_manifest, MarkerTree::Remote)
+        .map_err(|error| format!("{GQL_MANIFEST}: {error}"))?;
+    if &gql_slots != slots {
+        return Err(format!(
+            "{GQL_MANIFEST} placeholders {gql_slots:?} do not match {MANIFEST} placeholders {slots:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn frontmatter_without_version(manifest: &str) -> Vec<String> {
+    manifest
+        .replace("\r\n", "\n")
+        .lines()
+        .skip(1)
+        .take_while(|line| *line != "---")
+        .filter(|line| !line.starts_with("version:"))
+        .map(str::to_string)
+        .collect()
 }
 
 fn load_tree(root: &Path) -> Result<BTreeMap<String, String>, String> {
@@ -144,10 +191,11 @@ fn validate_path_namespace(
     }
 }
 
-fn validate_links(
+/// Fails when a Markdown file links to a relative path that `available` lacks.
+pub fn validate_links(
     tree_name: &str,
     files: &BTreeMap<String, String>,
-    union: &BTreeSet<String>,
+    available: &BTreeSet<String>,
 ) -> Result<(), String> {
     for (source, content) in files {
         if !source.ends_with(".md") {
@@ -158,7 +206,7 @@ fn validate_links(
                 continue;
             };
             let resolved = resolve_link(source, destination)?;
-            if !union.contains(&resolved) {
+            if !available.contains(&resolved) {
                 return Err(format!(
                     "{tree_name} skill link from {source} resolves to missing path {resolved:?}: {destination:?}"
                 ));
@@ -438,6 +486,51 @@ mod tests {
             result.remote_commands,
             BTreeSet::from(["graph-status".into()])
         );
+    }
+
+    #[test]
+    fn validates_the_gql_manifest_when_present() {
+        let gql_body = "[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n";
+        for (version, body, expected_error) in [
+            ("1.0.0+gql", gql_body, None),
+            ("1.0.0", gql_body, Some("plus +gql")),
+            ("1.0.1+gql", gql_body, Some("plus +gql")),
+            ("1.0.0+gql", "no placeholder\n", Some("do not match")),
+            (
+                "1.0.0+gql",
+                "---\n<!-- orbit:include local:other -->\n",
+                Some("do not match"),
+            ),
+        ] {
+            let root = fixture();
+            let content =
+                remote_manifest(body).replace("version: 1.0.0", &format!("version: {version}"));
+            std::fs::write(root.path().join("remote/SKILL.gql.md"), content).unwrap();
+            match (validate(root.path()), expected_error) {
+                (Ok(_), None) => {}
+                (Err(error), Some(expected)) => assert!(error.contains(expected), "{error}"),
+                (result, expected) => panic!("{version}: {result:?} vs {expected:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_gql_front_matter_drift_other_than_version() {
+        let root = fixture();
+        let content = remote_manifest("[remote](references/remote.md)\n<!-- orbit:include local:quick-start -->\n`orbit graph-status --project-id 1`\n")
+            .replace("version: 1.0.0", "version: 1.0.0+gql")
+            .replace("audience: developers", "audience: developers\n  workflow: ai");
+        std::fs::write(root.path().join("remote/SKILL.gql.md"), content).unwrap();
+        let error = validate(root.path()).unwrap_err();
+        assert!(error.contains("except for version"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_gql_manifest_with_invalid_frontmatter() {
+        let root = fixture();
+        std::fs::write(root.path().join("remote/SKILL.gql.md"), "no frontmatter\n").unwrap();
+        let error = validate(root.path()).unwrap_err();
+        assert!(error.contains("SKILL.gql.md"), "{error}");
     }
 
     #[test]

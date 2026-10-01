@@ -14,7 +14,7 @@ pub const CLAP_HELP_COMMAND: &str = "help";
 #[cfg(feature = "skill-markers")]
 pub use marker::compose_skill_manifests;
 #[cfg(feature = "skill-validation")]
-pub use skill::{SkillValidation, validate_skill_pair};
+pub use skill::{SkillValidation, validate_links, validate_skill_pair};
 pub use skill_frontmatter::{SkillFrontmatter, parse_skill_frontmatter};
 
 #[derive(Embed)]

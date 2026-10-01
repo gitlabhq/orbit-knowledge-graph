@@ -26,7 +26,7 @@ static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
 
 static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::Gql)
-        .expect("embedded Orbit GQL manifest has valid frontmatter")
+        .expect("embedded Orbit GQL skill passed manifest and tree validation at build time")
 });
 
 fn served_in(path: &str, frontend: Frontend) -> bool {
