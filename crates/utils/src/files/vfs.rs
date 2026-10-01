@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 use super::{Counter, Decision, File, Label, Need, Pass, SkipReason, SourceError};
 
@@ -307,7 +308,15 @@ impl Entry<'_> {
             self.vfs.keep(self.file, Some(Slot::Linked(on_disk)), false);
             return Ok(());
         }
-        let bytes = std::fs::read(&on_disk)?;
+        // A live checkout moves under us; a file gone between its stat and
+        // this read is not a file of the repository, not a failed run.
+        let bytes = match std::fs::read(&on_disk) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!(path = self.file.path, error = %e, "skipping a file that vanished before it was read");
+                return Ok(());
+            }
+        };
         self.vfs.passes.content(&mut self.file, &bytes);
         let slot = self.file.loads().then_some(Slot::Linked(on_disk));
         self.vfs.keep(self.file, slot, true);
@@ -688,6 +697,17 @@ mod tests {
             io::ErrorKind::Unsupported
         );
         assert_eq!(vfs.metadata(Path::new("lib.rs")).unwrap().len, 13);
+    }
+
+    /// A linked file the passes want to sniff may be gone by the time it is
+    /// read; it is then not a file of the repository, and the run goes on.
+    #[test]
+    fn a_linked_file_that_vanishes_before_its_sniff_is_not_a_node() {
+        let vfs = Vfs::new(TestFilter, None);
+        vfs.link("Cargo.toml", "/nonexistent/Cargo.toml".into(), 9)
+            .unwrap();
+        assert!(!vfs.exists(Path::new("Cargo.toml")));
+        assert!(vfs.is_empty());
     }
 
     #[test]
