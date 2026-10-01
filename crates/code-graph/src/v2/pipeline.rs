@@ -1,5 +1,5 @@
 use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
-use crate::v2::error::{FaultedFile, FileFault, FileReason, FileSkip, SkippedFile};
+use crate::v2::error::{AnalyzerError, FaultedFile, FileFault, FileReason, FileSkip, SkippedFile};
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
 use petgraph::graph::NodeIndex;
@@ -276,12 +276,6 @@ pub struct PipelineContext {
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
 }
 
-/// Why a file yielded no source: turned down by policy, or unreadable.
-pub enum Unread {
-    Skip(FileSkip, String),
-    Fault(FileFault, String),
-}
-
 impl PipelineContext {
     pub fn new(vfs: Arc<Vfs>, config: PipelineConfig, tracer: Tracer) -> Self {
         Self {
@@ -302,17 +296,15 @@ impl PipelineContext {
 
     /// The one read of a file to parse; the repository's passes may still
     /// turn it down on this read.
-    pub fn read_source(&self, input: &FamilyFileInput) -> Result<Arc<[u8]>, Unread> {
+    pub fn read_source(&self, input: &FamilyFileInput) -> Result<Arc<[u8]>, AnalyzerError> {
         self.vfs
             .source(Path::new(&input.path))
             .map_err(|unread| match unread {
-                orbit_utils::files::Unread::Listed(skip) => Unread::Skip(
+                Unread::Listed(skip) => AnalyzerError::skip(
                     FileSkip::Filter(skip.unwrap_or(SkipReason::NonRegularFile)),
-                    String::new(),
+                    "",
                 ),
-                orbit_utils::files::Unread::Unreadable(e) => {
-                    Unread::Fault(FileFault::FileRead, e.to_string())
-                }
+                Unread::Unreadable(e) => AnalyzerError::fault(FileFault::FileRead, e.to_string()),
             })
     }
 
@@ -405,16 +397,6 @@ impl LanguageContext {
     #[inline]
     pub fn tracer(&self) -> &crate::v2::trace::Tracer {
         &self.pipeline.tracer
-    }
-
-    #[inline]
-    pub fn root_path(&self) -> &str {
-        VIRTUAL_ROOT
-    }
-
-    #[inline]
-    pub fn vfs(&self) -> &Vfs {
-        &self.pipeline.vfs
     }
 
     #[inline]
@@ -646,7 +628,7 @@ impl Default for PipelineConfig {
     }
 }
 
-pub use orbit_utils::files::{Decision, Entry, File, Pass, SkipReason, Vfs};
+pub use orbit_utils::files::{Decision, Entry, File, Pass, SkipReason, Unread, Vfs};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -1258,19 +1240,16 @@ impl FamilyPipeline {
                 }
                 let source = match ctx.read_source(f) {
                     Ok(source) => source,
-                    Err(unread) => {
+                    Err(error) => {
                         progress.files_advanced(ProgressPhase::Parse, 1);
-                        return Some(match unread {
-                            Unread::Skip(kind, detail) => ParseOutcome::Skip(SkippedFile {
-                                path: f.path.clone(),
-                                kind,
-                                detail,
-                            }),
-                            Unread::Fault(kind, detail) => ParseOutcome::Err(FaultedFile {
-                                path: f.path.clone(),
-                                kind,
-                                detail,
-                            }),
+                        let path = f.path.clone();
+                        return Some(match error {
+                            AnalyzerError::Skip { kind, detail } => {
+                                ParseOutcome::Skip(SkippedFile { path, kind, detail })
+                            }
+                            AnalyzerError::Fault { kind, detail } => {
+                                ParseOutcome::Err(FaultedFile { path, kind, detail })
+                            }
                         });
                     }
                 };

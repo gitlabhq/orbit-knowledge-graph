@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
-use crate::v2::pipeline::{FamilyFileInput, PipelineContext, Unread};
+use crate::v2::pipeline::{FamilyFileInput, PipelineContext};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
     ImportMode, Position as GraphPosition, Range as GraphRange,
@@ -211,10 +211,7 @@ fn analyze_file(
             format!("{} ({} bytes, max {MAX_FILE_BYTES})", file.path, file.size),
         ));
     }
-    let source = ctx.read_source(file).map_err(|unread| match unread {
-        Unread::Skip(kind, detail) => AnalyzerError::skip(kind, detail),
-        Unread::Fault(kind, detail) => AnalyzerError::fault(kind, detail),
-    })?;
+    let source = ctx.read_source(file)?;
     let source = std::str::from_utf8(&source)
         .map_err(|_| AnalyzerError::skip(FileSkip::Filter(SkipReason::NotUtf8), "not utf-8"))?;
     let relative_path = file.path.clone();

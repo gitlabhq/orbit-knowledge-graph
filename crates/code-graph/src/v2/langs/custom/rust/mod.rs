@@ -50,7 +50,7 @@ use crate::v2::sentinel;
 
 use crate::v2::pipeline::{
     BatchTx, FamilyFileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
-    PipelineError, ProgressPhase, Unread, VIRTUAL_ROOT,
+    PipelineError, ProgressPhase, VIRTUAL_ROOT,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
@@ -615,13 +615,9 @@ fn parse_rust_file_standalone(
 ) -> Result<ParsedRustFile, RustFileError> {
     let file_path = file.path.as_str();
     let relative_path = to_absolute_path(file_path)[1..].to_string();
-    let source = ctx.read_source(file).map_err(|unread| {
-        let error = match unread {
-            Unread::Skip(kind, detail) => AnalyzerError::skip(kind, detail),
-            Unread::Fault(kind, detail) => AnalyzerError::fault(kind, detail),
-        };
-        (file_path.to_string(), error)
-    })?;
+    let source = ctx
+        .read_source(file)
+        .map_err(|error| (file_path.to_string(), error))?;
     let source = String::from_utf8(source.to_vec()).map_err(|_| {
         (
             file_path.to_string(),
