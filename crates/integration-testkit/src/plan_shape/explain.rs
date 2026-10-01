@@ -5,9 +5,10 @@ use compiler::passes::plan::{FkShape, Plan, PlanBody, Strategy};
 use query_engine::compiler;
 use std::collections::HashMap;
 
+use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
-fn leaf(label: &str, text: impl Into<String>) -> Tree {
+fn leaf(label: Operator, text: impl Into<String>) -> Tree {
     Tree::node(label, text, vec![])
 }
 
@@ -15,12 +16,12 @@ fn filter(predicates: Vec<String>, input: Tree) -> Tree {
     if predicates.is_empty() {
         return input;
     }
-    if input.label == "Filter" {
+    if input.label == Operator::Filter {
         let mut input = input;
         input.items.extend(predicates);
         input
     } else {
-        Tree::node("Filter", predicates.join(", "), vec![input])
+        Tree::node(Operator::Filter, predicates.join(", "), vec![input])
     }
 }
 
@@ -42,7 +43,7 @@ pub fn logical(input: &Input) -> Tree {
             let scan = filter(
                 predicates,
                 leaf(
-                    "NodeScan",
+                    Operator::NodeScan,
                     format!(
                         "{} AS {}",
                         node.entity.as_deref().unwrap_or("Unresolved"),
@@ -52,7 +53,7 @@ pub fn logical(input: &Input) -> Tree {
             );
             match &node.columns {
                 Some(ColumnSelection::List(columns)) => Tree::node(
-                    "Project",
+                    Operator::Project,
                     columns
                         .iter()
                         .map(|column| format!("{}.{column}", node.id))
@@ -61,7 +62,7 @@ pub fn logical(input: &Input) -> Tree {
                     vec![scan],
                 ),
                 Some(ColumnSelection::All) => {
-                    Tree::node("Project", format!("{}.*", node.id), vec![scan])
+                    Tree::node(Operator::Project, format!("{}.*", node.id), vec![scan])
                 }
                 None => scan,
             }
@@ -82,7 +83,7 @@ pub fn logical(input: &Input) -> Tree {
         filter(
             input_filters(&alias, &edge.filters),
             leaf(
-                "EdgeScan",
+                Operator::EdgeScan,
                 format!(
                     "{} {source}{arrow}{target} AS {alias}{depth}",
                     edge.types.join("|")
@@ -90,7 +91,7 @@ pub fn logical(input: &Input) -> Tree {
             ),
         )
     }));
-    let mut tree = Tree::node("Input", input.query_type.to_string(), children);
+    let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
     if !input.aggregation.metrics.is_empty() || !input.aggregation.group_by.is_empty() {
         let groups = input.aggregation.group_by.iter().map(|group| {
             let value = group.property().map_or_else(
@@ -115,14 +116,14 @@ pub fn logical(input: &Input) -> Tree {
             )
         });
         tree = Tree::node(
-            "Aggregate",
+            Operator::Aggregate,
             groups.chain(metrics).collect::<Vec<_>>().join(", "),
             vec![tree],
         );
     }
     if let Some(order) = &input.order_by {
         tree = Tree::node(
-            "Sort",
+            Operator::Sort,
             format!(
                 "{}.{}{}",
                 order.node,
@@ -138,7 +139,7 @@ pub fn logical(input: &Input) -> Tree {
     }
     if let Some(order) = &input.aggregation.sort {
         tree = Tree::node(
-            "Sort",
+            Operator::Sort,
             format!(
                 "{}{}",
                 order.column,
@@ -151,7 +152,7 @@ pub fn logical(input: &Input) -> Tree {
             vec![tree],
         );
     }
-    Tree::node("Limit", input.limit.to_string(), vec![tree])
+    Tree::node(Operator::Limit, input.limit.to_string(), vec![tree])
 }
 
 fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {
@@ -191,7 +192,7 @@ pub fn physical(plan: &Plan, ast: &Node) -> (Tree, Tree) {
             Strategy::SingleNode(root) | Strategy::Fk(FkShape::Chain(root)) => physical_tree(root),
             Strategy::Flat(execution) | Strategy::Fk(FkShape::Star { execution, .. }) => {
                 let source = Tree::node(
-                    "Project",
+                    Operator::Project,
                     projections(&execution.outputs),
                     vec![physical_source(&execution.source)],
                 );
@@ -199,32 +200,34 @@ pub fn physical(plan: &Plan, ast: &Node) -> (Tree, Tree) {
                     source
                 } else {
                     Tree::node(
-                        "With",
+                        Operator::With,
                         "",
                         execution
                             .definitions
                             .iter()
-                            .map(|(name, keys)| Tree::node("CTE", name, vec![physical_tree(keys)]))
+                            .map(|(name, keys)| {
+                                Tree::node(Operator::Cte, name, vec![physical_tree(keys)])
+                            })
                             .chain([source])
                             .collect(),
                     )
                 }
             }
         },
-        PlanBody::Neighbors { .. } => leaf("Neighbors", ""),
-        PlanBody::PathFinding(_) => leaf("PathFinding", ""),
-        PlanBody::Hydration { .. } => leaf("Hydration", ""),
+        PlanBody::Neighbors { .. } => leaf(Operator::Neighbors, ""),
+        PlanBody::PathFinding(_) => leaf(Operator::PathFinding, ""),
+        PlanBody::Hydration { .. } => leaf(Operator::Hydration, ""),
     };
     let emitted = match ast {
         Node::Query(value) => query(value),
-        Node::Insert(_) => leaf("Insert", ""),
+        Node::Insert(_) => leaf(Operator::Insert, ""),
     };
     (planned, emitted)
 }
 
 fn physical_tree(plan: &PhysicalPlan) -> Tree {
     Tree::node(
-        "Project",
+        Operator::Project,
         projections(&plan.outputs),
         vec![physical_source(&plan.source)],
     )
@@ -233,7 +236,7 @@ fn physical_tree(plan: &PhysicalPlan) -> Tree {
 fn physical_source(plan: &PhysicalSource) -> Tree {
     match plan {
         PhysicalSource::Union { alias, arms, .. } => Tree::node(
-            "Union",
+            Operator::Union,
             format!("ALL AS {alias}"),
             arms.iter().map(physical_tree).collect(),
         ),
@@ -247,19 +250,19 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             filter(conjuncts(predicate), physical_source(input))
         }
         PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
-            "SemiJoin",
+            Operator::SemiJoin,
             format!("{} IN subquery", expression(value)),
             vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {
-            Tree::node("Bind", alias, vec![physical_source(input)])
+            Tree::node(Operator::Bind, alias, vec![physical_source(input)])
         }
         PhysicalSource::Latest {
             alias,
             sort_key,
             input,
         } => Tree::node(
-            "Deduplicate",
+            Operator::Deduplicate,
             format!(
                 "LimitBy {}",
                 sort_key
@@ -276,7 +279,7 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             left,
             right,
         } => Tree::node(
-            "Join",
+            Operator::Join,
             join_head(&kind.to_string(), condition),
             vec![physical_source(left), physical_source(right)],
         ),
@@ -284,9 +287,9 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
 }
 
 fn scan(table: &str, alias: &str, final_: bool) -> Tree {
-    let scan = leaf("Scan", format!("Table({table}) AS {alias}"));
+    let scan = leaf(Operator::Scan, format!("Table({table}) AS {alias}"));
     if final_ {
-        Tree::node("Deduplicate", "Final", vec![scan])
+        Tree::node(Operator::Deduplicate, "Final", vec![scan])
     } else {
         scan
     }
@@ -373,7 +376,7 @@ fn query_filter(predicate: &Expr, input: Tree) -> Tree {
             right,
         } => query_filter(right, query_filter(left, input)),
         Expr::InSelect { expr, query: keys } => Tree::node(
-            "SemiJoin",
+            Operator::SemiJoin,
             format!("{} IN subquery", expression(expr)),
             vec![input, query(keys)],
         ),
@@ -408,16 +411,16 @@ fn relation(value: &TableRef) -> Tree {
             right,
             on,
         } => Tree::node(
-            "Join",
+            Operator::Join,
             join_head(&join_type.to_string(), on),
             vec![relation(left), relation(right)],
         ),
         TableRef::Subquery {
             query: inner,
             alias,
-        } => Tree::node("Bind", alias, vec![query(inner)]),
+        } => Tree::node(Operator::Bind, alias, vec![query(inner)]),
         TableRef::Union { queries, alias } => Tree::node(
-            "Union",
+            Operator::Union,
             format!("ALL AS {alias}"),
             queries.iter().map(query).collect(),
         ),
@@ -434,7 +437,7 @@ fn query(value: &Query) -> Tree {
         matches!(&value.expr, Expr::FuncCall { name, .. } if [AggFunction::Count, AggFunction::Sum, AggFunction::Avg, AggFunction::Min, AggFunction::Max, AggFunction::Collect].iter().any(|function| name == function.as_sql() || name == function.as_sql_if()))
     });
     if !aggregate {
-        tree = Tree::node("Project", projection, vec![tree]);
+        tree = Tree::node(Operator::Project, projection, vec![tree]);
     } else {
         let items = value
             .group_by
@@ -443,17 +446,17 @@ fn query(value: &Query) -> Tree {
             .chain([projection])
             .collect::<Vec<_>>()
             .join(", ");
-        tree = Tree::node("Aggregate", items, vec![tree]);
+        tree = Tree::node(Operator::Aggregate, items, vec![tree]);
     }
     if let Some(predicate) = &value.having {
         tree = query_filter(predicate, tree);
     }
     if value.distinct {
-        tree = Tree::node("Distinct", "", vec![tree]);
+        tree = Tree::node(Operator::Distinct, "", vec![tree]);
     }
     if !value.order_by.is_empty() {
         tree = Tree::node(
-            "Sort",
+            Operator::Sort,
             value
                 .order_by
                 .iter()
@@ -471,7 +474,7 @@ fn query(value: &Query) -> Tree {
     }
     if let Some((limit, keys)) = &value.limit_by {
         tree = Tree::node(
-            "Deduplicate",
+            Operator::Deduplicate,
             format!(
                 "LimitBy {limit} BY {}",
                 keys.iter().map(expression).collect::<Vec<_>>().join(", ")
@@ -481,7 +484,7 @@ fn query(value: &Query) -> Tree {
     }
     if !value.union_all.is_empty() {
         tree = Tree::node(
-            "Union",
+            Operator::Union,
             "ALL",
             std::iter::once(tree)
                 .chain(value.union_all.iter().map(query))
@@ -489,16 +492,16 @@ fn query(value: &Query) -> Tree {
         );
     }
     if let Some(limit) = value.limit {
-        tree = Tree::node("Limit", limit.to_string(), vec![tree]);
+        tree = Tree::node(Operator::Limit, limit.to_string(), vec![tree]);
     }
     if !value.ctes.is_empty() {
         tree = Tree::node(
-            "With",
+            Operator::With,
             "",
             value
                 .ctes
                 .iter()
-                .map(|cte| Tree::node("CTE", &cte.name, vec![query(&cte.query)]))
+                .map(|cte| Tree::node(Operator::Cte, &cte.name, vec![query(&cte.query)]))
                 .chain([tree])
                 .collect(),
         );

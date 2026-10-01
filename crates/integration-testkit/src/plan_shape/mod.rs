@@ -1,4 +1,5 @@
 mod explain;
+mod operator;
 mod pattern;
 mod terms;
 
@@ -127,11 +128,11 @@ impl Assertions {
                     }
                 }
             }
-            let definitions: Vec<_> = if actual.label == "With" {
+            let definitions: Vec<_> = if actual.label == operator::Operator::With {
                 actual
                     .children
                     .iter()
-                    .filter(|child| child.label == "CTE")
+                    .filter(|child| child.label == operator::Operator::Cte)
                     .map(|child| &child.head)
                     .collect()
             } else {
@@ -457,4 +458,30 @@ fn yaml_definition_order_is_a_standalone_assertion() {
             .unwrap_err()
             .contains("missing positive assertions")
     );
+}
+
+#[test]
+fn every_rendered_operator_parses_as_a_nested_child() {
+    use operator::Operator;
+    use pattern::Expression;
+
+    for &operator in Operator::ALL {
+        let child = Expression::node(operator, "", vec![]);
+        let tree = Expression::node(Operator::With, "", vec![child]);
+        assert_eq!(pattern::parse(&tree.to_string()).unwrap(), tree);
+    }
+    for text in [
+        "(FutureScan table)",
+        "(With (FutureScan table))",
+        "(Filter a.id = 1 (FutureScan table))",
+    ] {
+        let error = pattern::parse(text).unwrap_err();
+        assert!(error.contains("unknown operator 'FutureScan'"), "{error}");
+    }
+    let grouped = pattern::parse(
+        "(Filter (Project.id = 1 OR Scan.id = 2), COUNT(a.id) > 0 (Scan Table(t) AS a))",
+    )
+    .unwrap();
+    assert_eq!(grouped.children.len(), 1);
+    assert_eq!(grouped.items.len(), 2);
 }

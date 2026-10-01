@@ -1,24 +1,28 @@
+use super::operator::Operator;
 use super::terms::{self, Captures};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Expression {
-    pub label: String,
+    pub label: Operator,
     pub head: String,
     pub items: Vec<String>,
     pub children: Vec<Self>,
 }
 
 impl Expression {
-    pub fn node(label: &str, head: impl Into<String>, children: Vec<Self>) -> Self {
+    pub fn node(label: Operator, head: impl Into<String>, children: Vec<Self>) -> Self {
         let text = head.into();
-        let (head, items) = if matches!(label, "Filter" | "Project" | "Aggregate" | "_") {
+        let (head, items) = if matches!(
+            label,
+            Operator::Filter | Operator::Project | Operator::Aggregate | Operator::Hole
+        ) {
             (String::new(), split_items(&text))
         } else {
             (text.trim().to_string(), vec![])
         };
         Self {
-            label: label.into(),
+            label,
             head,
             items,
             children,
@@ -60,39 +64,26 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                 self.position += 1;
             }
         }
-        fn child(&self) -> bool {
+        fn child(&self) -> Result<bool, String> {
             if self.peek() != Some(b'(') {
-                return false;
+                return Ok(false);
             }
             let label = self.text[self.position + 1..]
                 .split(|c: char| c.is_whitespace() || c == ')')
                 .next()
                 .unwrap_or("");
-            matches!(
-                label,
-                "_" | "..."
-                    | "Input"
-                    | "NodeScan"
-                    | "EdgeScan"
-                    | "Filter"
-                    | "Project"
-                    | "Aggregate"
-                    | "Scan"
-                    | "Deduplicate"
-                    | "Bind"
-                    | "Join"
-                    | "SemiJoin"
-                    | "Union"
-                    | "With"
-                    | "CTE"
-                    | "Sort"
-                    | "Limit"
-                    | "Distinct"
-                    | "Neighbors"
-                    | "PathFinding"
-                    | "Hydration"
-                    | "Insert"
-            )
+            if Operator::parse(label).is_ok() {
+                return Ok(true);
+            }
+            if label.starts_with(|c: char| c.is_ascii_uppercase())
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(format!(
+                    "unknown operator '{label}' at byte {}",
+                    self.position
+                ));
+            }
+            Ok(false)
         }
         fn node(&mut self) -> Result<Expression, String> {
             self.whitespace();
@@ -108,9 +99,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                 self.position += 1;
             }
             let label = &self.text[start..self.position];
-            if label.is_empty() {
-                return Err("missing operator".into());
-            }
+            let label = Operator::parse(label)?;
             let mut head = Vec::new();
             let mut children = Vec::new();
             loop {
@@ -121,7 +110,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                         self.position += 1;
                         break;
                     }
-                    Some(b'(') if self.child() => children.push(self.node()?),
+                    Some(b'(') if self.child()? => children.push(self.node()?),
                     _ => {
                         let start = self.position;
                         let mut depth = 0;
@@ -141,7 +130,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                                         && self.text.as_bytes()[self.position - 1]
                                             .is_ascii_whitespace() =>
                                     {
-                                        if self.child() {
+                                        if self.child()? {
                                             break;
                                         }
                                         depth += 1;
@@ -167,10 +156,10 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                     }
                 }
             }
-            if label == "..." && (!head.is_empty() || !children.is_empty()) {
+            if label == Operator::Sequence && (!head.is_empty() || !children.is_empty()) {
                 return Err("(...) cannot have text or children".into());
             }
-            if label == "_" && (!head.is_empty() || !children.is_empty()) {
+            if label == Operator::Hole && (!head.is_empty() || !children.is_empty()) {
                 return Err("(_) is a subtree hole; it cannot have text or children".into());
             }
             let result = Expression::node(label, head.join("\n"), children);
@@ -199,7 +188,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
     if parser.peek().is_some() {
         return Err("trailing input".into());
     }
-    if result.label == "..." {
+    if result.label == Operator::Sequence {
         return Err("(...) is only valid in a child sequence".into());
     }
     Ok(result)
@@ -239,14 +228,14 @@ fn split_items(text: &str) -> Vec<String> {
 }
 
 pub fn matches(pattern: &Expression, actual: &Expression, captures: &Captures) -> Option<Captures> {
-    if pattern.label == "_"
+    if pattern.label == Operator::Hole
         && pattern.head.is_empty()
         && pattern.items.is_empty()
         && pattern.children.is_empty()
     {
         return Some(captures.clone());
     }
-    if pattern.label != "_" && pattern.label != actual.label {
+    if pattern.label != Operator::Hole && pattern.label != actual.label {
         return None;
     }
     let mut captures = captures.clone();
@@ -289,7 +278,7 @@ pub fn matches(pattern: &Expression, actual: &Expression, captures: &Captures) -
     ) -> Option<Captures> {
         match patterns.split_first() {
             None => nodes.is_empty().then(|| captures.clone()),
-            Some((first, rest)) if first.label == "..." => {
+            Some((first, rest)) if first.label == Operator::Sequence => {
                 (0..=nodes.len()).find_map(|offset| children(rest, &nodes[offset..], captures))
             }
             Some((first, rest)) => nodes.split_first().and_then(|(node, remaining)| {
@@ -332,7 +321,7 @@ pub fn has_holes(pattern: &Expression) -> bool {
             terms::Term::Group(_, children) => holes(children),
         })
     }
-    matches!(pattern.label.as_str(), "_" | "...")
+    matches!(pattern.label, Operator::Hole | Operator::Sequence)
         || std::iter::once(&pattern.head)
             .chain(&pattern.items)
             .any(|text| holes(&terms::parse(text).unwrap()))
