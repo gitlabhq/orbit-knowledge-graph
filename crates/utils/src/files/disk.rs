@@ -3,8 +3,9 @@
 //! filesystem reads it now only if a pass needs to, and links it either way.
 
 use std::path::Path;
+use std::sync::Mutex;
 
-use ignore::WalkBuilder;
+use ignore::{WalkBuilder, WalkState};
 use rayon::prelude::*;
 use tracing::warn;
 
@@ -12,9 +13,11 @@ use super::{SourceError, Vfs};
 
 /// Every file below `root` with git's listing semantics: .gitignore,
 /// .git/info/exclude and dotfiles honored, ripgrep .ignore and ancestor
-/// ignores not, `.git` itself never.
+/// ignores not, `.git` itself never. The walk is parallel and each file
+/// goes into the filesystem as it is found; nothing is collected first.
 pub fn discover(root: &Path, vfs: &Vfs) -> Result<(), SourceError> {
-    let walker = WalkBuilder::new(root)
+    let failed: Mutex<Option<SourceError>> = Mutex::new(None);
+    WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
         .git_exclude(true)
@@ -23,39 +26,62 @@ pub fn discover(root: &Path, vfs: &Vfs) -> Result<(), SourceError> {
         .parents(false)
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git")
-        .build();
-    let mut paths = Vec::new();
-    for entry in walker {
-        let entry = entry.map_err(|e| SourceError::Io(std::io::Error::other(e)))?;
-        let kind = entry.file_type();
-        if !kind.is_some_and(|t| t.is_file() || t.is_symlink()) {
-            continue;
-        }
-        if let Ok(path) = entry.path().strip_prefix(root) {
-            paths.push(path.to_string_lossy().into_owned());
-        }
+        .build_parallel()
+        .run(|| {
+            Box::new(|entry| {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        warn!(error = %e, "skipping an entry the walk could not read");
+                        return WalkState::Continue;
+                    }
+                };
+                let Some(kind) = entry.file_type() else {
+                    return WalkState::Continue;
+                };
+                if !(kind.is_file() || kind.is_symlink()) {
+                    return WalkState::Continue;
+                }
+                let Ok(path) = entry.path().strip_prefix(root) else {
+                    return WalkState::Continue;
+                };
+                match put(root, &path.to_string_lossy(), vfs) {
+                    Ok(()) => WalkState::Continue,
+                    Err(e) => {
+                        *failed.lock().unwrap_or_else(|e| e.into_inner()) = Some(e);
+                        WalkState::Quit
+                    }
+                }
+            })
+        });
+    match failed.into_inner().unwrap_or_else(|e| e.into_inner()) {
+        Some(e) => Err(e),
+        None => Ok(()),
     }
-    discover_paths(root, paths, vfs)
 }
 
 /// The named files below `root`: a change set, where a walk is not wanted.
 pub fn discover_paths(root: &Path, paths: Vec<String>, vfs: &Vfs) -> Result<(), SourceError> {
-    paths.into_par_iter().try_for_each(|path| {
-        let on_disk = root.join(&path);
-        // A live checkout moves under us; a file gone between the listing
-        // and here is not a file of the repository, not a failed run.
-        let metadata = match on_disk.symlink_metadata() {
-            Ok(metadata) => metadata,
-            Err(e) => {
-                warn!(path, error = %e, "skipping a file that vanished during discovery");
-                return Ok(());
-            }
-        };
-        match metadata.is_symlink() {
-            true => vfs.list(&path, metadata.len(), true),
-            false => vfs.link(&path, on_disk, metadata.len()),
+    paths
+        .into_par_iter()
+        .try_for_each(|path| put(root, &path, vfs))
+}
+
+fn put(root: &Path, path: &str, vfs: &Vfs) -> Result<(), SourceError> {
+    let on_disk = root.join(path);
+    // A live checkout moves under us; a file gone between the listing and
+    // here is not a file of the repository, not a failed run.
+    let metadata = match on_disk.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            warn!(path, error = %e, "skipping a file that vanished during discovery");
+            return Ok(());
         }
-    })
+    };
+    match metadata.is_symlink() {
+        true => vfs.list(path, metadata.len(), true),
+        false => vfs.link(path, on_disk, metadata.len()),
+    }
 }
 
 #[cfg(test)]
