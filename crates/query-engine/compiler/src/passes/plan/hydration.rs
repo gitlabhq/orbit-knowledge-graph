@@ -1,6 +1,6 @@
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use orbit_utils::traversal_path::TraversalPath;
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
 use super::{Hydration, Plan};
@@ -19,12 +19,42 @@ pub struct HydrationNodePlan {
     pub id_property: String,
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
-    /// Traversal paths extracted from the base query, used to narrow hydration
-    /// scans via `startsWith(traversal_path, tp)`.
-    pub traversal_paths: Vec<TraversalPath>,
-    /// Table sort key (ReplacingMergeTree ORDER BY) — the dedup identity for the
-    /// `LIMIT 1 BY <sort_key>` latest-row scan that replaces `FINAL`. Required.
+    pub path_filter: Option<HydrationPathFilter>,
     pub sort_key: Vec<String>,
+}
+
+pub enum HydrationPathFilter {
+    PrefixUnion(Vec<TraversalPath>),
+    PrefixSet(Vec<TraversalPath>),
+}
+
+fn path_filter(
+    paths: &[TraversalPath],
+    options: HydrationCompileOptions,
+) -> Option<HydrationPathFilter> {
+    let mut leaves = prune_to_leaves(paths);
+    if leaves.is_empty() {
+        return None;
+    }
+    if let Some(budget) = options.path_segment_budget {
+        while leaves
+            .iter()
+            .map(|path| path.segment_count())
+            .sum::<usize>()
+            > budget
+        {
+            let parents: Vec<_> = leaves.iter().map(|path| path.parent()).collect();
+            if parents == leaves {
+                break;
+            }
+            leaves = prune_to_leaves(&parents);
+        }
+    }
+    Some(if options.dynamic && leaves.len() > 256 {
+        HydrationPathFilter::PrefixSet(leaves)
+    } else {
+        HydrationPathFilter::PrefixUnion(leaves)
+    })
 }
 
 pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
@@ -62,7 +92,7 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
                 id_property: node.id_property.clone(),
                 node_ids: node.node_ids.clone(),
                 columns,
-                traversal_paths: node.traversal_paths.clone(),
+                path_filter: path_filter(&node.traversal_paths, options),
                 sort_key: context.latest_row_key(table)?.to_vec(),
             })
         })
@@ -70,6 +100,5 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
 
     Ok(context.finish(Hydration {
         nodes: hydration_nodes,
-        options,
     }))
 }
