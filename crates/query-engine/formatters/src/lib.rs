@@ -1,6 +1,8 @@
 mod goon;
+mod gql;
 mod graph;
 mod raw_row;
+mod text;
 
 use std::sync::LazyLock;
 
@@ -11,6 +13,7 @@ use orbit_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
 pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
+pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter};
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
     PaginationResponse,
@@ -31,6 +34,7 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 pub enum FormatName {
     Raw,
     Goon,
+    Gql,
 }
 
 pub trait ResultFormatter: Send + Sync {
