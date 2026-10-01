@@ -5,7 +5,7 @@ NS="e2e-${RUN_ID}-gkg"
 CH_NS="${E2E_CH_NAMESPACE:-ra-ch-${RUN_ID}}"
 
 log "Waiting for GKG pods to be ready (up to 10 min)..."
-$KC wait -n "${NS}" deploy -l app.kubernetes.io/name=gkg --for=condition=available --timeout=600s 2>/dev/null || true
+$KC wait -n "${NS}" deploy -l app.kubernetes.io/name=orbit --for=condition=available --timeout=600s 2>/dev/null || true
 
 log "Waiting for ClickHouse to be ready..."
 $KC rollout status -n "${CH_NS}" statefulset/clickhouse --timeout=300s 2>/dev/null || true
@@ -46,10 +46,10 @@ check "datalake tables have watermark column" $KC exec -n "${CH_NS}" clickhouse-
 
 # These require metrics enabled and wget in the container image.
 # Non-fatal until the tier overlay is wired into setup.sh.
-warn_check "gkg metrics scrapeable" $KC exec -n "${NS}" deploy/gkg-webserver -- \
+warn_check "gkg metrics scrapeable" $KC exec -n "${NS}" deploy/orbit-webserver -- \
   wget -q -O /dev/null http://localhost:9394/metrics
 
-warn_check "smoke healthz" $KC exec -n "${NS}" deploy/gkg-webserver -- \
+warn_check "smoke healthz" $KC exec -n "${NS}" deploy/orbit-webserver -- \
   wget -q -O /dev/null "http://localhost:50054/healthz"
 
 if [[ ${FAIL} -ne 0 ]]; then
