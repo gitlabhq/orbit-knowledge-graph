@@ -12,13 +12,14 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::passes::plan::{NodePlan, PathFindingBody, Plan};
+use crate::passes::plan::{NodePlan, PathFinding, Plan};
 use crate::passes::shared::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
-pub fn emit_pathfinding(plan: &Plan, input: &Input, pf: &PathFindingBody) -> Result<Node> {
+pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
+    let pf = &plan.operation;
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
 

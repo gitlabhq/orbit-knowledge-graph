@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use orbit_utils::traversal_path::TraversalPath;
 
-use super::{Plan, PlanBody};
+use super::context::PlanningContext;
+use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -28,11 +27,12 @@ pub struct HydrationNodePlan {
     pub sort_key: Vec<String>,
 }
 
-pub fn plan_hydration(
-    input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
+    context: PlanningContext<'_, M>,
     options: HydrationCompileOptions,
-) -> Result<Plan> {
+) -> Result<Plan<Hydration>> {
+    let input = context.input;
+    let model = context.model;
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
@@ -55,13 +55,6 @@ pub fn plan_hydration(
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
             };
-            let sort_key = model
-                .table_sort_key(table)
-                .filter(|sk| !sk.is_empty())
-                .map(<[String]>::to_vec)
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!("hydration table {table} has no sort key"))
-                })?;
             Ok(HydrationNodePlan {
                 alias: node.id.clone(),
                 table: table.to_string(),
@@ -70,19 +63,13 @@ pub fn plan_hydration(
                 node_ids: node.node_ids.clone(),
                 columns,
                 traversal_paths: node.traversal_paths.clone(),
-                sort_key,
+                sort_key: context.latest_row_key(table)?.to_vec(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Plan {
-        nodes: HashMap::new(),
-        hops: vec![],
-        node_edge_mappings: HashMap::new(),
-        denormalized: HashMap::new(),
-        body: PlanBody::Hydration {
-            nodes: hydration_nodes,
-            options,
-        },
-    })
+    Ok(context.finish(Hydration {
+        nodes: hydration_nodes,
+        options,
+    }))
 }

@@ -17,8 +17,8 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
     context: &PlanningContext<'_, M>,
     center: &str,
 ) -> Result<ExecutionPlan> {
-    let hops = context.hops;
-    let nodes = context.nodes;
+    let hops = &context.hops;
+    let nodes = &context.nodes;
     let traversal = !context.aggregate();
     let center_node = context.node(center)?;
     let root = PhysicalPlan::single_node(center_node)?;
@@ -228,7 +228,7 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
             plan.outputs.extend(edge_outputs(
                 hop,
                 index,
-                context.nodes,
+                &context.nodes,
                 Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
                 Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
             ));
