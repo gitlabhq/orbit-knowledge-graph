@@ -26,7 +26,6 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         outputs: root.outputs,
         definitions: Vec::new(),
         bindings: vec![BindingSource::table(center)],
-        edge_aliases: Vec::new(),
     };
     let mut extra: HashMap<String, Vec<Predicate>> = HashMap::new();
     for hop in hops {
@@ -171,7 +170,6 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             };
             plan.outputs
                 .extend(edge_outputs(hop, index, nodes, from_id, to_id));
-            plan.edge_aliases.push(format!("e{index}"));
         }
     }
     Ok(plan)
@@ -191,7 +189,6 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
         outputs: scan.outputs,
         bindings: vec![BindingSource::table(root)],
         definitions: vec![],
-        edge_aliases: vec![],
     };
     let mut reached = HashSet::from([root.as_str()]);
     for (index, hop) in context.hops.iter().enumerate() {

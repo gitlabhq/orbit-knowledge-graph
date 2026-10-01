@@ -106,7 +106,6 @@ pub struct LoweredQuery {
 
 pub struct EmitOutput {
     pub from: TableRef,
-    pub edge_aliases: Vec<String>,
     pub where_parts: Vec<Expr>,
     pub select: Vec<SelectExpr>,
     pub ctes: Vec<Cte>,
@@ -191,7 +190,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(plan, input, output)
+            traversal::emit_traversal(input, output)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;

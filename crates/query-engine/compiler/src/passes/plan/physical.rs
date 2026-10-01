@@ -12,7 +12,6 @@ pub struct ExecutionPlan {
     pub definitions: Vec<(String, PhysicalPlan)>,
     pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,
-    pub edge_aliases: Vec<String>,
 }
 
 pub struct BindingSource {

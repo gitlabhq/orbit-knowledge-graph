@@ -1,9 +1,13 @@
 use query_data_model::QueryDataModel;
 use std::collections::HashSet;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
+    TARGET_ID_COLUMN, TARGET_KIND_COLUMN,
+};
 
 use super::requirements::{Column, OutputValue, Predicate, Projection, live, property_filter};
+use crate::constants::*;
 use crate::error::{QueryError, Result};
 
 use super::HydrationStrategy;
@@ -60,10 +64,39 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             definitions: self.definitions,
             outputs: Vec::new(),
             bindings: Vec::new(),
-            edge_aliases: (0..self.facts.hops.len())
-                .map(|index| format!("e{index}"))
-                .collect(),
         };
+        if !self.facts.aggregate() {
+            for (index, hop) in self.facts.hops.iter().enumerate() {
+                let edge = format!("e{index}");
+                let prefix = if hop.max_hops > 1 {
+                    format!("hop_{edge}")
+                } else {
+                    edge.clone()
+                };
+                plan.outputs.extend(
+                    [
+                        (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
+                        (SOURCE_ID_COLUMN, EDGE_SRC_SUFFIX),
+                        (SOURCE_KIND_COLUMN, EDGE_SRC_TYPE_SUFFIX),
+                        (TARGET_ID_COLUMN, EDGE_DST_SUFFIX),
+                        (TARGET_KIND_COLUMN, EDGE_DST_TYPE_SUFFIX),
+                    ]
+                    .into_iter()
+                    .map(|(column, suffix)| {
+                        Projection::new(
+                            OutputValue::Column(Column::new(&edge, column)),
+                            format!("{prefix}_{suffix}"),
+                        )
+                    }),
+                );
+                if hop.max_hops > 1 {
+                    plan.outputs.push(Projection::new(
+                        OutputValue::Column(Column::new(&edge, PATH_NODES_COLUMN)),
+                        format!("{prefix}_{PATH_NODES_COLUMN}"),
+                    ));
+                }
+            }
+        }
         let mut visited = HashSet::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
             let (start, end) = hop.direction.edge_columns();
@@ -76,7 +109,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 else {
                     continue;
                 };
-                let edge = &plan.edge_aliases[index];
+                let edge = &format!("e{index}");
                 let joined = node.hydration != HydrationStrategy::Skip
                     && !(node.hydration == HydrationStrategy::FilterOnly
                         && self.filtered.contains(alias));
