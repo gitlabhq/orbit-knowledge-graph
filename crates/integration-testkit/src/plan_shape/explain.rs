@@ -15,14 +15,13 @@ fn filter(predicates: Vec<String>, input: Tree) -> Tree {
     if predicates.is_empty() {
         return input;
     }
-    let mut predicates = predicates;
-    let children = if input.label == "Filter" {
-        predicates.extend(input.items);
-        input.children
+    if input.label == "Filter" {
+        let mut input = input;
+        input.items.extend(predicates);
+        input
     } else {
-        vec![input]
-    };
-    Tree::node("Filter", predicates.join(", "), children)
+        Tree::node("Filter", predicates.join(", "), vec![input])
+    }
 }
 
 pub fn logical(input: &Input) -> Tree {
@@ -505,4 +504,36 @@ fn query(value: &Query) -> Tree {
         );
     }
     tree
+}
+
+#[test]
+fn exact_assertions_preserve_nested_filter_order() {
+    let predicates = [
+        Expr::eq(Expr::col("p", "id"), Expr::int(1)),
+        Expr::eq(Expr::col("p", "star_count"), Expr::int(2)),
+    ];
+    let source = predicates.iter().fold(
+        PhysicalSource::Scan {
+            table: "gl_project".into(),
+            alias: "p".into(),
+            final_: false,
+            relationship: None,
+        },
+        |input, predicate| PhysicalSource::Filter {
+            predicate: predicate.clone(),
+            input: Box::new(input),
+        },
+    );
+    let assertions: super::Assertions = orbit_utils::yaml::from_str(
+        "exact: (Filter p.id = 1, p.star_count = 2 (Scan Table(gl_project) AS p))",
+    )
+    .unwrap();
+    assertions
+        .check(&physical_source(&source), "planned")
+        .unwrap();
+    let emitted = query_filter(
+        &Expr::conjoin(predicates.to_vec()).unwrap(),
+        scan("gl_project", "p", false),
+    );
+    assertions.check(&emitted, "emitted").unwrap();
 }

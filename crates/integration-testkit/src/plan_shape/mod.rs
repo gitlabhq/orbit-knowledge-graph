@@ -83,6 +83,7 @@ impl Assertions {
         }
         if self.expect.is_empty()
             && self.exact.is_none()
+            && self.definition_order.is_none()
             && !self.occurrences.iter().any(|item| item.count > 0)
         {
             return Err(format!("{label}: missing positive assertions"));
@@ -432,4 +433,28 @@ emitted:
     emitted_checks.check(&emitted, "emitted").unwrap();
     assert!(planned_checks.check(&emitted, "planned").is_err());
     assert!(emitted_checks.check(&planned, "emitted").is_err());
+}
+
+#[test]
+fn yaml_definition_order_is_a_standalone_assertion() {
+    let actual =
+        pattern::parse("(With (CTE first (Scan a)) (CTE second (Scan b)) (Scan c))").unwrap();
+    let check = |yaml: &str, tree: &pattern::Expression| {
+        orbit_utils::yaml::from_str::<Assertions>(yaml)
+            .unwrap()
+            .check(tree, "definition-order")
+    };
+    check("definition_order: [first, second]", &actual).unwrap();
+    assert!(
+        check("definition_order: [second, first]", &actual)
+            .unwrap_err()
+            .contains("definition_order")
+    );
+    check("definition_order: []", &pattern::parse("(Scan a)").unwrap()).unwrap();
+    assert!(check("definition_order: []", &actual).is_err());
+    assert!(
+        check("{}", &actual)
+            .unwrap_err()
+            .contains("missing positive assertions")
+    );
 }
