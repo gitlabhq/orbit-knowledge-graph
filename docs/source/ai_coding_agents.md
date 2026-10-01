@@ -17,15 +17,14 @@ title: Set up AI coding agents with the GitLab Orbit skill
 The GitLab Orbit skill gives AI coding agents structured guidance for querying the
 GitLab Orbit graph. It includes:
 
-- **Query recipes** - paste-ready queries for common questions (blast
-  radius, pipeline history, contributor patterns).
-- **Query language reference** - the full query language so agents compose
-  valid queries on the first attempt. GitLab serves the JSON Query DSL or GQL
-  guidance, whichever query mode is enabled for you.
+- **Query recipes** - paste-ready queries for common questions, such as
+  class inheritance, pipeline history, and grouped counts.
+- **Query language reference** - syntax guidance for the enabled query mode:
+  JSON Query DSL or read-only openCypher 9-based syntax.
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
-- **Repository map helpers** - scripts that summarize codebase structure from
-  a local checkout or from GitLab Orbit Remote.
+- **Repository maps** - the local `repo-map` command for a checkout.
+  JSON mode also includes a helper script for GitLab Orbit Remote.
 
 The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 [GitLab Orbit Local](local/_index.md).

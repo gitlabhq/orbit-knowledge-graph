@@ -11,10 +11,12 @@ for meaningful behavior changes.
 
 ## Query modes
 
-Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode; every other
-file is shared. Keep its front matter in step with `SKILL.md`, and set its
-version to the `SKILL.md` version plus `+gql` so caches never mix the two. The
-`orbit-server` skill tests fail if they drift.
+Orbit serves `SKILL.gql.md` as `SKILL.md` to users in GQL mode. Query references
+and the remote repo-map helper are mode-specific; setup and reporting guidance
+are shared. Keep both manifests' name, description, and compatibility equal.
+Set the GQL version to the JSON version plus `+gql` so caches never mix them.
+The server tests check those four fields, each mode's file set, and relative links.
+Both manifests' front matter and local-section placeholders are validated at build time.
 
 ## Syncing the query-language reference
 

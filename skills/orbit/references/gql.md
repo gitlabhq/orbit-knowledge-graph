@@ -1,6 +1,6 @@
-# Orbit GQL reference
+# Orbit query reference: openCypher 9-based syntax
 
-Read-only graph queries in GQL text, based on openCypher. Pass each query
+Orbit accepts a read-only subset of openCypher 9-based syntax. Pass each query
 inline, for example `glab orbit query "MATCH ... RETURN ..."`. See
 [`SKILL.md`](../SKILL.md#running-a-query) for input forms.
 
@@ -59,6 +59,24 @@ center node, and a shortest path needs both endpoints bounded.
 Values are literals. There are no query parameters, so never splice untrusted
 text into a query.
 
+### Text-token search
+
+For word searches, use token functions rather than substring `CONTAINS`.
+These functions require a text-indexed property, such as `MergeRequest.title`
+or `Definition.fqn`. Other properties reject them.
+
+- `token_match(property, 'token')` matches one token.
+- `all_tokens(property, 'first second')` requires every token.
+- `any_tokens(property, 'first second')` requires at least one token.
+
+```gql orbit-query
+MATCH (mr:MergeRequest {project_id: 278964})
+WHERE all_tokens(mr.title, 'database migration')
+RETURN mr.iid, mr.title, mr.state
+ORDER BY mr.created_at DESC
+LIMIT 10
+```
+
 ## Projections
 
 - `RETURN mr.iid, mr.title` selects properties.
@@ -72,7 +90,9 @@ text into a query.
 
 `PAGE rows` replaces `LIMIT` and returns `next_cursor` while more rows remain.
 Continue with `PAGE rows AFTER 'next_cursor'`. The cursor binds to the query
-text, so change nothing else between pages.
+text, so change nothing else between pages. In raw output, the token is
+`pagination.next_cursor`. Check `pagination.truncated`: when true, the result
+window is incomplete. Do not report the returned rows as a complete list.
 
 ## Not supported
 
@@ -112,9 +132,11 @@ LIMIT 10
 
 ### Pipelines that ran for one merge request
 
+Use the MR's internal numeric ID, not its project-scoped IID. The `source`
+filter excludes downstream child pipelines, whose source is `parent_pipeline`.
+
 ```gql orbit-query
-MATCH (mr:MergeRequest {id: 482908721})-[:TRIGGERED]->(pl:Pipeline)
-WHERE pl.source = 'merge_request_event'
+MATCH (pl:Pipeline {merge_request_id: 482908721, source: 'merge_request_event'})
 RETURN pl.id, pl.status, pl.ref
 ORDER BY pl.created_at DESC
 LIMIT 10
@@ -130,21 +152,47 @@ ORDER BY wi.created_at DESC
 LIMIT 10
 ```
 
-### Files a merge request touched
+### Merge requests that touched a file
 
-Use `HAS_DIFF`, which covers every diff snapshot. `HAS_LATEST_DIFF` covers only
-the final one. Each file appears once per snapshot and there is no `DISTINCT`,
-so group by the path:
+Use `HAS_DIFF` for history across all snapshots. `HAS_LATEST_DIFF` misses an MR
+if it touched the file only in an earlier revision. Anchor on `old_path` and
+`project_id` so the same path in another project does not match.
+Group by MR to avoid returning it once per matching snapshot.
 
 ```gql orbit-query
-MATCH (mr:MergeRequest {id: 482908721})-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
-RETURN f.old_path, count(d) AS snapshots
+MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, old_path: 'app/services/base_service.rb'})
+RETURN mr.id, mr.iid, mr.title, count(d) AS snapshots
 ORDER BY snapshots DESC
+LIMIT 100
+```
+
+### Files in a merge request's latest diff
+
+Use `HAS_LATEST_DIFF` for the current revision. Using `HAS_DIFF` instead also
+includes files removed from the diff in later revisions.
+
+```gql orbit-query
+MATCH (mr:MergeRequest {id: 482908721})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+RETURN f.old_path, f.new_path
 LIMIT 50
 ```
 
-`HAS_FILE` edges are sparsely populated. If this returns far fewer files than
-the merge request changed, report the result as incomplete coverage.
+`HAS_FILE` edges are sparsely populated. For either recipe, report unexpectedly
+small results as incomplete coverage, not proof that files or MRs are absent.
+
+### Subclasses of a class
+
+`EXTENDS` points from child to parent. Bound the parent by its fully qualified
+name, project, and branch. This query includes descendants up to three hops away.
+
+```gql orbit-query
+MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'ApplicationRecord', project_id: 278964, branch: 'master'})
+RETURN child.name, child.fqn, child.file_path
+LIMIT 1000
+```
+
+Missing inheritance edges or unindexed code can omit subclasses. Report this
+as indexed coverage, not an exhaustive list.
 
 ### Everything connected to one node
 

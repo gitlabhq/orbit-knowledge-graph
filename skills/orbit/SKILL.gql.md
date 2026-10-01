@@ -28,7 +28,7 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ## Query language
 
-Queries are read-only GQL text (`MATCH ... RETURN`). `glab orbit dsl` is unavailable.
+Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`). `glab orbit dsl` is unavailable.
 
 ## Discovery
 
@@ -52,9 +52,9 @@ glab orbit query "CALL db.schema('Project')"
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted GQL string literals then need double quotes around the query. Inline query text needs Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
 
-`--file` reads a JSON request envelope whose `query` field holds the GQL text, not a bare GQL file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
+`--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
 ## Common pitfalls
 
@@ -62,9 +62,9 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 
 - At least one node needs an ID or a property filter. `LIMIT` does not bound the scan, so `MATCH (p:Project) RETURN p LIMIT 5` rejects.
 - Write relationship types after a colon: `-[:AUTHORED]->`. `-[AUTHORED]->` declares a variable and rejects.
-- Pipelines for a merge request need `WHERE pl.source = 'merge_request_event'`.
+- Pipelines for a merge request need the `source: 'merge_request_event'` filter.
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
-- File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. It repeats a file once per diff snapshot; see [the recipe](references/gql.md#files-a-merge-request-touched).
+- To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 
@@ -100,8 +100,9 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 
 | Topic | Location |
 |---|---|
-| First-run setup, exit codes, errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| GQL syntax, paste-ready queries, and GQL errors | [`references/gql.md`](references/gql.md) |
+| First-run setup, exit codes, service health, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
+| openCypher 9-based syntax and paste-ready queries | [`references/gql.md`](references/gql.md) |
+| Empty results and query validation errors | [`references/gql.md`](references/gql.md#troubleshooting) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |

@@ -1,6 +1,5 @@
 //! Skills stay outside the agent command registry because they are passive artifacts.
 //! Version is not a content hash: concurrent bumps or an explicit skip can reuse it.
-//! GQL callers get `SKILL.gql.md` as the manifest; every other file is shared.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -214,18 +213,60 @@ mod tests {
     }
 
     #[test]
-    fn full_tree_is_sorted_and_every_hash_matches_content() {
-        let tree = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
-        let files = tree.files.unwrap();
-        assert_eq!(files.len(), 9);
-        assert!(files.windows(2).all(|pair| pair[0].path < pair[1].path));
-        for file in &files {
+    fn served_trees_have_expected_files_hashes_and_valid_links() {
+        for (frontend, paths) in [
+            (
+                Frontend::JsonDsl,
+                &[
+                    "SKILL.md",
+                    "references/local_repo_map.md",
+                    "references/maintaining.md",
+                    "references/query_language.md",
+                    "references/recipes.md",
+                    "references/remote_repo_map.md",
+                    "references/reporting.md",
+                    "references/troubleshooting.md",
+                    "scripts/remote_repo_map.py",
+                ][..],
+            ),
+            (
+                Frontend::Gql,
+                &[
+                    "SKILL.md",
+                    "references/gql.md",
+                    "references/local_repo_map.md",
+                    "references/maintaining.md",
+                    "references/reporting.md",
+                    "references/troubleshooting.md",
+                ][..],
+            ),
+        ] {
+            let files = get_skill("orbit", frontend, false).unwrap().files.unwrap();
             assert_eq!(
-                file.sha256,
-                sha256_hex(file.content.as_bytes()),
-                "{}",
-                file.path
+                files
+                    .iter()
+                    .map(|file| file.path.as_str())
+                    .collect::<Vec<_>>(),
+                paths
             );
+            let remote = tempfile::tempdir().unwrap();
+            for file in files {
+                assert_eq!(
+                    file.sha256,
+                    sha256_hex(file.content.as_bytes()),
+                    "{}",
+                    file.path
+                );
+                let path = remote.path().join(file.path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, file.content).unwrap();
+            }
+            orbit_prompts::validate_skill_pair(
+                remote.path(),
+                std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli"),
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../orbit-cli/src/main.rs"),
+            )
+            .unwrap_or_else(|error| panic!("{frontend:?}: {error}"));
         }
     }
 

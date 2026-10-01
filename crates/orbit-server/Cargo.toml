@@ -80,6 +80,8 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
 tracing-subscriber = { workspace = true }
