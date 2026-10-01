@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::ast::{Expr, JoinType, SelectExpr};
 use crate::error::{QueryError, Result};
 use crate::passes::shared::{
@@ -24,6 +22,17 @@ pub struct BindingSource {
     pub alias: String,
     pub column: String,
     pub joined: bool,
+}
+
+impl BindingSource {
+    pub(super) fn table(alias: &str) -> Self {
+        Self {
+            node: alias.into(),
+            alias: alias.into(),
+            column: DEFAULT_PRIMARY_KEY.into(),
+            joined: true,
+        }
+    }
 }
 
 pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Expr {
@@ -225,55 +234,5 @@ impl PhysicalPlan {
             source: PhysicalSource::node(node, true)?
                 .where_all(latest_node_predicates(&node.alias, node)),
         })
-    }
-
-    pub fn fk_chain(
-        hops: &[Hop],
-        nodes: &HashMap<String, NodePlan>,
-        project_edges: bool,
-    ) -> Result<Self> {
-        let root = &hops
-            .first()
-            .ok_or_else(|| QueryError::Lowering("FK chain requires a hop".into()))?
-            .from_node;
-        let node = |alias: &str| {
-            nodes
-                .get(alias)
-                .ok_or_else(|| QueryError::Lowering(format!("FK chain node '{alias}' not found")))
-        };
-        let mut plan = Self::node_scan(node(root)?, None, &[])?;
-        let mut reached = HashSet::from([root.as_str()]);
-        for (index, hop) in hops.iter().enumerate() {
-            let fk = hop
-                .fk
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
-            let alias = if reached.contains(hop.from_node.as_str()) {
-                &hop.to_node
-            } else {
-                &hop.from_node
-            };
-            let next = Self::node_scan(node(alias)?, None, &[])?;
-            plan.source = plan.source.inner_join(
-                next.source,
-                Expr::eq(
-                    Expr::col(&fk.fk_node, &fk.fk_column),
-                    Expr::col(&fk.target_node, &fk.referenced_column),
-                ),
-            );
-            plan.outputs.extend(next.outputs);
-            reached.insert(hop.from_node.as_str());
-            reached.insert(hop.to_node.as_str());
-            if project_edges {
-                plan.outputs.extend(super::fk::edge_outputs(
-                    hop,
-                    index,
-                    nodes,
-                    Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
-                    Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
-                ));
-            }
-        }
-        Ok(plan)
     }
 }

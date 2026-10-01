@@ -13,7 +13,7 @@ use crate::input::*;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 
-use super::plan::{Plan, PlanBody, Strategy};
+use super::plan::{Plan, PlanBody};
 use super::shared;
 
 #[derive(Clone, Default)]
@@ -43,10 +43,6 @@ impl NodeBinding {
             table_alias,
             traversal_path: Some(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
         }
-    }
-
-    fn table(alias: &str) -> Self {
-        Self::source(alias, DEFAULT_PRIMARY_KEY, Some(alias.into()))
     }
 
     pub fn role_identity(&self) -> Result<Option<&Expr>> {
@@ -106,17 +102,6 @@ pub struct LoweredEdge {
 pub struct LoweredQuery {
     pub ast: Node,
     pub metadata: LoweredMetadata,
-}
-
-impl Strategy {
-    fn emit(&self) -> EmitOutput {
-        match self {
-            Strategy::SingleNode(root) => physical::emit(root),
-            Strategy::Fk(super::plan::FkShape::Chain(root)) => physical::emit(root),
-            Strategy::Fk(super::plan::FkShape::Star { execution, .. })
-            | Strategy::Flat(execution) => physical::execute(execution),
-        }
-    }
 }
 
 pub struct EmitOutput {
@@ -207,17 +192,17 @@ impl EmitOutput {
 pub fn emit(plan: &Plan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match &plan.body {
-        PlanBody::Traversal { strategy } => {
-            let mut output = strategy.emit();
+        PlanBody::Traversal { execution } => {
+            let mut output = physical::execute(execution);
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(plan, input, output)
         }
         PlanBody::Aggregation {
-            strategy,
+            execution,
             aggregations,
             agg_sort,
         } => {
-            let mut output = strategy.emit();
+            let mut output = physical::execute(execution);
             nodes = output.take_bindings(plan, input)?;
             aggregation::emit_aggregation(
                 plan,

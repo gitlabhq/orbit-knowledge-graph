@@ -3,9 +3,8 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::flat::PlanningFacts;
-use super::physical::{ExecutionPlan, PhysicalPlan};
-use crate::error::{QueryError, Result};
+use super::context::PlanningContext;
+use crate::error::Result;
 use crate::input::*;
 
 use super::{
@@ -183,26 +182,6 @@ pub enum HydrationStrategy {
     Skip,
 }
 
-pub enum Strategy {
-    Flat(Box<ExecutionPlan>),
-    SingleNode(Box<PhysicalPlan>),
-    Fk(FkShape),
-}
-
-/// Single-hop FK is the degenerate one-hop [`FkShape::Star`].
-pub enum FkShape {
-    /// All hops have FKs on the same center node. The center node drives a
-    /// single scan; other nodes JOIN via the center's FK columns.
-    Star {
-        center: String,
-        execution: Box<ExecutionPlan>,
-    },
-    /// Every hop is FK-derived and consecutive hops share a node. The node
-    /// tables are joined on their FK columns; the edges are a materialization
-    /// of those FKs, so the chain skips all edge-table scans.
-    Chain(Box<PhysicalPlan>),
-}
-
 pub fn plan<M>(
     input: &Input,
     model: &M,
@@ -257,78 +236,48 @@ where
         }
     }
 
-    let table_names: HashSet<String> = input
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            node.entity
-                .as_deref()
-                .and_then(|entity| model.entity_table(entity))
-                .map(String::from)
-        })
-        .chain(hops.iter().map(|hop| hop.edge_table.clone()))
-        .collect();
-    let table_columns = table_names
-        .iter()
-        .filter_map(|table| {
-            model
-                .table_columns(table)
-                .map(|columns| (table.clone(), columns.clone()))
-        })
-        .collect();
-    let table_sort_keys = table_names
-        .iter()
-        .filter_map(|table| {
-            model
-                .table_sort_key(table)
-                .map(|sort_key| (table.clone(), sort_key.to_vec()))
-        })
-        .collect();
-    let strategy = if hops.is_empty() {
-        let node = nodes
-            .values()
-            .next()
-            .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        Strategy::SingleNode(Box::new(PhysicalPlan::single_node(node)?))
-    } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
-        let execution = super::fk::star(
-            &center,
-            &hops,
-            &nodes,
-            input.query_type == QueryType::Traversal,
-            &table_sort_keys,
-        )?;
-        Strategy::Fk(FkShape::Star {
-            center,
-            execution: Box::new(execution),
-        })
-    } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
-        Strategy::Fk(FkShape::Chain(Box::new(PhysicalPlan::fk_chain(
-            &hops,
-            &nodes,
-            input.query_type == QueryType::Traversal,
-        )?)))
-    } else {
-        Strategy::Flat(Box::new(super::flat::plan(
-            PlanningFacts {
-                hops: &hops,
-                nodes: &nodes,
-                sort_keys: &table_sort_keys,
-                table_columns: &table_columns,
-                denormalized: &denormalized,
-            },
-            input.query_type == QueryType::Aggregation,
-        )?))
+    let context = PlanningContext {
+        input,
+        model,
+        hops: &hops,
+        nodes: &nodes,
+        denormalized: &denormalized,
     };
-    let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
+    let execution = if hops.is_empty() {
+        context.single_node()?
+    } else if use_fk_elision && let Some(center) = detect_fk_star(&hops) {
+        super::fk::star(&context, &center)?
+    } else if use_fk_elision && detect_fk_chain(&hops, &nodes) {
+        super::fk::chain(&context)?
+    } else {
+        super::flat::plan(&context)?
+    };
+    let mut node_edge_mappings = if hops.is_empty() {
+        HashMap::new()
+    } else {
+        execution
+            .bindings
+            .iter()
+            .map(|binding| {
+                (
+                    binding.node.clone(),
+                    (binding.alias.clone(), binding.column.clone()),
+                )
+            })
+            .collect()
+    };
+    for (target, holder, column) in elided_fks {
+        node_edge_mappings.entry(target).or_insert((holder, column));
+    }
+    let execution = Box::new(execution);
     let body = if input.query_type == QueryType::Aggregation {
         PlanBody::Aggregation {
-            strategy,
+            execution,
             aggregations: input.aggregation.metrics.clone(),
             agg_sort: input.aggregation.sort.clone(),
         }
     } else {
-        PlanBody::Traversal { strategy }
+        PlanBody::Traversal { execution }
     };
     Ok(Plan {
         nodes,
@@ -792,70 +741,6 @@ fn resolve_join_columns(hops: &mut [Hop]) {
             curr_col: curr_col.to_string(),
         });
     }
-}
-
-fn compute_node_edge_mappings(
-    hops: &[Hop],
-    elided_fks: &[(String, String, String)],
-    strategy: &Strategy,
-    nodes: &HashMap<String, NodePlan>,
-) -> HashMap<String, (String, String)> {
-    let mut mappings = HashMap::new();
-
-    match strategy {
-        Strategy::Fk(FkShape::Star { center, .. }) => {
-            mappings.insert(
-                center.clone(),
-                (center.clone(), DEFAULT_PRIMARY_KEY.to_string()),
-            );
-            for hop in hops {
-                if let Some(ref fk) = hop.fk {
-                    let fk_alias = if fk.fk_node == *center {
-                        center.clone()
-                    } else {
-                        fk.fk_node.clone()
-                    };
-                    let target_identity = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
-                        (fk_alias, fk.fk_column.clone())
-                    } else {
-                        (fk.target_node.clone(), DEFAULT_PRIMARY_KEY.to_string())
-                    };
-                    mappings.insert(fk.target_node.clone(), target_identity);
-                }
-            }
-        }
-        Strategy::Fk(FkShape::Chain(_)) => {
-            // Each node is joined as its own table, so it maps to its own PK.
-            for hop in hops {
-                for node in [&hop.from_node, &hop.to_node] {
-                    mappings
-                        .entry(node.clone())
-                        .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
-                }
-            }
-        }
-        _ => {
-            for (i, hop) in hops.iter().enumerate() {
-                let alias = format!("e{i}");
-                let (start_col, end_col) = hop.direction.edge_columns();
-                mappings
-                    .entry(hop.from_node.clone())
-                    .or_insert_with(|| (alias.clone(), start_col.to_string()));
-                mappings
-                    .entry(hop.to_node.clone())
-                    .or_insert_with(|| (alias.clone(), end_col.to_string()));
-            }
-        }
-    }
-
-    for (target_node, fk_node, fk_column) in elided_fks {
-        mappings
-            .entry(target_node.clone())
-            .or_insert_with(|| (fk_node.clone(), fk_column.clone()));
-    }
-
-    let _ = nodes;
-    mappings
 }
 
 fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {

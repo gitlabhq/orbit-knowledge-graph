@@ -6,10 +6,11 @@ use crate::ast::{Expr, Op};
 use crate::passes::shared::rel_kind_filter;
 use crate::passes::shared::{deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate};
 
-use super::flat::PlanningFacts;
+use super::context::PlanningContext;
 use super::{DenormalizedKey, Hop};
+use query_data_model::QueryDataModel;
 
-impl PlanningFacts<'_> {
+impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
     pub(super) fn filtered_edge_predicates(
         &self,
         alias: &str,
@@ -48,7 +49,7 @@ impl PlanningFacts<'_> {
         if !skip_deleted {
             predicates.push(deleted_false(alias));
         }
-        if let Some(columns) = self.table_columns.get(&hop.edge_table) {
+        if let Some(columns) = self.model.table_columns(&hop.edge_table) {
             let mut seen = HashSet::new();
             for node_alias in [&hop.from_node, &hop.to_node] {
                 if let Some(node) = self.nodes.get(node_alias) {

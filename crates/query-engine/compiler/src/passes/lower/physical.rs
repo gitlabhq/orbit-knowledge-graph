@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use crate::passes::shared::latest_row_dedup;
@@ -7,36 +5,33 @@ use crate::passes::shared::latest_row_dedup;
 use super::{EmitOutput, NodeBinding};
 
 pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
-    let mut output = emit_source(&plan.source);
-    output.select = plan.outputs.clone();
-    output.edge_aliases = plan.edge_aliases.clone();
-    output.edge_if_predicates = plan.edge_if_predicates.clone();
-    output.ctes = plan
-        .definitions
-        .iter()
-        .map(|(name, keys)| Cte::new(name, query(keys)))
-        .collect();
-    output.nodes = plan
-        .bindings
-        .iter()
-        .map(|binding| {
-            (
-                binding.node.clone(),
-                NodeBinding::source(
-                    &binding.alias,
-                    &binding.column,
-                    binding.joined.then(|| binding.node.clone()),
-                ),
-            )
-        })
-        .collect();
-    output
-}
-
-pub(super) fn emit(plan: &PhysicalPlan) -> EmitOutput {
-    let mut output = emit_source(&plan.source);
-    output.select = plan.outputs.clone();
-    output
+    let source = emit_source(&plan.source);
+    EmitOutput {
+        from: source.from,
+        where_parts: source.predicates,
+        select: plan.outputs.clone(),
+        edge_aliases: plan.edge_aliases.clone(),
+        edge_if_predicates: plan.edge_if_predicates.clone(),
+        ctes: plan
+            .definitions
+            .iter()
+            .map(|(name, keys)| Cte::new(name, query(keys)))
+            .collect(),
+        nodes: plan
+            .bindings
+            .iter()
+            .map(|binding| {
+                (
+                    binding.node.clone(),
+                    NodeBinding::source(
+                        &binding.alias,
+                        &binding.column,
+                        binding.joined.then(|| binding.node.clone()),
+                    ),
+                )
+            })
+            .collect(),
+    }
 }
 
 pub(super) fn query(plan: &PhysicalPlan) -> Query {
@@ -55,14 +50,19 @@ pub(super) fn query(plan: &PhysicalPlan) -> Query {
     Query {
         select: plan.outputs.clone(),
         from: output.from,
-        where_clause: Expr::conjoin(output.where_parts),
+        where_clause: Expr::conjoin(output.predicates),
         order_by,
         limit_by,
         ..Default::default()
     }
 }
 
-pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
+struct SourceOutput {
+    from: TableRef,
+    predicates: Vec<Expr>,
+}
+
+fn emit_source(plan: &PhysicalSource) -> SourceOutput {
     match plan {
         PhysicalSource::Union {
             alias,
@@ -70,14 +70,9 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             relationship,
         } => {
             let queries = arms.iter().map(query).collect();
-            EmitOutput {
+            SourceOutput {
                 from: TableRef::union_all(queries, alias).with_relationship(*relationship),
-                nodes: HashMap::new(),
-                edge_aliases: vec![],
-                where_parts: vec![],
-                select: vec![],
-                ctes: vec![],
-                edge_if_predicates: None,
+                predicates: vec![],
             }
         }
         PhysicalSource::Scan {
@@ -85,28 +80,23 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             alias,
             final_,
             relationship,
-        } => EmitOutput {
+        } => SourceOutput {
             from: TableRef::Scan {
                 table: table.clone(),
                 alias: alias.clone(),
                 final_: *final_,
                 relationship: *relationship,
             },
-            nodes: HashMap::from([(alias.clone(), NodeBinding::table(alias))]),
-            edge_aliases: vec![],
-            where_parts: vec![],
-            select: vec![],
-            ctes: vec![],
-            edge_if_predicates: None,
+            predicates: vec![],
         },
         PhysicalSource::Filter { predicate, input } => {
             let mut output = emit_source(input);
-            output.where_parts.push(predicate.clone());
+            output.predicates.push(predicate.clone());
             output
         }
         PhysicalSource::KeyFilter { value, keys, input } => {
             let mut output = emit_source(input);
-            output.where_parts.push(Expr::InSelect {
+            output.predicates.push(Expr::InSelect {
                 expr: Box::new(value.clone()),
                 query: Box::new(query(keys)),
             });
@@ -122,7 +112,7 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
                 Query {
                     select: vec![SelectExpr::star()],
                     from: output.from,
-                    where_clause: Expr::conjoin(std::mem::take(&mut output.where_parts)),
+                    where_clause: Expr::conjoin(std::mem::take(&mut output.predicates)),
                     order_by,
                     limit_by,
                     ..Default::default()
@@ -140,8 +130,7 @@ pub(super) fn emit_source(plan: &PhysicalSource) -> EmitOutput {
             let mut left = emit_source(left);
             let right = emit_source(right);
             left.from = TableRef::join(*kind, left.from, right.from, condition.clone());
-            left.where_parts.extend(right.where_parts);
-            left.nodes.extend(right.nodes);
+            left.predicates.extend(right.predicates);
             left
         }
     }

@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use query_data_model::QueryDataModel;
+use std::collections::HashSet;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
@@ -6,43 +7,38 @@ use crate::ast::{Expr, SelectExpr};
 use crate::error::{QueryError, Result};
 use crate::passes::shared::{deleted_false, filter_to_expr};
 
+use super::HydrationStrategy;
+use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
-use super::{DenormalizedKey, DenormalizedProperty, Hop, HydrationStrategy, NodePlan};
 
-pub(super) struct PlanningFacts<'a> {
-    pub hops: &'a [Hop],
-    pub nodes: &'a HashMap<String, NodePlan>,
-    pub sort_keys: &'a HashMap<String, Vec<String>>,
-    pub table_columns: &'a HashMap<String, HashSet<String>>,
-    pub denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
-}
-
-struct FlatBuilder<'a> {
-    facts: PlanningFacts<'a>,
+struct FlatBuilder<'a, M: QueryDataModel + ?Sized> {
+    facts: &'a PlanningContext<'a, M>,
     definitions: Vec<(String, PhysicalPlan)>,
     filtered: HashSet<String>,
     tagged: HashSet<(String, String)>,
 }
 
-pub(super) fn plan(facts: PlanningFacts<'_>, aggregate: bool) -> Result<ExecutionPlan> {
+pub(super) fn plan<M: QueryDataModel + ?Sized>(
+    facts: &PlanningContext<'_, M>,
+) -> Result<ExecutionPlan> {
     FlatBuilder {
         facts,
         definitions: Vec::new(),
         filtered: HashSet::new(),
         tagged: HashSet::new(),
     }
-    .build(aggregate)
+    .build()
 }
 
-impl FlatBuilder<'_> {
-    fn build(mut self, aggregate: bool) -> Result<ExecutionPlan> {
+impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
+    fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
         let mut edge_if_predicates = None;
         let mut cascades = Vec::new();
         for (index, hop) in self.facts.hops.iter().enumerate() {
             let membership = self.filter_keys(index)?;
             let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref));
-            let (edge, condition) = self.edge(index, membership, cascade.as_ref(), aggregate)?;
+            let (edge, condition) = self.edge(index, membership, cascade.as_ref())?;
             edge_if_predicates = condition.or(edge_if_predicates);
             source = Some(match source {
                 Some(previous) => {
@@ -223,7 +219,6 @@ impl FlatBuilder<'_> {
         index: usize,
         membership: Vec<Expr>,
         cascade: Option<&PhysicalPlan>,
-        aggregate: bool,
     ) -> Result<(PhysicalSource, Option<Expr>)> {
         let hop = &self.facts.hops[index];
         let alias = format!("e{index}");
@@ -235,11 +230,11 @@ impl FlatBuilder<'_> {
         };
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
-        if !multi_hop && !dedup && aggregate {
+        if !multi_hop && !dedup && self.facts.aggregate() {
             let sort_key = self
                 .facts
-                .sort_keys
-                .get(&hop.edge_table)
+                .model
+                .table_sort_key(&hop.edge_table)
                 .filter(|key| !key.is_empty())
                 .ok_or_else(|| {
                     QueryError::Lowering(format!(
@@ -254,7 +249,7 @@ impl FlatBuilder<'_> {
             let condition = Expr::conjoin(predicates.clone());
             return Ok((
                 PhysicalSource::Latest {
-                    sort_key: sort_key.clone(),
+                    sort_key: sort_key.to_vec(),
                     alias: alias.clone(),
                     input: Box::new(scan(false).filter(predicates)),
                 },
@@ -269,8 +264,8 @@ impl FlatBuilder<'_> {
             let (start, end) = hop.direction.edge_columns();
             let narrow_inside = self
                 .facts
-                .sort_keys
-                .get(&hop.edge_table)
+                .model
+                .table_sort_key(&hop.edge_table)
                 .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
@@ -307,18 +302,5 @@ impl FlatBuilder<'_> {
             predicates.extend(self.facts.node_id_predicates(&alias, hop));
         }
         Ok((edge.filter(predicates), None))
-    }
-}
-
-impl PlanningFacts<'_> {
-    fn node_sort_key(&self, node: &NodePlan) -> Result<&[String]> {
-        let table = node
-            .table
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
-        self.sort_keys
-            .get(table)
-            .map(Vec::as_slice)
-            .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))
     }
 }
