@@ -1,6 +1,6 @@
+use super::sql::latest_row_dedup;
 use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
-use crate::passes::shared::latest_row_dedup;
 
 use super::requirements::{column, predicate, projections};
 use super::{EmitOutput, NodeBinding};

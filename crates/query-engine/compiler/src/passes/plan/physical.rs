@@ -9,7 +9,6 @@ use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
-    pub edge_if_predicates: Option<Vec<Predicate>>,
     pub definitions: Vec<(String, PhysicalPlan)>,
     pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,

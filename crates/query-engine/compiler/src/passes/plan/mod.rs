@@ -4,6 +4,7 @@ pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;
 mod flat;
+pub(crate) mod helpers;
 mod hops;
 pub mod hydration;
 pub mod neighbors;

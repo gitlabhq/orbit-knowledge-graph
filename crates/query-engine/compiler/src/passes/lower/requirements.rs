@@ -1,24 +1,24 @@
+use super::sql;
 use crate::ast::*;
 use crate::input::{OrderDirection, TruncateUnit};
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
-use crate::passes::shared;
 
-pub fn column(value: &Column) -> Expr {
+pub(super) fn column(value: &Column) -> Expr {
     Expr::col(&value.source, &value.name)
 }
 
-pub fn predicate(value: &Predicate) -> Expr {
+pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
         Predicate::Property {
             column: value,
             filter,
             data_type,
-        } => shared::filter_expression(&value.source, &value.name, filter, data_type.as_ref()),
+        } => sql::filter_expression(&value.source, &value.name, filter, data_type.as_ref()),
         Predicate::Ids {
             column: value,
             values,
-        } => shared::id_list_predicate(&value.source, &value.name, values),
+        } => sql::id_list_predicate(&value.source, &value.name, values),
         Predicate::IdRange {
             column: value,
             start,
@@ -27,18 +27,18 @@ pub fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Ge, column(value), Expr::int(*start)),
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
-        Predicate::Live { alias } => shared::deleted_false(alias),
+        Predicate::Live { alias } => sql::deleted_false(alias),
         Predicate::EntityKind {
             column: value,
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
         Predicate::RelationshipKinds { alias, kinds } => {
-            shared::rel_kind_filter(alias, kinds).expect("planned relationship kinds")
+            sql::rel_kind_filter(alias, kinds).expect("planned relationship kinds")
         }
         Predicate::Tags {
             column: value,
             values,
-        } => shared::tag_membership(&value.source, &value.name, values),
+        } => sql::tag_membership(&value.source, &value.name, values),
         Predicate::Membership {
             column: value,
             definition,
@@ -51,7 +51,7 @@ pub fn predicate(value: &Predicate) -> Expr {
     }
 }
 
-pub fn projections(values: &[Projection]) -> Vec<SelectExpr> {
+pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
     values
         .iter()
         .map(|value| {

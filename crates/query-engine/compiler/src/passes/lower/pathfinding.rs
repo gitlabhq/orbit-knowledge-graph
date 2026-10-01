@@ -12,11 +12,11 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::passes::plan::{NodePlan, PathFinding, Plan};
-use crate::passes::shared::{
+use super::sql::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
+use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
 pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     let pf = &plan.operation;

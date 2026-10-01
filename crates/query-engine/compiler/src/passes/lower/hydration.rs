@@ -13,8 +13,8 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
+use super::sql::{deleted_false, latest_row_dedup};
 use crate::passes::plan::HydrationNodePlan;
-use crate::passes::shared::{deleted_false, latest_row_dedup};
 
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 

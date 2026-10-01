@@ -69,6 +69,7 @@ Planning resolves the referenced property's column for FK joins and filtering su
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
 Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
+Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 
 Single-node planning selects an executable scan/filter source tree and a list of result outputs.
 The single-node emitter renders those operations without choosing the scan or predicates again.
@@ -103,6 +104,7 @@ Shared lowering renders these operations and definitions without repeating eligi
 Traversal and aggregation own execution plans in their plan-body variants. Lowering does not dispatch on the strategy that produced them.
 Aggregation planning resolves measure arguments, grouping columns, output aliases, and aggregate ordering through the shared context.
 It records resolved measures, grouping columns, time buckets, and the source plan's conditional requirements.
+Conditional aggregate requirements come from the selected latest-row edge scan, rather than a separate builder output or temporary execution-plan field.
 Lowering constructs aggregate calls and time-bucket casts without repeating metadata lookups.
 Ranges remain range requirements until lowering expands their comparisons. Joins carry endpoint columns and optional row requirements.
 All query families share one planning context and return a typed `Plan<T>` through the runtime `QueryPlan` enum.

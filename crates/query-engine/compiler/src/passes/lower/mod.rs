@@ -4,7 +4,8 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 mod physical;
-pub mod requirements;
+mod requirements;
+pub(crate) mod sql;
 pub mod traversal;
 
 use crate::ast::*;
@@ -14,7 +15,6 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 
 use super::plan::{Plan, QueryPlan};
-use super::shared;
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
@@ -225,7 +225,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
                 .property(property)
         };
         for jp in &input.join_predicates {
-            let pred = shared::comparison(
+            let pred = sql::comparison(
                 column(&jp.lhs_node, &jp.lhs_prop)?,
                 jp.op,
                 column(&jp.rhs_node, &jp.rhs_prop)?,

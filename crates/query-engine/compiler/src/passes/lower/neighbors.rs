@@ -10,11 +10,11 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
-use crate::passes::shared::{
+use super::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
+use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
 pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
     let Neighbors {

@@ -1,8 +1,8 @@
 use ontology::constants::*;
 
+use super::helpers::{denorm_tag_values, requested_columns};
 use super::{BoundFilter, NodePlan};
 use crate::input::InputFilter;
-use crate::passes::shared::{denorm_tag_values, requested_columns};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Column {
