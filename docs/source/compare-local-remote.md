@@ -273,4 +273,3 @@ Use GitLab Orbit Remote with GitLab Duo Agent Platform.
 You can ask a question in plain language in the GitLab UI, and the agent queries the graph and answers.
 Results are scoped to what your role already permits, so you see the same data you would see
 elsewhere in GitLab.
-
