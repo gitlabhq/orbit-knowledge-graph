@@ -35,6 +35,7 @@ fn served_in(path: &str, frontend: Frontend) -> bool {
         "references/gql.md" => frontend == Frontend::Gql,
         "references/query_language.md"
         | "references/recipes.md"
+        | "references/troubleshooting_json.md"
         | "references/remote_repo_map.md"
         | "scripts/remote_repo_map.py" => frontend == Frontend::JsonDsl,
         _ => true,
@@ -217,7 +218,7 @@ mod tests {
     fn full_tree_is_sorted_and_every_hash_matches_content() {
         let tree = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
         let files = tree.files.unwrap();
-        assert_eq!(files.len(), 9);
+        assert_eq!(files.len(), 10);
         assert!(files.windows(2).all(|pair| pair[0].path < pair[1].path));
         for file in &files {
             assert_eq!(

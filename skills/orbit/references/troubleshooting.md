@@ -50,7 +50,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |
 
-`glab orbit query --response-format raw` prints the full JSON error payload when the exit code alone is not enough.
+`glab orbit query --response-format raw` prints the full error payload when the exit code alone is not enough.
 
 ## Exit 2: feature flag off, or old glab
 
@@ -73,55 +73,15 @@ Cause: your user has the feature flag, but belongs to no top-level group with Or
 
 ## Exit 5: rate limited
 
-Cause: the `orbit_query` rate limit. Fix: back off. For bulk agent work, lower `limit`, add a short sleep between queries, or fold the work into one aggregation or traversal query.
+Cause: the `orbit_query` rate limit. Fix: back off. For bulk agent work, lower the row limit, add a short sleep between queries, or fold the work into one aggregate query.
 
 ## Exit 1: generic error
 
-Common causes: a malformed JSON body (validate with `jq . /tmp/q.json`), an unreachable hostname (check `glab auth status`), or a network or TLS failure. Re-run with `--response-format raw` and read stderr.
+Common causes: a malformed query or request body, an unreachable hostname (check `glab auth status`), or a network or TLS failure. Re-run with `--response-format raw` and read stderr.
 
 ## Named-query catalog
 
 The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object when the per-user `orbit_gql_queries` flag is off and GQL text when on. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity and mode, so do not reuse another caller's response or retain it across mode changes. JSON queries reject in GQL mode, and GQL strings reject in JSON mode. There is no client override or parser fallback. Missing entries can require client parameters or depend on entities unavailable in the active schema.
-
-## Empty result body
-
-Usually the query matched no rows. Confirm with a known-good probe in `/tmp/q-min.json`:
-
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "filters": {
-        "full_path": {"starts_with": "gitlab-org/"}
-      }
-    }],
-    "limit": 1
-  }
-}
-```
-
-```shell
-glab orbit query --response-format raw --file /tmp/q-min.json
-```
-
-If this returns a row, the connection works and your other query has no matches.
-
-## Validation errors (HTTP 400, exit 1)
-
-The query did not match the DSL JSON Schema. Common causes:
-
-- `node` (singular) instead of the `nodes` array. Wrap the selector: `"nodes": [{...}]`.
-- `neighbors` or single-node `traversal` with more than one entry in `nodes`.
-- Multi-node `traversal` without at least two nodes and one relationship.
-- `aggregation` without any `aggregations` entries.
-- `hops` upper bound or `max_depth` above 3, the server-enforced ceiling.
-- `cursor.after` reused after the query changed. The token is bound to the exact query that issued it.
-- `allowlist rejected` or `not valid under 'oneOf'` on a `columns` entry. The column is not in the entity's allowlist. Run `glab orbit ontology <Entity>` for the valid list.
-
-Fix: validate against the live schema from `glab orbit dsl`. Full field reference in [`query_language.md`](query_language.md).
 
 ## Service unavailable
 
@@ -133,9 +93,9 @@ If any component is unhealthy, retry with exponential backoff. If it persists, e
 
 Resolve a single user question in at most 5 query attempts (see [`SKILL.md`](../SKILL.md)). The supporting rules:
 
-1. Each retry must change something material. Changing only `limit` or `columns` is not progress. Changing `entity`, the relationship type, or a `filter` is.
+1. Each retry must change something material. Changing only the row limit or the returned properties is not progress. Changing the node label, the relationship type, or a filter is.
 2. Validation errors (HTTP 400) count toward the budget. Three consecutive validation errors on one query shape mean the shape is wrong. Stop, re-read the relevant recipe, and pick a different shape.
-3. Empty results are not always a failure. Confirm with the [known-good probe](#empty-result-body) before you assume the query is wrong.
+3. Empty results are not always a failure. Run a known-good probe before you assume the query is wrong. It is a one-row query for an entity you know exists. See the empty-result section of `troubleshooting_json.md` or `gql.md`, whichever your skill lists.
 4. When you give up, give up loudly. Tell the user: "Orbit did not return an answer after 5 attempts. The query shapes I tried were: [...]. Suggested next steps: [...]." A clear give-up is more useful than a silently inflated partial result.
 
 Cost grows linearly in attempts, in CLI shell-out time and in agent context. A hard cap is cheaper than an ambiguous answer.

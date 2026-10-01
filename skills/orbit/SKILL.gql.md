@@ -100,7 +100,7 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 
 | Topic | Location |
 |---|---|
-| First-run setup, exit codes, errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
+| First-run setup, exit codes, catalog, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | GQL syntax, paste-ready queries, and GQL errors | [`references/gql.md`](references/gql.md) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |

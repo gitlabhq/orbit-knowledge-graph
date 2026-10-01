@@ -47,7 +47,7 @@ async fn get_skill_returns_sorted_tree_with_file_hashes() {
     assert_eq!(response.version, listed.skills[0].version);
     assert_eq!(response.compatibility, listed.skills[0].compatibility);
     assert_eq!(response.server_version, listed.server_version);
-    assert_eq!(response.files.len(), 9);
+    assert_eq!(response.files.len(), 10);
     assert_eq!(response.files[0].path, "SKILL.md");
     assert!(
         response
