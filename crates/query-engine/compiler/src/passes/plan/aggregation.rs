@@ -1,25 +1,43 @@
 use query_data_model::QueryDataModel;
 
-use crate::ast::{Expr, OrderExpr, SelectExpr};
-use crate::input::{AggExpr, InputGroupByKey, OrderDirection, TruncateUnit, group_by_output_names};
+use crate::input::{
+    AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
+};
 use crate::passes::shared::requested_columns;
 
 use super::HydrationStrategy;
 use super::context::PlanningContext;
+use super::requirements::{Column, Predicate};
+
+#[derive(Clone, PartialEq)]
+pub struct Group {
+    pub column: Column,
+    pub truncate: Option<TruncateUnit>,
+}
+
+pub struct Measure {
+    pub function: AggFunction,
+    pub argument: Option<Column>,
+    pub name: String,
+}
 
 pub struct AggregationPlan {
-    pub select: Vec<SelectExpr>,
-    pub group_by: Vec<Expr>,
-    pub order_by: Vec<OrderExpr>,
+    pub groups: Vec<Group>,
+    pub group_outputs: Vec<(Group, String)>,
+    pub measures: Vec<Measure>,
+    pub condition: Vec<Predicate>,
+    pub order: Option<InputAggSort>,
 }
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
-    pub fn aggregation(&self, condition: Option<&Expr>) -> AggregationPlan {
+    pub fn aggregation(&self, condition: Option<Vec<Predicate>>) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
         let mut plan = AggregationPlan {
-            select: Vec::new(),
-            group_by: Vec::new(),
-            order_by: Vec::new(),
+            groups: vec![],
+            group_outputs: vec![],
+            measures: vec![],
+            condition: condition.unwrap_or_default(),
+            order: aggregation.sort.clone(),
         };
         for (group, alias) in aggregation
             .group_by
@@ -33,30 +51,24 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     truncate,
                     ..
                 } => {
-                    let column = Expr::col(node, property);
-                    let expression = match truncate {
-                        Some(unit) => {
-                            let truncated = Expr::func(unit.ch_function(), vec![column]);
-                            match unit {
-                                TruncateUnit::Minute | TruncateUnit::Hour => {
-                                    Expr::func("toDateTime64", vec![truncated, Expr::ident("0")])
-                                }
-                                _ => Expr::func("toDate32", vec![truncated]),
-                            }
-                        }
-                        None => column,
+                    let group = Group {
+                        column: Column::new(node, property),
+                        truncate: *truncate,
                     };
-                    plan.select.push(SelectExpr::new(expression.clone(), alias));
-                    if !plan.group_by.contains(&expression) {
-                        plan.group_by.push(expression);
+                    plan.group_outputs.push((group.clone(), alias));
+                    if !plan.groups.contains(&group) {
+                        plan.groups.push(group);
                     }
                 }
                 InputGroupByKey::Node { node, .. } => {
                     if let Some(metadata) = self.nodes.get(node.as_str()) {
                         for column in requested_columns(&metadata.columns) {
-                            let expression = Expr::col(node, column);
-                            if !plan.group_by.contains(&expression) {
-                                plan.group_by.push(expression);
+                            let group = Group {
+                                column: Column::new(node, column),
+                                truncate: None,
+                            };
+                            if !plan.groups.contains(&group) {
+                                plan.groups.push(group);
                             }
                         }
                     }
@@ -74,34 +86,20 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                             .get(&target.node)
                             .is_some_and(|node| node.hydration == HydrationStrategy::Skip)
                     })
-                    .map(|property| Expr::col(&target.node, property)),
+                    .map(|property| Column::new(&target.node, property)),
                 AggExpr::Sum(property)
                 | AggExpr::Avg(property)
                 | AggExpr::Min(property)
                 | AggExpr::Max(property)
-                | AggExpr::Collect(property) => Some(Expr::col(&property.node, &property.property)),
+                | AggExpr::Collect(property) => {
+                    Some(Column::new(&property.node, &property.property))
+                }
             };
-            let mut arguments: Vec<_> = argument.into_iter().collect();
-            let function = metric.expr.function();
-            let name = if let Some(condition) = condition {
-                arguments.push(condition.clone());
-                function.as_sql_if()
-            } else {
-                function.as_sql()
-            };
-            plan.select.push(SelectExpr::new(
-                Expr::func(name, arguments),
-                metric.output_name(),
-            ));
-        }
-        if let Some(sort) = &aggregation.sort {
-            let column = Expr::ident(&sort.column);
-            plan.order_by
-                .push(if sort.direction == OrderDirection::Desc {
-                    OrderExpr::desc(column)
-                } else {
-                    OrderExpr::asc(column)
-                });
+            plan.measures.push(Measure {
+                function: metric.expr.function(),
+                argument,
+                name: metric.output_name(),
+            });
         }
         plan
     }

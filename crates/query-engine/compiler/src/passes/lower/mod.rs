@@ -4,6 +4,7 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 mod physical;
+pub mod requirements;
 pub mod traversal;
 
 use crate::ast::*;
@@ -196,12 +197,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             let result = &plan.operation.result;
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            Ok(Node::Query(Box::new(output.into_query(
-                result.select.clone(),
-                result.group_by.clone(),
-                result.order_by.clone(),
-                input.limit,
-            ))))
+            Ok(requirements::aggregation(result, output, input.limit))
         }
         QueryPlan::Neighbors(plan) => {
             let (query, binding) = neighbors::emit_neighbors(plan, input)?;

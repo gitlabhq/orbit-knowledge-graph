@@ -6,37 +6,7 @@ use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::{BoundFilter, NodePlan};
-
-pub(crate) fn latest_node_predicates(alias: &str, node: &NodePlan) -> Vec<Expr> {
-    let mut predicates: Vec<_> = node
-        .filters
-        .iter()
-        .map(|(property, filter)| filter_to_expr(alias, property, filter))
-        .collect();
-    if !node.node_ids.is_empty() {
-        predicates.push(id_list_predicate(
-            alias,
-            DEFAULT_PRIMARY_KEY,
-            &node.node_ids,
-        ));
-    }
-    if let Some(range) = &node.id_range {
-        predicates.push(id_range_predicate(alias, range));
-    }
-    predicates.push(deleted_false(alias));
-    predicates
-}
-
-pub(crate) fn node_select_columns(alias: &str, node: &NodePlan) -> Vec<SelectExpr> {
-    if !node.emit_select {
-        return vec![];
-    }
-    requested_columns(&node.columns)
-        .into_iter()
-        .map(|column| SelectExpr::new(Expr::col(alias, &column), format!("{alias}_{column}")))
-        .collect()
-}
+use crate::passes::plan::BoundFilter;
 
 pub(crate) fn latest_row_dedup(
     alias: &str,
@@ -57,7 +27,15 @@ pub enum FilterOwner<'a> {
 }
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
-    let filter = &bound.filter;
+    filter_expression(alias, prop, &bound.filter, bound.data_type.as_ref())
+}
+
+pub(crate) fn filter_expression(
+    alias: &str,
+    prop: &str,
+    filter: &InputFilter,
+    data_type: Option<&ontology::DataType>,
+) -> Expr {
     let col = Expr::col(alias, prop);
 
     if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
@@ -68,9 +46,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let str_val = || filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-    let typed = |v: serde_json::Value| -> Expr {
-        Expr::param(data_type_to_ch(bound.data_type.as_ref()), v)
-    };
+    let typed = |v: serde_json::Value| -> Expr { Expr::param(data_type_to_ch(data_type), v) };
 
     match filter.op {
         None | Some(FilterOp::Eq) => Expr::eq(col, typed(val())),
@@ -81,13 +57,8 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         Some(FilterOp::Lte) => Expr::binary(Op::Le, col, typed(val())),
         Some(FilterOp::In) => {
             if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                Expr::col_in(
-                    alias,
-                    prop,
-                    data_type_to_ch(bound.data_type.as_ref()),
-                    arr.clone(),
-                )
-                .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+                Expr::col_in(alias, prop, data_type_to_ch(data_type), arr.clone())
+                    .unwrap_or_else(|| Expr::param(ChType::Bool, false))
             } else {
                 Expr::param(ChType::Bool, false)
             }
@@ -305,6 +276,24 @@ pub fn denorm_tag_expr(
     tag_key: &str,
     filter: &InputFilter,
 ) -> Option<Expr> {
+    denorm_tag_values(tag_key, filter).map(|values| tag_membership(edge_alias, tag_col, &values))
+}
+
+pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Expr {
+    if let [value] = values {
+        Expr::func("has", vec![Expr::col(alias, column), Expr::string(value)])
+    } else {
+        Expr::func(
+            "hasAny",
+            vec![
+                Expr::col(alias, column),
+                Expr::func("array", values.iter().map(Expr::string).collect()),
+            ],
+        )
+    }
+}
+
+pub(crate) fn denorm_tag_values(tag_key: &str, filter: &InputFilter) -> Option<Vec<String>> {
     match filter.op {
         None | Some(FilterOp::Eq) => {
             let val = filter
@@ -312,13 +301,7 @@ pub fn denorm_tag_expr(
                 .as_ref()
                 .map(tag_value_string)
                 .unwrap_or_default();
-            Some(Expr::func(
-                "has",
-                vec![
-                    Expr::col(edge_alias, tag_col),
-                    Expr::string(format!("{tag_key}:{val}")),
-                ],
-            ))
+            Some(vec![format!("{tag_key}:{val}")])
         }
         Some(FilterOp::In) => {
             let values = filter.value.as_ref().and_then(|v| v.as_array())?;
@@ -326,22 +309,7 @@ pub fn denorm_tag_expr(
                 .iter()
                 .filter_map(|v| tag_value_opt(v).map(|s| format!("{tag_key}:{s}")))
                 .collect();
-            if tags.len() == 1 {
-                Some(Expr::func(
-                    "has",
-                    vec![Expr::col(edge_alias, tag_col), Expr::string(&tags[0])],
-                ))
-            } else if !tags.is_empty() {
-                Some(Expr::func(
-                    "hasAny",
-                    vec![
-                        Expr::col(edge_alias, tag_col),
-                        Expr::func("array", tags.iter().map(Expr::string).collect()),
-                    ],
-                ))
-            } else {
-                None
-            }
+            (!tags.is_empty()).then_some(tags)
         }
         _ => None,
     }

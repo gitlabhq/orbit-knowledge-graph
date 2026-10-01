@@ -2,6 +2,7 @@ use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use crate::passes::shared::latest_row_dedup;
 
+use super::requirements::{column, predicate, projections};
 use super::{EmitOutput, NodeBinding};
 
 pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
@@ -9,7 +10,7 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
     EmitOutput {
         from: source.from,
         where_parts: source.predicates,
-        select: plan.outputs.clone(),
+        select: projections(&plan.outputs),
         edge_aliases: plan.edge_aliases.clone(),
         ctes: plan
             .definitions
@@ -47,7 +48,7 @@ pub(super) fn query(plan: &PhysicalPlan) -> Query {
     };
     let output = emit_source(source);
     Query {
-        select: plan.outputs.clone(),
+        select: projections(&plan.outputs),
         from: output.from,
         where_clause: Expr::conjoin(output.predicates),
         order_by,
@@ -88,15 +89,15 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             },
             predicates: vec![],
         },
-        PhysicalSource::Filter { predicate, input } => {
+        PhysicalSource::Filter { predicates, input } => {
             let mut output = emit_source(input);
-            output.predicates.push(predicate.clone());
+            output.predicates.extend(predicates.iter().map(predicate));
             output
         }
         PhysicalSource::KeyFilter { value, keys, input } => {
             let mut output = emit_source(input);
             output.predicates.push(Expr::InSelect {
-                expr: Box::new(value.clone()),
+                expr: Box::new(column(value)),
                 query: Box::new(query(keys)),
             });
             output
@@ -121,14 +122,23 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             output
         }
         PhysicalSource::Join {
-            kind,
-            condition,
+            endpoints,
+            predicates,
             left,
             right,
         } => {
             let mut left = emit_source(left);
             let right = emit_source(right);
-            left.from = TableRef::join(*kind, left.from, right.from, condition.clone());
+            let condition = predicates.iter().map(predicate).fold(
+                Expr::eq(column(&endpoints.0), column(&endpoints.1)),
+                Expr::and,
+            );
+            left.from = TableRef::join(
+                crate::ast::JoinType::Inner,
+                left.from,
+                right.from,
+                condition,
+            );
             left.predicates.extend(right.predicates);
             left
         }

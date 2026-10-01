@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use crate::ast::{Expr, Op};
-use crate::passes::shared::rel_kind_filter;
-use crate::passes::shared::{deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate};
+use super::requirements::{
+    Column, Predicate, id_list, live, property_filter, relationship_kinds, tag_filter,
+};
 
 use super::context::PlanningContext;
 use super::{DenormalizedKey, Hop};
@@ -16,22 +16,27 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         alias: &str,
         hop: &Hop,
         tagged: &mut HashSet<(String, String)>,
-    ) -> Vec<Expr> {
+    ) -> Vec<Predicate> {
         let mut predicates = self.edge_predicates(alias, hop, false);
         predicates.extend(
             hop.filters
                 .iter()
-                .map(|(property, filter)| filter_to_expr(alias, property, filter)),
+                .map(|(property, filter)| property_filter(alias, property, filter)),
         );
         self.push_denorm_tags(&mut predicates, hop, alias, tagged);
         predicates.extend(self.node_id_predicates(alias, hop));
         predicates
     }
 
-    pub(super) fn edge_predicates(&self, alias: &str, hop: &Hop, skip_deleted: bool) -> Vec<Expr> {
+    pub(super) fn edge_predicates(
+        &self,
+        alias: &str,
+        hop: &Hop,
+        skip_deleted: bool,
+    ) -> Vec<Predicate> {
         let mut predicates = Vec::new();
         let (start, end) = hop.direction.edge_columns();
-        if let Some(filter) = rel_kind_filter(alias, &hop.rel_types) {
+        if let Some(filter) = relationship_kinds(alias, &hop.rel_types) {
             predicates.push(filter);
         }
         for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
@@ -43,11 +48,14 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                 } else {
                     TARGET_KIND_COLUMN
                 };
-                predicates.push(Expr::eq(Expr::col(alias, kind), Expr::string(entity)));
+                predicates.push(Predicate::EntityKind {
+                    column: Column::new(alias, kind),
+                    entity: entity.clone(),
+                });
             }
         }
         if !skip_deleted {
-            predicates.push(deleted_false(alias));
+            predicates.push(live(alias));
         }
         if let Some(columns) = self.model.table_columns(&hop.edge_table) {
             let mut seen = HashSet::new();
@@ -58,7 +66,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                             && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                             && seen.insert(property)
                         {
-                            predicates.push(filter_to_expr(alias, property, filter));
+                            predicates.push(property_filter(alias, property, filter));
                         }
                     }
                 }
@@ -69,7 +77,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
 
     pub(super) fn push_denorm_tags(
         &self,
-        predicates: &mut Vec<Expr>,
+        predicates: &mut Vec<Predicate>,
         hop: &Hop,
         alias: &str,
         tagged: &mut HashSet<(String, String)>,
@@ -105,7 +113,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                         .iter()
                         .any(|relationship| facts.relationships.contains(relationship))
                     && let Some(predicate) =
-                        denorm_tag_expr(alias, &facts.edge_column, &facts.tag_key, &filter.filter)
+                        tag_filter(alias, &facts.edge_column, &facts.tag_key, &filter.filter)
                 {
                     predicates.push(predicate);
                     tagged.insert(tag);
@@ -114,7 +122,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         }
     }
 
-    pub(super) fn node_id_predicates(&self, alias: &str, hop: &Hop) -> Vec<Expr> {
+    pub(super) fn node_id_predicates(&self, alias: &str, hop: &Hop) -> Vec<Predicate> {
         let (start, end) = hop.direction.edge_columns();
         let mut predicates = Vec::new();
         for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
@@ -122,13 +130,14 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                 continue;
             };
             if let Some(range) = &node.id_range {
-                predicates.push(Expr::and(
-                    Expr::binary(Op::Ge, Expr::col(alias, column), Expr::int(range.start)),
-                    Expr::binary(Op::Le, Expr::col(alias, column), Expr::int(range.end)),
-                ));
+                predicates.push(Predicate::IdRange {
+                    column: Column::new(alias, column),
+                    start: range.start,
+                    end: range.end,
+                });
             }
             if !node.node_ids.is_empty() {
-                predicates.push(id_list_predicate(alias, column, &node.node_ids));
+                predicates.push(id_list(alias, column, &node.node_ids));
             }
         }
         predicates
