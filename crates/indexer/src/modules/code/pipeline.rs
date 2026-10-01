@@ -462,8 +462,8 @@ impl CodeIndexer {
             .run_indexing(context, request, repository, indexed_at, observer, cancel)
             .await;
 
-        // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
-        // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
+        // `repository` is the run's in-memory filesystem; it goes with the handle whether this
+        // returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
         let run = indexing_result?;
 

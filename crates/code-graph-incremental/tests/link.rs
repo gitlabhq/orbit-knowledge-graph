@@ -171,7 +171,9 @@ fn an_unreadable_manifest_keeps_a_row_tagged_with_the_fault() {
         .find(|t| t.label == "Cargo.toml")
         .expect("the manifest keeps its row");
     assert_eq!(
-        manifest.get_tag(0, reason_key).map(|v| env.lang.syms.resolve(v)),
+        manifest
+            .get_tag(0, reason_key)
+            .map(|v| env.lang.syms.resolve(v)),
         Some("fault_file_read")
     );
 }
