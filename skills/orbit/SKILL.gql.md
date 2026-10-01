@@ -64,7 +64,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Write relationship types after a colon: `-[:AUTHORED]->`. `-[AUTHORED]->` declares a variable and rejects.
 - Pipelines for a merge request need `WHERE pl.source = 'merge_request_event'`.
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
-- File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. It repeats a file once per diff snapshot; see [the recipe](references/gql.md#files-a-merge-request-touched).
+- File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. It repeats a file or merge request once per diff snapshot. To list the files of one merge request, use [this recipe](references/gql.md#files-a-merge-request-touched). To list the merge requests that touched one file, use [this one](references/gql.md#merge-requests-that-touched-a-file).
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 

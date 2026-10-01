@@ -146,6 +146,31 @@ LIMIT 50
 `HAS_FILE` edges are sparsely populated. If this returns far fewer files than
 the merge request changed, report the result as incomplete coverage.
 
+### Merge requests that touched a file
+
+This is the inverse of the recipe above: anchor on the file path and walk back
+to the merge requests. Use `MergeRequestDiffFile.old_path`, which holds the path
+before the change (equal to `new_path` unless the file was renamed). Each merge
+request repeats once per diff snapshot, so group by it. Return `mr.project_id`
+with `mr.iid`, because the same path exists in many projects:
+
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {old_path: 'app/models/user.rb'})
+RETURN mr.project_id, mr.iid, mr.title, mr.state, count(d) AS snapshots
+ORDER BY snapshots DESC
+LIMIT 50
+```
+
+Pick the edge by the question. "Which files did this merge request change?"
+anchors on the merge request and walks `HAS_DIFF` then `HAS_FILE`. "Which merge
+requests changed this file?" anchors on the file path and walks the same edges
+backwards. The same sparse `HAS_FILE` coverage caveat applies.
+
+The merge request that renamed a file to this path stores the path only in
+`new_path`. To include it, rerun with `{new_path: 'app/models/user.rb'}` and
+add `f.old_path` to `RETURN`, which gives the old name to query for history from
+before the rename.
+
 ### Everything connected to one node
 
 The far endpoint has a variable but no label.
