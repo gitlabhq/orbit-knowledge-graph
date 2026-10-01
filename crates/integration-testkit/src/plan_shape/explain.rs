@@ -253,15 +253,159 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             );
             definitions(&plan.operation.execution, tree)
         }
-        QueryPlan::Neighbors(_) => leaf(Operator::Neighbors, ""),
-        QueryPlan::PathFinding(_) => leaf(Operator::PathFinding, ""),
-        QueryPlan::Hydration(_) => leaf(Operator::Hydration, ""),
+        QueryPlan::Neighbors(plan) => {
+            let operation = &plan.operation;
+            let access = operation.fused_table.as_ref().map_or_else(
+                || {
+                    format!(
+                        "directional outgoing=[{}] incoming=[{}]",
+                        operation.edge.outgoing_tables.join(", "),
+                        operation.edge.incoming_tables.join(", ")
+                    )
+                },
+                |table| format!("fused table={table}"),
+            );
+            Tree::node(
+                Operator::Neighbors,
+                format!(
+                    "center={} direction={} {access} center_filter={} relationships=[{}] path_lookup={}",
+                    operation.center,
+                    match operation.direction {
+                        compiler::input::Direction::Both => "both",
+                        compiler::input::Direction::Incoming => "incoming",
+                        compiler::input::Direction::Outgoing => "outgoing",
+                    },
+                    operation.has_non_denorm,
+                    operation
+                        .edge
+                        .rel_type_filter
+                        .as_deref()
+                        .unwrap_or_default()
+                        .join(", "),
+                    operation.center_tp_lookup.as_ref().map_or_else(
+                        || "none".into(),
+                        |(table, column)| format!("{table}.{column}")
+                    )
+                ),
+                vec![planned_node(&plan.nodes[&operation.center])],
+            )
+        }
+        QueryPlan::PathFinding(plan) => {
+            let operation = &plan.operation;
+            Tree::node(
+                Operator::PathFinding,
+                format!(
+                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}] forward_kinds=[{}] backward_kinds=[{}]",
+                    operation.start,
+                    operation.end,
+                    operation.max_depth,
+                    operation.forward_depth,
+                    operation.backward_depth,
+                    operation.scoped_by_tp,
+                    operation.edge.tables.join(", "),
+                    operation
+                        .edge
+                        .rel_type_filter
+                        .as_deref()
+                        .unwrap_or_default()
+                        .join(", "),
+                    operation
+                        .forward_first_hop_filter
+                        .as_deref()
+                        .unwrap_or_default()
+                        .join(", "),
+                    operation
+                        .backward_first_hop_filter
+                        .as_deref()
+                        .unwrap_or_default()
+                        .join(", ")
+                ),
+                vec![
+                    planned_node(&plan.nodes[&operation.start]),
+                    planned_node(&plan.nodes[&operation.end]),
+                ],
+            )
+        }
+        QueryPlan::Hydration(plan) => Tree::node(
+            Operator::Hydration,
+            "",
+            plan.operation
+                .nodes
+                .iter()
+                .map(|node| {
+                    use compiler::passes::plan::hydration::HydrationPathFilter;
+                    let mut predicates = vec![format!(
+                        "{}.{} IN {:?}",
+                        node.alias, node.id_property, node.node_ids
+                    )];
+                    if let Some(paths) = &node.path_filter {
+                        let (mode, paths) = match paths {
+                            HydrationPathFilter::PrefixUnion(paths) => ("PREFIX UNION", paths),
+                            HydrationPathFilter::PrefixSet(paths) => ("PREFIX SET", paths),
+                        };
+                        predicates.insert(
+                            0,
+                            format!(
+                                "{}.traversal_path {mode} [{}]",
+                                node.alias,
+                                paths
+                                    .iter()
+                                    .map(|path| text_literal(path.as_str()))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
+                    let read = Tree::node(
+                        Operator::Deduplicate,
+                        format!(
+                            "LimitBy {}",
+                            node.sort_key
+                                .iter()
+                                .map(|key| format!("{}.{key}", node.alias))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        vec![filter(predicates, scan(&node.table, &node.alias, false))],
+                    );
+                    Tree::node(
+                        Operator::Project,
+                        node.columns
+                            .iter()
+                            .map(|column| format!("{}.{column}", node.alias))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        vec![filter(
+                            vec![format!("{}._deleted = false", node.alias)],
+                            read,
+                        )],
+                    )
+                })
+                .collect(),
+        ),
     };
     let emitted = match ast {
         Node::Query(value) => query(value),
         Node::Insert(_) => leaf(Operator::Insert, ""),
     };
     (planned, emitted)
+}
+
+fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
+    filter(
+        compiler::passes::plan::requirements::node_predicates(node)
+            .iter()
+            .flat_map(planned_predicate)
+            .collect(),
+        leaf(
+            Operator::NodeScan,
+            format!(
+                "{} AS {}",
+                node.entity.as_deref().unwrap_or("Unresolved"),
+                node.alias
+            ),
+        ),
+    )
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {

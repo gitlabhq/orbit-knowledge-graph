@@ -15,13 +15,16 @@ logical:
 physical:
   clickhouse:
     planned:
-      exact: (Neighbors)
+      expect:
+        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=false relationships=[CALLS] ... (_))
+        - (NodeScan Definition AS d)
     emitted:
       expect:
         - (Scan Table(gl_code_edge) ...)
   duckdb:
     planned:
-      exact: (Neighbors)
+      expect:
+        - (Neighbors center=d direction=both ... (_))
     emitted:
       expect:
         - (Scan Table(gl_edge) ...)

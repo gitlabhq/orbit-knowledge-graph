@@ -160,6 +160,9 @@ Failures report the fixture path, frontend, backend, phase, and assertion index.
 
 The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.
 Scope-aware relation captures remain deferred to the query-local SQL identity work.
+Family explain views include neighbor access and routes, path frontier depths and endpoints, and hydration projections, paths, and dedup keys.
+Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
+The harness applies that setup after normalization; hydration remains unavailable as a user query type.
 
 Each edge-chain emitter builds node bindings as it emits scans and joins.
 Each binding contains the graph identity, visible table alias, and hydration path expression when available.

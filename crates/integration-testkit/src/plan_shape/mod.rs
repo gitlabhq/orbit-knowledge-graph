@@ -20,6 +20,15 @@ struct Scenario {
     query: BTreeMap<String, String>,
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
+    hydration: Option<HydrationSetup>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct HydrationSetup {
+    dynamic: bool,
+    path_segment_budget: Option<usize>,
+    paths: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -171,7 +180,7 @@ fn check<M: QueryDataModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input) -> compiler::Result<plan::QueryPlan>,
+    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -185,13 +194,34 @@ fn check<M: QueryDataModel>(
             _ => panic!("{label}: unknown frontend"),
         }
         .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let input =
+        let mut input =
             normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let mut options = plan::HydrationCompileOptions::default();
+        if let Some(hydration) = &scenario.hydration {
+            input.query_type = compiler::input::QueryType::Hydration;
+            for (alias, paths) in &hydration.paths {
+                let node = input
+                    .nodes
+                    .iter_mut()
+                    .find(|node| &node.id == alias)
+                    .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
+                node.traversal_paths = paths
+                    .iter()
+                    .map(|path| {
+                        orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
+                    })
+                    .collect();
+            }
+            options = plan::HydrationCompileOptions {
+                dynamic: hydration.dynamic,
+                path_segment_budget: hydration.path_segment_budget,
+            };
+        }
         scenario
             .logical
             .check(&explain::logical(&input), &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
         let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
@@ -240,11 +270,11 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         );
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, &remote, backend, path, |input| {
-                    plan::plan_clickhouse(input, &remote, Default::default(), &HashSet::new())
+                "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {
+                    plan::plan_clickhouse(input, &remote, options, &HashSet::new())
                 }),
-                "duckdb" => check(&scenario, &local, backend, path, |input| {
-                    plan::plan_duckdb(input, &local, Default::default(), &HashSet::new())
+                "duckdb" => check(&scenario, &local, backend, path, |input, options| {
+                    plan::plan_duckdb(input, &local, options, &HashSet::new())
                 }),
                 _ => panic!("unknown backend {backend}"),
             }
@@ -484,4 +514,69 @@ fn every_rendered_operator_parses_as_a_nested_child() {
     .unwrap();
     assert_eq!(grouped.children.len(), 1);
     assert_eq!(grouped.items.len(), 2);
+}
+
+#[test]
+fn hydration_planning_selects_paths_before_sql_rendering() {
+    use compiler::input::{InputNode, QueryType};
+    use compiler::passes::plan::hydration::HydrationPathFilter;
+    use orbit_utils::traversal_path::TraversalPath;
+
+    let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+        .unwrap();
+    for (count, dynamic, budget, set, expected_paths) in [
+        (256, true, None, false, 256),
+        (257, true, None, true, 257),
+        (257, false, None, false, 257),
+        (257, true, Some(1), false, 1),
+    ] {
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "f".into(),
+                entity: Some("File".into()),
+                node_ids: vec![1],
+                traversal_paths: (0..count)
+                    .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
+                    .collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let plan = plan::plan_clickhouse(
+            &input,
+            &model,
+            plan::HydrationCompileOptions {
+                dynamic,
+                path_segment_budget: budget,
+            },
+            &HashSet::new(),
+        )
+        .unwrap();
+        let plan::QueryPlan::Hydration(hydration) = &plan else {
+            panic!("expected hydration");
+        };
+        let (actual_set, paths) = match hydration.operation.nodes[0].path_filter.as_ref().unwrap() {
+            HydrationPathFilter::PrefixUnion(paths) => (false, paths),
+            HydrationPathFilter::PrefixSet(paths) => (true, paths),
+        };
+        assert_eq!((actual_set, paths.len()), (set, expected_paths));
+        let lowered = lower::emit(&plan, &input).unwrap();
+        let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
+        assert_eq!(sql.contains("arrayExists"), set);
+        assert_eq!(
+            sql.matches("startsWith").count(),
+            if set { 1 } else { expected_paths }
+        );
+        let (planned, _) = explain::physical(&plan, &lowered.ast);
+        let mode = if set { "SET" } else { "UNION" };
+        Assertions {
+            expect: vec![format!(
+                "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
+            )],
+            ..Default::default()
+        }
+        .check(&planned, "hydration.planned")
+        .unwrap();
+    }
 }

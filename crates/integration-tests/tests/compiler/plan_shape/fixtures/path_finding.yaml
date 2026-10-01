@@ -19,14 +19,18 @@ logical:
 physical:
   clickhouse:
     planned:
-      exact: (PathFinding)
+      expect:
+        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_code_edge] relationships=[CALLS] ... (_) (_))
+        - (Filter a.id = 1, ... (NodeScan Definition AS a))
+        - (Filter b.id = 2, ... (NodeScan Definition AS b))
     emitted:
       expect:
         - (CTE _ (_))
         - (Scan Table(gl_code_edge) ...)
   duckdb:
     planned:
-      exact: (PathFinding)
+      expect:
+        - (PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=[gl_edge] relationships=[CALLS] ... (_) (_))
     emitted:
       expect:
         - (CTE _ (_))
