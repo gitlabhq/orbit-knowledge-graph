@@ -105,7 +105,6 @@ pub struct Neighbors {
 
 pub struct Hydration {
     pub nodes: Vec<HydrationNodePlan>,
-    pub options: HydrationCompileOptions,
 }
 
 pub struct PathFinding {

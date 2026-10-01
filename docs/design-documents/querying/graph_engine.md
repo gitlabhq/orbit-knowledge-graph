@@ -112,6 +112,8 @@ The context owns temporary query facts and transfers common metadata into the fi
 Neighbors planning selects the fused scan when eligible; its lowerer renders the selected access path.
 Path finding and hydration retain their family-specific algorithms and share node and catalog lookup helpers.
 Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
+Hydration planning prunes traversal paths, applies the segment budget, and selects prefix-union or prefix-set access.
+Lowering renders the selected paths as balanced OR predicates or an array membership predicate without selecting the mode again.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.

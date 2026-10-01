@@ -205,12 +205,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             Ok(query)
         }
         QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(
-            &plan.operation.nodes,
-            input.limit,
-            plan.operation.options.dynamic,
-            plan.operation.options.path_segment_budget,
-        ),
+        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
     }?;
 
     if !input.join_predicates.is_empty()
