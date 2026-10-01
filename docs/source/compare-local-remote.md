@@ -28,37 +28,63 @@ title: Compare GitLab Orbit Remote and Local
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit creates a read-only property graph you can query.
+GitLab Orbit creates a read-only property graph you can query. GitLab Orbit Remote
+connects to your GitLab instance and GitLab Orbit Local can access
+your local code and projects.
 
-GitLab Orbit Local runs on your machine and builds a code-only graph from a repository you have
-checked out.
+Together, you can use both tools to understand the relationships between your code and
+other data in your GitLab instance.
 
-GitLab Orbit Remote runs on GitLab infrastructure and builds a graph of merged source code together
+The following sections compare GitLab Orbit Remote and Local so you
+can learn how they work and determine which one is right for you.
+
+## GitLab Orbit Remote
+
+GitLab Orbit Remote runs on GitLab infrastructure. It builds a graph of merged source code together
 with your software development lifecycle (SDLC) data, including groups, projects, users, merge
 requests, pipelines, work items, and security findings.
 
-The following sections compare GitLab Orbit Remote and Local so you
-can determine which one is right for you, and how to use them
-effectively.
+Use GitLab Orbit Remote when you need more context about the code
+you're working on.
+
+Developers use GitLab Orbit Remote to:
+
+- Assess a blast radius across projects
+- Check code review history
+- Trace a vulnerability
+back to the change that introduced it
+
+For product and engineering managers, security teams, and support,
+use GitLab Orbit Remote with GitLab Duo Agent Platform.
+
+You can ask a question in plain language in the GitLab UI, and the agent queries the graph and answers.
+Results are scoped to what your role already permits, so you see the same data you would see
+elsewhere in GitLab.
+
+## GitLab Orbit Local
+
+GitLab Orbit Local runs on your machine and builds a code-only graph from a repository you have
+checked out. It indexes the branch you are on and
+gives AI coding agents real structure to work with.
+
+Use GitLab Orbit Local when you have questions about the code you're working on.
+
+Developers use GitLab Orbit Local to:
+
+- Get oriented with an unfamiliar repository
+- Find every caller of a function
+before a rename
+- Map what a change touches
 
 ## GitLab Orbit on GitLab Self-Managed
 
 GitLab Orbit on GitLab Self-Managed is GitLab Orbit Remote that you run yourself.
-You deploy it as a Helm chart on a Kubernetes cluster next to your instance, together with the
+You deploy GitLab Orbit as a Helm chart on a Kubernetes cluster separate to your instance, together with the
 data pipeline that feeds it.
 
 For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
 
 ## Deployment and network
-
-| Deployment | GitLab Orbit Local | GitLab Orbit Remote |
-|------------|--------------------|---------------------|
-| Runs on your machine | {{< yes >}} | {{< no >}} |
-| Runs on GitLab infrastructure | {{< no >}} | {{< yes >}} |
-| Graph storage | DuckDB file at `~/.orbit/graph.duckdb` | Managed ClickHouse |
-| Storage you set up | {{< no >}} | {{< no >}} |
-| Network connection required to query | {{< no >}} | {{< yes >}} |
-| GitLab instance required | {{< no >}} | {{< yes >}} |
 
 Choose GitLab Orbit Local when the network is unavailable, or when the code must not leave your
 machine. You still need a network connection to complete the following setup tasks and actions for GitLab Orbit:
@@ -70,10 +96,17 @@ machine. You still need a network connection to complete the following setup tas
 After you install the GitLab Orbit binary, index and query commands are entirely local, and no request leaves your
 computer to build or read the graph.
 
-GitLab Orbit Remote has the following deployment requirements:
+GitLab Orbit Remote runs in a separate Kubernetes cluster from your GitLab instance.
+This deployment approach ensures memory usage and compute remain separate.
 
-- Runs in a separate Kubernetes cluster from your GitLab instance. This ensures that compute and memory usage remains separate.
-- Is read-only. It reads changes from GitLab and never writes back.
+| Deployment | GitLab Orbit Local | GitLab Orbit Remote |
+|------------|--------------------|---------------------|
+| Runs on your machine | {{< yes >}} | {{< no >}} |
+| Runs on GitLab infrastructure | {{< no >}} | {{< yes >}} |
+| Graph storage | DuckDB file at `~/.orbit/graph.duckdb` | Managed ClickHouse |
+| Storage you set up | {{< no >}} | {{< no >}} |
+| Network connection required to query | {{< no >}} | {{< yes >}} |
+| GitLab instance required | {{< no >}} | {{< yes >}} |
 
 ## Authentication and authorization
 
@@ -243,33 +276,3 @@ You use the same skill for GitLab Orbit Remote and Local, but the guidance diffe
 For more information, see
 [set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md).
 
-## Recommendations for developers
-
-Use GitLab Orbit Local when you have questions about the code you're working on.
-GitLab Orbit Local works offline, indexes the branch you are on, and
-gives AI coding agents real structure to work with.
-
-Developers use GitLab Orbit Local to:
-
-- Get oriented with an unfamiliar repository
-- Find every caller of a function
-before a rename
-- Map what a change touches
-
-Use GitLab Orbit Remote when you need more context about the code
-you're working on.
-
-Developers use GitLab Orbit Remote to:
-
-- Assess a blast radius across projects
-- Check code review history
-- Trace a vulnerability
-back to the change that introduced it
-
-## Recommendations for product and engineering managers, security teams, and support
-
-Use GitLab Orbit Remote with GitLab Duo Agent Platform.
-
-You can ask a question in plain language in the GitLab UI, and the agent queries the graph and answers.
-Results are scoped to what your role already permits, so you see the same data you would see
-elsewhere in GitLab.
