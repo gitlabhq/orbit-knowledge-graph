@@ -86,7 +86,9 @@ The union carries the original relationship index so scope predicates still reac
 Joined node reads use the same physical source builder for broad FINAL scans and narrowed latest-row scans.
 Narrowing and sort-key predicates run inside the latest-row scan; mutable-field and deletion predicates run outside it.
 Authoritative filter CTEs reuse the physical node source and select only the referenced key.
-Flat and FK-star strategies share an execution plan: a source tree, ordered CTE definitions, outputs, binding sources, and edge aliases.
+Single-node, flat, FK-star, and FK-chain builders share a planning context and return the same execution plan.
+The context borrows prepared query facts and the data model; table columns and sort keys are read from the catalog without copied maps.
+The execution plan contains a source tree, ordered CTE definitions, outputs, binding sources, and edge aliases.
 Cascade key scans live in that tree, with nested upstream membership filters and relationship provenance.
 Planning orders flat filter definitions by first use, with joined-node candidates before authoritative filter-only keys.
 Edge-derived node-narrowing definitions follow those filters and use each node's first hop and its cascade.
@@ -98,7 +100,7 @@ Their consumers retain latest-row resolution and exact predicate rechecks.
 FK-star planning builds the center scan, target joins, filter references, bindings, and synthetic edge outputs.
 It appends candidate and narrowing definitions directly to the execution plan in dependency order.
 Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
-Traversal and aggregation own their edge-chain strategies in their plan-body variants.
+Traversal and aggregation own execution plans in their plan-body variants. Lowering does not dispatch on the strategy that produced them.
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
 

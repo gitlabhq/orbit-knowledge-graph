@@ -1,3 +1,4 @@
+use query_data_model::QueryDataModel;
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -8,30 +9,24 @@ use crate::error::{QueryError, Result};
 use crate::input::Direction;
 use crate::passes::shared::id_list_predicate;
 
+use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
 use super::{Hop, HydrationStrategy, NodePlan};
 
-pub(super) fn star(
+pub(super) fn star<M: QueryDataModel + ?Sized>(
+    context: &PlanningContext<'_, M>,
     center: &str,
-    hops: &[Hop],
-    nodes: &HashMap<String, NodePlan>,
-    traversal: bool,
-    sort_keys: &HashMap<String, Vec<String>>,
 ) -> Result<ExecutionPlan> {
-    let center_node = nodes
-        .get(center)
-        .ok_or_else(|| QueryError::Lowering(format!("FK node '{center}' not found")))?;
+    let hops = context.hops;
+    let nodes = context.nodes;
+    let traversal = !context.aggregate();
+    let center_node = context.node(center)?;
     let root = PhysicalPlan::single_node(center_node)?;
     let mut plan = ExecutionPlan {
         source: root.source,
         outputs: root.outputs,
         definitions: Vec::new(),
-        bindings: vec![BindingSource {
-            node: center.into(),
-            alias: center.into(),
-            column: DEFAULT_PRIMARY_KEY.into(),
-            joined: true,
-        }],
+        bindings: vec![BindingSource::table(center)],
         edge_aliases: Vec::new(),
         edge_if_predicates: None,
     };
@@ -41,9 +36,7 @@ pub(super) fn star(
             .fk
             .as_ref()
             .ok_or_else(|| QueryError::Lowering("FK star hop missing metadata".into()))?;
-        let target = nodes.get(&fk.target_node).ok_or_else(|| {
-            QueryError::Lowering(format!("FK node '{}' not found", fk.target_node))
-        })?;
+        let target = context.node(&fk.target_node)?;
         if !target.node_ids.is_empty() && fk.referenced_column == DEFAULT_PRIMARY_KEY {
             extra
                 .entry(fk.fk_node.clone())
@@ -138,13 +131,7 @@ pub(super) fn star(
             };
             let membership =
                 name.map(|name| key_membership(&target.alias, &fk.referenced_column, name));
-            let table = target.table.as_ref().ok_or_else(|| {
-                QueryError::Lowering(format!("node '{}' has no table", target.alias))
-            })?;
-            let sort_key = sort_keys.get(table).ok_or_else(|| {
-                QueryError::Lowering(format!("no sort key for node table '{table}'"))
-            })?;
-            let scan = PhysicalPlan::node_scan(target, membership, sort_key)?;
+            let scan = PhysicalPlan::node_scan(target, membership, context.node_sort_key(target)?)?;
             plan.source = plan.source.inner_join(
                 scan.source,
                 Expr::eq(
@@ -197,7 +184,60 @@ pub(super) fn star(
     Ok(plan)
 }
 
-pub(super) fn edge_outputs(
+pub(super) fn chain<M: QueryDataModel + ?Sized>(
+    context: &PlanningContext<'_, M>,
+) -> Result<ExecutionPlan> {
+    let root = &context
+        .hops
+        .first()
+        .ok_or_else(|| QueryError::Lowering("FK chain requires a hop".into()))?
+        .from_node;
+    let scan = PhysicalPlan::node_scan(context.node(root)?, None, &[])?;
+    let mut plan = ExecutionPlan {
+        source: scan.source,
+        outputs: scan.outputs,
+        bindings: vec![BindingSource::table(root)],
+        definitions: vec![],
+        edge_aliases: vec![],
+        edge_if_predicates: None,
+    };
+    let mut reached = HashSet::from([root.as_str()]);
+    for (index, hop) in context.hops.iter().enumerate() {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
+        let alias = if reached.contains(hop.from_node.as_str()) {
+            &hop.to_node
+        } else {
+            &hop.from_node
+        };
+        let next = PhysicalPlan::node_scan(context.node(alias)?, None, &[])?;
+        plan.source = plan.source.inner_join(
+            next.source,
+            Expr::eq(
+                Expr::col(&fk.fk_node, &fk.fk_column),
+                Expr::col(&fk.target_node, &fk.referenced_column),
+            ),
+        );
+        plan.outputs.extend(next.outputs);
+        plan.bindings.push(BindingSource::table(alias));
+        reached.insert(hop.from_node.as_str());
+        reached.insert(hop.to_node.as_str());
+        if !context.aggregate() {
+            plan.outputs.extend(edge_outputs(
+                hop,
+                index,
+                context.nodes,
+                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
+                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+            ));
+        }
+    }
+    Ok(plan)
+}
+
+fn edge_outputs(
     hop: &Hop,
     index: usize,
     nodes: &HashMap<String, NodePlan>,

@@ -2,6 +2,7 @@
 //! query-type-specific data lives in the body variant. The Rust enum
 //! enforces that emit functions only access their own variant's data.
 
+mod context;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;
@@ -17,9 +18,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::{
-    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
-};
+pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::QueryDataModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
@@ -74,10 +73,10 @@ pub fn denormalized_facts(
 
 pub enum PlanBody {
     Traversal {
-        strategy: Strategy,
+        execution: Box<physical::ExecutionPlan>,
     },
     Aggregation {
-        strategy: Strategy,
+        execution: Box<physical::ExecutionPlan>,
         aggregations: Vec<InputAggregationMetric>,
         agg_sort: Option<InputAggSort>,
     },
