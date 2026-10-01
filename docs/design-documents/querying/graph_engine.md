@@ -102,52 +102,6 @@ Traversal and aggregation own their edge-chain strategies in their plan-body var
 Neighbors, path finding, and hydration dispatch directly from their family-specific plan bodies.
 Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
 
-`mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
-The shared runner and structural matcher live in `integration-testkit::plan_shape`.
-Logical assertions inspect parsed, normalized Input before scope preparation.
-They include node and relationship filters, groups, measures, ordering, and limits.
-Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
-The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
-Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(...)` matches zero or more children.
-`...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
-These assertions check plan structure; data-correctness scenarios check execution results.
-
-### Plan fixture assertions
-
-Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `definition_order`, and `exact`.
-Use multiline patterns for nested operations. Expressions use readable column references and preserve explicit grouping and quoted literals.
-
-```yaml
-physical:
-  clickhouse:
-    planned:
-      bind:
-        - (CTE $projects (Project p.id AS id (_)))
-      expect:
-        - (Filter p.id IN $projects.id, ... (_))
-      occurrences:
-        - pattern: (CTE $projects (_))
-          count: 1
-      definition_order: [$projects]
-    emitted:
-      expect:
-        - (Scan Table(gl_project) AS p)
-```
-
-`bind` must match exactly one subtree and introduce a named capture. Later assertions may reference it but cannot introduce new captures.
-Captures are local to one assertion block and one frontend/backend run. They capture syntax, not scoped SQL relation identities.
-`?` matches one expression token or parenthesized group; `$name` captures that same unit and requires later uses to agree.
-Quoted `'?'`, `'$name'`, and `'...'` are literal strings. Failed matches do not change capture bindings.
-
-Item lists match without order, preserve duplicate counts, and require `...` to admit extra items.
-Child order remains significant. Expressions retain token order and grouping; the matcher does not infer algebraic equivalence.
-`exact` compares the whole ordered tree, including projection order, and rejects wildcards and captures.
-`definition_order` checks the complete top-level CTE sequence, including captured names.
-Failures report the fixture path, frontend, backend, phase, and assertion index. Missing-pattern errors include the first subtree with the requested operator.
-
-The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.
-Scope-aware relation captures remain deferred to the query-local SQL identity work.
-
 Each edge-chain emitter builds node bindings as it emits scans and joins.
 Each binding contains the graph identity, visible table alias, and hydration path expression when available.
 Lowering resolves elided endpoints through their emitted holders or pinned literals.
