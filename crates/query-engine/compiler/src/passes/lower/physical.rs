@@ -11,7 +11,6 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
         where_parts: source.predicates,
         select: plan.outputs.clone(),
         edge_aliases: plan.edge_aliases.clone(),
-        edge_if_predicates: plan.edge_if_predicates.clone(),
         ctes: plan
             .definitions
             .iter()

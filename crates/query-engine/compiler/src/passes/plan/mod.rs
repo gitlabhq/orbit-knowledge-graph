@@ -2,6 +2,7 @@
 //! query-type-specific data lives in the body variant. The Rust enum
 //! enforces that emit functions only access their own variant's data.
 
+pub mod aggregation;
 mod context;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
@@ -77,8 +78,7 @@ pub enum PlanBody {
     },
     Aggregation {
         execution: Box<physical::ExecutionPlan>,
-        aggregations: Vec<InputAggregationMetric>,
-        agg_sort: Option<InputAggSort>,
+        result: aggregation::AggregationPlan,
     },
     Neighbors {
         center: String,
