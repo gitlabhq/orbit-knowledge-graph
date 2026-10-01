@@ -252,7 +252,9 @@ message GetQueryDslResponse {
 // ---------------------------------------------------------------------------
 
 // Request for the embedded skill catalog.
-message ListSkillsRequest {}
+message ListSkillsRequest {
+  QueryLanguage language = 1;  // Selects the query mode the served skills teach
+}
 
 // Response listing every skill embedded in the deployed server.
 message ListSkillsResponse {
@@ -273,6 +275,7 @@ message SkillSummary {
 message GetSkillRequest {
   string name = 1;
   bool metadata_only = 2;  // true omits files for a cheap cache revalidation
+  QueryLanguage language = 3;  // Selects the query mode the served skill teaches
 }
 
 message GetSkillResponse {
