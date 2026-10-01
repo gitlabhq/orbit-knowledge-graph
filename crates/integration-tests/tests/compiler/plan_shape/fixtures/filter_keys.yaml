@@ -1,0 +1,32 @@
+name: Filter-only FK target exports keys from an authoritative filtered scan
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+        {"id": "u", "entity": "User", "filters": {"username": "alice"}}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "aggregations": [{"count": "mr", "as": "n"}]
+    }
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})<-[:AUTHORED]-(u:User {username: 'alice'})
+    RETURN count(mr) AS n
+logical:
+  expect:
+    - (Filter u.username = 'alice' (NodeScan User AS u))
+    - (Aggregate COUNT(mr) AS n (_))
+physical:
+  clickhouse:
+    planned:
+      bind:
+        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+      expect:
+        - (Filter mr.author_id IN $users.id, ... (_))
+      occurrences:
+        - pattern: (CTE $users (_))
+          count: 1
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))

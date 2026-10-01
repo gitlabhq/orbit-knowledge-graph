@@ -1,0 +1,47 @@
+name: Joined node narrowing plans an edge key scan with its upstream cascade
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "filters": {"name": "caller"}, "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "columns": ["id"]},
+        {"id": "c", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ],
+      "order_by": "c.id"
+    }
+  gql: |
+    MATCH (a:Definition {name: 'caller'})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)
+    RETURN a.id, b.id, c.id ORDER BY c.id
+logical:
+  expect:
+    - (Sort c.id (_))
+    - (EdgeScan CALLS a->b AS e0)
+physical:
+  clickhouse:
+    planned:
+      bind:
+        - (CTE $callers (Project a.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))
+        - (CTE $targets (Project e1n.target_id AS id (SemiJoin e1n.source_id IN subquery (Filter ... (Scan Table(gl_code_edge) AS e1n)) (_))))
+      definition_order: [$callers, $targets]
+      expect:
+        - |
+          (Join ON c.id = e1.target_id
+            (_)
+            (Bind c
+              (Filter c._deleted = false
+                (Deduplicate LimitBy c.traversal_path, c.project_id, c.branch, c.id
+                  (Filter c.id IN $targets.id (Scan Table(gl_definition) AS c))))))
+        - (Filter e0p.source_id IN $callers.id, ... (_))
+      reject:
+        - (Join ON a.id = e0.source_id (_) (_))
+  duckdb:
+    planned:
+      expect:
+        - (Join ON c.id = e1.target_id (_) (Bind c (_)))
+      reject:
+        - (CTE _narrow_c (_))

@@ -1,0 +1,32 @@
+name: Single node retains its filter and requested projection
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "f", "entity": "File", "columns": ["id", "path"], "filters": {"language": "rust"}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (f:File {language: 'rust'}) RETURN f.id, f.path LIMIT 10
+logical:
+  expect:
+    - (Project f.id, f.path (Filter f.language = 'rust' (NodeScan File AS f)))
+physical:
+  clickhouse:
+    planned:
+      exact: |
+        (Project f.id AS f_id, f.path AS f_path
+          (Filter f.language = 'rust', f._deleted = false
+            (Deduplicate Final (Scan Table(gl_file) AS f))))
+    emitted:
+      exact: |
+        (Limit 10
+          (Project f.id AS f_id, f.path AS f_path
+            (Filter f.language = 'rust', f._deleted = false
+              (Deduplicate Final (Scan Table(gl_file) AS f)))))
+  duckdb:
+    planned:
+      exact: |
+        (Project f.id AS f_id, f.path AS f_path
+          (Filter f.language = 'rust', f._deleted = false
+            (Deduplicate Final (Scan Table(gl_file) AS f))))
