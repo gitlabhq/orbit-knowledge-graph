@@ -374,8 +374,12 @@ impl Vfs {
         self.passes.content(&mut file, &bytes);
         let loads = file.loads();
         let label = file.label.clone();
-        let slot = loads.then_some(slot);
-        self.keep(file, slot, true);
+        // The node exists and is indexed; only its decision changes.
+        if let Some(node) = lock(&self.nodes).get_mut(&key) {
+            node.file = file;
+            node.slot = loads.then_some(slot);
+            node.checked = true;
+        }
         match loads {
             true => Ok(bytes),
             false => Err(Unread::Listed(label)),
