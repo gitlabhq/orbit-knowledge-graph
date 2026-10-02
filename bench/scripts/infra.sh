@@ -140,9 +140,9 @@ case "${1:-}" in
 
     echo "[infra] Restarting GKG (schema migration re-creates tables on boot)"
     kubectl --context="${KCTX}" rollout restart -n "${GKG_NS}" \
-      deploy/gkg-dispatcher deploy/gkg-indexer-default deploy/gkg-webserver
+      deploy/orbit-dispatcher deploy/orbit-indexer-default deploy/orbit-webserver
     kubectl --context="${KCTX}" rollout status -n "${GKG_NS}" \
-      deploy/gkg-dispatcher --timeout=120s
+      deploy/orbit-dispatcher --timeout=120s
     echo "[infra] Reload complete. GKG will re-create schema and re-index from the datalake."
     ;;
   deploy)
@@ -178,11 +178,11 @@ case "${1:-}" in
     kubectl --context="${KCTX}" -n "${GKG_NS}" delete job \
       -l app.kubernetes.io/component=clickhouse-setup --ignore-not-found 2>/dev/null
     INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
-      -f gkg -o json 2>/dev/null \
+      -f orbit -o json 2>/dev/null \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'].rsplit('-',1)[-1]) if d else print('')" 2>/dev/null || echo "")
 
-    HELM_ARGS=(upgrade gkg
-      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+    HELM_ARGS=(upgrade orbit
+      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit
       --namespace "${GKG_NS}"
       --reuse-values
       --set "image.repository=${IMAGE}"
@@ -197,9 +197,9 @@ case "${1:-}" in
       RUN_ID="${RUN_ID}" "$0" reload
     else
       kubectl --context="${KCTX}" rollout restart -n "${GKG_NS}" \
-        deploy/gkg-dispatcher deploy/gkg-indexer-default deploy/gkg-webserver
+        deploy/orbit-dispatcher deploy/orbit-indexer-default deploy/orbit-webserver
       kubectl --context="${KCTX}" rollout status -n "${GKG_NS}" \
-        deploy/gkg-dispatcher --timeout=120s
+        deploy/orbit-dispatcher --timeout=120s
     fi
     echo "[infra] Deploy complete. Running image: ${IMAGE}:${TAG}"
     ;;

@@ -7,7 +7,8 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/component: ${COMPONENT}
-      app.kubernetes.io/name: gkg
+      app.kubernetes.io/name: orbit
   endpoints:
     - port: metrics
+      path: /-/metrics
       interval: 15s
