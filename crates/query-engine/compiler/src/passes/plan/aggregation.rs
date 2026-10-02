@@ -34,25 +34,18 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
         let mut source = &execution.source;
-        while let PhysicalSource::Join { left, .. } = source {
-            source = left;
-        }
-        let condition = match source {
-            PhysicalSource::Latest { input, .. } => match input.as_ref() {
-                PhysicalSource::Filter { predicates, input }
-                    if matches!(
-                        input.as_ref(),
-                        PhysicalSource::Scan {
-                            relationship: Some(_),
-                            ..
-                        }
-                    ) =>
-                {
-                    predicates.clone()
-                }
-                _ => vec![],
-            },
-            _ => vec![],
+        let condition = loop {
+            match source {
+                PhysicalSource::Latest {
+                    aggregate_condition,
+                    ..
+                } => break aggregate_condition.clone(),
+                PhysicalSource::Join { left, .. } => source = left,
+                PhysicalSource::Filter { input, .. }
+                | PhysicalSource::Scope { input, .. }
+                | PhysicalSource::KeyFilter { input, .. } => source = input,
+                PhysicalSource::Scan { .. } | PhysicalSource::Union { .. } => break vec![],
+            }
         };
         let mut plan = AggregationPlan {
             groups: vec![],

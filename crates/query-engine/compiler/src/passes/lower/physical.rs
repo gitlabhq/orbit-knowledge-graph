@@ -34,18 +34,25 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
 }
 
 pub(super) fn query(plan: &PhysicalPlan) -> Query {
-    let (source, order_by, limit_by) = match &plan.source {
+    let (source, order_by, limit_by, condition) = match &plan.source {
         PhysicalSource::Latest {
             alias,
             sort_key,
             input,
+            aggregate_condition,
         } => {
             let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-            (input.as_ref(), order_by, limit_by)
+            (
+                input.as_ref(),
+                order_by,
+                limit_by,
+                aggregate_condition.as_slice(),
+            )
         }
-        source => (source, vec![], None),
+        source => (source, vec![], None, [].as_slice()),
     };
-    let output = emit_source(source);
+    let mut output = emit_source(source);
+    output.predicates.extend(condition.iter().map(predicate));
     Query {
         select: projections(&plan.outputs),
         from: output.from,
@@ -104,7 +111,16 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
         PhysicalSource::Scope { alias, input } | PhysicalSource::Latest { alias, input, .. } => {
             let mut output = emit_source(input);
             let (order_by, limit_by) = match plan {
-                PhysicalSource::Latest { sort_key, .. } => latest_row_dedup(alias, sort_key),
+                PhysicalSource::Latest {
+                    sort_key,
+                    aggregate_condition,
+                    ..
+                } => {
+                    output
+                        .predicates
+                        .extend(aggregate_condition.iter().map(predicate));
+                    latest_row_dedup(alias, sort_key)
+                }
                 _ => (vec![], None),
             };
             output.from = TableRef::subquery(

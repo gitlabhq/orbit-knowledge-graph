@@ -192,6 +192,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         let mut keys =
                             PhysicalPlan::candidate_keys(node, DEFAULT_PRIMARY_KEY, vec![])?;
                         keys.source = PhysicalSource::Latest {
+                            aggregate_condition: vec![],
                             alias: alias.clone(),
                             sort_key: sort_key.to_vec(),
                             input: Box::new(keys.source),
@@ -268,7 +269,8 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             return Ok(PhysicalSource::Latest {
                 sort_key: sort_key.to_vec(),
                 alias: alias.clone(),
-                input: Box::new(scan(false).filter(predicates)),
+                aggregate_condition: predicates,
+                input: Box::new(scan(false)),
             });
         }
         let edge = if multi_hop {

@@ -6,6 +6,8 @@ use super::context::PlanningContext;
 use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
 
+const PREFIX_SET_PATH_THRESHOLD: usize = 256;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HydrationCompileOptions {
     pub dynamic: bool,
@@ -50,11 +52,13 @@ fn path_filter(
             leaves = prune_to_leaves(&parents);
         }
     }
-    Some(if options.dynamic && leaves.len() > 256 {
-        HydrationPathFilter::PrefixSet(leaves)
-    } else {
-        HydrationPathFilter::PrefixUnion(leaves)
-    })
+    Some(
+        if options.dynamic && leaves.len() > PREFIX_SET_PATH_THRESHOLD {
+            HydrationPathFilter::PrefixSet(leaves)
+        } else {
+            HydrationPathFilter::PrefixUnion(leaves)
+        },
+    )
 }
 
 pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(

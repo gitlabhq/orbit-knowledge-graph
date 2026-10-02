@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use super::requirements::{Column, OutputValue, Predicate, Projection, id_list};
+use super::requirements::{Column, OutputValue, Projection, id_list};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
@@ -16,7 +16,17 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
     context: &PlanningContext<'_, M>,
     center: &str,
 ) -> Result<ExecutionPlan> {
-    let hops = &context.hops;
+    let hops = context
+        .hops
+        .iter()
+        .map(|hop| {
+            let fk = hop
+                .fk
+                .as_ref()
+                .ok_or_else(|| QueryError::Lowering("FK star hop missing metadata".into()))?;
+            Ok((hop, fk, context.node(&fk.target_node)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let nodes = &context.nodes;
     let traversal = !context.aggregate();
     let center_node = context.node(center)?;
@@ -27,62 +37,40 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         definitions: Vec::new(),
         bindings: vec![BindingSource::table(center)],
     };
-    let mut extra: HashMap<String, Vec<Predicate>> = HashMap::new();
-    for hop in hops {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FK star hop missing metadata".into()))?;
-        let target = context.node(&fk.target_node)?;
+    let mut center_pins = Vec::new();
+    for (_, fk, target) in &hops {
         if !target.node_ids.is_empty() && fk.referenced_column == DEFAULT_PRIMARY_KEY {
-            extra.entry(fk.fk_node.clone()).or_default().push(id_list(
-                &fk.fk_node,
-                &fk.fk_column,
-                &target.node_ids,
-            ));
+            center_pins.push(id_list(&fk.fk_node, &fk.fk_column, &target.node_ids));
         }
     }
-    let center_pins = extra.get(center).cloned().unwrap_or_default();
     let mut references = HashMap::new();
     let mut visited = HashSet::new();
-    for hop in hops {
-        let fk = hop.fk.as_ref().expect("validated FK star hop");
-        let target = &nodes[&fk.target_node];
+    for (_, fk, target) in &hops {
         if !target.fk_needs_join || !visited.insert(&fk.target_node) {
             continue;
         }
-        let additional = extra.get(&fk.target_node).cloned().unwrap_or_default();
-        if target.filters.is_empty()
-            && target.node_ids.is_empty()
-            && target.id_range.is_none()
-            && additional.is_empty()
-        {
+        if target.filters.is_empty() && target.node_ids.is_empty() && target.id_range.is_none() {
             continue;
         }
         let name = format!("_candidate_{}", fk.target_node);
         plan.definitions.push((
             name.clone(),
-            PhysicalPlan::candidate_keys(target, &fk.referenced_column, additional)?,
+            PhysicalPlan::candidate_keys(target, &fk.referenced_column, vec![])?,
         ));
         references.insert(fk.target_node.clone(), name);
     }
-    for hop in hops {
-        let fk = hop.fk.as_ref().expect("validated FK star hop");
+    let mut center_extra = center_pins.clone();
+    for (_, fk, _) in &hops {
         if let Some(name) = references.get(&fk.target_node) {
-            extra
-                .entry(fk.fk_node.clone())
-                .or_default()
-                .push(key_membership(&fk.fk_node, &fk.fk_column, name.clone()));
+            center_extra.push(key_membership(&fk.fk_node, &fk.fk_column, name.clone()));
         }
     }
-    let center_extra = extra.remove(center).unwrap_or_default();
     if !visited.is_empty() && !center_extra.is_empty() {
         let name = format!("_candidate_{center}");
         plan.definitions.push((
             name.clone(),
             PhysicalPlan::candidate_keys(center_node, DEFAULT_PRIMARY_KEY, center_extra.clone())?,
         ));
-        references.insert(center.into(), name.clone());
         plan.source = plan
             .source
             .filter(vec![key_membership(center, DEFAULT_PRIMARY_KEY, name)]);
@@ -92,21 +80,11 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         input: Box::new(plan.source.filter(center_pins)),
     };
 
-    for hop in hops {
-        let fk = hop.fk.as_ref().expect("validated FK star hop");
-        let target = &nodes[&fk.target_node];
-        if fk.fk_node != center
-            && !target.node_ids.is_empty()
-            && fk.referenced_column == DEFAULT_PRIMARY_KEY
-        {
-            plan.source =
-                plan.source
-                    .filter(vec![id_list(&fk.fk_node, &fk.fk_column, &target.node_ids)]);
-        }
+    for (_, fk, target) in &hops {
         if target.fk_needs_join {
             let name = if let Some(name) = references.get(&fk.target_node) {
                 Some(name.clone())
-            } else if (traversal || fk.fk_node != center)
+            } else if traversal
                 && target.filters.is_empty()
                 && target.node_ids.is_empty()
                 && target.id_range.is_none()
@@ -155,8 +133,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         });
     }
     if traversal {
-        for (index, hop) in hops.iter().enumerate() {
-            let fk = hop.fk.as_ref().expect("validated FK star hop");
+        for (index, (hop, fk, _)) in hops.iter().enumerate() {
             let target_id = if fk.referenced_column == DEFAULT_PRIMARY_KEY {
                 Column::new(center, &fk.fk_column)
             } else {
@@ -245,12 +222,22 @@ fn edge_outputs(
         (EDGE_SRC_SUFFIX, OutputValue::Column(source_id)),
         (
             EDGE_SRC_TYPE_SUFFIX,
-            OutputValue::Text(nodes[source].entity.clone().unwrap_or_default()),
+            OutputValue::Text(
+                nodes
+                    .get(source)
+                    .and_then(|node| node.entity.clone())
+                    .unwrap_or_default(),
+            ),
         ),
         (EDGE_DST_SUFFIX, OutputValue::Column(target_id)),
         (
             EDGE_DST_TYPE_SUFFIX,
-            OutputValue::Text(nodes[target].entity.clone().unwrap_or_default()),
+            OutputValue::Text(
+                nodes
+                    .get(target)
+                    .and_then(|node| node.entity.clone())
+                    .unwrap_or_default(),
+            ),
         ),
     ]
     .map(|(suffix, value)| Projection::new(value, format!("e{index}_{suffix}")))

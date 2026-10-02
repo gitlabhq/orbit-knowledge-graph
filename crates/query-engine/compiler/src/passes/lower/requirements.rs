@@ -33,7 +33,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
         Predicate::RelationshipKinds { alias, kinds } => {
-            sql::rel_kind_filter(alias, kinds).expect("planned relationship kinds")
+            sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))
         }
         Predicate::Tags {
             column: value,

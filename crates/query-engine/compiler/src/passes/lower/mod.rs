@@ -248,12 +248,13 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             }
         })
         .collect();
-    let stable_order = match input.query_type {
-        QueryType::Aggregation => match &node {
+    let stable_order = match plan {
+        QueryPlan::Hydration(_) => vec![],
+        QueryPlan::Aggregation(_) => match &node {
             Node::Query(query) => query.group_by.iter().cloned().map(OrderExpr::asc).collect(),
             Node::Insert(_) => Vec::new(),
         },
-        QueryType::PathFinding => vec![
+        QueryPlan::PathFinding(_) => vec![
             OrderExpr::asc(Expr::func(
                 "toString",
                 vec![Expr::col("paths", crate::constants::path_column())],
@@ -263,8 +264,8 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
                 vec![Expr::col("paths", crate::constants::edge_kinds_column())],
             )),
         ],
-        QueryType::Neighbors => match plan {
-            QueryPlan::Neighbors(plan) if plan.operation.direction == Direction::Both => vec![
+        QueryPlan::Neighbors(plan) => match plan.operation.direction {
+            Direction::Both => vec![
                 OrderExpr::asc(Expr::ident(crate::constants::redaction_id_column(
                     &plan.operation.center,
                 ))),
@@ -281,28 +282,22 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
                 )),
             ],
         },
-        _ if input.relationships.is_empty() => input
+        QueryPlan::Traversal(_) if input.relationships.is_empty() => input
             .nodes
             .iter()
             .filter_map(|node| nodes.get(&node.id))
             .map(|binding| OrderExpr::asc(binding.identity().clone()))
             .collect(),
-        _ => {
-            let mappings = match plan {
-                QueryPlan::Traversal(plan) => &plan.node_edge_mappings,
-                QueryPlan::Aggregation(plan) => &plan.node_edge_mappings,
-                _ => unreachable!("only edge-chain queries use mapped ordering"),
-            };
-            mappings
-                .iter()
-                .filter_map(|(node, source)| {
-                    nodes.get(node).map(|binding| (source, binding.identity()))
-                })
-                .collect::<BTreeMap<_, _>>()
-                .into_values()
-                .map(|identity| OrderExpr::asc(identity.clone()))
-                .collect()
-        }
+        QueryPlan::Traversal(plan) => plan
+            .node_edge_mappings
+            .iter()
+            .filter_map(|(node, source)| {
+                nodes.get(node).map(|binding| (source, binding.identity()))
+            })
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
+            .map(|identity| OrderExpr::asc(identity.clone()))
+            .collect(),
     };
     Ok(LoweredQuery {
         ast: node,

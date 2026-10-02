@@ -81,6 +81,7 @@ pub enum PhysicalSource {
     Latest {
         sort_key: Vec<String>,
         alias: String,
+        aggregate_condition: Vec<Predicate>,
         input: Box<Self>,
     },
 }
@@ -106,18 +107,14 @@ impl PhysicalSource {
         })
     }
 
-    fn where_all(self, predicates: Vec<Predicate>) -> Self {
-        Self::Filter {
-            predicates,
-            input: Box::new(self),
-        }
-    }
-
     pub(crate) fn filter(self, predicates: Vec<Predicate>) -> Self {
         if predicates.is_empty() {
             self
         } else {
-            self.where_all(predicates)
+            Self::Filter {
+                predicates,
+                input: Box::new(self),
+            }
         }
     }
 
@@ -167,7 +164,7 @@ impl PhysicalPlan {
         let mut predicates = node_predicates(node);
         predicates.extend(extra);
         Ok(Self {
-            source: PhysicalSource::node(node, final_)?.where_all(predicates),
+            source: PhysicalSource::node(node, final_)?.filter(predicates),
             outputs: vec![Projection::new(
                 OutputValue::Column(Column::new(&node.alias, column)),
                 DEFAULT_PRIMARY_KEY,
@@ -210,15 +207,16 @@ impl PhysicalPlan {
                 }
             }
             source = PhysicalSource::Latest {
+                aggregate_condition: vec![],
                 sort_key: sort_key.to_vec(),
                 alias: node.alias.clone(),
-                input: Box::new(source.where_all(predicates)),
+                input: Box::new(source.filter(predicates)),
             };
         }
         Ok(Self {
             source: PhysicalSource::Scope {
                 alias: node.alias.clone(),
-                input: Box::new(source.where_all(node_predicates(node))),
+                input: Box::new(source.filter(node_predicates(node))),
             },
             outputs: node_outputs(node),
         })
@@ -227,7 +225,7 @@ impl PhysicalPlan {
     pub fn single_node(node: &NodePlan) -> Result<Self> {
         Ok(Self {
             outputs: node_outputs(node),
-            source: PhysicalSource::node(node, true)?.where_all(node_predicates(node)),
+            source: PhysicalSource::node(node, true)?.filter(node_predicates(node)),
         })
     }
 }

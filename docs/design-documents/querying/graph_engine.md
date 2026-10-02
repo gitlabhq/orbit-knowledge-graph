@@ -71,50 +71,6 @@ Planning resolves backend facts into execution requirements. Lowering translates
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 
-Single-node planning selects an executable scan/filter source tree and a list of result outputs.
-The single-node emitter renders those operations without choosing the scan or predicates again.
-This tree supplies the source fragment; aggregation, ordering, and pagination still build on that fragment in their existing phases.
-The output list does not hide source columns from those phases or create another SQL scope.
-FK-chain planning also uses the physical source tree, with explicit joins and scoped node scans.
-Each scoped scan resolves current rows and applies its predicates inside the derived table before joining.
-Flat-chain planning builds an executable edge-source tree with scans, filters, cascade key membership, and joins.
-It places narrowing predicates inside or outside FINAL scans using the leading sort-key columns.
-Single-edge aggregation plans a latest-row scan and retains the same predicates for conditional counting.
-Flat planning also composes node joins and outputs, retaining each node's first edge identity and traversal path in explicit binding sources.
-Shared physical lowering renders the complete source tree and converts those binding sources to result bindings.
-Bounded traversal hops are planned as physical unions of depth arms with explicit joins and outputs.
-The union carries the original relationship index so scope predicates still reach each underlying scan.
-Joined node reads use the same physical source builder for broad FINAL scans and narrowed latest-row scans.
-Narrowing and sort-key predicates run inside the latest-row scan; mutable-field and deletion predicates run outside it.
-Authoritative filter CTEs reuse the physical node source and select only the referenced key.
-Single-node, flat, FK-star, and FK-chain builders share a planning context and return the same execution plan.
-The context borrows prepared query facts and the data model; table columns and sort keys are read from the catalog without copied maps.
-The execution plan contains a source tree, ordered CTE definitions, outputs, binding sources, and edge aliases.
-Cascade key scans live in that tree, with nested upstream membership filters and relationship provenance.
-Planning orders flat filter definitions by first use, with joined-node candidates before authoritative filter-only keys.
-Edge-derived node-narrowing definitions follow those filters and use each node's first hop and its cascade.
-Flat construction borrows catalog facts through a short-lived builder and appends filter definitions on first use.
-It consumes each hop's membership predicates immediately, without a candidate-plan map or a stored list of per-hop filters.
-The node-join phase extends the execution plan and reuses the collected cascade frontiers.
-FK candidate prefilters also use physical key plans, with plain reads distinct from authoritative FINAL reads.
-Their consumers retain latest-row resolution and exact predicate rechecks.
-FK-star planning builds the center scan, target joins, filter references, bindings, and synthetic edge outputs.
-It appends candidate and narrowing definitions directly to the execution plan in dependency order.
-Shared lowering renders these operations and definitions without repeating eligibility decisions or tracking emitted CTEs.
-Traversal and aggregation own execution plans in their plan-body variants. Lowering does not dispatch on the strategy that produced them.
-Aggregation planning resolves measure arguments, grouping columns, output aliases, and aggregate ordering through the shared context.
-It records resolved measures, grouping columns, time buckets, and the source plan's conditional requirements.
-Conditional aggregate requirements come from the selected latest-row edge scan, rather than a separate builder output or temporary execution-plan field.
-Lowering constructs aggregate calls and time-bucket casts without repeating metadata lookups.
-Ranges remain range requirements until lowering expands their comparisons. Joins carry endpoint columns and optional row requirements.
-All query families share one planning context and return a typed `Plan<T>` through the runtime `QueryPlan` enum.
-The context owns temporary query facts and transfers common metadata into the finished plan.
-Neighbors planning selects the fused scan when eligible; its lowerer renders the selected access path.
-Path finding and hydration retain their family-specific algorithms and share node and catalog lookup helpers.
-Hydration arms reuse physical latest-row query rendering, retaining their explicit inner projection and outer deletion check.
-Hydration planning prunes traversal paths, applies the segment budget, and selects prefix-union or prefix-set access.
-Lowering renders the selected paths as balanced OR predicates or an array membership predicate without selecting the mode again.
-
 Each edge-chain emitter builds node bindings as it emits scans and joins.
 Each binding contains the graph identity, visible table alias, and hydration path expression when available.
 Lowering resolves elided endpoints through their emitted holders or pinned literals.
