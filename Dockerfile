@@ -5,7 +5,7 @@ WORKDIR /build
 COPY . .
 
 ARG SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache
-ARG GKG_BILLING_ENFORCED=false
+ARG ORBIT_BILLING_ENFORCED=false
 ENV CARGO_INCREMENTAL=0
 
 RUN --mount=type=secret,id=sccache_gcs_key \
@@ -17,7 +17,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
              SCCACHE_GCS_BUCKET="${SCCACHE_GCS_BUCKET}" \
              SCCACHE_GCS_RW_MODE=READ_WRITE; \
     fi && \
-    export RUSTC_WRAPPER="$SCCACHE_BIN" GKG_BILLING_ENFORCED="${GKG_BILLING_ENFORCED}" && \
+    export RUSTC_WRAPPER="$SCCACHE_BIN" ORBIT_BILLING_ENFORCED="${ORBIT_BILLING_ENFORCED}" && \
     "$SCCACHE_BIN" --start-server || true && \
     cargo build --release -p orbit-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \

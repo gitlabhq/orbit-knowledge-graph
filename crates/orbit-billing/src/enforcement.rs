@@ -1,10 +1,10 @@
-//! Startup validation for builds compiled with `GKG_BILLING_ENFORCED=true`.
+//! Startup validation for builds compiled with `ORBIT_BILLING_ENFORCED=true`.
 //!
 //! The switch is a build-time cfg flag, so the deployed config cannot turn it off.
 
 use orbit_server_config::{BillingAuthMode, BillingConfig, QuotaAuthMode};
 
-pub const ENFORCED: bool = cfg!(gkg_billing_enforced);
+pub const ENFORCED: bool = cfg!(orbit_billing_enforced);
 
 struct Environment {
     name: &'static str,

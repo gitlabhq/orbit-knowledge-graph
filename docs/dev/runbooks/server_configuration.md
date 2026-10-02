@@ -548,7 +548,7 @@ Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` qu
 
 ### Enforced builds
 
-Images built with the `GKG_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
+Images built with the `ORBIT_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
 
 - `billing.enabled` and `billing.quota.enabled` are both `true`.
 - `billing.quota.customers_dot_url` and `billing.collector_url` exactly match one environment pair. A trailing slash is allowed; any other difference, such as a path, a port or different capitalisation, is rejected:

@@ -426,7 +426,7 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 
 **Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
 
-**Enforced builds.** A binary built with `GKG_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
+**Enforced builds.** A binary built with `ORBIT_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
 
 - Billing and the quota gate are enabled.
 - The CustomersDot and collector URLs form one compiled-in production or staging pair.
