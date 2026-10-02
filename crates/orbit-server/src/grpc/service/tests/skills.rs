@@ -1,5 +1,10 @@
 use super::*;
+use query_engine::compiler::Frontend;
 use sha2::{Digest, Sha256};
+
+fn catalog_version(frontend: Frontend) -> String {
+    crate::skills::list_skills(frontend).remove(0).version
+}
 
 fn sha256_hex(content: &str) -> String {
     Sha256::digest(content.as_bytes())
@@ -19,7 +24,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
     assert_eq!(response.skills.len(), 1);
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
-    assert_eq!(skill.version, "0.33.1");
+    assert_eq!(skill.version, catalog_version(Frontend::JsonDsl));
     assert!(skill.description.contains("glab orbit"));
     assert!(skill.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
@@ -73,7 +78,7 @@ async fn get_skill_metadata_only_omits_files() {
         .into_inner();
 
     assert_eq!(response.name, "orbit");
-    assert_eq!(response.version, "0.33.1");
+    assert_eq!(response.version, catalog_version(Frontend::JsonDsl));
     assert!(response.compatibility.contains("Orbit CLI"));
     assert_eq!(response.server_version, orbit_utils::version::get());
     assert!(response.files.is_empty());
@@ -109,7 +114,7 @@ async fn skill_requests_select_the_query_language() {
         .await
         .unwrap()
         .into_inner();
-    assert_eq!(gql.version, "0.33.1+gql");
+    assert_eq!(gql.version, catalog_version(Frontend::Gql));
     let listed = service
         .list_skills(authed_request(ListSkillsRequest {
             language: QueryLanguage::Gql as i32,
