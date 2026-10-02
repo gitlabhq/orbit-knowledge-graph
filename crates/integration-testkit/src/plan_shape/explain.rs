@@ -474,6 +474,7 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             alias,
             sort_key,
             input,
+            aggregate_condition,
         } => Tree::node(
             Operator::Deduplicate,
             format!(
@@ -484,7 +485,13 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            vec![physical_source(input)],
+            vec![filter(
+                aggregate_condition
+                    .iter()
+                    .flat_map(planned_predicate)
+                    .collect(),
+                physical_source(input),
+            )],
         ),
         PhysicalSource::Join {
             endpoints,

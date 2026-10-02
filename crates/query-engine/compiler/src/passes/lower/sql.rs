@@ -1,7 +1,6 @@
 use ontology::constants::*;
 
 use crate::ast::*;
-use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
@@ -120,23 +119,6 @@ pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
             Expr::int(range.end),
         ),
     )
-}
-
-pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
-    edge_select_columns_with_prefix(alias, alias)
-}
-
-pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectExpr> {
-    [
-        (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
-        (SOURCE_ID_COLUMN, EDGE_SRC_SUFFIX),
-        (SOURCE_KIND_COLUMN, EDGE_SRC_TYPE_SUFFIX),
-        (TARGET_ID_COLUMN, EDGE_DST_SUFFIX),
-        (TARGET_KIND_COLUMN, EDGE_DST_TYPE_SUFFIX),
-    ]
-    .iter()
-    .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{prefix}_{suffix}")))
-    .collect()
 }
 
 pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
