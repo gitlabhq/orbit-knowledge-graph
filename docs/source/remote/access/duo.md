@@ -99,7 +99,7 @@ To use GitLab Orbit in a custom flow:
 1. Select **Save changes**.
 
 To edit the flow in VS Code, see
-[Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/#edit-a-flow).
+[Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/?tab=VS+Code#edit-a-flow).
 
 ## Billing
 
