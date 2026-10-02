@@ -64,26 +64,15 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                 self.position += 1;
             }
         }
-        fn child(&self) -> Result<bool, String> {
+        fn child(&self) -> bool {
             if self.peek() != Some(b'(') {
-                return Ok(false);
+                return false;
             }
             let label = self.text[self.position + 1..]
                 .split(|c: char| c.is_whitespace() || c == ')')
                 .next()
                 .unwrap_or("");
-            if Operator::parse(label).is_ok() {
-                return Ok(true);
-            }
-            if label.starts_with(|c: char| c.is_ascii_uppercase())
-                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            {
-                return Err(format!(
-                    "unknown operator '{label}' at byte {}",
-                    self.position
-                ));
-            }
-            Ok(false)
+            Operator::parse(label).is_ok()
         }
         fn node(&mut self) -> Result<Expression, String> {
             self.whitespace();
@@ -110,7 +99,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                         self.position += 1;
                         break;
                     }
-                    Some(b'(') if self.child()? => children.push(self.node()?),
+                    Some(b'(') if self.child() => children.push(self.node()?),
                     _ => {
                         let start = self.position;
                         let mut depth = 0;
@@ -130,7 +119,7 @@ pub fn parse(text: &str) -> Result<Expression, String> {
                                         && self.text.as_bytes()[self.position - 1]
                                             .is_ascii_whitespace() =>
                                     {
-                                        if self.child()? {
+                                        if self.child() {
                                             break;
                                         }
                                         depth += 1;

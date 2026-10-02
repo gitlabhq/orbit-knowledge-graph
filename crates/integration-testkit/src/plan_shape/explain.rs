@@ -183,7 +183,14 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
         FilterOp::Lt => "<",
         FilterOp::Lte => "<=",
         FilterOp::In => "IN",
-        _ => op.as_ref(),
+        FilterOp::IsNull => return format!("{alias}.{property} IS NULL"),
+        FilterOp::IsNotNull => return format!("{alias}.{property} IS NOT NULL"),
+        FilterOp::Contains
+        | FilterOp::StartsWith
+        | FilterOp::EndsWith
+        | FilterOp::TokenMatch
+        | FilterOp::AllTokens
+        | FilterOp::AnyTokens => return format!("{}({alias}.{property}, {value})", op.as_ref()),
     };
     format!("{alias}.{property} {operator} {value}")
 }
@@ -334,10 +341,13 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .iter()
                 .map(|node| {
                     use compiler::passes::plan::hydration::HydrationPathFilter;
-                    let mut predicates = vec![format!(
-                        "{}.{} IN {:?}",
-                        node.alias, node.id_property, node.node_ids
-                    )];
+                    let mut predicates = Vec::new();
+                    if !node.node_ids.is_empty() {
+                        predicates.push(format!(
+                            "{}.{} IN {:?}",
+                            node.alias, node.id_property, node.node_ids
+                        ));
+                    }
                     if let Some(paths) = &node.path_filter {
                         let (mode, paths) = match paths {
                             HydrationPathFilter::PrefixUnion(paths) => ("PREFIX UNION", paths),
@@ -655,6 +665,10 @@ fn expression(value: &Expr) -> String {
             };
             format!("{} {op} {}", operand(left), operand(right))
         }
+        Expr::UnaryOp {
+            op: op @ (Op::IsNull | Op::IsNotNull),
+            expr,
+        } => format!("{} {op}", expression(expr)),
         Expr::UnaryOp { op, expr } => format!("{op}({})", expression(expr)),
         Expr::Lambda { param, body } => format!("{param} -> {}", expression(body)),
         Expr::InSubquery {

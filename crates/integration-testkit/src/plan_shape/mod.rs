@@ -500,20 +500,38 @@ fn every_rendered_operator_parses_as_a_nested_child() {
         let tree = Expression::node(Operator::With, "", vec![child]);
         assert_eq!(pattern::parse(&tree.to_string()).unwrap(), tree);
     }
-    for text in [
-        "(FutureScan table)",
-        "(With (FutureScan table))",
-        "(Filter a.id = 1 (FutureScan table))",
-    ] {
-        let error = pattern::parse(text).unwrap_err();
-        assert!(error.contains("unknown operator 'FutureScan'"), "{error}");
-    }
+    let error = pattern::parse("(FutureScan table)").unwrap_err();
+    assert!(error.contains("unknown operator 'FutureScan'"), "{error}");
     let grouped = pattern::parse(
         "(Filter (Project.id = 1 OR Scan.id = 2), COUNT(a.id) > 0 (Scan Table(t) AS a))",
     )
     .unwrap();
     assert_eq!(grouped.children.len(), 1);
     assert_eq!(grouped.items.len(), 2);
+}
+
+#[test]
+fn yaml_assertions_preserve_uppercase_expression_groups() {
+    let actual = pattern::Expression::node(
+        operator::Operator::Filter,
+        "(NULL) IS NULL, (STATUS = ACTIVE), (NOT (a.deleted = true))",
+        vec![pattern::Expression::node(
+            operator::Operator::Scan,
+            "Table(t) AS a",
+            vec![],
+        )],
+    );
+    let assertions: Assertions = orbit_utils::yaml::from_str(
+        r#"
+expect:
+  - (Filter (NULL) IS NULL, (STATUS = ACTIVE), (NOT (a.deleted = true)) (Scan Table(t) AS a))
+reject:
+  - (Filter (STATUS = INACTIVE), ... (_))
+"#,
+    )
+    .unwrap();
+    assertions.check(&actual, "uppercase-groups").unwrap();
+    assert_eq!(pattern::parse(&actual.to_string()).unwrap(), actual);
 }
 
 #[test]
