@@ -299,4 +299,5 @@ async fn analytics_tracker_delivers_a_partial_batch_without_flush() {
         (before.0 + 1, before.1),
         "a single tracked event was not delivered without an explicit flush"
     );
+    tracker.shutdown().await;
 }

@@ -3,6 +3,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -26,6 +27,8 @@ use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+
+const ANALYTICS_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -273,8 +276,12 @@ async fn run_webserver(
         res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     };
-    if let Some(tracker) = analytics_tracker {
-        tracker.shutdown().await;
+    if let Some(tracker) = analytics_tracker
+        && tokio::time::timeout(ANALYTICS_DRAIN_TIMEOUT, tracker.shutdown())
+            .await
+            .is_err()
+    {
+        warn!("analytics drain timed out; dropping buffered events");
     }
     result
 }
