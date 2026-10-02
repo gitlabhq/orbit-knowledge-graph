@@ -69,9 +69,9 @@ To turn on GitLab Orbit for custom flows:
 
 ### Use GitLab Orbit in a custom flow
 
-A [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/)
-can call GitLab Orbit only if its configuration lists the GitLab Orbit tools.
-An instruction in the prompt is not enough.
+To use GitLab Orbit in a [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/),
+you must add the GitLab Orbit tools to the flow configuration.
+After you add the tools, you can write prompts that tell the agent to use GitLab Orbit.
 
 Prerequisites:
 
@@ -81,7 +81,11 @@ Prerequisites:
 
 To use GitLab Orbit in a custom flow:
 
-1. In the flow configuration, add the GitLab Orbit tools to the `toolset`
+1. In the top bar, select **Search or go to** and find your group or project.
+1. Select **AI** > **Flows**.
+1. Select the flow you want to edit.
+1. In the upper-right corner, select **Edit**.
+1. Add the GitLab Orbit tools to the `toolset`
    of each agent component that needs them:
 
    ```yaml
@@ -92,6 +96,10 @@ To use GitLab Orbit in a custom flow:
 
 1. In the prompt, tell the agent when to use GitLab Orbit. For example,
    to find other projects that import the changed files.
+1. Select **Save changes**.
+
+To edit the flow in VS Code, see
+[Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/#edit-a-flow).
 
 ## Billing
 

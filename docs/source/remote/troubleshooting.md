@@ -101,10 +101,10 @@ GitLab Orbit removes security entities from the results and from aggregate count
 
 To resolve this issue, give the account the Security Manager role in the group.
 
-## GitLab Orbit tools are missing from a custom flow
+## Custom flow does not use GitLab Orbit
 
-A custom flow runs, but the agent does not have the `orbit_list_commands` or
-`orbit_invoke_command` tools. The flow does not show an error.
+An agent in a custom flow runs but does not call GitLab Orbit.
+The agent might say that it has no GitLab Orbit tools. The flow does not show an error.
 
 This issue occurs when the flow configuration does not list the GitLab Orbit
 tools, or when the user who triggered the flow has not turned on GitLab Orbit.
