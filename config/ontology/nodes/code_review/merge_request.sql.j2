@@ -170,8 +170,9 @@ LEFT JOIN (
       argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_duo_workflows_workflow_merge_requests
     WHERE startsWith(traversal_path, {traversal_path:String})
-      AND (workflow_id, id) IN (
+      AND (traversal_path, workflow_id, id) IN (
       SELECT
+        traversal_path,
         workflow_id,
         id
       FROM siphon_duo_workflows_workflow_merge_requests
