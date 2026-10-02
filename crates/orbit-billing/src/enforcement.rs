@@ -12,8 +12,6 @@ struct Environment {
     collector_url: &'static str,
 }
 
-// Released enforced builds accept only these URLs. A hostname migration must keep the old name
-// serving while those releases are supported, and add the new name here a few releases ahead.
 const ENVIRONMENTS: [Environment; 2] = [
     Environment {
         name: "production",
@@ -80,7 +78,6 @@ fn validate_with(enforced: bool, config: &BillingConfig) -> Result<(), Enforceme
     }
 }
 
-// Both clients strip trailing slashes before appending their request path.
 fn same_base_url(actual: &str, expected: &str) -> bool {
     actual.trim_end_matches('/') == expected
 }
