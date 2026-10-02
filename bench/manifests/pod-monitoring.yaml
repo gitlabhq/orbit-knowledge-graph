@@ -10,4 +10,5 @@ spec:
       app.kubernetes.io/name: orbit
   endpoints:
     - port: metrics
+      path: /-/metrics
       interval: 15s

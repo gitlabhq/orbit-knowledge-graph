@@ -44,13 +44,13 @@ check "datalake tables have watermark column" $KC exec -n "${CH_NS}" clickhouse-
   clickhouse-client --password "${CH_PASS}" \
   --query "SELECT count() FROM system.columns WHERE database = 'datalake' AND name = '_siphon_watermark' HAVING count() > 0"
 
-# These require metrics enabled and wget in the container image.
+# These require metrics enabled in the tier overlay.
 # Non-fatal until the tier overlay is wired into setup.sh.
 warn_check "gkg metrics scrapeable" $KC exec -n "${NS}" deploy/orbit-webserver -- \
-  wget -q -O /dev/null http://localhost:9394/metrics
+  curl -fsS -o /dev/null http://localhost:9394/-/metrics
 
-warn_check "smoke healthz" $KC exec -n "${NS}" deploy/orbit-webserver -- \
-  wget -q -O /dev/null "http://localhost:50054/healthz"
+warn_check "smoke readiness" $KC exec -n "${NS}" deploy/orbit-webserver -- \
+  curl -fsS -o /dev/null "http://localhost:9394/-/readiness"
 
 if [[ ${FAIL} -ne 0 ]]; then
   log "Validation FAILED; stack is not a measurement environment."
