@@ -179,8 +179,8 @@ if [[ -n "${CKPT}" ]]; then
         ('dispatch.sdlc.namespace.sweep', '1970-01-01 00:00:00')"
   log "  Set ${CKPT} to epoch"
 fi
-$KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher deploy/gkg-indexer-default
-$KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher --timeout=120s
+$KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/orbit-dispatcher deploy/orbit-indexer-default
+$KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/orbit-dispatcher --timeout=120s
 log "  Dispatcher and indexer restarted"
 
 # --- 9. Enable GMP metrics scraping for GKG pods ---
