@@ -163,21 +163,27 @@ LEFT JOIN (
     max(link_type = 1 AND deleted = false) AS created_by_duo
   FROM (
     SELECT
-      merge_request_id,
       workflow_id,
       id,
+      argMax(merge_request_id, {{version_column}}) AS merge_request_id,
       argMax(link_type, {{version_column}}) AS link_type,
       argMax({{deleted_column}}, {{version_column}}) AS deleted
     FROM siphon_duo_workflows_workflow_merge_requests
     WHERE startsWith(traversal_path, {traversal_path:String})
-      AND merge_request_id IN (
+      AND (workflow_id, id) IN (
       SELECT
+        workflow_id,
         id
-      FROM merge_requests
+      FROM siphon_duo_workflows_workflow_merge_requests
       WHERE startsWith(traversal_path, {traversal_path:String})
-        AND {{watermark_column}} > {last_watermark:String}
-        AND {{watermark_column}} <= {watermark:String} )
-    GROUP BY merge_request_id, workflow_id, id )
+        AND merge_request_id IN (
+        SELECT
+          id
+        FROM merge_requests
+        WHERE startsWith(traversal_path, {traversal_path:String})
+          AND {{watermark_column}} > {last_watermark:String}
+          AND {{watermark_column}} <= {watermark:String} ) )
+    GROUP BY workflow_id, id )
   GROUP BY merge_request_id ) AS duo_links ON m.id = duo_links._dl_mr
 WHERE startsWith(m.traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id
