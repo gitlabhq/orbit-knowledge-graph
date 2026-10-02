@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use chrono::Utc;
 use rand::RngExt;
@@ -20,6 +21,11 @@ const CC_TOKEN_REFRESH_LEAD_SECS: i64 = 30 * 60;
 /// Minimum gap between Rails calls after a failure, so an outage draws at
 /// most one call per pod per interval.
 const CC_TOKEN_RETRY_INTERVAL_SECS: i64 = 60;
+
+/// Caps the fetch when a cached token can cover for a timeout (matches
+/// labkit's own OIDC token source). With nothing to fall back on, a slow
+/// Rails is worth waiting out instead of giving up early.
+const CC_TOKEN_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub trait CloudConnectorTokenFetcher: Send + Sync {
     fn fetch(
@@ -71,7 +77,18 @@ impl CloudConnectorTokenCache {
             return Ok(token);
         }
 
-        let fetched = self.fetcher.fetch().await;
+        let has_cached_token = self.state.read().unwrap().token.is_some();
+        let fetched = if has_cached_token {
+            tokio::time::timeout(CC_TOKEN_FETCH_TIMEOUT, self.fetcher.fetch())
+                .await
+                .unwrap_or_else(|_| {
+                    Err(GitlabClientError::Unexpected(format!(
+                        "cloud connector token fetch timed out after {CC_TOKEN_FETCH_TIMEOUT:?}"
+                    )))
+                })
+        } else {
+            self.fetcher.fetch().await
+        };
 
         let now = Utc::now().timestamp();
         let mut state = self.state.write().unwrap();
@@ -160,6 +177,10 @@ mod tests {
             let exp = self.exp.load(Ordering::SeqCst);
             let fail = self.fail.load(Ordering::SeqCst);
             Box::pin(async move {
+                // Without a real suspension point, a concurrent burst resolves the
+                // first future to completion before the executor polls the rest,
+                // so single-flight dedup would never actually be exercised.
+                tokio::task::yield_now().await;
                 if fail {
                     return Err(GitlabClientError::Unexpected(
                         "cloud connector token request returned status 503".into(),
@@ -299,6 +320,64 @@ mod tests {
         );
         assert_eq!(fetcher.calls(), 50);
         assert!(cache.state.read().unwrap().token.is_none());
+    }
+
+    struct DelayedFetcher {
+        delay: Duration,
+        exp: i64,
+    }
+
+    impl CloudConnectorTokenFetcher for DelayedFetcher {
+        fn fetch(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<CloudConnectorToken, GitlabClientError>> + Send + '_>>
+        {
+            let delay = self.delay;
+            let exp = self.exp;
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok(CloudConnectorToken {
+                    token: "delayed-token".into(),
+                    exp,
+                })
+            })
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_fetch_is_abandoned_at_the_timeout_when_a_cached_token_exists() {
+        let fetcher = Arc::new(DelayedFetcher {
+            delay: Duration::from_secs(3_600),
+            exp: now() + 3_600,
+        });
+        let cache = CloudConnectorTokenCache::new(fetcher);
+        {
+            let mut state = cache.state.write().unwrap();
+            state.token = Some("seed-token".to_string());
+            state.refresh_at = 0;
+        }
+
+        let started = tokio::time::Instant::now();
+        let result = cache.token().await;
+
+        assert_eq!(result.unwrap(), "seed-token");
+        assert_eq!(started.elapsed(), CC_TOKEN_FETCH_TIMEOUT);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_fetch_is_not_abandoned_when_no_cached_token_exists() {
+        let delay = CC_TOKEN_FETCH_TIMEOUT + Duration::from_secs(5);
+        let fetcher = Arc::new(DelayedFetcher {
+            delay,
+            exp: now() + 3_600,
+        });
+        let cache = CloudConnectorTokenCache::new(fetcher);
+
+        let started = tokio::time::Instant::now();
+        let result = cache.token().await;
+
+        assert_eq!(result.unwrap(), "delayed-token");
+        assert_eq!(started.elapsed(), delay);
     }
 
     async fn spawn_token_route(
