@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use labkit_events::StructuredEvent;
 use orbit_server_config::AnalyticsConfig;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 
 const APP_ID: &str = "gkg-server";
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -34,7 +34,8 @@ impl SnowplowAnalyticsTracker {
     fn spawn_periodic_flush(&self) {
         let tracker = Arc::downgrade(&self.tracker);
         tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(FLUSH_INTERVAL);
+            let mut ticker =
+                tokio::time::interval_at(Instant::now() + FLUSH_INTERVAL, FLUSH_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
                 ticker.tick().await;

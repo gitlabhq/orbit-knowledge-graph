@@ -4588,8 +4588,8 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 
 [[package]]
 name = "labkit"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.5.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e1e71ad594f2c9d691be7a6e44898cbacbdc961#9e1e71ad594f2c9d691be7a6e44898cbacbdc961"
 dependencies = [
  "axum",
  "axum-server",
@@ -4606,6 +4606,8 @@ dependencies = [
  "pin-project-lite",
  "prometheus",
  "rustls",
+ "serde",
+ "serde_json",
  "tokio",
  "tonic",
  "tower",
@@ -4621,8 +4623,8 @@ dependencies = [
 
 [[package]]
 name = "labkit-events"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.5.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e1e71ad594f2c9d691be7a6e44898cbacbdc961#9e1e71ad594f2c9d691be7a6e44898cbacbdc961"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4639,8 +4641,8 @@ dependencies = [
 
 [[package]]
 name = "labkit-fields"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.5.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9e1e71ad594f2c9d691be7a6e44898cbacbdc961#9e1e71ad594f2c9d691be7a6e44898cbacbdc961"
 
 [[package]]
 name = "language-tags"
@@ -8785,7 +8787,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser 0.0.7",
@@ -8803,7 +8805,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ec1f5cac0eb96063c64b28705255a7ed6e7d77f95c1d25e9f8b8c928006ce1"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser 1.1.0",
  "nohash-hasher",
@@ -9469,7 +9471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
