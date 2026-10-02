@@ -81,6 +81,13 @@ struct GrepArgs {
     )]
     limit: usize,
 
+    #[arg(
+        long,
+        requires = "query",
+        help = "Include up to three connections per section for each match"
+    )]
+    connections: bool,
+
     /// Only search definitions under this repo-relative directory or file
     /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
     /// `crates/*/src/lib.rs`.
@@ -569,6 +576,7 @@ async fn dispatch(
             query,
             repo,
             limit,
+            connections,
             path,
             kind,
             db,
@@ -581,6 +589,7 @@ async fn dispatch(
             orbit_search::RecallFilter {
                 kinds: kind_names(kind),
             },
+            connections,
         ),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
@@ -863,6 +872,13 @@ mod tests {
             Commands::Grep(_)
         ));
         assert!(Cli::try_parse_from(["orbit", "grep", "App", "--limit", "0"]).is_err());
+        let Commands::Grep(grep) =
+            Cli::parse_from(["orbit", "grep", "App", "--connections"]).command
+        else {
+            panic!("expected grep");
+        };
+        assert!(grep.connections);
+        assert!(Cli::try_parse_from(["orbit", "grep", "--path", "src", "--connections"]).is_err());
         assert!(matches!(
             Cli::parse_from(["orbit", "sql", "SELECT 1"]).command,
             Commands::Sql(_)

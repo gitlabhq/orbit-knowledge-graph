@@ -23,6 +23,7 @@ const SEARCH_COMMANDS: &[&str] = &[
     "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
 ];
 
+const FILE_SEARCH_COMMANDS: &[&str] = &["fd", "find"];
 const READ_COMMANDS: &[&str] = &["bat", "cat", "head", "less", "more", "sed", "tail"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
@@ -107,7 +108,11 @@ fn respond(
     {
         event = Some(Event::OrbitUsed);
     }
-    if !should_nudge(kind, call) {
+    if session
+        .as_ref()
+        .is_some_and(|(graph_first, id)| graph_first.sessions.join(id).exists())
+        || !should_nudge(kind, call)
+    {
         return (None, event);
     }
     if let Some((graph_first, id)) = &session
@@ -122,6 +127,9 @@ fn respond(
             }
         });
         return (Some(deny), Some(Event::Deny));
+    }
+    if graph_first.is_some() {
+        return (None, event);
     }
     let nudge = json!({
         "hookSpecificOutput": {
@@ -228,41 +236,69 @@ fn invokes_orbit(command: &str) -> bool {
 }
 
 fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
+    if matches!(kind, Kind::Read) {
+        return false;
+    }
     let cwd = call.get("cwd").and_then(Value::as_str);
-    let Some(root) = graph_first.project_dir.as_deref().or(cwd) else {
+    let Some(root) = graph_first.project_dir.as_deref().or(cwd).map(Path::new) else {
         return false;
     };
-    if cwd.is_some_and(|cwd| !Path::new(cwd).starts_with(root)) {
+    let cwd = cwd.map(Path::new).unwrap_or(root);
+    if !cwd.starts_with(root) {
         return false;
     }
     let command = command_of(call);
     if !command.is_empty() {
-        return command_paths(command).all(|path| path.starts_with(root));
+        let paths: Vec<_> = command_paths(command, cwd).collect();
+        if paths.iter().any(|path| !path.starts_with(root)) {
+            return false;
+        }
+        if invokes_file_search(command) {
+            return true;
+        }
+        return invokes_search(command) && !paths.iter().any(|path| path.is_file());
     }
-    let key = match kind {
-        Kind::Search => "path",
-        Kind::Read => "file_path",
+    if call.get("tool_name").and_then(Value::as_str) == Some("Glob") {
+        return true;
+    }
+    let path = call
+        .get("tool_input")
+        .unwrap_or(call)
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if path.is_empty() {
+        return true;
+    }
+    let path = Path::new(path);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
     };
-    let path = Path::new(
-        call.get("tool_input")
-            .unwrap_or(call)
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or(""),
-    );
-    path.is_relative() || path.starts_with(root)
+    dunce::canonicalize(path).map_or(true, |path| path.starts_with(root) && !path.is_file())
 }
 
-fn command_paths(command: &str) -> impl Iterator<Item = PathBuf> + '_ {
+fn command_paths<'a>(command: &'a str, cwd: &'a Path) -> impl Iterator<Item = PathBuf> + 'a {
     let home = dirs::home_dir();
     command
         .split(|c: char| c.is_whitespace() || "|;&()`<>=".contains(c))
         .map(|token| token.trim_matches(['\'', '"']))
-        .filter_map(move |token| match token.strip_prefix("~/") {
-            Some(rest) => home.as_ref().map(|home| home.join(rest)),
-            None => token.starts_with('/').then(|| PathBuf::from(token)),
+        .filter(|token| !token.starts_with('-'))
+        .filter_map(move |token| {
+            let path = match token.strip_prefix("~/") {
+                Some(rest) => home.as_ref()?.join(rest),
+                None if token.starts_with('/') => PathBuf::from(token),
+                None => cwd.join(token),
+            };
+            (!path.starts_with("/dev") && path.exists()).then_some(path)
         })
-        .filter(|path| !path.starts_with("/dev") && path.exists())
+}
+
+fn invokes_file_search(command: &str) -> bool {
+    command
+        .split(['|', ';', '&', '\n', '(', ')', '`'])
+        .any(|segment| segment_invokes(segment, FILE_SEARCH_COMMANDS))
 }
 
 fn local_graph_exists() -> bool {
@@ -306,10 +342,10 @@ fn should_nudge(kind: Kind, call: &Value) -> bool {
 fn invokes_search(command: &str) -> bool {
     command
         .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(segment_invokes_search)
+        .any(|segment| segment_invokes(segment, SEARCH_COMMANDS))
 }
 
-fn segment_invokes_search(segment: &str) -> bool {
+fn segment_invokes(segment: &str, commands: &[&str]) -> bool {
     for token in segment.split_whitespace() {
         if token.starts_with('-') || token.contains('=') {
             continue;
@@ -318,7 +354,7 @@ fn segment_invokes_search(segment: &str) -> bool {
         if COMMAND_WRAPPERS.contains(&name) {
             continue;
         }
-        return SEARCH_COMMANDS.contains(&name);
+        return commands.contains(&name);
     }
     false
 }
@@ -462,29 +498,28 @@ mod tests {
             json!({"session_id": "c", "tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
         let mcp = json!({"session_id": "h", "tool_name": "mcp__orbit__run_sql", "tool_input": {}});
         for (kind, call, expected) in [
-            (Kind::Read, read("a", "/repo/src/main.rs"), "deny"),
-            (Kind::Read, read("a", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, bash("b", "cd repo && rg foo"), "deny"),
+            (Kind::Read, read("a", "/repo/src/main.rs"), "none"),
+            (Kind::Search, bash("b", "rg foo"), "deny"),
+            (Kind::Read, read("b", "/repo/src/main.rs"), "none"),
             (Kind::Search, glob, "deny"),
             (Kind::Search, bash("c2", "find . -name '*.rs'"), "deny"),
             (Kind::Search, bash("d", "glab orbit grep foo"), "none"),
-            (Kind::Read, read("d", "/repo/src/main.rs"), "nudge"),
+            (Kind::Read, read("d", "/repo/src/main.rs"), "none"),
             (Kind::Search, bash("g", "time orbit grep foo"), "none"),
-            (Kind::Read, read("g", "/repo/src/main.rs"), "nudge"),
             (Kind::Search, mcp, "none"),
-            (Kind::Read, read("h", "/repo/src/main.rs"), "nudge"),
-            (Kind::Read, read("e", "/elsewhere/lib.rs"), "nudge"),
+            (Kind::Read, read("h", "/repo/src/main.rs"), "none"),
+            (Kind::Read, read("e", "/elsewhere/lib.rs"), "none"),
             (
                 Kind::Search,
                 bash("i", "orbit context Foo && grep bar src/"),
-                "nudge",
+                "none",
             ),
-            (Kind::Search, bash("j", "rg foo /etc"), "nudge"),
+            (Kind::Search, bash("j", "rg foo /etc"), "none"),
             (Kind::Search, bash("k", "rg foo src 2>/dev/null"), "deny"),
             (
                 Kind::Read,
                 json!({"tool_input": {"file_path": "/repo/a.rs"}}),
-                "nudge",
+                "none",
             ),
         ] {
             assert_eq!(decide(kind, &call, Some(&graph_first)), expected, "{call}");
@@ -497,16 +532,71 @@ mod tests {
             event(Kind::Search, bash("m", "orbit grep x")),
             Some(Event::OrbitUsed)
         );
-        assert_eq!(
-            event(Kind::Read, read("n", "/repo/a.rs")),
-            Some(Event::Deny)
-        );
-        assert_eq!(event(Kind::Read, read("n", "/repo/a.rs")), None);
+        assert_eq!(event(Kind::Search, bash("n", "rg x")), Some(Event::Deny));
+        assert_eq!(event(Kind::Search, bash("n", "rg x")), None);
         prune_sessions(dir.path(), SystemTime::now() + SESSION_TTL * 2);
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
         assert_eq!(
             session_id(&json!({"session_id": "../x"})).as_deref(),
             Some("___x")
+        );
+    }
+
+    #[test]
+    fn graph_first_allows_known_files_and_blocks_broad_searches() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = dunce::canonicalize(root.path()).unwrap();
+        let src = root_path.join("src");
+        std::fs::create_dir(&src).unwrap();
+        let file = src.join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let graph_first = GraphFirst {
+            sessions: root_path.join("sessions"),
+            project_dir: Some(root_path.display().to_string()),
+        };
+        let bash = |id: &str, command: &str| json!({"session_id": id, "cwd": root_path, "tool_input": {"command": command}});
+        assert_eq!(
+            decide(
+                Kind::Search,
+                &bash(
+                    "known",
+                    &format!("cat {}; grep main {}", file.display(), file.display())
+                ),
+                Some(&graph_first),
+            ),
+            "none"
+        );
+        assert_eq!(
+            decide(
+                Kind::Search,
+                &bash("known", "rg main src"),
+                Some(&graph_first)
+            ),
+            "deny"
+        );
+        assert_eq!(
+            decide(
+                Kind::Search,
+                &bash("find", "find src -name '*.rs'"),
+                Some(&graph_first)
+            ),
+            "deny"
+        );
+        let native_file = json!({
+            "session_id": "native-file", "tool_name": "Grep", "cwd": root_path,
+            "tool_input": {"pattern": "main", "path": file},
+        });
+        let native_dir = json!({
+            "session_id": "native-dir", "tool_name": "Grep", "cwd": root_path,
+            "tool_input": {"pattern": "main", "path": src},
+        });
+        assert_eq!(
+            decide(Kind::Search, &native_file, Some(&graph_first)),
+            "none"
+        );
+        assert_eq!(
+            decide(Kind::Search, &native_dir, Some(&graph_first)),
+            "deny"
         );
     }
 

@@ -1,9 +1,11 @@
 name: grep
-version: 1.12.0
+version: 1.13.0
 short: Search local definition names, paths, and bodies
 description: >-
   Search local definition names, paths, and bodies with one query: quote `a|b|c` for OR
   alternatives, each requiring all searchable terms.
   Single tokens must also match literally, ignoring case; this is FTS, not regex.
-  Results rank exact names before name/path hits and body mentions; pass
-  `Definition:<id>` or `path:start-end` to `context` for source and relationships.
+  Results rank exact names before name/path hits and body mentions.
+  Add `--connections` for up to three indexed connections per section per match,
+  including callers/callees and tests. Omitted counts point to `orbit context Definition:<id>`
+  for full source and connections. Batch related names rather than repeating discovery.

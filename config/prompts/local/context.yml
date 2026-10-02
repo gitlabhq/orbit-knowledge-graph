@@ -1,5 +1,5 @@
 name: context
-version: 1.9.0
+version: 1.9.1
 short: Expand local code context
 description: >-
   Expand local code context.
@@ -9,6 +9,7 @@ description: >-
   `Definition:<id>`. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
   return those numbered lines with the definitions they touch; directories list
-  indexed files with definition counts. Choose a Definition ID for complete source and its indexed
-  connections. Test connections appear in their own section. Reuse source; never
-  truncate output. Raw reads are only for non-code or source Orbit cannot provide.
+  indexed files with definition counts. Definition targets return source and indexed
+  connections. Test connections appear in their own section. Use context for
+  relationships and maps, then inspect only files/ranges it identifies.
+  Reuse shown source. Review edits with `git diff`, not re-indexing.

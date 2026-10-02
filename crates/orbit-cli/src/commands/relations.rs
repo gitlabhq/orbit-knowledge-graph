@@ -88,6 +88,7 @@ pub(crate) fn render(
     hydrator: &NodeHydrator,
     nodes: &[NodeValue],
     file_members: &[context::SourceRange],
+    connection_limit: Option<usize>,
 ) -> Result<String> {
     if nodes.is_empty() {
         return Ok(String::new());
@@ -252,17 +253,17 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             }
             writeln!(out, "\n{title} ({} indexed):", rows.len())?;
             let mut prev_path = String::new();
-            let limit = if is_file {
+            let limit = connection_limit.unwrap_or(if is_file {
                 FILE_CONNECTION_LIMIT
             } else {
                 rows.len()
-            };
+            });
             for row in rows.iter().take(limit) {
                 let via = if row.via.is_empty() {
                     String::new()
                 } else {
                     let names: Vec<_> = row.via.split(", ").collect();
-                    if is_file && names.len() > 3 {
+                    if (is_file || connection_limit.is_some()) && names.len() > 3 {
                         format!(
                             "  via {} (+{} names)",
                             names[..3].join(", "),
@@ -285,7 +286,14 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
             let omitted = rows.len().saturating_sub(limit);
             if omitted > 0 {
                 let omitted_rows = &rows[limit..];
-                if omitted_rows.iter().any(|row| row.direct) {
+                if !is_file {
+                    writeln!(
+                        out,
+                        "  … {omitted} connections omitted; {} context Definition:{}",
+                        spec::launcher(),
+                        node.id
+                    )?;
+                } else if omitted_rows.iter().any(|row| row.direct) {
                     writeln!(
                         out,
                         "  … {omitted} connections omitted; list all file edges: {} sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",

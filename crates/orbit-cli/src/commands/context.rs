@@ -92,7 +92,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         out.push('\n');
     }
     out.push_str(&relations::render(
-        &client, &git, &hydrator, &nodes, &members,
+        &client, &git, &hydrator, &nodes, &members, None,
     )?);
     print!("{out}");
     Ok(())

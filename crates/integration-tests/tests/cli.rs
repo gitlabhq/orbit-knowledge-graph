@@ -1397,6 +1397,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("Connections"), "{stdout}");
     assert!(
         stdout.contains("Definition:")
             && stdout.contains("src/utils.py:3-4  body-only ×1")
@@ -1579,6 +1580,46 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     assert!(ok && body.contains("return 0"), "{err}\n{body}");
     assert_eq!(body.matches("<-- ").count(), 50, "{body}");
     assert!(!body.contains("connections omitted"), "{body}");
+    let (preview, err, ok) = run_cmd(
+        &[
+            "grep",
+            "entry_0",
+            "--connections",
+            "--limit",
+            "1",
+            "--repo",
+            repo_arg,
+        ],
+        dd,
+    );
+    assert!(
+        ok && preview.contains("Connections (25 indexed):"),
+        "{err}\n{preview}"
+    );
+    assert!(preview.contains("Test, fixture, or generated connections (25 indexed):"));
+    assert_eq!(preview.matches("<-- ").count(), 6, "{preview}");
+    assert_eq!(
+        preview
+            .matches("22 connections omitted; orbit context Definition:")
+            .count(),
+        2
+    );
+    assert!(!preview.contains("return 0"), "{preview}");
+    let (missing, err, ok) = run_cmd(
+        &[
+            "grep",
+            "missing_symbol",
+            "--connections",
+            "--repo",
+            repo_arg,
+        ],
+        dd,
+    );
+    assert!(
+        ok && missing.contains("No definitions match"),
+        "{err}\n{missing}"
+    );
+    assert!(!missing.contains("Connections"));
     for path in ["src/callers.py", "tests/callers.py"] {
         let (out, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);
         assert!(

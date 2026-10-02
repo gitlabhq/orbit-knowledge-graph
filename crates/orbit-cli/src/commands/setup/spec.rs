@@ -340,19 +340,29 @@ mod tests {
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
             for phrase in [
-                "` commands to bash tools for file/code search and callers/callees",
-                "FTS.",
-                "Terms AND; `a|b` OR",
-                "Grep means `",
-                "grep shows IDs and file:lines",
-                "Do not reread unchanged files",
+                "Find related symbols together",
+                "FTS: terms AND; `a|b` OR",
+                "--connections",
+                "context Definition:123",
+                "Chain independent lookups",
+                "Reuse shown source",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
             }
             assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
+            for text in [
+                &TEXTS.nudge_search,
+                &TEXTS.nudge_read,
+                &TEXTS.graph_first_deny,
+                &TEXTS.template_vars["reminder"],
+            ] {
+                let rendered = substitute_launcher(text, launcher);
+                assert!(rendered.contains(&format!("{launcher} ")), "{rendered}");
+                assert!(!rendered.contains("{{"), "{rendered}");
+            }
         }
-        assert!(search_nudge_text().contains("FTS."));
-        assert!(read_nudge_text().contains("Do not reread unchanged files"));
+        assert!(search_nudge_text().contains("--connections"));
+        assert!(read_nudge_text().contains("Reuse source already shown"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }

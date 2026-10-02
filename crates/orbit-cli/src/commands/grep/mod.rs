@@ -18,6 +18,7 @@ pub(crate) fn run(
     limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
+    connections: bool,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     if let Some(query) = &query
@@ -63,6 +64,9 @@ pub(crate) fn run(
     }
 
     report_results(&mut out, &outcome, &nodes)?;
+    if connections {
+        writeln!(out, "\n{}", backend.connections(&nodes)?)?;
+    }
     Ok(())
 }
 

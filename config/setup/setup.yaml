@@ -8,19 +8,17 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Prefer `{{orbit}}` commands to bash tools for file/code search and callers/callees. Grep means `{{orbit}} grep`.
-
-  - Unknown code? `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR.
-  - grep shows IDs and file:lines. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context Definition:123`.
-  - Do not reread unchanged files. Reuse shown source.
-  - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
-  - Too broad? Add `--path`/`--kind`.
+  - Find related symbols together: `{{orbit}} grep 'a|b|c'`. Auto-indexed. FTS: terms AND; `a|b` OR. Narrow with --path/--kind.
+  - Need callers/callees too? Add `--connections` to grep.
+  - `{{orbit}} context Definition:123` returns source and callers/callees. Batch IDs or paths in one call.
+  - Chain independent lookups. Inspect relevant code, tests, and helpers together.
+  - Reuse shown source; search again only for a specific missing fact.
 
 nudge_search: |
-  Grep means `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Add --path/--kind.
+  Batch related names in `{{orbit}} grep 'a|b|c'`; add --connections for callers/callees. Reuse results instead of repeating discovery.
 nudge_read: |
-  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
+  Start with Orbit to locate relevant code and relationships: `{{orbit}} grep 'words'` or `{{orbit}} context path`. Then inspect only files/ranges it identifies. Reuse source already shown.
 graph_first_deny: |
-  Blocked once: this session has not used Orbit yet. Run `{{orbit}} grep 'words'` first; it matches symbol names and file paths (FTS; terms AND, `a|b` OR; add --path/--kind).
+  Blocked once: query Orbit directly; no index step. Use `{{orbit}} grep 'words'` to locate code or `{{orbit}} context path` for relationships/maps. Then inspect only files/ranges Orbit identifies.
 template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS."
+  reminder: "[orbit] Batch related names: run {{orbit}} grep 'a|b|c'; add --connections for callers/callees. Reuse results instead of repeating discovery."

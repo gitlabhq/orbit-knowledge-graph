@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use duckdb_client::search::DuckDbSearch;
+use duckdb_client::search::{DuckDbSearch, NodeHydrator, NodeValue};
 use orbit_search::{GrepOutcome, RecallFilter};
 
-use crate::workspace;
+use crate::{commands::relations, workspace};
 
 pub(super) struct LocalBackend {
     search: DuckDbSearch,
-    header: String,
+    git: workspace::GitInfo,
 }
 
 impl LocalBackend {
@@ -20,16 +20,27 @@ impl LocalBackend {
         let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
         Ok(Self {
             search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
-            header: git.short_sha().to_string(),
+            git,
         })
     }
 
     pub(super) fn header(&self) -> &str {
-        &self.header
+        self.git.short_sha()
     }
 
     pub(super) fn search(&self) -> &DuckDbSearch {
         &self.search
+    }
+
+    pub(super) fn connections(&self, nodes: &[NodeValue]) -> Result<String> {
+        relations::render(
+            self.search.client(),
+            &self.git,
+            &NodeHydrator::embedded("Definition")?,
+            nodes,
+            &[],
+            Some(3),
+        )
     }
 
     pub(super) fn grep(
