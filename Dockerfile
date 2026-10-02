@@ -4,7 +4,6 @@ FROM registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:late
 WORKDIR /build
 COPY . .
 
-ARG SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache
 ARG ORBIT_BILLING_ENFORCED=false
 ENV CARGO_INCREMENTAL=0
 
@@ -14,7 +13,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     SCCACHE_BIN="$(mise which sccache)" && \
     if [ -s /run/secrets/sccache_gcs_key ]; then \
       export SCCACHE_GCS_KEY_PATH=/run/secrets/sccache_gcs_key \
-             SCCACHE_GCS_BUCKET="${SCCACHE_GCS_BUCKET}" \
+             SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache \
              SCCACHE_GCS_RW_MODE=READ_WRITE; \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" ORBIT_BILLING_ENFORCED="${ORBIT_BILLING_ENFORCED}" && \
