@@ -1,0 +1,34 @@
+# Only live "created" links (link_type = 1) mark a merge request as Duo-created;
+# merge_requests.created_by_duo is deliberately ignored because Siphon can leave
+# it false after the link replicates.
+description: created_by_duo comes from created-type workflow links, not the merge_requests column
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 10, iid: 1, title: Created by Duo, description: "", source_branch: duo, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 20, iid: 2, title: Source link only, description: "", source_branch: src, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 30, iid: 3, title: Deleted link, description: "", source_branch: gone, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 40, iid: 4, title: No link, description: "", source_branch: plain, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 50, iid: 5, title: Column set but no link, description: "", source_branch: col, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, created_by_duo: true, traversal_path: "1/100/" }
+    - { id: 60, iid: 6, title: Link relinked as source, description: "", source_branch: re, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+  siphon_duo_workflows_workflow_merge_requests:
+    - { id: 1, workflow_id: 7, merge_request_id: 10, link_type: 1, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/" }
+    - { id: 2, workflow_id: 7, merge_request_id: 20, link_type: 0, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/" }
+    - { id: 3, workflow_id: 7, merge_request_id: 30, link_type: 1, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, workflow_id: 7, merge_request_id: 30, link_type: 1, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 11:00:00", _siphon_deleted: true }
+    - { id: 4, workflow_id: 8, merge_request_id: 60, link_type: 1, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 4, workflow_id: 8, merge_request_id: 60, link_type: 0, project_id: 1000, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 11:00:00" }
+
+expect:
+  nodes:
+    gl_merge_request:
+      rows:
+        - { id: 10, created_by_duo: true }
+        - { id: 20, created_by_duo: false }
+        - { id: 30, created_by_duo: false }
+        - { id: 40, created_by_duo: false }
+        - { id: 50, created_by_duo: false }
+        - { id: 60, created_by_duo: false }

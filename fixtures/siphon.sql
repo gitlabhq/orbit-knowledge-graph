@@ -293,6 +293,7 @@ CREATE TABLE IF NOT EXISTS merge_requests
     `squash_commit_sha` Nullable(String),
     `merge_ref_sha` Nullable(String),
     `draft` Bool DEFAULT false CODEC(ZSTD(1)),
+    `created_by_duo` Bool DEFAULT false CODEC(ZSTD(1)),
     `prepared_at` Nullable(DateTime64(6, 'UTC')),
     `merged_commit_sha` Nullable(String),
     `override_requested_changes` Bool DEFAULT false CODEC(ZSTD(1)),
@@ -950,6 +951,28 @@ CREATE TABLE IF NOT EXISTS siphon_merge_request_metrics
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, merge_request_id, id)
 ORDER BY (traversal_path, merge_request_id, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source table for Duo workflow <-> merge request links (MergeRequest.created_by_duo)
+CREATE TABLE IF NOT EXISTS siphon_duo_workflows_workflow_merge_requests
+(
+    `id` Int64,
+    `workflow_id` Int64,
+    `merge_request_id` Int64,
+    `project_id` Nullable(Int64),
+    `namespace_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `link_type` Int16,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, workflow_id, id)
+ORDER BY (traversal_path, workflow_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
 -- Siphon source tables for approvals (standalone edge)

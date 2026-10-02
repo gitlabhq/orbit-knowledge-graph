@@ -129,6 +129,12 @@ properties:
     mutable: false
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
+  created_by_duo:
+    type: boolean
+    source: created_by_duo
+    nullable: false
+    description: "Whether a Duo workflow created this merge request. Derived from created-type workflow links, not from the merge_requests.created_by_duo column."
+
   merged_commit_id:
     type: int64
     source: merged_commit_id
@@ -311,12 +317,12 @@ properties:
     description: "Full unified diff. Resolved from GitLab at query time."
 
 indexer:
-  reindex: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
+  reindex: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals, siphon_duo_workflows_workflow_merge_requests]
 pipelines:
   - name: MergeRequest
     extract:
       type: clickhouse
-      tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
+      tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals, siphon_duo_workflows_workflow_merge_requests]
       order_by: [traversal_path, id]
       query: merge_request.sql.j2
     transform:
@@ -459,6 +465,7 @@ storage:
     - {name: added_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: removed_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_contribution, type: "Bool", default: "false"}
+    - {name: created_by_duo, type: "Bool", default: "false"}
     - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: merge_user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
@@ -477,6 +484,7 @@ storage:
     - {name: idx_squash, column: squash, type: "minmax", granularity: 1}
     - {name: idx_discussion_locked, column: discussion_locked, type: "minmax", granularity: 1}
     - {name: idx_first_contribution, column: first_contribution, type: "minmax", granularity: 1}
+    - {name: idx_created_by_duo, column: created_by_duo, type: "minmax", granularity: 1}
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_merged_at, column: merged_at, type: "minmax", granularity: 1}

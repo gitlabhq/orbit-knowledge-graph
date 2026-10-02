@@ -49,6 +49,7 @@ SELECT
   metrics.metric_reviewer_first_assigned_at AS metric_reviewer_first_assigned_at,
   ifNull(reviewers.reviewers, CAST([], 'Array(Tuple(user_id UInt64, state Int16, created_at DateTime64(6, ''UTC'')))')) AS reviewers,
   ifNull(approvals.approvals, CAST([], 'Array(Tuple(user_id UInt64, created_at DateTime64(6, ''UTC'')))')) AS approvals,
+  ifNull(duo_links.created_by_duo, false) AS created_by_duo,
   m.{{version_column}} AS _version,
   m.{{deleted_column}} AS _deleted
 FROM (
@@ -156,6 +157,31 @@ LEFT JOIN (
     GROUP BY traversal_path, merge_request_id, id )
   GROUP BY traversal_path, merge_request_id ) AS approvals ON m.traversal_path = approvals._ap_tp
   AND m.id = approvals._ap_mr
+LEFT JOIN (
+  SELECT
+    traversal_path AS _dl_tp,
+    merge_request_id AS _dl_mr,
+    max(link_type = 1 AND deleted = false) AS created_by_duo
+  FROM (
+    SELECT
+      traversal_path,
+      merge_request_id,
+      workflow_id,
+      id,
+      argMax(link_type, {{version_column}}) AS link_type,
+      argMax({{deleted_column}}, {{version_column}}) AS deleted
+    FROM siphon_duo_workflows_workflow_merge_requests
+    WHERE startsWith(traversal_path, {traversal_path:String})
+      AND merge_request_id IN (
+      SELECT
+        id
+      FROM merge_requests
+      WHERE startsWith(traversal_path, {traversal_path:String})
+        AND {{watermark_column}} > {last_watermark:String}
+        AND {{watermark_column}} <= {watermark:String} )
+    GROUP BY traversal_path, merge_request_id, workflow_id, id )
+  GROUP BY traversal_path, merge_request_id ) AS duo_links ON m.traversal_path = duo_links._dl_tp
+  AND m.id = duo_links._dl_mr
 WHERE startsWith(m.traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}
