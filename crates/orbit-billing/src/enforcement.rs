@@ -66,8 +66,8 @@ fn validate_with(enforced: bool, config: &BillingConfig) -> Result<(), Enforceme
         return Err(EnforcementError::QuotaDisabled);
     }
     let known_environment = ENVIRONMENTS.iter().any(|env| {
-        same_origin(&config.quota.customers_dot_url, env.customers_dot_url)
-            && same_origin(&config.collector_url, env.collector_url)
+        same_base_url(&config.quota.customers_dot_url, env.customers_dot_url)
+            && same_base_url(&config.collector_url, env.collector_url)
     });
     if !known_environment {
         return Err(EnforcementError::UnknownEnvironment);
@@ -79,13 +79,20 @@ fn validate_with(enforced: bool, config: &BillingConfig) -> Result<(), Enforceme
     }
 }
 
-fn same_origin(actual: &str, expected: &str) -> bool {
+// The clients append their request path to the configured URL, so a path prefix would
+// send requests to an unknown route on the real host.
+fn same_base_url(actual: &str, expected: &str) -> bool {
     let (Ok(actual), Ok(expected)) = (Url::parse(actual), Url::parse(expected)) else {
         return false;
     };
     actual.scheme() == expected.scheme()
         && actual.host_str() == expected.host_str()
         && actual.port_or_known_default() == expected.port_or_known_default()
+        && actual.path() == "/"
+        && actual.username().is_empty()
+        && actual.password().is_none()
+        && actual.query().is_none()
+        && actual.fragment().is_none()
 }
 
 fn allowed_environments() -> String {
@@ -212,6 +219,11 @@ mod tests {
             "https://evilcustomers.gitlab.com",
             "http://customers.gitlab.com",
             "https://customers.gitlab.com:8443",
+            "https://customers.gitlab.com@evil.io",
+            "https://user:pass@customers.gitlab.com",
+            "https://customers.gitlab.com/stub",
+            "https://customers.gitlab.com/?x=1",
+            "https://customers.gitlab.com/#frag",
         ] {
             let billing = config(
                 cdot,
@@ -228,9 +240,9 @@ mod tests {
     }
 
     #[test]
-    fn enforced_ignores_trailing_slash_and_host_case() {
+    fn enforced_ignores_trailing_slash_host_case_and_default_port() {
         let billing = config(
-            "https://Customers.GitLab.com/",
+            "https://Customers.GitLab.com:443/",
             "https://BILLING.prdsub.gitlab.net/",
             QuotaAuthMode::AdminToken,
             BillingAuthMode::Oidc,

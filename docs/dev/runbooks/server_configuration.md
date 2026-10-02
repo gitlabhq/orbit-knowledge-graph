@@ -551,7 +551,7 @@ Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` qu
 Images built with the `GKG_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
 
 - `billing.enabled` and `billing.quota.enabled` are both `true`.
-- `billing.quota.customers_dot_url` and `billing.collector_url` form one environment pair, compared on scheme, host and port:
+- `billing.quota.customers_dot_url` and `billing.collector_url` form one environment pair, compared on scheme, host and port, with no path, credentials, query or fragment:
   - production: `https://customers.gitlab.com` with `https://billing.prdsub.gitlab.net`
   - staging: `https://customers.staging.gitlab.com` with `https://billing.stgsub.gitlab.net`
 - The auth modes belong to one family: `admin_token` with `oidc`, or `license_checksum` with `cloud_connector`.
