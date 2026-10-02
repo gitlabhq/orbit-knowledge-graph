@@ -45,9 +45,61 @@ GitLab Orbit is wired into the following GitLab Duo Agent Platform agents and fl
 | Data Analyst Agent | SDLC analytics powered by GLQL. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
 | CI Expert Agent | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
 | Developer Flow | Turn a work item into a draft MR in the UI. GitLab Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
+| Custom flows | Your own flows. GitLab Orbit is available when the flow lists the GitLab Orbit tools. |
 
 When an agent uses GitLab Orbit to answer a question, the answer is grounded in your
 live graph rather than the agent's general knowledge.
+
+## Turn on GitLab Orbit for custom flows
+
+To turn on GitLab Orbit for custom flows:
+
+<!-- vale orbit.StandaloneProductName = NO -->
+
+1. In the upper-right corner, select your avatar.
+1. Select **Preferences**.
+1. Under **Orbit in GitLab Duo**, select the **Use Orbit in GitLab Duo**
+   and **Other Foundational Agents** checkboxes.
+1. Select **Save changes**.
+
+<!-- vale orbit.StandaloneProductName = YES -->
+
+> [!note]
+> The **Custom Agents** setting does not apply to custom flows.
+
+### Use GitLab Orbit in a custom flow
+
+To use GitLab Orbit in a [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/),
+you must add the GitLab Orbit tools to the flow configuration.
+After you add the tools, you can write prompts that tell the agent to use GitLab Orbit.
+
+Prerequisites:
+
+- The Maintainer or Owner role for the project that manages the flow.
+- Each user who triggers the flow must
+  [turn on GitLab Orbit for custom flows](#turn-on-gitlab-orbit-for-custom-flows).
+
+To use GitLab Orbit in a custom flow:
+
+1. In the top bar, select **Search or go to** and find your group or project.
+1. Select **AI** > **Flows**.
+1. Select the flow you want to edit.
+1. In the upper-right corner, select **Edit**.
+1. Add the GitLab Orbit tools to the `toolset`
+   of each agent component that needs them:
+
+   ```yaml
+   toolset:
+     - orbit_list_commands
+     - orbit_invoke_command
+   ```
+
+1. In the prompt, tell the agent when to use GitLab Orbit. For example,
+   to find other projects that import the changed files.
+1. Select **Save changes**.
+
+To edit the flow in VS Code, see
+[Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/?tab=VS+Code#edit-a-flow).
 
 ## Billing
 
@@ -99,3 +151,5 @@ Planning and work items:
 - Complex multi-step questions may need a follow-up to narrow scope.
 - Code content (file text, function bodies) is available but may not be returned
   by default for large results. Ask explicitly: "Show me the source of this function."
+- Code Review Flow does not use GitLab Orbit. To use GitLab Orbit in code review, use a
+  [custom flow](#use-gitlab-orbit-in-a-custom-flow).
