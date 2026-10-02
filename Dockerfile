@@ -43,4 +43,10 @@ COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
 COPY dashboards/dedicated/*.dashboard.json /usr/share/gkg/dashboards/dedicated/
 COPY dashboards/orbit/*.dashboard.json /usr/share/gkg/dashboards/com/
 
+# UID matches the chart's runAsUser; group 0 lets OpenShift's arbitrary UIDs keep the same access.
+RUN echo 'gkg:x:65532:0::/nonexistent:/usr/sbin/nologin' >> /etc/passwd && \
+    find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
+USER 65532:0
+
 ENTRYPOINT ["gkg-server"]

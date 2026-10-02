@@ -449,9 +449,13 @@ Every `gkg` image digest that a manifest job publishes from the canonical projec
 
 Verification, mirroring, registry retention, and failure handling are in the [image signing runbook](../dev/runbooks/image_signing.md).
 
-### Image Scanning
+### Image Hardening
 
-FedRAMP requires hardened container images (DISA Container Image Creation and Deployment Guide, NIST SP 800-53 AC-6 and CM-6). CI scans the `gkg` image with Trivy at three points:
+FedRAMP requires hardened container images (DISA Container Image Creation and Deployment Guide, NIST SP 800-53 AC-6 and CM-6).
+
+- **Image user**: the `gkg` image runs as UID 65532 with group 0. The chart sets the same UID, and group 0 lets an OpenShift arbitrary UID keep the same file access. The build removes the set-user-ID and set-group-ID bits from every file.
+
+CI scans the `gkg` image with Trivy at three points:
 
 - **Dockerfile**: the `dockerfile-scan` job runs on merge requests and `main`. It fails on any High or Critical misconfiguration, which includes an image that runs as root.
 - **Release gate**: the `release-image-scan` job scans each per-arch release digest before `release-manifest` moves the version tags. A root image user or a High or Critical CVE with a fix available fails the release.
