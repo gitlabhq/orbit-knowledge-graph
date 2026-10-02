@@ -4589,7 +4589,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.5.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=83bcdd4991aa409242c3cbe0a74bbafda30f1f6a#83bcdd4991aa409242c3cbe0a74bbafda30f1f6a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=0a0438d7b2f9cb027e6450c2b5da91042b29ffa4#0a0438d7b2f9cb027e6450c2b5da91042b29ffa4"
 dependencies = [
  "axum",
  "axum-server",
@@ -4624,7 +4624,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.5.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=83bcdd4991aa409242c3cbe0a74bbafda30f1f6a#83bcdd4991aa409242c3cbe0a74bbafda30f1f6a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=0a0438d7b2f9cb027e6450c2b5da91042b29ffa4#0a0438d7b2f9cb027e6450c2b5da91042b29ffa4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4642,7 +4642,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.5.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=83bcdd4991aa409242c3cbe0a74bbafda30f1f6a#83bcdd4991aa409242c3cbe0a74bbafda30f1f6a"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=0a0438d7b2f9cb027e6450c2b5da91042b29ffa4#0a0438d7b2f9cb027e6450c2b5da91042b29ffa4"
 
 [[package]]
 name = "language-tags"
