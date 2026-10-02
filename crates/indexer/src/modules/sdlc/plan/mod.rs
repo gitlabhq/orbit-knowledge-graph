@@ -3,14 +3,19 @@ pub(in crate::modules::sdlc) mod extract;
 mod transform;
 
 pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
-pub(in crate::modules::sdlc) use extract::ExtractTemplate;
+pub(in crate::modules::sdlc) use extract::{
+    CHANGED_IDS_VARIABLE, CHANGED_ROWS_VARIABLE, ExtractTemplate,
+};
 pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec, Transformation};
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
+use std::collections::BTreeMap;
+
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::sql_template;
 use orbit_utils::arrow::ArrowUtils;
 use serde_json::Value;
@@ -69,6 +74,10 @@ pub(in crate::modules::sdlc) trait Filter {
     fn params(&self) -> Vec<(String, Value)> {
         Vec::new()
     }
+    /// Values for template markers other than `{{filters}}` and `{{batch_size}}`.
+    fn markers(&self) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
 }
 
 // A `None` filter contributes nothing, keeping optional filters chainable at call sites.
@@ -79,16 +88,35 @@ impl<F: Filter> Filter for Option<F> {
     fn params(&self) -> Vec<(String, Value)> {
         self.as_ref().map(|f| f.params()).unwrap_or_default()
     }
+    fn markers(&self) -> Vec<(&'static str, String)> {
+        self.as_ref().map(|f| f.markers()).unwrap_or_default()
+    }
+}
+
+/// Child tables that re-extract a parent row when only they changed; see `ontology::WatermarkSource`.
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct WatermarkSources {
+    pub parent_table: String,
+    /// Unqualified watermark column, shared by the parent table and every child table.
+    pub watermark_column: String,
+    pub version_column: String,
+    pub children: Vec<ontology::WatermarkSource>,
 }
 
 pub(in crate::modules::sdlc) struct WatermarkFilter<'a> {
     pub column: &'a str,
     pub last: DateTime<Utc>,
     pub current: DateTime<Utc>,
+    pub sources: Option<&'a WatermarkSources>,
 }
 
 impl Filter for WatermarkFilter<'_> {
     fn condition(&self) -> String {
+        // With sources the window is applied inside `{{changed_rows}}`; an outer
+        // window filter would drop the rows pulled in by a child change.
+        if self.sources.is_some() {
+            return String::new();
+        }
         format!(
             "{col} > {{last_watermark:String}} AND {col} <= {{watermark:String}}",
             col = self.column
@@ -106,6 +134,97 @@ impl Filter for WatermarkFilter<'_> {
                 Value::String(self.current.format(TIMESTAMP_FORMAT).to_string()),
             ),
         ]
+    }
+
+    fn markers(&self) -> Vec<(&'static str, String)> {
+        let Some(sources) = self.sources else {
+            return Vec::new();
+        };
+        // The first load has no previous window: every row is "changed", so a child branch only builds a huge id set.
+        let include_children = self.last > DateTime::<Utc>::UNIX_EPOCH;
+        vec![
+            (
+                CHANGED_ROWS_VARIABLE,
+                sources.changed_rows_sql(include_children),
+            ),
+            (
+                CHANGED_IDS_VARIABLE,
+                sources.changed_ids_sql(include_children),
+            ),
+        ]
+    }
+}
+
+impl WatermarkSources {
+    const SCOPE: &'static str = "startsWith(traversal_path, {traversal_path:String})";
+
+    fn window(&self) -> String {
+        let watermark = &self.watermark_column;
+        format!("{watermark} > {{last_watermark:String}} AND {watermark} <= {{watermark:String}}")
+    }
+
+    fn own_ids_sql(&self) -> String {
+        format!(
+            "SELECT {DEFAULT_PRIMARY_KEY} FROM {parent} WHERE {scope} AND {window}",
+            parent = self.parent_table,
+            scope = Self::SCOPE,
+            window = self.window(),
+        )
+    }
+
+    fn child_ids_sql(&self) -> String {
+        self.children
+            .iter()
+            .map(|child| self.child_parent_ids_sql(child))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ")
+    }
+
+    fn child_parent_ids_sql(&self, child: &ontology::WatermarkSource) -> String {
+        let (table, scope, window) = (&child.table, Self::SCOPE, self.window());
+        let key = &child.parent_key;
+        if child.row_key.is_empty() {
+            return format!("SELECT {key} AS parent_id FROM {table} WHERE {scope} AND {window}");
+        }
+        // A delete tombstone keeps only the key columns, so `{key}` is 0 on it; the
+        // parent is whatever the row's earlier versions pointed at.
+        let row_key = child.row_key.join(", ");
+        let version = &self.version_column;
+        format!(
+            "SELECT argMaxIf({key}, {version}, {key} != 0) AS parent_id FROM {table} \
+             WHERE {scope} AND ({row_key}) IN (SELECT {row_key} FROM {table} WHERE {scope} AND {window}) \
+             GROUP BY {row_key} HAVING parent_id != 0"
+        )
+    }
+
+    /// Ids of parents that changed, without reading parent rows; cheaper than `changed_rows` for child filters.
+    fn changed_ids_sql(&self, include_children: bool) -> String {
+        if !include_children || self.children.is_empty() {
+            return self.own_ids_sql();
+        }
+        format!("{} UNION ALL {}", self.own_ids_sql(), self.child_ids_sql())
+    }
+
+    /// Parent rows whose own window moved, plus (child branches) parents with a child row in the window.
+    ///
+    /// The parent rows are two separately prunable scans: the window keeps the
+    /// `_siphon_watermark` minmax index, and the child branch only reads the
+    /// parent when a child changed without its parent. A single
+    /// `window OR id IN (...)` predicate prunes neither.
+    fn changed_rows_sql(&self, include_children: bool) -> String {
+        let parent = &self.parent_table;
+        let scope = Self::SCOPE;
+        let window = self.window();
+        let own_rows = format!("SELECT * FROM {parent} WHERE {scope} AND {window}");
+        if !include_children || self.children.is_empty() {
+            return format!("({own_rows})");
+        }
+        let own_ids = self.own_ids_sql();
+        let child_ids = self.child_ids_sql();
+        format!(
+            "({own_rows} UNION ALL SELECT * FROM {parent} WHERE {scope} AND {DEFAULT_PRIMARY_KEY} IN \
+             (SELECT parent_id FROM ({child_ids}) WHERE parent_id NOT IN ({own_ids})))"
+        )
     }
 }
 
@@ -225,6 +344,7 @@ pub(in crate::modules::sdlc) struct Plan {
     pub scope: EtlScope,
     pub extract_template: ExtractTemplate,
     pub watermark_column: String,
+    pub watermark_sources: Option<WatermarkSources>,
     pub deleted_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
@@ -236,6 +356,7 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
     template: String,
     filters: Vec<String>,
     params: serde_json::Map<String, Value>,
+    markers: BTreeMap<&'static str, String>,
     batch_size: u64,
 }
 
@@ -245,6 +366,7 @@ impl Plan {
             template: self.extract_template.as_str().to_string(),
             filters: Vec::new(),
             params: serde_json::Map::new(),
+            markers: BTreeMap::new(),
             batch_size: self.batch_size,
         }
     }
@@ -253,13 +375,13 @@ impl Plan {
 impl PreparedQuery {
     pub fn with(mut self, filter: impl Filter) -> Self {
         let condition = filter.condition();
-        if condition.is_empty() {
-            return self;
+        if !condition.is_empty() {
+            self.filters.push(condition);
         }
-        self.filters.push(condition);
         for (key, value) in filter.params() {
             self.params.insert(key, value);
         }
+        self.markers.extend(filter.markers());
         self
     }
 
@@ -275,14 +397,15 @@ impl PreparedQuery {
                 .join(" AND ");
             format!("AND {joined}")
         };
-        sql_template::render(
-            &self.template,
-            sql_template::context! {
-                filters => filters_sql,
-                batch_size => self.batch_size,
-            },
-        )
-        .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
+        let mut variables: serde_json::Map<String, Value> = self
+            .markers
+            .iter()
+            .map(|(name, sql)| ((*name).to_string(), Value::String(sql.clone())))
+            .collect();
+        variables.insert("filters".into(), Value::String(filters_sql));
+        variables.insert("batch_size".into(), self.batch_size.into());
+        sql_template::render(&self.template, variables)
+            .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
     }
 
     pub fn params(&self) -> Value {
@@ -404,6 +527,7 @@ mod tests {
             ))
             .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),
+            watermark_sources: None,
             deleted_column: "_siphon_deleted".to_string(),
             sort_key,
             batch_size,
@@ -550,6 +674,7 @@ mod tests {
             column: &plan.watermark_column,
             last: Utc::now(),
             current: Utc::now(),
+            sources: None,
         });
         let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
@@ -637,6 +762,7 @@ mod tests {
                 column: &plan.watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
+                sources: None,
             })
             .with(TraversalPathFilter {
                 path: &TraversalPath::new_unchecked("1/2/"),

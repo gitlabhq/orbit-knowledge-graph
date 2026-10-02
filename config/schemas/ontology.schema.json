@@ -1795,6 +1795,36 @@
           "type": "integer",
           "minimum": 2,
           "description": "Splits this pipeline's initial SDLC load into N parallel partitions. Omit for single-threaded load."
+        },
+        "watermark_sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "table": {
+                "type": "string",
+                "description": "Child table listed in extract.tables after the base table."
+              },
+              "parent_key": {
+                "type": "string",
+                "description": "Column of the child table that holds the parent row's id."
+              },
+              "row_key": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "Key columns, besides traversal_path, that identify a child row. Set when delete tombstones keep only key columns, so parent_key is 0 on a deletion and the parent is resolved through the row's earlier versions."
+              }
+            },
+            "required": [
+              "table",
+              "parent_key"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Child tables whose changes re-extract the parent row even when its own watermark did not move. Authored SQL consumes them through the {{changed_rows}} (parent rows) and {{changed_ids}} (parent ids) markers. Namespaced pipelines only."
         }
       },
       "required": [

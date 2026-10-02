@@ -325,6 +325,11 @@ pipelines:
       tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals, siphon_duo_workflows_workflow_merge_requests]
       order_by: [traversal_path, id]
       query: merge_request.sql.j2
+      watermark_sources:
+        - {table: siphon_merge_request_metrics, parent_key: merge_request_id}
+        - {table: siphon_merge_request_reviewers, parent_key: merge_request_id}
+        - {table: siphon_approvals, parent_key: merge_request_id}
+        - {table: siphon_duo_workflows_workflow_merge_requests, parent_key: merge_request_id, row_key: [workflow_id, id]}
     transform:
       type: datafusion
       edges:

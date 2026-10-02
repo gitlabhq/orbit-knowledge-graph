@@ -1,0 +1,27 @@
+# The MR row is unchanged; only its metrics row replicates after the
+# MergeRequest checkpoint.
+description: Metrics that replicate after their merge request fill the metric columns on the next incremental run
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Late metrics, description: "", source_branch: feat, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    expect:
+      nodes:
+        gl_merge_request:
+          rows:
+            - { id: 10, commits_count: null }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_merge_request_metrics:
+        - { id: 1, merge_request_id: 10, commits_count: 7, target_project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_merge_request:
+          rows:
+            - { id: 10, commits_count: 7 }

@@ -487,6 +487,7 @@ mod tests {
             )
             .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),
+            watermark_sources: None,
             deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
@@ -518,6 +519,7 @@ mod tests {
                 column: &plan.watermark_column,
                 last: DateTime::<Utc>::UNIX_EPOCH,
                 current: test_watermark(),
+                sources: None,
             })
     }
 

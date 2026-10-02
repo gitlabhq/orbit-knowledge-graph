@@ -3,25 +3,29 @@ use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::sql_template;
 
 use super::{
-    BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
+    BATCH_SIZE_MARKER, CHANGED_IDS_MARKER, CHANGED_IDS_VARIABLE, CHANGED_ROWS_MARKER,
+    CHANGED_ROWS_VARIABLE, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate,
+    FILTERS_MARKER, watermark_sources,
 };
 
 pub(in crate::modules::sdlc) fn compile_authored_extract(
     declaration: &ClickHouseExtractDeclaration,
     raw: &str,
 ) -> Result<ExtractSpec, PlanError> {
-    let rendered = sql_template::render(
-        raw,
-        sql_template::context! {
-            version_column => declaration.version,
-            watermark_column => declaration.watermark,
-            deleted_column => declaration.deleted,
-            // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
-            filters => FILTERS_MARKER,
-            batch_size => BATCH_SIZE_MARKER,
-        },
-    )
-    .map_err(|e| {
+    let uses_changed_rows = !declaration.watermark_sources.is_empty();
+    // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
+    let mut context = std::collections::BTreeMap::from([
+        ("version_column", declaration.version.as_str()),
+        ("watermark_column", declaration.watermark.as_str()),
+        ("deleted_column", declaration.deleted.as_str()),
+        ("filters", FILTERS_MARKER),
+        ("batch_size", BATCH_SIZE_MARKER),
+    ]);
+    if uses_changed_rows {
+        context.insert(CHANGED_ROWS_VARIABLE, CHANGED_ROWS_MARKER);
+        context.insert(CHANGED_IDS_VARIABLE, CHANGED_IDS_MARKER);
+    }
+    let rendered = sql_template::render(raw, context).map_err(|e| {
         PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", declaration.entity))
     })?;
 
@@ -42,10 +46,16 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
     let deleted = aliased_expression(&rendered, DELETED_COLUMN)
         .unwrap_or_else(|| declaration.deleted.clone());
 
+    let template = if uses_changed_rows {
+        ExtractTemplate::with_changed_rows(rendered)?
+    } else {
+        ExtractTemplate::new(rendered)?
+    };
     Ok(ExtractSpec {
-        template: ExtractTemplate::new(rendered)?,
+        template,
         watermark,
         deleted,
+        watermark_sources: watermark_sources(declaration),
     })
 }
 
@@ -87,6 +97,7 @@ mod tests {
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
             query: ontology::ExtractQuery::Sql(String::new()),
             lookup_joins: vec![],
+            watermark_sources: vec![],
         }
     }
 

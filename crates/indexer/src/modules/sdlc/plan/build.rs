@@ -179,6 +179,7 @@ fn assemble(
         scope: pipeline.scope,
         extract_template: spec.template,
         watermark_column: spec.watermark,
+        watermark_sources: spec.watermark_sources,
         deleted_column: spec.deleted,
         sort_key: extract.order_by.clone(),
         batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
@@ -250,6 +251,7 @@ mod tests {
                 column: &plan.watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
+                sources: plan.watermark_sources.as_ref(),
             })
             .with(TraversalPathFilter { path })
             .to_sql()
@@ -262,6 +264,7 @@ mod tests {
                 column: &plan.watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
+                sources: None,
             })
             .to_sql()
             .expect("renders extract SQL")
@@ -389,6 +392,7 @@ mod tests {
             )
             .unwrap(),
             watermark_column: String::new(),
+            watermark_sources: None,
             deleted_column: String::new(),
             sort_key: vec![],
             batch_size: 1,
@@ -658,6 +662,75 @@ mod tests {
         );
     }
 
+    fn merge_request_sql(last: chrono::DateTime<Utc>) -> String {
+        let built = plans(&test_ontology(), 1000);
+        let plan = built
+            .namespaced
+            .iter()
+            .find(|p| p.name == "MergeRequest")
+            .expect("MergeRequest plan");
+        let path = TraversalPath::new_unchecked("1/2/");
+        let sql = plan
+            .prepare()
+            .with(WatermarkFilter {
+                column: &plan.watermark_column,
+                last,
+                current: Utc::now(),
+                sources: plan.watermark_sources.as_ref(),
+            })
+            .with(TraversalPathFilter { path: &path })
+            .to_sql()
+            .expect("renders extract SQL");
+        normalize(&sql)
+    }
+
+    #[test]
+    fn watermark_sources_pull_in_parents_whose_child_changed() {
+        let sql = merge_request_sql(Utc::now());
+        for child in [
+            "siphon_merge_request_metrics",
+            "siphon_merge_request_reviewers",
+            "siphon_approvals",
+        ] {
+            assert!(
+                sql.contains(&format!(
+                    "SELECT merge_request_id AS parent_id FROM {child} WHERE startsWith(traversal_path, {{traversal_path:String}}) AND _siphon_watermark > {{last_watermark:String}} AND _siphon_watermark <= {{watermark:String}}"
+                )),
+                "child {child} must contribute its own window, sql: {sql}"
+            );
+        }
+        assert!(
+            sql.contains("SELECT argMaxIf(merge_request_id, _siphon_replicated_at, merge_request_id != 0) AS parent_id FROM siphon_duo_workflows_workflow_merge_requests WHERE startsWith(traversal_path, {traversal_path:String}) AND (workflow_id, id) IN (SELECT workflow_id, id FROM siphon_duo_workflows_workflow_merge_requests WHERE"),
+            "a tombstone keeps only key columns, so the link's parent comes from its earlier versions, sql: {sql}"
+        );
+        assert!(
+            !sql.contains("m._siphon_watermark >"),
+            "the window lives inside changed_rows, not in an outer OR that defeats pruning, sql: {sql}"
+        );
+        assert!(
+            sql.contains("UNION ALL SELECT * FROM merge_requests WHERE startsWith(traversal_path, {traversal_path:String}) AND id IN (SELECT parent_id FROM ("),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("WHERE parent_id NOT IN (SELECT id FROM merge_requests WHERE"),
+            "parents already in their own window must not be scanned twice, sql: {sql}"
+        );
+        assert!(
+            !sql.contains("_siphon_deleted = false AND _siphon_watermark"),
+            "a link deletion must still re-extract the parent, sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn watermark_sources_skip_child_scans_on_the_initial_load() {
+        let sql = merge_request_sql(chrono::DateTime::<Utc>::UNIX_EPOCH);
+        assert!(!sql.contains("parent_id"), "sql: {sql}");
+        assert!(
+            sql.contains("FROM (SELECT * FROM merge_requests WHERE startsWith(traversal_path, {traversal_path:String}) AND _siphon_watermark >"),
+            "sql: {sql}"
+        );
+    }
+
     #[test]
     fn cursor_filter_renders_dnf_in_extract_sql() {
         let built = plans(&test_ontology(), 1000);
@@ -671,6 +744,7 @@ mod tests {
                 column: &user.watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
+                sources: None,
             })
             .with(CursorFilter {
                 sort_key: &user.sort_key,

@@ -13,6 +13,7 @@ use crate::entities::{
 use crate::etl::{
     ClickHouseExtract, ClickHouseExtractLookup, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract,
     ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
+    WatermarkSource,
 };
 
 use super::{EtlSettings, ReadOntologyFile};
@@ -88,6 +89,18 @@ struct ExtractYaml {
     lookups: Vec<ExtractLookupYaml>,
     #[serde(default)]
     partition_count: Option<u32>,
+    /// Child tables whose changes re-extract the parent row (see `WatermarkSource`).
+    #[serde(default)]
+    watermark_sources: Vec<WatermarkSourceYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WatermarkSourceYaml {
+    table: String,
+    parent_key: String,
+    #[serde(default)]
+    row_key: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -747,6 +760,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             }
         }
     }
+    validate_watermark_sources(&b.name, &b.extract, generated, b.scope)?;
     let query =
         b.extract
             .resolve_query(b.reader, &b.name, b.yaml_path, b.extract.filter.clone())?;
@@ -769,6 +783,16 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
                 .map(ExtractLookupYaml::into_lookup)
                 .collect(),
             partition_count: b.extract.partition_count,
+            watermark_sources: b
+                .extract
+                .watermark_sources
+                .into_iter()
+                .map(|source| WatermarkSource {
+                    table: source.table,
+                    parent_key: source.parent_key,
+                    row_key: source.row_key,
+                })
+                .collect(),
         }),
     };
     Ok(Pipeline {
@@ -777,6 +801,47 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
         extract,
         transform: b.transform,
     })
+}
+
+fn validate_watermark_sources(
+    pipeline: &str,
+    extract: &ExtractYaml,
+    generated: bool,
+    scope: EtlScope,
+) -> Result<(), OntologyError> {
+    if extract.watermark_sources.is_empty() {
+        return Ok(());
+    }
+    let invalid = |reason: &str| {
+        Err(OntologyError::Validation(format!(
+            "pipeline '{pipeline}': extract.watermark_sources {reason}"
+        )))
+    };
+    if generated {
+        return invalid(
+            "requires an authored .sql.j2 extract that uses {{changed_rows}} and {{changed_ids}}",
+        );
+    }
+    if scope != EtlScope::Namespaced {
+        return invalid("is only supported for namespaced pipelines");
+    }
+    let base_table = extract.tables.first();
+    let mut seen = HashSet::new();
+    for source in &extract.watermark_sources {
+        if !extract.tables.contains(&source.table) || Some(&source.table) == base_table {
+            return invalid(&format!(
+                "table '{}' must be a child table listed in extract.tables after the base table",
+                source.table
+            ));
+        }
+        if !seen.insert(&source.table) {
+            return invalid(&format!(
+                "table '{}' is declared more than once",
+                source.table
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn convert_reindex_on(
@@ -1321,6 +1386,133 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("extract.lookups requires query: generated"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_watermark_sources_on_generated_query() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                  watermark_sources:
+                    - {table: child_table, parent_key: parent_id}
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("invalid watermark_sources should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.watermark_sources requires an authored .sql.j2"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_watermark_sources_table_outside_extract_tables() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: test_node.sql
+                  watermark_sources:
+                    - {table: child_table, parent_key: parent_id}
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("invalid watermark_sources should be rejected");
+        assert!(
+            err.to_string()
+                .contains("must be a child table listed in extract.tables"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_watermark_sources_on_the_base_table() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table, child_table]
+                  order_by: [id]
+                  query: test_node.sql
+                  watermark_sources:
+                    - {table: source_table, parent_key: id}
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("invalid watermark_sources should be rejected");
+        assert!(
+            err.to_string().contains("must be a child table"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_duplicate_watermark_sources() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table, child_table]
+                  order_by: [id]
+                  query: test_node.sql
+                  watermark_sources:
+                    - {table: child_table, parent_key: parent_id}
+                    - {table: child_table, parent_key: parent_id}
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("invalid watermark_sources should be rejected");
+        assert!(
+            err.to_string().contains("declared more than once"),
             "got: {err}"
         );
     }

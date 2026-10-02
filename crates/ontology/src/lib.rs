@@ -48,7 +48,7 @@ pub use entities::{
 pub use etl::{
     ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
     EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline,
-    ReindexSource, Transform,
+    ReindexSource, Transform, WatermarkSource,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

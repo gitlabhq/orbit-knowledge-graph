@@ -40,6 +40,20 @@ pub struct ClickHouseExtract {
     pub query: ExtractQuery,
     pub lookups: Vec<ClickHouseExtractLookup>,
     pub partition_count: Option<u32>,
+    pub watermark_sources: Vec<WatermarkSource>,
+}
+
+/// A child table whose changes re-extract the parent row even when the parent's
+/// own watermark did not move (a late link, metrics or approval row).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatermarkSource {
+    pub table: String,
+    /// Column of `table` that holds the parent row's `id`.
+    pub parent_key: String,
+    /// Key columns (besides `traversal_path`) that identify a row of `table`. Set when
+    /// Siphon delete tombstones keep only key columns, so `parent_key` reads as 0 on a
+    /// deletion and the parent must be resolved through the row's earlier versions.
+    pub row_key: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

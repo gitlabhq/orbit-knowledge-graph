@@ -16,6 +16,12 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 102
+  scope: "*"
+  note: >-
+    Parent rows are re-extracted when a declared watermark source (child table)
+    changes, so late MergeRequest metrics, reviewers, approvals and Duo links now reach
+    the graph. merge_request.sql.j2 changes; the deriver widens it to a full rebuild.
 - version: 101
   scope: "*"
   note: >-
