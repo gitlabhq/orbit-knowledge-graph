@@ -416,8 +416,8 @@ Count detected vulnerabilities by severity:
 ## `path_finding`: shortest path between nodes
 
 Shortest path from a group to a project (`max_depth` ≤ 3, server-enforced).
-`rel_types` is required when either endpoint uses `filters`. Omitting it
-causes a server-side validation error.
+`rel_types` is required on every path query, including when both endpoints use
+`node_ids`. Omitting it causes a server-side validation error.
 
 > **Pitfall:** `path_finding` follows `rel_types` only in their **defined
 > (schema) direction**, unlike `traversal` where `from`/`to` merely name

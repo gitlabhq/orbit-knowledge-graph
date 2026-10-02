@@ -633,7 +633,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Relationship types to traverse. Required when an endpoint is constrained by filters or id_range; optional when both endpoints use node_ids.",
+          "description": "Relationship types to traverse, each followed only in its defined direction. Required, including when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },

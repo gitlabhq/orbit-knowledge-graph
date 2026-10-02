@@ -563,18 +563,22 @@ Path finding queries use `path`.
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `max_depth` | `integer` | Maximum path length. Maximum 3. |
-| `rel_types` | `array` | Relationship types to traverse. Required unless both endpoints use `node_ids`. |
+| `rel_types` | `array` | Relationship types to traverse. Required. |
 
 Both endpoints must be bounded by `node_ids`, filters, or an `id_range` with a
-span of 500 or less. If either endpoint uses filters or `id_range`, provide
-`rel_types`.
+span of 500 or less. Always provide `rel_types`: a path query without it is
+rejected, even when both endpoints use `node_ids`.
+
+Path finding follows each relationship type only in its defined direction, from
+`from` toward `to`. Choose endpoints and relationship types that form a forward
+chain, for example `User` to `Project` through `AUTHORED` and `IN_PROJECT`.
 
 ```json orbit-query
 {
   "query_type": "path_finding",
   "nodes": [
-    {"id": "start", "entity": "Project", "node_ids": [278964]},
-    {"id": "end", "entity": "User", "node_ids": [1]}
+    {"id": "start", "entity": "User", "node_ids": [1]},
+    {"id": "end", "entity": "Project", "node_ids": [278964]}
   ],
   "path": {
     "type": "shortest",
