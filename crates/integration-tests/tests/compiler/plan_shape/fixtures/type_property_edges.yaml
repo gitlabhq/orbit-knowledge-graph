@@ -1,0 +1,27 @@
+name: Node type properties do not suppress planned edge outputs
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "columns": ["username", "user_type"]},
+        {"id": "g", "entity": "Group", "node_ids": [9970], "columns": ["name"]}
+      ],
+      "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+      "order_by": "u.username",
+      "limit": 5
+    }
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970})
+    RETURN u.username, u.user_type, g.name ORDER BY u.username LIMIT 5
+logical:
+  expect:
+    - (EdgeScan MEMBER_OF u->g AS e0)
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
+    emitted:
+      expect:
+        - (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
