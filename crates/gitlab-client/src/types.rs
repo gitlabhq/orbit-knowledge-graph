@@ -10,12 +10,6 @@ pub struct CloudConnectorToken {
     pub exp: i64,
 }
 
-impl CloudConnectorToken {
-    pub fn expires_at(&self) -> i64 {
-        self.exp - crate::client::CC_TOKEN_EXPIRY_BUFFER_SECS
-    }
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct MergeRequestDiffBatch {
     #[serde(rename = "id")]
