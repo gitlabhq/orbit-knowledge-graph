@@ -185,7 +185,13 @@ mod tests {
         assert_eq!(skills.len(), 1);
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
-        assert_eq!(skill.version, "0.33.1");
+        let manifest = SkillAssets::get(MANIFEST).unwrap();
+        let frontmatter = orbit_prompts::parse_skill_frontmatter(
+            std::str::from_utf8(&manifest.data).unwrap(),
+            SKILL_NAME,
+        )
+        .unwrap();
+        assert_eq!(skill.version, frontmatter.version.to_string());
         assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
         assert!(skill.compatibility.contains("Orbit CLI"));
     }
