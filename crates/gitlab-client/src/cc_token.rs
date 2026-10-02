@@ -330,9 +330,20 @@ mod tests {
         assert!(cache.state.read().unwrap().token.is_none());
     }
 
+    /// Call `n` sleeps for `steps[n].0` and returns a token with `exp`
+    /// `steps[n].1`; calls past the end repeat the last step.
     struct DelayedFetcher {
-        delay: Duration,
-        exp: i64,
+        calls: AtomicUsize,
+        steps: Vec<(Duration, i64)>,
+    }
+
+    impl DelayedFetcher {
+        fn new(steps: Vec<(Duration, i64)>) -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+                steps,
+            }
+        }
     }
 
     impl CloudConnectorTokenFetcher for DelayedFetcher {
@@ -340,12 +351,12 @@ mod tests {
             &self,
         ) -> Pin<Box<dyn Future<Output = Result<CloudConnectorToken, GitlabClientError>> + Send + '_>>
         {
-            let delay = self.delay;
-            let exp = self.exp;
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            let (delay, exp) = self.steps[n.min(self.steps.len() - 1)];
             Box::pin(async move {
                 tokio::time::sleep(delay).await;
                 Ok(CloudConnectorToken {
-                    token: "delayed-token".into(),
+                    token: format!("token-{n}"),
                     exp,
                 })
             })
@@ -353,63 +364,52 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_slow_fetch_is_abandoned_at_the_timeout_when_a_cached_token_exists() {
-        let fetcher = Arc::new(DelayedFetcher {
-            delay: Duration::from_secs(3_600),
-            exp: now() + 3_600,
-        });
+    async fn a_slow_fetch_is_abandoned_at_the_timeout_when_a_valid_cached_token_exists() {
+        let fetcher = Arc::new(DelayedFetcher::new(vec![
+            (Duration::ZERO, now() + 3_600),
+            (Duration::from_secs(3_600), now() + 3_600),
+        ]));
         let cache = CloudConnectorTokenCache::new(fetcher);
-        {
-            let mut state = cache.state.write().unwrap();
-            state.token = Some("seed-token".to_string());
-            state.token_exp = now() + 3_600;
-            state.refresh_at = 0;
-        }
+        assert_eq!(cache.token().await.unwrap(), "token-0");
+        let_refresh_at_pass(&cache);
 
         let started = tokio::time::Instant::now();
-        let before = now();
         let result = cache.token().await;
 
-        assert_eq!(result.unwrap(), "seed-token");
+        assert_eq!(result.unwrap(), "token-0");
         assert_eq!(started.elapsed(), CC_TOKEN_FETCH_TIMEOUT);
-        assert!(refresh_at(&cache) >= before + CC_TOKEN_RETRY_INTERVAL_SECS);
+        let retry_at = now() + CC_TOKEN_RETRY_INTERVAL_SECS;
+        assert!((retry_at - 1..=retry_at).contains(&refresh_at(&cache)));
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_slow_fetch_is_waited_out_when_the_cached_token_has_expired() {
         let delay = CC_TOKEN_FETCH_TIMEOUT + Duration::from_secs(5);
-        let fetcher = Arc::new(DelayedFetcher {
-            delay,
-            exp: now() + 3_600,
-        });
+        let fetcher = Arc::new(DelayedFetcher::new(vec![
+            (Duration::ZERO, now() - 60),
+            (delay, now() + 3_600),
+        ]));
         let cache = CloudConnectorTokenCache::new(fetcher);
-        {
-            let mut state = cache.state.write().unwrap();
-            state.token = Some("expired-token".to_string());
-            state.token_exp = now() - 60;
-            state.refresh_at = 0;
-        }
+        assert_eq!(cache.token().await.unwrap(), "token-0");
+        let_refresh_at_pass(&cache);
 
         let started = tokio::time::Instant::now();
         let result = cache.token().await;
 
-        assert_eq!(result.unwrap(), "delayed-token");
+        assert_eq!(result.unwrap(), "token-1");
         assert_eq!(started.elapsed(), delay);
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_slow_fetch_is_not_abandoned_when_no_cached_token_exists() {
         let delay = CC_TOKEN_FETCH_TIMEOUT + Duration::from_secs(5);
-        let fetcher = Arc::new(DelayedFetcher {
-            delay,
-            exp: now() + 3_600,
-        });
+        let fetcher = Arc::new(DelayedFetcher::new(vec![(delay, now() + 3_600)]));
         let cache = CloudConnectorTokenCache::new(fetcher);
 
         let started = tokio::time::Instant::now();
         let result = cache.token().await;
 
-        assert_eq!(result.unwrap(), "delayed-token");
+        assert_eq!(result.unwrap(), "token-0");
         assert_eq!(started.elapsed(), delay);
     }
 
