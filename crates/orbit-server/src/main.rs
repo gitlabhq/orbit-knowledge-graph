@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
 
     let result = match args.mode {
+        Mode::ClickhouseSetup => orbit_server::clickhouse_setup::run(&config).await,
         Mode::DispatchIndexing => {
             config.schema.validate()?;
             let archive = ontology::archive::OntologyArchive::from_bytes(

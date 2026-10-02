@@ -94,6 +94,11 @@ nothing. A managed ClickHouse usually restricts the `system` database. Without t
 stop when a new version is promoted. Add the grants in both cases. The
 configuration then works unchanged if you move to a managed service.
 
+The GitLab Orbit image can also apply the statements itself. `gkg-server --mode clickhouse-setup` connects to
+`graph.url` as `clickhouse_setup.admin_username` (by default `default`). It reads `admin_password`,
+`writer_password`, `reader_password`, and `siphon_reader_password` from `/etc/secrets/clickhouse_setup/`.
+With TLS, it verifies the ClickHouse certificate against the system trust store. The Helm chart runs this mode before every install and upgrade when `clickhouseSetup.enabled` is `true`.
+
 GitLab Orbit reaches ClickHouse over the HTTP interface on port 8123, or port 8443 with TLS. Siphon uses the
 native protocol on port 9000, so both the HTTP port and port 9000 must be reachable from the cluster.
 

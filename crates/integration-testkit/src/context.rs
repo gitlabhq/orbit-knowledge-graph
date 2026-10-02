@@ -240,6 +240,7 @@ impl TestContext {
             .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
             .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
+            .with_env_var("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1")
             .with_label(CONTAINER_LABEL_KEY, "true")
             .with_label(SESSION_LABEL_KEY, session_id())
             .start()
