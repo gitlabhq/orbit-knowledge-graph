@@ -18,6 +18,9 @@
 migrations:
 - version: 101
   scope: "*"
+  note: >-
+    MergeRequest gains created_by_duo, derived in merge_request.sql.j2 from Duo workflow
+    links. The deriver widens a .sql.j2 change to a full rebuild, so existing MRs backfill the flag.
 - version: 100
   scope: "*"
   note: >-
