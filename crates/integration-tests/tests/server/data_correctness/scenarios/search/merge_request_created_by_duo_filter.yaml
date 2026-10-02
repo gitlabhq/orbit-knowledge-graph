@@ -1,0 +1,32 @@
+description: MergeRequest can be filtered on the created_by_duo boolean
+
+config:
+  extra_seed:
+    gl_merge_request:
+      - { id: 9810, iid: 810, title: "Duo MR", state: opened, created_by_duo: true, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+      - { id: 9811, iid: 811, title: "Human MR", state: opened, created_by_duo: false, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: false }
+  redaction:
+    allow:
+      merge_request: [2000, 2001, 2002, 2003, 2004, 2005, 9100, 9810, 9811]
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+                 "columns": ["title", "created_by_duo"],
+                 "node_ids": [9810, 9811],
+                 "filters": {"created_by_duo": true}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id IN [9810, 9811] AND mr.created_by_duo = true RETURN mr.title, mr.created_by_duo LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [9810]
+      rows:
+        - { id: 9810, created_by_duo: true }
+  skip_requirements: ["filter:created_by_duo"]

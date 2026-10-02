@@ -968,7 +968,19 @@ CREATE TABLE IF NOT EXISTS siphon_duo_workflows_workflow_merge_requests
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
     `_siphon_deleted` Bool DEFAULT FALSE,
     `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
-    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1
+    `idempotency_key` Nullable(String),
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    PROJECTION by_merge_request_id (
+        SELECT
+            id,
+            workflow_id,
+            merge_request_id,
+            link_type,
+            traversal_path,
+            _siphon_replicated_at,
+            _siphon_deleted
+        ORDER BY merge_request_id, id
+    )
 )
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, workflow_id, id)

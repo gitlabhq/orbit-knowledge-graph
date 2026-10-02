@@ -159,12 +159,10 @@ LEFT JOIN (
   AND m.id = approvals._ap_mr
 LEFT JOIN (
   SELECT
-    traversal_path AS _dl_tp,
     merge_request_id AS _dl_mr,
     max(link_type = 1 AND deleted = false) AS created_by_duo
   FROM (
     SELECT
-      traversal_path,
       merge_request_id,
       workflow_id,
       id,
@@ -179,9 +177,8 @@ LEFT JOIN (
       WHERE startsWith(traversal_path, {traversal_path:String})
         AND {{watermark_column}} > {last_watermark:String}
         AND {{watermark_column}} <= {watermark:String} )
-    GROUP BY traversal_path, merge_request_id, workflow_id, id )
-  GROUP BY traversal_path, merge_request_id ) AS duo_links ON m.traversal_path = duo_links._dl_tp
-  AND m.id = duo_links._dl_mr
+    GROUP BY merge_request_id, workflow_id, id )
+  GROUP BY merge_request_id ) AS duo_links ON m.id = duo_links._dl_mr
 WHERE startsWith(m.traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id
 LIMIT {{batch_size}}
