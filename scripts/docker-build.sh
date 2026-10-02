@@ -23,6 +23,9 @@ BUILD_ARGS=""
 if [ -n "$GKG_VERSION" ]; then
   BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
 fi
+if [ -n "$GKG_BILLING_ENFORCED" ]; then
+  BUILD_ARGS="$BUILD_ARGS --build-arg GKG_BILLING_ENFORCED=$GKG_BILLING_ENFORCED"
+fi
 
 SECRET_ARGS=""
 if [ -n "$SCCACHE_GCS_KEY" ] && [ -f "$SCCACHE_GCS_KEY" ]; then

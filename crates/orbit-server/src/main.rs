@@ -204,6 +204,11 @@ async fn run_webserver(
         grpc_server = grpc_server.with_cache_broker(nats);
     }
 
+    orbit_billing::enforcement::validate(&config.billing)?;
+    info!(
+        billing_enforced = orbit_billing::enforcement::ENFORCED,
+        "billing enforcement"
+    );
     orbit_billing::register_metrics();
     orbit_billing::register_quota_metrics();
     if config.billing.enabled {

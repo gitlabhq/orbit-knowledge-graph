@@ -426,6 +426,14 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 
 **Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
 
+**Enforced builds.** A binary built with `GKG_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
+
+- Billing and the quota gate are enabled.
+- The CustomersDot and collector URLs form one compiled-in production or staging pair.
+- The quota and billing auth modes belong to the same family.
+
+The flag is a compile-time cfg, so the deployed config cannot disable it. Builds without it behave as described here.
+
 **Which channels are checked.** Only `mcp` and `rest` source types are quota-checked (these are the charged channels). `dws`, `frontend`, and `core` are zero-rated or included, so they skip the quota check entirely.
 
 ```rust

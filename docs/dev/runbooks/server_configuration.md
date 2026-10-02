@@ -546,6 +546,18 @@ In `license_checksum` mode the gate sends the instance's license checksum as `X-
 
 Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` query parameter, so CDot logs can be traced back to Orbit requests.
 
+### Enforced builds
+
+Images built with the `GKG_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
+
+- `billing.enabled` and `billing.quota.enabled` are both `true`.
+- `billing.quota.customers_dot_url` and `billing.collector_url` form one environment pair, compared on scheme, host and port:
+  - production: `https://customers.gitlab.com` with `https://billing.prdsub.gitlab.net`
+  - staging: `https://customers.staging.gitlab.com` with `https://billing.stgsub.gitlab.net`
+- The auth modes belong to one family: `admin_token` with `oidc`, or `license_checksum` with `cloud_connector`.
+
+The switch is compiled into the binary, so the config map cannot change it. The build argument defaults to `false`, which skips these checks. The startup log reports `billing_enforced`.
+
 ## Object storage
 
 Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores, Google Cloud Storage, or a local directory.
