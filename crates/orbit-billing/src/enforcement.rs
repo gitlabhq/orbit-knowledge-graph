@@ -3,7 +3,6 @@
 //! The switch is a build-time cfg flag, so the deployed config cannot turn it off.
 
 use orbit_server_config::{BillingAuthMode, BillingConfig, QuotaAuthMode};
-use reqwest::Url;
 
 pub const ENFORCED: bool = cfg!(gkg_billing_enforced);
 
@@ -13,6 +12,8 @@ struct Environment {
     collector_url: &'static str,
 }
 
+// Released enforced builds accept only these URLs. A hostname migration must keep the old name
+// serving while those releases are supported, and add the new name here a few releases ahead.
 const ENVIRONMENTS: [Environment; 2] = [
     Environment {
         name: "production",
@@ -79,20 +80,9 @@ fn validate_with(enforced: bool, config: &BillingConfig) -> Result<(), Enforceme
     }
 }
 
-// The clients append their request path to the configured URL, so a path prefix would
-// send requests to an unknown route on the real host.
+// Both clients strip trailing slashes before appending their request path.
 fn same_base_url(actual: &str, expected: &str) -> bool {
-    let (Ok(actual), Ok(expected)) = (Url::parse(actual), Url::parse(expected)) else {
-        return false;
-    };
-    actual.scheme() == expected.scheme()
-        && actual.host_str() == expected.host_str()
-        && actual.port_or_known_default() == expected.port_or_known_default()
-        && actual.path() == "/"
-        && actual.username().is_empty()
-        && actual.password().is_none()
-        && actual.query().is_none()
-        && actual.fragment().is_none()
+    actual.trim_end_matches('/') == expected
 }
 
 fn allowed_environments() -> String {
@@ -213,17 +203,22 @@ mod tests {
     }
 
     #[test]
-    fn enforced_rejects_lookalike_hosts() {
+    fn enforced_rejects_urls_that_are_not_an_exact_match() {
         for cdot in [
             "https://customers.gitlab.com.evil.io",
             "https://evilcustomers.gitlab.com",
             "http://customers.gitlab.com",
             "https://customers.gitlab.com:8443",
+            "https://customers.gitlab.com:443",
+            "https://Customers.GitLab.com",
             "https://customers.gitlab.com@evil.io",
             "https://user:pass@customers.gitlab.com",
             "https://customers.gitlab.com/stub",
             "https://customers.gitlab.com/?x=1",
             "https://customers.gitlab.com/#frag",
+            " https://customers.gitlab.com",
+            "not a url",
+            "",
         ] {
             let billing = config(
                 cdot,
@@ -240,10 +235,10 @@ mod tests {
     }
 
     #[test]
-    fn enforced_ignores_trailing_slash_host_case_and_default_port() {
+    fn enforced_accepts_trailing_slash() {
         let billing = config(
-            "https://Customers.GitLab.com:443/",
-            "https://BILLING.prdsub.gitlab.net/",
+            "https://customers.gitlab.com/",
+            "https://billing.prdsub.gitlab.net/",
             QuotaAuthMode::AdminToken,
             BillingAuthMode::Oidc,
         );
@@ -268,19 +263,17 @@ mod tests {
     }
 
     #[test]
-    fn enforced_rejects_unparseable_urls() {
-        for (cdot, collector) in [("not a url", PROD_COLLECTOR), (PROD_CDOT, "")] {
-            let billing = config(
-                cdot,
-                collector,
-                QuotaAuthMode::AdminToken,
-                BillingAuthMode::Oidc,
-            );
-            assert_eq!(
-                validate_with(true, &billing),
-                Err(EnforcementError::UnknownEnvironment)
-            );
-        }
+    fn enforced_rejects_collector_with_request_path() {
+        let billing = config(
+            PROD_CDOT,
+            "https://billing.prdsub.gitlab.net/com.snowplowanalytics.snowplow.auth/tp2",
+            QuotaAuthMode::AdminToken,
+            BillingAuthMode::Oidc,
+        );
+        assert_eq!(
+            validate_with(true, &billing),
+            Err(EnforcementError::UnknownEnvironment)
+        );
     }
 
     #[test]
