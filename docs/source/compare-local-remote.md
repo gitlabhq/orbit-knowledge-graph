@@ -47,12 +47,12 @@ requests, pipelines, work items, and security findings.
 Use GitLab Orbit Remote when you need more context about the code
 you're working on.
 
-Developers use GitLab Orbit Remote to:
+Developers can use GitLab Orbit Remote for the following tasks:
 
-- Assess a blast radius across projects
-- Check code review history
+- Assess a blast radius across projects.
+- Check code review history.
 - Trace a vulnerability
-back to the change that introduced it
+back to the change that introduced it.
 
 For product and engineering managers, security teams, and support,
 use GitLab Orbit Remote with GitLab Duo Agent Platform.
@@ -69,12 +69,12 @@ gives AI coding agents real structure to work with.
 
 Use GitLab Orbit Local when you have questions about the code you're working on.
 
-Developers use GitLab Orbit Local to:
+Developers use GitLab Orbit Local for the following tasks:
 
-- Get oriented with an unfamiliar repository
+- Get oriented with an unfamiliar repository.
 - Find every caller of a function
-before a rename
-- Map what a change touches
+before a rename.
+- Map what a change touches.
 
 ## GitLab Orbit on GitLab Self-Managed
 
