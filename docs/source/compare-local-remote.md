@@ -64,10 +64,14 @@ elsewhere in GitLab.
 ## GitLab Orbit Local
 
 GitLab Orbit Local runs on your machine and builds a code-only graph from a repository you have
-checked out. It indexes the branch you are on and
-gives AI coding agents real structure to work with.
+checked out. It indexes the branch you are on, which
+gives AI coding agents real structure to work so they can answer
+questions about your code.
 
-Use GitLab Orbit Local when you have questions about the code you're working on.
+Use GitLab Orbit Local when:
+
+- The network is unavailable. You still need a network connection to manage the `orbit` binary, the GitLab Orbit skill, and telemetry.
+- The code must not leave your machine.
 
 Developers use GitLab Orbit Local for the following tasks:
 
@@ -79,24 +83,24 @@ before a rename.
 ## GitLab Orbit on GitLab Self-Managed
 
 GitLab Orbit on GitLab Self-Managed is GitLab Orbit Remote that you run yourself.
-You deploy GitLab Orbit as a Helm chart on a Kubernetes cluster separate to your instance, together with the
-data pipeline that feeds it.
+GitLab Orbit is available only as a Helm chart.
+You install GitLab Orbit on a Kubernetes cluster, together with Siphon, the data pipeline that
+copies your GitLab database into ClickHouse.
+
+Where you install GitLab Orbit depends on how you installed GitLab:
+
+- Linux package: Create a separate Kubernetes cluster for GitLab Orbit, and connect it to the server that runs GitLab.
+The cluster and your instance must be able to reach each other.
+- GitLab Helm chart: Install GitLab Orbit in the same cluster that runs GitLab.
 
 For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
 
 ## Deployment and network
 
-Choose GitLab Orbit Local when the network is unavailable, or when the code must not leave your
-machine. You still need a network connection to complete the following setup tasks and actions for GitLab Orbit:
-
-- Install or update the binary.
-- Install the GitLab Orbit skill.
-- Send telemetry data that the CLI sends by default. You can turn off telemetry.
-
 After you install the GitLab Orbit binary, index and query commands are entirely local, and no request leaves your
 computer to build or read the graph.
 
-GitLab Orbit Remote runs in a separate Kubernetes cluster from your GitLab instance.
+On GitLab.com, GitLab Orbit Remote runs in a separate Kubernetes cluster from your GitLab instance.
 This deployment approach ensures memory usage and compute remain separate.
 
 | Deployment | GitLab Orbit Local | GitLab Orbit Remote |
@@ -215,15 +219,6 @@ GitLab Orbit Remote and Local index code in the same languages.
 
 ## Work scope and freshness
 
-| Scope | GitLab Orbit Local | GitLab Orbit Remote |
-|-------|--------------------|---------------------|
-| Working tree, including uncommitted files | {{< yes >}} | {{< no >}} |
-| Default branch only | {{< no >}} | {{< yes >}} |
-| Multiple repositories in one graph | {{< yes >}} | {{< yes >}} |
-| Whole top-level group | {{< no >}} | {{< yes >}} |
-| Branch selection | {{< no >}} | {{< no >}} |
-| Updates automatically | {{< no >}} | {{< yes >}} |
-
 GitLab Orbit Remote and Local see different versions of your code.
 
 GitLab Orbit Local:
@@ -239,6 +234,15 @@ GitLab Orbit Remote:
 - Indexes the default branch of every project in the top-level groups where you
 turned GitLab Orbit on
 - Reindexes the graph automatically when the default branch changes
+
+| Scope | GitLab Orbit Local | GitLab Orbit Remote |
+|-------|--------------------|---------------------|
+| Working tree, including uncommitted files | {{< yes >}} | {{< no >}} |
+| Default branch only | {{< no >}} | {{< yes >}} |
+| Multiple repositories in one graph | {{< yes >}} | {{< yes >}} |
+| Whole top-level group | {{< no >}} | {{< yes >}} |
+| Branch selection | {{< no >}} | {{< no >}} |
+| Updates automatically | {{< no >}} | {{< yes >}} |
 
 ## Supported tooling
 
@@ -262,6 +266,12 @@ turned GitLab Orbit on
 
 ## The GitLab Orbit skill
 
+The GitLab Orbit skill gives AI coding agents structured guidance for graph queries.
+You use the same skill for GitLab Orbit Remote and Local, but the guidance differs.
+
+For more information, see
+[set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md).
+
 | Skill capability | GitLab Orbit Local | GitLab Orbit Remote |
 |------------------|--------------------|---------------------|
 | Query language guidance | Read-only SQL | JSON query DSL |
@@ -270,8 +280,3 @@ turned GitLab Orbit on
 | Reporting and coverage guidance | {{< no >}} | {{< yes >}} |
 | Setup checklist and troubleshooting | {{< yes >}} | {{< yes >}} |
 
-The GitLab Orbit skill gives AI coding agents structured guidance for graph queries.
-You use the same skill for GitLab Orbit Remote and Local, but the guidance differs.
-
-For more information, see
-[set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md).
