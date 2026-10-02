@@ -1,5 +1,5 @@
 name: list_commands
-version: 1.7.0
+version: 1.4.0
 variables: [commands, catalog]
 description: >-
   Orbit is the GitLab Knowledge Graph. It answers code-structure and

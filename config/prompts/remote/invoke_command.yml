@@ -1,5 +1,5 @@
 name: invoke_command
-version: 1.5.0
+version: 1.3.0
 description: >-
   Runs a command from the Orbit command catalog. Keep only command_name and
   parameters at the top level; put the command's own inputs inside parameters.

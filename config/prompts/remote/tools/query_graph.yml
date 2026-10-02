@@ -1,5 +1,5 @@
 name: query_graph
-version: 1.4.1
+version: 1.2.0
 summary: >-
   Traverse GitLab relationships and code structure: callers, imports, blast
   radius, joins across entity types, grouped counts.
