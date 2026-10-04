@@ -168,6 +168,9 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         root_namespace_id: Some(99),
         global_user_id: Some("guser-it".parse().expect("global_user_id")),
         session_id: Some("sess-it".parse().expect("session_id")),
+        status: Some(orbit_query::OrbitQueryStatus::CompileError),
+        outcome: Some(orbit_query::OrbitQueryOutcome::CallerError),
+        failure_reason: Some("depth".parse().expect("failure_reason")),
         ..Default::default()
     });
 
@@ -247,4 +250,14 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     assert_eq!(common_data["data"]["deployment_type"], ".com");
     assert_eq!(common_data["data"]["environment"], "staging");
     assert_eq!(common_data["data"]["organization_id"], 42);
+    let query_data = context_data
+        .iter()
+        .find(|c| {
+            c["schema"]
+                .as_str()
+                .is_some_and(|s| s.contains("orbit_query"))
+        })
+        .expect("orbit_query entity");
+    assert_eq!(query_data["data"]["outcome"], "caller_error");
+    assert_eq!(query_data["data"]["failure_reason"], "depth");
 }

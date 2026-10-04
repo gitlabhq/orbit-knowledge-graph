@@ -8,6 +8,7 @@ use orbit_analytics::{
 use orbit_server_config::AnalyticsConfig;
 use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
+use query_engine::pipeline::PipelineError;
 
 use crate::auth::{Claims, SourceType};
 
@@ -83,6 +84,42 @@ pub(crate) fn build_query(
     };
     apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
     Ok(OrbitQueryContext::new(q))
+}
+
+pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&PipelineError>) {
+    use orbit_query::OrbitQueryOutcome as Outcome;
+    q.status = Some(status(error));
+    q.outcome = Some(match error {
+        None => Outcome::Success,
+        Some(e) if e.is_caller_error() => Outcome::CallerError,
+        Some(_) => Outcome::ServerError,
+    });
+    let Some(error) = error else { return };
+    q.failure_reason = error.failure_reason().as_str().parse().ok();
+    q.row_count = None;
+    q.redacted_count = None;
+    if q.execute_ms.is_none() {
+        q.ch_read_rows = None;
+        q.ch_read_bytes = None;
+        q.ch_memory_usage = None;
+    }
+}
+
+fn status(error: Option<&PipelineError>) -> orbit_query::OrbitQueryStatus {
+    use orbit_query::OrbitQueryStatus as Status;
+    let Some(error) = error else {
+        return Status::Ok;
+    };
+    match error {
+        PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => Status::SecurityError,
+        PipelineError::Compile { .. } => Status::CompileError,
+        PipelineError::Execution(_) => Status::ExecutionError,
+        PipelineError::Authorization(_) => Status::AuthorizationError,
+        PipelineError::ContentResolution(_) => Status::ContentResolutionError,
+        PipelineError::Streaming(_) => Status::StreamingError,
+        PipelineError::Timeout => Status::Timeout,
+        PipelineError::Custom(_) => Status::CustomError,
+    }
 }
 
 fn apply_metrics(
@@ -189,13 +226,12 @@ fn apply_metrics(
             Some(to_vec(columns))
         };
         q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
+        let label: &str = metrics
+            .hydration
+            .as_ref()
+            .map_or("none", |h| h.kind().into());
+        q.hydration_plan = label.parse().ok();
     }
-
-    let label: &str = metrics
-        .hydration
-        .as_ref()
-        .map_or("none", |h| h.kind().into());
-    q.hydration_plan = label.parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
     q.compile_ms = metrics.compile_ms.map(|v| v as i64);
     q.execute_ms = metrics.execute_ms.map(|v| v as i64);
