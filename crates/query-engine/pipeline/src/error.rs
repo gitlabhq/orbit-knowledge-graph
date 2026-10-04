@@ -150,8 +150,11 @@ impl ClickHouseLimit {
 
 fn clickhouse_error_code(message: &str) -> Option<u32> {
     let after = &message[message.find("Code: ")? + 6..];
-    let end = after.find(|c: char| !c.is_ascii_digit())?;
-    after[..end].parse().ok()
+    after
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
 }
 
 #[cfg(test)]
@@ -159,12 +162,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clickhouse_limit_reads_the_error_code() {
-        let message = "query error: bad response: Code: 241. DB::Exception: Memory limit exceeded";
-        assert_eq!(
-            ClickHouseLimit::from_message(message),
-            Some(ClickHouseLimit::MemoryLimit)
-        );
-        assert_eq!(ClickHouseLimit::from_message("some other error"), None);
+    fn clickhouse_limit_reads_real_error_messages() {
+        let prefix = "Query execution failed: query error: bad response: ";
+        let cases = [
+            ("Code: 159", Some(ClickHouseLimit::TooSlow)),
+            (
+                "Code: 159. DB::Exception: Timeout exceeded: elapsed 30038.950827 ms, maximum: 30000 ms. (TIMEOUT_EXCEEDED)",
+                Some(ClickHouseLimit::TooSlow),
+            ),
+            (
+                "Code: 241. DB::Exception: (total) memory limit exceeded: would use 32.41 GiB",
+                Some(ClickHouseLimit::MemoryLimit),
+            ),
+            (
+                "Code: 158. DB::Exception: Limit for rows (controlled by 'max_rows_to_read' setting) exceeded",
+                Some(ClickHouseLimit::TooManyRows),
+            ),
+            (
+                "Code: 307. DB::Exception: Limit for rows or bytes to read exceeded, max bytes: 1.00 B",
+                Some(ClickHouseLimit::TooManyBytes),
+            ),
+            (
+                "Code: 191. DB::Exception: Limit for IN",
+                Some(ClickHouseLimit::SetSizeLimit),
+            ),
+            (
+                "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
+                Some(ClickHouseLimit::TypeMismatch),
+            ),
+            (
+                "Code: 47. DB::Exception: Unknown expression identifier `p.id`",
+                None,
+            ),
+            ("connection refused", None),
+        ];
+        for (message, expected) in cases {
+            assert_eq!(
+                ClickHouseLimit::from_message(&format!("{prefix}{message}")),
+                expected,
+                "{message}"
+            );
+        }
     }
 }
