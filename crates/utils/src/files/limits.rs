@@ -1,7 +1,7 @@
 //! Resource caps. Every domain wants them, so the store enforces them and
 //! the passes never count.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{metric} cap exceeded ({count} > {cap})")]
@@ -30,30 +30,16 @@ pub struct Limits {
 
 /// A running total with a cap: the first `add` to overflow trips it. Returns
 /// the total before the add, which is the offset for an append.
-pub(super) fn charge<A: Atomic>(
-    total: &A,
+pub(super) fn charge(
+    total: &AtomicU64,
     metric: &'static str,
     n: u64,
     cap: Option<u64>,
 ) -> Result<u64, CapExceeded> {
-    let before = total.fetch_add(n);
+    let before = total.fetch_add(n, Relaxed);
     let count = before.saturating_add(n);
     match cap.filter(|&cap| count > cap) {
         Some(cap) => Err(CapExceeded { metric, count, cap }),
         None => Ok(before),
-    }
-}
-
-pub(super) trait Atomic {
-    fn fetch_add(&self, n: u64) -> u64;
-}
-impl Atomic for AtomicU64 {
-    fn fetch_add(&self, n: u64) -> u64 {
-        AtomicU64::fetch_add(self, n, Relaxed)
-    }
-}
-impl Atomic for AtomicUsize {
-    fn fetch_add(&self, n: u64) -> u64 {
-        AtomicUsize::fetch_add(self, n as usize, Relaxed) as u64
     }
 }

@@ -1,5 +1,5 @@
 //! A Gitaly tar.gz: one sequential pass over the inflating stream. Each
-//! entry is offered lazily, so a file the header already settled is never
+//! entry is offered lazily, so a file the header already decided is never
 //! inflated into memory.
 
 use std::ffi::OsString;

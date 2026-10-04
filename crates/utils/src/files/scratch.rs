@@ -7,7 +7,7 @@ use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::AtomicU64;
 
 use super::limits::charge;
 use super::{Bytes, Options, SourceError};
@@ -18,14 +18,12 @@ pub(super) enum Blob {
     Spilled { offset: u64, len: u64, raw_len: u64 },
 }
 
-/// One anonymous append-only file, opened on the first spill: positional
-/// writes from any thread, positional reads, gone when the store is.
 pub(super) struct Scratch {
     dir: Option<PathBuf>,
     compress: bool,
     cap: Option<u64>,
     file: OnceLock<std::fs::File>,
-    end: AtomicU64,
+    pub(super) end: AtomicU64,
 }
 
 impl Scratch {
@@ -79,9 +77,5 @@ impl Scratch {
         };
         let _ = self.file.set(file);
         Ok(self.file.get().expect("scratch file was just set"))
-    }
-
-    pub(super) fn spilled(&self) -> u64 {
-        self.end.load(Relaxed)
     }
 }

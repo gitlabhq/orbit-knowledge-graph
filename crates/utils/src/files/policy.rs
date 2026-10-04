@@ -52,19 +52,19 @@ impl<T: Tag> File<T> {
         matches!(self.decision(), Decision::Keep(_))
     }
 
-    /// The one verdict after the store is frozen: `judge` runs once, on a
-    /// copy, and its outcome is this file's decision from then on.
-    pub(super) fn judge_once(&self, judge: impl FnOnce(&mut Self)) -> Decision<T> {
+    /// The one decision after the store is frozen: `content` runs once, on
+    /// a copy, and its outcome is this file's decision from then on.
+    pub(super) fn decide_once(&self, content: impl FnOnce(&mut Self)) -> Decision<T> {
         *self.verdict.get_or_init(|| {
             let mut copy = Self::new(self.path.clone(), self.size);
             copy.decided = self.decided;
-            judge(&mut copy);
+            content(&mut copy);
             copy.decided
         })
     }
 
     /// `Pending` after the content passes means no policy objected.
-    pub(super) fn settle(&mut self) {
+    pub(super) fn keep_if_pending(&mut self) {
         if matches!(self.decided, Decision::Pending) {
             self.decided = Decision::Keep(T::default());
         }

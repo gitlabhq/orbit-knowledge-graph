@@ -23,6 +23,9 @@ pub struct Changed<'a> {
     pub paths: Vec<String>,
 }
 
+/// A live checkout changes under us: an entry deleted since it was listed is
+/// skipped. Anything else (a directory we may not read, an I/O fault) would
+/// make the graph claim a repository it did not see, so the run fails.
 impl Source for Checkout<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         let root = self.0;
@@ -45,8 +48,11 @@ impl Source for Checkout<'_> {
                 Box::new(|entry| {
                     let entry = match entry {
                         Ok(entry) => entry,
-                        Err(e) if vanished(&e) => {
-                            warn!(error = %e, "skipping an entry that vanished during the walk");
+                        Err(e)
+                            if e.io_error()
+                                .is_some_and(|io| io.kind() == ErrorKind::NotFound) =>
+                        {
+                            warn!(error = %e, "skipping an entry deleted during the walk");
                             return WalkState::Continue;
                         }
                         Err(e) => return fail(SourceError::Io(std::io::Error::other(e))),
@@ -81,21 +87,12 @@ impl Source for Changed<'_> {
     }
 }
 
-/// A live checkout moves under us: something gone since it was listed is
-/// skipped. Anything else (a directory we may not read, an I/O fault) would
-/// make the graph claim a repository it did not see, so the run fails.
-fn vanished(error: &ignore::Error) -> bool {
-    error
-        .io_error()
-        .is_some_and(|io| io.kind() == ErrorKind::NotFound)
-}
-
 fn put<T: Tag>(root: &Path, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
     let on_disk = root.join(path);
     let metadata = match on_disk.symlink_metadata() {
         Ok(metadata) => metadata,
         Err(e) => {
-            warn!(path, error = %e, "skipping a file that vanished during discovery");
+            warn!(path, error = %e, "skipping a file deleted during discovery");
             return Ok(());
         }
     };
@@ -111,7 +108,7 @@ fn put<T: Tag>(root: &Path, path: &str, into: &Loading<T>) -> Result<(), SourceE
     match std::fs::read_link(&on_disk) {
         Ok(target) => into.put(path, Put::Symlink(target.to_string_lossy().into_owned())),
         Err(e) => {
-            warn!(path, error = %e, "skipping a symlink that vanished during discovery");
+            warn!(path, error = %e, "skipping a symlink deleted during discovery");
             Ok(())
         }
     }

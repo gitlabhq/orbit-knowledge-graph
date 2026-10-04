@@ -18,7 +18,7 @@ enum Role {
 }
 
 /// The shape of a code filter: pngs are listed at the header, `.rs` is a
-/// source, a `.toml` is sniffed first, and a NUL in the bytes lists the file.
+/// source, a `.toml` is read before deciding, and a NUL in the bytes lists the file.
 struct CodeFilter;
 
 impl Pass for CodeFilter {
@@ -185,7 +185,7 @@ fn the_passes_decide_what_is_kept_listed_and_dropped() {
             ("model/weights.bin".into(), Decision::List("binary")),
             ("src/main.rs".into(), Decision::Keep(Role::Source)),
         ],
-        "a sniffed file no pass objected to keeps the default tag"
+        "a file read before deciding, with no objection, keeps the default tag"
     );
     assert_eq!(
         read_error(&vfs, "model/weights.bin"),
@@ -301,7 +301,7 @@ impl Source for Lazy<'_> {
 }
 
 #[test]
-fn a_lazy_file_is_produced_once_and_never_when_the_header_settled_it() {
+fn a_lazy_file_is_produced_once_and_never_when_the_header_decided() {
     let reads = AtomicUsize::new(0);
     let vfs = load(
         Lazy {
@@ -320,7 +320,7 @@ fn a_lazy_file_is_produced_once_and_never_when_the_header_settled_it() {
     assert_eq!(
         reads.load(Ordering::SeqCst),
         2,
-        "only the kept and the sniffed file"
+        "only the kept file and the one read before deciding"
     );
     assert_eq!(text(&vfs, "Cargo.toml"), "[package]");
     assert_eq!(text(&vfs, "src/main.rs"), "fn main() {}");
@@ -545,8 +545,56 @@ fn symlinks_are_listed_followed_inside_the_repository_and_never_escape() {
             "{path} leads nowhere"
         );
     }
+    assert_eq!(
+        read_error(&vfs, "etc/passwd"),
+        ErrorKind::NotFound,
+        "a path through an escaping link leads nowhere too"
+    );
     assert!(vfs.read(Path::new("ping")).is_err(), "a loop ends");
     assert!(vfs.read(Path::new("ping/deeper")).is_err());
+}
+
+/// The store has no host. A symlink whose target exists on this machine,
+/// absolute or relative, reads as nothing, from an archive and from a
+/// checkout alike; a symlinked directory is not walked into.
+#[test]
+#[cfg(unix)]
+fn nothing_on_the_host_is_reachable_through_a_symlink() {
+    let outside = tempfile::tempdir().unwrap();
+    write(outside.path(), "secret.txt", b"hostile");
+    let secret = outside.path().join("secret.txt");
+    let secret_str = secret.to_str().unwrap();
+
+    let checkout = tempfile::tempdir().unwrap();
+    write(checkout.path(), "ok.rs", b"fn ok() {}");
+    std::os::unix::fs::symlink(&secret, checkout.path().join("abs")).unwrap();
+    std::os::unix::fs::symlink(
+        Path::new("..").join(outside.path().file_name().unwrap()),
+        checkout.path().join("sibling"),
+    )
+    .unwrap();
+    let from_checkout = load(Checkout(checkout.path()), (), Limits::default());
+
+    let data = archive(&[
+        Entry::File("root/ok.rs", b"fn ok() {}"),
+        Entry::Symlink("root/abs", secret_str),
+        Entry::Symlink("root/sibling", "../../outside"),
+    ]);
+    let from_archive = load(Archive(&data[..]), (), Limits::default());
+
+    for vfs in [&from_checkout, &from_archive] {
+        assert_eq!(text(vfs, "ok.rs"), "fn ok() {}");
+        for path in ["abs", "sibling", "sibling/secret.txt"] {
+            assert_eq!(read_error(vfs, path), ErrorKind::NotFound, "{path}");
+        }
+        let paths: Vec<&str> = vfs.files().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["abs", "ok.rs", "sibling"],
+            "links are nodes, their targets are not"
+        );
+        assert_eq!(vfs.usage().kept, 10, "nothing from outside was read");
+    }
 }
 
 #[test]
@@ -597,7 +645,7 @@ fn a_checkout_lists_what_git_lists() {
     );
 }
 
-/// A checkout is linked, never copied. The header settles what it can at
+/// A checkout is linked, never copied. The header decides what it can at
 /// discovery; a file whose fate needs its bytes is read then for the
 /// decision only; the rest are checked on the first read, where a content
 /// pass can still turn them down, and the inventory records it.
@@ -619,7 +667,7 @@ fn a_linked_checkout_is_checked_on_first_read() {
     assert_eq!(
         decision("Cargo.toml"),
         Decision::Keep(Role::Input),
-        "sniffed at discovery"
+        "read at discovery"
     );
     assert_eq!(
         decision("assets/logo.png"),
@@ -679,7 +727,7 @@ fn an_unreadable_directory_fails_the_walk() {
 }
 
 #[test]
-fn a_change_set_is_settled_without_a_walk_and_a_vanished_file_is_skipped() {
+fn a_change_set_is_loaded_without_a_walk_and_a_deleted_file_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(root, "a.rs", b"fn a() {}");
@@ -689,7 +737,7 @@ fn a_change_set_is_settled_without_a_walk_and_a_vanished_file_is_skipped() {
     let vfs = load(
         Changed {
             root,
-            paths: vec!["b.png".into(), "a.rs".into(), "vanished.rs".into()],
+            paths: vec!["b.png".into(), "a.rs".into(), "deleted.rs".into()],
         },
         CodeFilter,
         Limits::default(),
@@ -707,6 +755,7 @@ fn a_change_set_is_settled_without_a_walk_and_a_vanished_file_is_skipped() {
 enum Entry<'a> {
     File(&'a str, &'a [u8]),
     Symlink(&'a str, &'a str),
+    Hardlink(&'a str, &'a str),
     Raw(tar::EntryType, &'a str, &'a [u8]),
 }
 
@@ -722,6 +771,11 @@ fn archive(entries: &[Entry]) -> Vec<u8> {
             }
             Entry::Symlink(path, target) => {
                 header.set_entry_type(tar::EntryType::Symlink);
+                header.set_size(0);
+                builder.append_link(&mut header, *path, *target).unwrap();
+            }
+            Entry::Hardlink(path, target) => {
+                header.set_entry_type(tar::EntryType::Link);
                 header.set_size(0);
                 builder.append_link(&mut header, *path, *target).unwrap();
             }
@@ -761,6 +815,7 @@ fn an_archive_is_read_below_its_root_and_only_its_root() {
                 Entry::File("other-root/file.rs", b"elsewhere"),
                 Entry::File(&long, b"fn f() {}"),
                 Entry::Symlink("root/bin/run", "../src/main.rs"),
+                Entry::Hardlink("root/dup.rs", "root/src/main.rs"),
                 Entry::Symlink("root/escape", "/etc/passwd"),
             ])[..],
         ),
@@ -771,11 +826,22 @@ fn an_archive_is_read_below_its_root_and_only_its_root() {
     let paths: Vec<&str> = vfs.files().map(|f| f.path.as_str()).collect();
     assert_eq!(
         paths,
-        ["bin/run", &long["root/".len()..], "escape", "src/main.rs"],
+        [
+            "bin/run",
+            &long["root/".len()..],
+            "dup.rs",
+            "escape",
+            "src/main.rs"
+        ],
         "PAX headers and a foreign root are skipped; names too long for a disk are fine here"
     );
     assert_eq!(text(&vfs, "src/main.rs"), "fn main() {}");
     assert_eq!(text(&vfs, "bin/run"), "fn main() {}");
+    assert_eq!(
+        text(&vfs, "dup.rs"),
+        "fn main() {}",
+        "a hard link names an entry under the root"
+    );
     assert_eq!(read_error(&vfs, "escape"), ErrorKind::NotFound);
     assert_eq!(
         vfs.stat(Path::new("root")).unwrap_err().kind(),

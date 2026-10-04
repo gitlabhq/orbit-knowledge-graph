@@ -57,10 +57,10 @@ impl<T: Tag> Vfs<T> {
     }
 
     /// The bytes of a file. On a linked file no pass has seen, the content
-    /// passes run on this first read, and a refusal becomes the file's
-    /// decision from here on. The node stays either way: a `Drop` decided
-    /// this late is a node that reads as `Unsupported`, and `files()` shows
-    /// it with its reason.
+    /// passes run on this first read, and their decision is the file's from
+    /// here on. The node stays either way: a `Drop` decided this late is a
+    /// node that reads as `Unsupported`, and `files()` shows it with its
+    /// reason.
     pub fn read(&self, path: &Path) -> io::Result<Bytes> {
         let key = self.resolve(path)?;
         let Some(node) = self.node(&key) else {
@@ -82,10 +82,10 @@ impl<T: Tag> Vfs<T> {
         if node.checked {
             return Ok(bytes);
         }
-        let verdict = node
+        match node
             .file
-            .judge_once(|file| self.passes.content(file, &bytes));
-        match verdict {
+            .decide_once(|file| self.passes.content(file, &bytes))
+        {
             Decision::Keep(_) => Ok(bytes),
             _ => Err(unsupported(&node.file)),
         }
@@ -117,8 +117,10 @@ impl<T: Tag> Vfs<T> {
     /// What is at `path`: the node reached through any symlinks, plus the
     /// link target if `path` itself is one. A dangling link is `NotFound`.
     pub fn stat(&self, path: &Path) -> io::Result<Stat<T>> {
-        let own = self.resolve_parents(path)?;
-        let link = self.links.get(&own).map(PathBuf::from);
+        let link = self
+            .links
+            .get(&self.resolve_parents(path)?)
+            .map(PathBuf::from);
         let key = self.resolve(path)?;
         let canonical = Path::new("/").join(&key);
         if let Some(node) = self.node(&key) {

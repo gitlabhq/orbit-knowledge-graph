@@ -6,7 +6,7 @@ use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rustc_hash::{FxHashMap, FxHasher};
@@ -47,7 +47,7 @@ pub struct Loading<T> {
     nodes: Vec<Mutex<Vec<Node<T>>>>,
     blobs: Vec<Mutex<FxHashMap<ContentId, Blob>>>,
     scratch: Scratch,
-    files: AtomicUsize,
+    files: AtomicU64,
     bytes: AtomicU64,
     resident: AtomicU64,
     deduped: AtomicU64,
@@ -73,7 +73,11 @@ pub(super) struct ContentId(pub(super) [u8; 32]);
 
 /// Putting files in, from any thread.
 impl<T: Tag> Loading<T> {
-    pub fn new(passes: impl Pass<Tag = T> + 'static, limits: Limits, options: Options) -> Self {
+    pub(super) fn new(
+        passes: impl Pass<Tag = T> + 'static,
+        limits: Limits,
+        options: Options,
+    ) -> Self {
         Self {
             passes: Arc::new(passes),
             scratch: Scratch::new(&options, limits.spilled_bytes),
@@ -81,7 +85,7 @@ impl<T: Tag> Loading<T> {
             cancelled: options.cancelled,
             nodes: (0..NODE_SHARDS).map(|_| Mutex::default()).collect(),
             blobs: (0..BLOB_SHARDS).map(|_| Mutex::default()).collect(),
-            files: AtomicUsize::new(0),
+            files: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             resident: AtomicU64::new(0),
             deduped: AtomicU64::new(0),
@@ -110,7 +114,7 @@ impl<T: Tag> Loading<T> {
         let mut file = File::new(key, size);
         if let Put::Symlink(target) = what {
             file.decide(Decision::List(LINK_REASON));
-            return self.keep(file, Some(Slot::Link(target)), true);
+            return self.add_node(file, Some(Slot::Link(target)), true);
         }
         match self.limits.file_bytes {
             Some(cap) if size > cap => file.decide(Decision::List(OVERSIZE_REASON)),
@@ -118,52 +122,55 @@ impl<T: Tag> Loading<T> {
         }
         match (file.decision(), what) {
             (Decision::Drop(_), _) => Ok(()),
-            (Decision::List(_), _) => self.keep(file, None, true),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes),
-            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?),
+            (Decision::List(_), _) => self.add_node(file, None, true),
+            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None),
+            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None),
             (Decision::Keep(_), Put::OnDisk { path, .. }) => {
-                self.keep(file, Some(Slot::Linked(path)), false)
+                self.add_node(file, Some(Slot::Linked(path)), false)
             }
-            (Decision::Pending, Put::OnDisk { path, .. }) => self.put_sniffed(file, path),
+            // A pass wants the bytes before deciding: read for the decision
+            // only, then link. A live checkout changes under us; a file
+            // deleted between its listing and this read is not a file of
+            // the repository.
+            (Decision::Pending, Put::OnDisk { path, .. }) => match std::fs::read(&path) {
+                Ok(bytes) => self.put_bytes(file, bytes, Some(path)),
+                Err(e) => {
+                    warn!(path = file.path, error = %e, "skipping a file deleted before it was read");
+                    Ok(())
+                }
+            },
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
         }
     }
 
-    fn put_bytes(&self, mut file: File<T>, bytes: Vec<u8>) -> Result<(), SourceError> {
+    /// The one read: the content passes see the bytes, and a kept file
+    /// keeps them, stored by content or linked where they already are.
+    fn put_bytes(
+        &self,
+        mut file: File<T>,
+        bytes: Vec<u8>,
+        on_disk: Option<PathBuf>,
+    ) -> Result<(), SourceError> {
         self.passes.content(&mut file, &bytes);
-        file.settle();
-        match file.decision() {
-            Decision::Drop(_) => Ok(()),
-            Decision::Keep(_) => {
-                let id = self.store(bytes)?;
-                self.keep(file, Some(Slot::Stored(id)), true)
-            }
-            _ => self.keep(file, None, true),
-        }
-    }
-
-    /// A pass wants the bytes before deciding: read for the decision only,
-    /// then link. A live checkout moves under us; a file gone between its
-    /// listing and this read is not a file of the repository.
-    fn put_sniffed(&self, mut file: File<T>, on_disk: PathBuf) -> Result<(), SourceError> {
-        let bytes = match std::fs::read(&on_disk) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                warn!(path = file.path, error = %e, "skipping a file that vanished before it was read");
-                return Ok(());
-            }
+        file.keep_if_pending();
+        let slot = match (file.decision(), on_disk) {
+            (Decision::Drop(_), _) => return Ok(()),
+            (Decision::Keep(_), Some(path)) => Some(Slot::Linked(path)),
+            (Decision::Keep(_), None) => Some(Slot::Stored(self.store(bytes)?)),
+            _ => None,
         };
-        self.passes.content(&mut file, &bytes);
-        file.settle();
-        match file.decision() {
-            Decision::Drop(_) => Ok(()),
-            Decision::Keep(_) => self.keep(file, Some(Slot::Linked(on_disk)), true),
-            _ => self.keep(file, None, true),
-        }
+        self.add_node(file, slot, true)
     }
 
-    fn keep(&self, file: File<T>, slot: Option<Slot>, checked: bool) -> Result<(), SourceError> {
-        let shard = &self.nodes[hash(&file.path) % NODE_SHARDS];
+    fn add_node(
+        &self,
+        file: File<T>,
+        slot: Option<Slot>,
+        checked: bool,
+    ) -> Result<(), SourceError> {
+        let mut hasher = FxHasher::default();
+        file.path.hash(&mut hasher);
+        let shard = &self.nodes[hasher.finish() as usize % NODE_SHARDS];
         lock(shard).push(Node {
             file,
             slot,
@@ -236,7 +243,7 @@ impl<T: Tag> Loading<T> {
             bytes: self.bytes.load(Relaxed),
             kept: 0,
             resident: self.resident.load(Relaxed),
-            spilled: self.scratch.spilled(),
+            spilled: self.scratch.end.load(Relaxed),
             deduped_bytes: self.deduped.load(Relaxed),
             duplicate_paths: offered - deduped.len(),
         };
@@ -249,12 +256,6 @@ impl<T: Tag> Loading<T> {
             usage,
         }
     }
-}
-
-fn hash(path: &str) -> usize {
-    let mut hasher = FxHasher::default();
-    path.hash(&mut hasher);
-    hasher.finish() as usize
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
