@@ -3,7 +3,7 @@
 
 use std::io::{ErrorKind, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use flate2::write::GzEncoder;
 
