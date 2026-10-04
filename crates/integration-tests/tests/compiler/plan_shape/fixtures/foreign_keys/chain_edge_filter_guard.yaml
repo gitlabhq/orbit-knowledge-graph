@@ -1,0 +1,14 @@
+name: Relationship filters prevent FK-chain substitution
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe","filters":{"target_id":1}},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+  gql: |
+    MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE {target_id: 1}]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job) RETURN mr, pipe, j
+logical:
+  expect: ["(Filter e0.target_id = 1 (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter e0.target_id = 1, ... (_))", "(Scan Table(gl_ci_edge) AS e0)", "(Scan Table(gl_ci_edge) AS e1)"]
+    emitted:
+      expect: ["(Filter e0.target_id = 1, ... (_))", "(Scan Table(gl_ci_edge) AS e0)"]

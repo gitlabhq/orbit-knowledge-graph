@@ -1,0 +1,19 @@
+name: Filtered path endpoints use bounded current-row anchor keys
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","filters":{"username":"alice"}},{"id":"b","entity":"Group","node_ids":[100]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":1,"rel_types":["MEMBER_OF"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:User {username: 'alice'})-[:MEMBER_OF*1..1]->(b:Group {id: 100}) RETURN p
+logical:
+  expect: ["(Filter a.username = 'alice' (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+    emitted:
+      definition_order: [_nf_a, forward]
+      expect:
+        - (CTE _nf_a (Limit 500 (_)))
+        - (Filter a.username = 'alice' (Deduplicate Final (Scan Table(gl_user) AS a)))
+        - (Filter e1.source_id IN _nf_a.id, ... (_))
+      reject: ["(CTE _path_scope_traversal_paths (_))", "(Scan Table(gl_group) ...)"]

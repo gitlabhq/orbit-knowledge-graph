@@ -1,0 +1,16 @@
+name: A high-selectivity property creates candidate keys for an ordered node
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"},"columns":["name"]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"order_by":"a.name"}
+  gql: |
+    MATCH (a:Definition {name: 'compile'})-[:CALLS]->(b:Definition) RETURN a.name, b ORDER BY a.name
+logical:
+  expect: ["(Sort a.name (_))"]
+physical:
+  clickhouse:
+    planned:
+      definition_order: [_filter_a]
+      expect: ["(CTE _filter_a (Project a.id AS id (Deduplicate LimitBy ... (Filter a.name = 'compile', a._deleted = false (Scan Table(gl_definition) AS a)))))", "(Filter e0.source_id IN _filter_a.id, ... (_))"]
+    emitted:
+      definition_order: [_filter_a]
+      expect: ["(Filter e0.source_id IN _filter_a.id, ... (_))", "(Bind a (Project * (Filter a.name = 'compile', a._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS a)))))"]

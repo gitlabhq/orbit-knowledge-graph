@@ -1,0 +1,16 @@
+name: Wildcard paths restrict first-hop kinds from endpoint metadata
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["*"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:Definition {id: 1})-[*1..2]->(b:Definition {id: 2}) RETURN p
+logical:
+  expect: ["(Input path_finding (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding a->b depth=2 forward=1 backward=1 scoped=true tables=? relationships=[*] forward_kinds=[CALLS, DEFINES, EXTENDS] backward_kinds=[CALLS, DEFINES, EXTENDS, IMPORTS] (_) (_))"]
+    emitted:
+      expect:
+        - (CTE forward (Project ... (Filter e1.relationship_kind IN ?, e1.source_kind = 'Definition', ... (_))))
+        - (CTE backward (Project ... (Filter e1.relationship_kind IN ?, e1.target_kind = 'Definition', ... (_))))
