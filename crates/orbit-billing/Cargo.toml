@@ -13,6 +13,7 @@ labkit = { workspace = true }
 labkit-events = { workspace = true }
 orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
+orbit-utils = { path = "../utils" }
 moka = { workspace = true }
 opentelemetry = { workspace = true }
 query-engine = { path = "../query-engine" }
@@ -21,6 +22,7 @@ reqwest = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tonic = { workspace = true }
 tonic-types = { workspace = true }
 tracing = { workspace = true }

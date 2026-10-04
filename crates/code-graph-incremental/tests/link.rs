@@ -2,7 +2,7 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
-    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite,
+    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite, Sources,
 };
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
@@ -23,13 +23,17 @@ def run():
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     for (path, content) in files {
-        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         std::fs::write(root.join(path), content).unwrap();
     }
 }
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    Pipeline::new(Context::new(env), inventory::walk(root).unwrap())
+    let entries = inventory::walk(root).unwrap().into_inner();
+    let sources = Sources {
+        root: root.to_path_buf(),
+        entries,
+    };
+    Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
@@ -97,8 +101,6 @@ fn linking_a_file_yields_its_local_edges() {
     );
 }
 
-/// A blob under a source extension cannot be settled from its header; it is
-/// read once, by the worker that would have parsed it, and turned down there.
 #[test]
 fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
     let repo = tempfile::tempdir().unwrap();
@@ -108,7 +110,6 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
             ("main.py", MAIN.as_bytes()),
             ("README.md", b"# hi\n"),
             ("logo.png", b"\x89PNG\x00\x00"),
-            ("blob.py", b"\x00\x01\x02 not python"),
         ],
     );
     let env = python_env(Limits::UNLIMITED);
@@ -126,56 +127,15 @@ fn every_file_gets_a_tree_and_unparsed_ones_carry_their_reason() {
         })
         .collect();
     rows.sort();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 3);
     assert_eq!(rows[0], ("README.md".into(), 0, None));
-    assert_eq!(rows[1], ("blob.py".into(), 0, Some("skip_binary")));
     assert_eq!(
-        rows[2],
+        rows[1],
         ("logo.png".into(), 0, Some("skip_excluded_extension"))
     );
-    assert_eq!(rows[3].0, "main.py");
-    assert!(rows[3].1 > 0);
+    assert_eq!(rows[2].0, "main.py");
+    assert!(rows[2].1 > 0);
     assert_eq!(graph.dirty.len(), 1, "only the parsed file needs resolving");
-}
-
-/// A manifest the repository lists but cannot read when the resolver wants
-/// it (gone from a live checkout) keeps a row that says so.
-#[test]
-fn an_unreadable_manifest_keeps_a_row_tagged_with_the_fault() {
-    let repo = tempfile::tempdir().unwrap();
-    write_all(
-        repo.path(),
-        &[
-            ("src/lib.rs", b"pub fn f() {}\n"),
-            ("Cargo.toml", b"[package]\nname = \"x\"\n"),
-        ],
-    );
-    let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
-    let files = inventory::walk(repo.path()).unwrap();
-    std::fs::remove_file(repo.path().join("Cargo.toml")).unwrap();
-
-    let graph = Pipeline::new(Context::new(&env), files)
-        .then(Prepare)
-        .unwrap()
-        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
-        .unwrap()
-        .then(Insert)
-        .unwrap()
-        .into_value();
-
-    let reason_key = env.lang.syms.lookup("reason");
-    let manifest = graph
-        .state
-        .trees
-        .iter()
-        .find(|t| t.label == "Cargo.toml")
-        .expect("the manifest keeps its row");
-    assert_eq!(
-        manifest
-            .get_tag(0, reason_key)
-            .map(|v| env.lang.syms.resolve(v)),
-        Some("fault_file_read")
-    );
 }
 
 #[test]

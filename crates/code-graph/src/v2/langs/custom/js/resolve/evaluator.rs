@@ -5,10 +5,6 @@ use oxc::span::SourceType;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use orbit_utils::files::Vfs;
-
-use crate::v2::pipeline::VIRTUAL_ROOT as REPO_ROOT;
-
 use crate::utils::exceeds_nesting_cap;
 
 const MAX_EVAL_MODULES: usize = 64;
@@ -31,7 +27,7 @@ pub(super) enum EvaluatedValue {
 }
 
 struct AliasEvalContext<'a> {
-    vfs: &'a Vfs,
+    root_dir: &'a Path,
     config_dir: &'a Path,
     module_depth: usize,
 }
@@ -50,7 +46,7 @@ pub(super) struct ModuleEvalCache {
 }
 
 pub(super) fn evaluate_module_exports(
-    vfs: &Vfs,
+    root_dir: &Path,
     module_path: &Path,
     cache: &mut ModuleEvalCache,
     depth: usize,
@@ -59,7 +55,8 @@ pub(super) fn evaluate_module_exports(
         return None;
     }
 
-    let module_path = existing_repo_path(vfs, &normalize_path(module_path.to_path_buf()))?;
+    let module_path =
+        canonical_repo_existing_path(root_dir, &normalize_path(module_path.to_path_buf()))?;
     if let Some(cached) = cache.exports.get(&module_path) {
         return cached.clone();
     }
@@ -68,7 +65,7 @@ pub(super) fn evaluate_module_exports(
         return None;
     }
 
-    let module_len = vfs.metadata(&module_path).ok()?.len;
+    let module_len = std::fs::metadata(&module_path).ok()?.len();
     if module_len > MAX_EVAL_FILE_BYTES
         || cache.total_bytes.saturating_add(module_len) > MAX_EVAL_TOTAL_BYTES
     {
@@ -83,12 +80,12 @@ pub(super) fn evaluate_module_exports(
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
     {
-        vfs.read_to_string(&module_path)
+        std::fs::read_to_string(&module_path)
             .ok()
             .and_then(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
             .and_then(json_to_evaluated)
     } else {
-        evaluate_script_module(vfs, &module_path, cache, depth)
+        evaluate_script_module(root_dir, &module_path, cache, depth)
     };
 
     cache.exports.insert(module_path, evaluated.clone());
@@ -96,12 +93,12 @@ pub(super) fn evaluate_module_exports(
 }
 
 fn evaluate_script_module(
-    vfs: &Vfs,
+    root_dir: &Path,
     module_path: &Path,
     cache: &mut ModuleEvalCache,
     depth: usize,
 ) -> Option<EvaluatedValue> {
-    let source = vfs.read_to_string(module_path).ok()?;
+    let source = std::fs::read_to_string(module_path).ok()?;
     if exceeds_nesting_cap(&source) {
         return None;
     }
@@ -114,8 +111,8 @@ fn evaluate_script_module(
     }
 
     let context = AliasEvalContext {
-        vfs,
-        config_dir: module_path.parent().unwrap_or(Path::new(REPO_ROOT)),
+        root_dir,
+        config_dir: module_path.parent().unwrap_or(root_dir),
         module_depth: depth,
     };
     let mut state = AliasEvalState::default();
@@ -822,7 +819,7 @@ fn evaluate_call_expression(
         (EvaluatedValue::FsModule, "existsSync") => {
             let path = evaluate_argument_string(call.arguments.first()?, context, state, cache)?;
             Some(EvaluatedValue::Bool(
-                contained_repo_path(context.vfs, context.config_dir, &path).is_some(),
+                contained_repo_existing_path(context.root_dir, context.config_dir, &path).is_some(),
             ))
         }
         _ => None,
@@ -839,7 +836,12 @@ fn evaluate_require_call(
         "fs" => Some(EvaluatedValue::FsModule),
         _ => {
             let module_path = resolve_local_module_path(context, specifier)?;
-            evaluate_module_exports(context.vfs, &module_path, cache, context.module_depth + 1)
+            evaluate_module_exports(
+                context.root_dir,
+                &module_path,
+                cache,
+                context.module_depth + 1,
+            )
         }
     }
 }
@@ -856,7 +858,7 @@ fn resolve_local_module_path(context: &AliasEvalContext<'_>, specifier: &str) ->
     };
     let base = normalize_path(base);
 
-    if let Some(candidate) = existing_repo_path(context.vfs, &base)
+    if let Some(candidate) = canonical_repo_existing_path(context.root_dir, &base)
         && candidate.is_file()
     {
         return Some(candidate);
@@ -864,19 +866,19 @@ fn resolve_local_module_path(context: &AliasEvalContext<'_>, specifier: &str) ->
 
     for extension in super::super::constants::EVAL_EXTENSIONS {
         let candidate = PathBuf::from(format!("{}.{}", base.to_string_lossy(), extension));
-        if let Some(candidate) = existing_repo_path(context.vfs, &candidate)
+        if let Some(candidate) = canonical_repo_existing_path(context.root_dir, &candidate)
             && candidate.is_file()
         {
             return Some(candidate);
         }
     }
 
-    if let Some(base_dir) = existing_repo_path(context.vfs, &base)
+    if let Some(base_dir) = canonical_repo_existing_path(context.root_dir, &base)
         && base_dir.is_dir()
     {
         for extension in super::super::constants::EVAL_EXTENSIONS {
             let candidate = base_dir.join(format!("index.{extension}"));
-            if let Some(candidate) = existing_repo_path(context.vfs, &candidate)
+            if let Some(candidate) = canonical_repo_existing_path(context.root_dir, &candidate)
                 && candidate.is_file()
             {
                 return Some(candidate);
@@ -986,16 +988,26 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     normalized
 }
 
-/// A normalized repository path, if the repository has it.
-fn existing_repo_path(vfs: &Vfs, path: &Path) -> Option<PathBuf> {
-    vfs.exists(path).then(|| path.to_path_buf())
+/// Thin wrapper around `orbit_utils::fs::contained_canonical_path` so the
+/// evaluator's existing call sites read unchanged. All security-relevant
+/// path-containment logic lives in `crates/utils/src/fs.rs` as a SSOT.
+fn canonical_repo_existing_path(root_dir: &Path, path: &Path) -> Option<PathBuf> {
+    orbit_utils::fs::contained_canonical_path(root_dir, path)
 }
 
-pub(super) fn contained_repo_path(vfs: &Vfs, config_dir: &Path, path: &str) -> Option<PathBuf> {
+pub(super) fn contained_repo_path(
+    root_dir: &Path,
+    config_dir: &Path,
+    path: &str,
+) -> Option<PathBuf> {
     let candidate = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
         config_dir.join(path)
     };
-    existing_repo_path(vfs, &normalize_path(candidate))
+    canonical_repo_existing_path(root_dir, &normalize_path(candidate))
+}
+
+fn contained_repo_existing_path(root_dir: &Path, config_dir: &Path, path: &str) -> Option<PathBuf> {
+    contained_repo_path(root_dir, config_dir, path).filter(|candidate| candidate.exists())
 }

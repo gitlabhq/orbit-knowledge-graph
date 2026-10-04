@@ -44,7 +44,8 @@ fn envelope() -> Envelope<'static> {
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    templates::index(Context::new(&env), inventory::walk(root).unwrap())
+    let inventory = inventory::walk(root).unwrap().into_inner();
+    templates::index(Context::new(&env), root, inventory)
         .unwrap()
         .then(Display)
         .unwrap()
@@ -238,10 +239,10 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let files = inventory::walk(repo.path()).unwrap();
+    let inventory = inventory::walk(repo.path()).unwrap().into_inner();
     let mut seen: Vec<(String, usize)> = Vec::new();
 
-    let displayed = templates::index(Context::new(&env), files)
+    let displayed = templates::index(Context::new(&env), repo.path(), inventory)
         .unwrap()
         .then(Display)
         .unwrap()

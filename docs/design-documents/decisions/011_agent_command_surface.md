@@ -69,6 +69,8 @@ The schema-discovery commands (`get_query_dsl`, `get_response_format`) directly 
 
 Both schema-discovery commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
 
+GQL has no `get_query_dsl` command. Its `query_graph` description includes brief openCypher 9-based syntax rules, capped below 512 bytes, in the response to `list_commands`. Other descriptions keep the 400-byte cap, except `list_commands`, which includes command summaries. Both query modes keep large schemas out of descriptions.
+
 ### Skills are not commands
 
 Skills are a CLI delivery channel, not an agent capability. The typed `ListSkills`
@@ -86,6 +88,9 @@ guarantee: concurrent changes can choose the same next version, and an explicit
 
 `ListSkills` returns each skill's name, version, description, and compatibility.
 `GetSkill` returns the versioned tree, or no files when `metadata_only` is true.
+Both requests carry the caller's `language`. GQL callers get `SKILL.gql.md` as
+`SKILL.md`, whose version carries `+gql` so ETags and caches differ by mode. A
+missing language selects JSON; an unknown one rejects with `INVALID_ARGUMENT`.
 Full-tree responses sort normalized relative paths and include each UTF-8 file's
 SHA-256 for integrity verification. Both responses include `server_version` as
 deployment provenance; it is not part of skill identity.

@@ -13,9 +13,13 @@ option go_package = "gitlab.com/gitlab-org/orbit/knowledge-graph/clients/orbitpb
 // Controls output serialization across all data RPCs.
 // RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 // LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
+// GQL returns query results as a text table of graph patterns such as
+// (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 2}). Only ExecuteQuery
+// honors it; other RPCs treat it as RAW.
 enum ResponseFormat {
   RESPONSE_FORMAT_RAW = 0;
   RESPONSE_FORMAT_LLM = 1;
+  RESPONSE_FORMAT_GQL = 2;
 }
 
 // Concrete encoding produced by the server. QueryMetadata carries this
@@ -24,6 +28,7 @@ enum ResponseFormat {
 enum FormatName {
   FORMAT_NAME_RAW = 0;
   FORMAT_NAME_GOON = 1;
+  FORMAT_NAME_GQL = 2;
 }
 
 // Core service API. Gated behind the :knowledge_graph feature flag
@@ -120,7 +125,7 @@ enum QueryLanguage {
 // Client-sent initial message to start a query.
 message ExecuteQueryRequest {
   string query = 1;
-  ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text
+  ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: GOON text; GQL: graph pattern table
   QueryType query_type = 3;
   QueryLanguage language = 4;
 }
@@ -129,7 +134,7 @@ message ExecuteQueryRequest {
 message ExecuteQueryResult {
   oneof content {
     string result_json = 1;     // format = RAW: structured JSON
-    string formatted_text = 2;  // format = LLM: compact text
+    string formatted_text = 2;  // format = LLM or GQL: compact text
   }
   QueryMetadata metadata = 3;
 }
@@ -247,7 +252,9 @@ message GetQueryDslResponse {
 // ---------------------------------------------------------------------------
 
 // Request for the embedded skill catalog.
-message ListSkillsRequest {}
+message ListSkillsRequest {
+  QueryLanguage language = 1;  // Selects the query mode the served skills teach
+}
 
 // Response listing every skill embedded in the deployed server.
 message ListSkillsResponse {
@@ -268,6 +275,7 @@ message SkillSummary {
 message GetSkillRequest {
   string name = 1;
   bool metadata_only = 2;  // true omits files for a cheap cache revalidation
+  QueryLanguage language = 3;  // Selects the query mode the served skill teaches
 }
 
 message GetSkillResponse {

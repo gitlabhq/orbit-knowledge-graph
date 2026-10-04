@@ -3,12 +3,11 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
-use code_graph::v2::config::{Language, detect_language_from_path};
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, FamilyFileInput, GraphStatsCounters, OnBatch, Pipeline, PipelineConfig,
-    PipelineContext, Vfs,
+    BatchTx, Decision, FileInventory, FileInventoryEntry, GraphStatsCounters, OnBatch, Pipeline,
+    PipelineConfig, PipelineContext,
 };
 use duckdb_client::DuckDbClient;
 
@@ -52,12 +51,17 @@ pub fn run_yaml_suite(yaml: &str) {
     );
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
-    let vfs = Vfs::default();
-    for (path, size) in write_suite_files(&suite, tmp.path()) {
-        vfs.link(&path, tmp.path().join(&path), size)
-            .expect("link suite file");
-    }
-    let vfs = Arc::new(vfs);
+    let file_inventory: Vec<FileInventoryEntry> = write_suite_files(&suite, tmp.path())
+        .into_iter()
+        .map(|(path, size)| FileInventoryEntry {
+            path,
+            size,
+            decision: Decision::Parse,
+            label: Default::default(),
+        })
+        .collect();
+
+    let root = tmp.path().to_string_lossy().to_string();
 
     let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
     let tracer = Tracer::new(trace_any);
@@ -90,13 +94,24 @@ pub fn run_yaml_suite(yaml: &str) {
         None | Some("generic") => {
             let config = PipelineConfig::default();
             let on_batch = on_batch_for(&client);
+            let inventory: Arc<FileInventory> =
+                Arc::new(FileInventory::new(file_inventory.clone()));
             let result = if let Some(pool) = &pool {
                 let c = converter.clone();
                 let ob = on_batch.clone();
-                let vfs = vfs.clone();
-                pool.install(move || Pipeline::run_with_tracer(vfs, config, tracer, c, ob))
+                let inventory = inventory.clone();
+                pool.install(move || {
+                    Pipeline::run_with_tracer(tmp.path(), inventory, config, tracer, c, ob)
+                })
             } else {
-                Pipeline::run_with_tracer(vfs.clone(), config, tracer, converter.clone(), on_batch)
+                Pipeline::run_with_tracer(
+                    tmp.path(),
+                    inventory,
+                    config,
+                    tracer,
+                    converter.clone(),
+                    on_batch,
+                )
             };
             assert!(
                 result.errors.is_empty(),
@@ -106,20 +121,20 @@ pub fn run_yaml_suite(yaml: &str) {
             result.ctx.clone()
         }
         Some(tag) => {
-            let files: Vec<FamilyFileInput> = vfs
-                .files()
-                .into_iter()
-                .map(|f| FamilyFileInput {
-                    language: detect_language_from_path(&f.path).unwrap_or(Language::JavaScript),
-                    path: f.path,
-                    size: f.size,
-                })
+            let files: Vec<String> = suite
+                .fixtures
+                .iter()
+                .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let ctx = Arc::new(PipelineContext::new(
-                vfs.clone(),
-                PipelineConfig::default(),
+            let ctx = Arc::new(PipelineContext {
+                config: PipelineConfig::default(),
                 tracer,
-            ));
+                root_path: root.clone(),
+                skipped: Mutex::new(Vec::new()),
+                faults: Mutex::new(Vec::new()),
+                file_timings: Mutex::new(Vec::new()),
+                language_timings: Mutex::new(Vec::new()),
+            });
             let (tx, rx) = crossbeam_channel::unbounded();
             let on_batch = {
                 let tx = tx.clone();

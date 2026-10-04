@@ -28,8 +28,41 @@ chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c
 # ---------------------------------------------------------------------------
 log "[1/4] bringing up gitlab-dev-stack + Orbit in the background"
 mise -C "$CAPRONI_DIR" install
+# MR runs test the MR's own image; main keeps the tag in values/gkg.yaml.
+if [ -n "${GKG_IMAGE_TAG:-}" ]; then
+  sed -i "s|^  tag: .*|  tag: \"${GKG_IMAGE_TAG}\"|" "$CAPRONI_DIR/values/gkg.yaml"
+  log "     gkg image tag: ${GKG_IMAGE_TAG}"
+fi
+# Blocks until the MR image is pushed (built in parallel by docker-build-mr).
+wait_for_image() {
+  [ -n "${GKG_IMAGE_TAG:-}" ] || return 0
+  # Log in like the other registry scripts, so an auth failure can't pass for "not pushed yet".
+  if [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
+    echo "$CI_REGISTRY_PASSWORD" | mise -C "$CAPRONI_DIR" exec -- docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" >/dev/null \
+      || log "     docker login failed, continuing without credentials (anonymous reads work)"
+  fi
+  log "     waiting for image ${GKG_IMAGE}:${GKG_IMAGE_TAG} (built by docker-build-mr)"
+  local start=$SECONDS
+  for i in $(seq 1 90); do
+    if mise -C "$CAPRONI_DIR" exec -- docker manifest inspect "${GKG_IMAGE}:${GKG_IMAGE_TAG}" >/dev/null 2>&1; then
+      if [ "$i" -eq 1 ]; then
+        log "     image already pushed"
+      else
+        log "     image pushed after waiting $(( SECONDS - start ))s"
+      fi
+      return 0
+    fi
+    [ $(( i % 6 )) -eq 0 ] && log "     still waiting for image ($(( SECONDS - start ))s so far)"
+    sleep 10
+  done
+  log "     image not pushed after 15 min; did docker-build-mr fail or was it not played?"
+  return 1
+}
 UP_LOG="$ROOT/caproni-up.log"
+# fd 3 keeps the image-wait messages in the live job log; the rest goes to UP_LOG.
+exec 3>&2
 (
+  wait_for_image 2>&3
   cap --debug up
   kc wait -n gitlab --for=condition=Ready pod \
     -l app.kubernetes.io/name=gkg,app.kubernetes.io/component=webserver --timeout=600s
@@ -166,10 +199,17 @@ export GKG_JWT_SECRET
 GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.gitlab-jwt-signing-key}' | base64 -d)"
 [ -n "$GKG_JWT_SECRET" ] || { echo "could not read gkg JWT signing key" >&2; exit 1; }
 
+REPORT="$ROOT/loadtest-results.md"
+{
+  echo "## Orbit perf: gRPC load test"
+  echo
+  echo "Commit \`${CI_COMMIT_SHORT_SHA:-local}\` · image \`${GKG_IMAGE_TAG:-dev}\` · [job](${CI_JOB_URL:-}) · synth \`${SYNTH_CONFIG}\`"
+  echo
+} > "$REPORT"
 xtask loadtest \
   --endpoint http://127.0.0.1:50054 \
   --rounds "$ROUNDS" \
   --concurrency "$CONCURRENCY" \
-  | tee "$ROOT/loadtest-results.md"
+  | tee -a "$REPORT"
 
 log "done. results in loadtest-results.md"

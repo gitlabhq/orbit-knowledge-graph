@@ -350,7 +350,6 @@ tests:
       MATCH (d:Definition)
       WHERE d.definition_type = 'Module'
       RETURN d.fqn AS fqn
-      LIMIT 100
     assert:
       - { row: { fqn: "named/util.ts" } }
       - { row: { fqn: "default/util.ts" } }

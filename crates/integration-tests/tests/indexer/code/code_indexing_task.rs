@@ -685,7 +685,49 @@ async fn reindex_tombstones_only_the_vanished_keys() {
 }
 
 #[tokio::test]
-async fn repeated_reindexes_keep_only_the_latest_definitions() {
+async fn disk_is_clean_after_successful_indexing() {
+    let project_id: i64 = 4;
+    let commit_sha = "abc123";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main {
+            public void save() {}
+        }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(&handler, &clickhouse, project_id, commit_sha, 1, "1/4/").await;
+
+    assert_code_indexed(&clickhouse, project_id).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after indexing, found: {remaining:?}"
+    );
+}
+
+#[tokio::test]
+async fn disk_is_clean_after_multiple_reindexes() {
     let project_id: i64 = 5;
 
     let clickhouse = integration_testkit::TestContext::new(&[
@@ -702,6 +744,7 @@ async fn repeated_reindexes_keep_only_the_latest_definitions() {
     );
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
     index_code(&handler, &clickhouse, project_id, "commit1", 1, "1/5/").await;
@@ -719,7 +762,18 @@ async fn repeated_reindexes_keep_only_the_latest_definitions() {
     index_code(&handler, &clickhouse, project_id, "commit3", 3, "1/5/").await;
 
     assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v3"]).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after repeated indexing, found: {remaining:?}"
+    );
 }
+
 #[tokio::test]
 async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let project_id: i64 = 6;
@@ -1788,6 +1842,45 @@ async fn heartbeat_keeps_a_slow_job_alive_and_indexes_it() {
         locks.renew_count() >= 3,
         "the heartbeat must renew the lock during the slow fetch; got {} renews",
         locks.renew_count(),
+    );
+}
+
+#[tokio::test]
+async fn disk_is_clean_after_a_timed_out_job() {
+    let project_id: i64 = 991;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+
+    // 1s budget vs a 3s fetch: the job is dropped mid-run, so cleanup runs via the TempDir drop.
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        orbit_server_config::CodeIndexingPipelineConfig {
+            job_timeout_secs: 1,
+            ..indexer::testkit::test_pipeline_configuration()
+        },
+    );
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 1, "991/991/");
+    envelope.attempt = 1;
+    let _ = handler.handle(handler_context(), envelope).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "a dropped job must not leak its extraction dir, found: {remaining:?}"
     );
 }
 

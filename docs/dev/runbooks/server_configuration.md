@@ -544,6 +544,20 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 
 In `license_checksum` mode the gate sends the instance's license checksum as `X-License-Token`. GitLab adds it to the Orbit JWT as the `license_checksum` claim when the instance has an online cloud license. No CDot credentials are deployed. Requests without the claim skip the check and are allowed with a warning (`decision=skipped` on `gkg.billing.quota.decisions`). A CDot `401` (expired or unknown license) fails open with a warning and is not cached. Cached decisions are not keyed on the license, so a renewal can take up to one cache TTL to take effect. Orbit pods need egress to `customers_dot_url`. The claim travels inside the JWT, so use TLS between GitLab and Orbit when that traffic leaves a trusted network.
 
+Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` query parameter, so CDot logs can be traced back to Orbit requests.
+
+### Enforced builds
+
+Images built with the `ORBIT_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
+
+- `billing.enabled` and `billing.quota.enabled` are both `true`.
+- `billing.quota.customers_dot_url` and `billing.collector_url` exactly match one environment pair. A trailing slash is allowed; any other difference, such as a path, a port or different capitalisation, is rejected:
+  - production: `https://customers.gitlab.com` with `https://billing.prdsub.gitlab.net`
+  - staging: `https://customers.staging.gitlab.com` with `https://billing.stgsub.gitlab.net`
+- The auth modes belong to one family: `admin_token` with `oidc`, or `license_checksum` with `cloud_connector`.
+
+The switch is compiled into the binary, so the config map cannot change it. The build argument defaults to `false`, which skips these checks. The startup log reports `billing_enforced`.
+
 ## Object storage
 
 Names the bucket Orbit will use for cold storage and how to authenticate to it. Disabled by default; nothing reads the store yet. The `orbit-object-storage` crate turns this section into an `object_store` client for S3, S3-compatible stores, Google Cloud Storage, or a local directory.

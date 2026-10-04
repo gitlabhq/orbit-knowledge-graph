@@ -1,21 +1,32 @@
 //! Named workflows. Each one composes phases and nothing else; callers
 //! compose their own when they need to stop somewhere in between.
 
-use std::sync::Arc;
+use std::path::Path;
 
-use orbit_utils::files::Vfs;
+use orbit_utils::fs_walk::FileInventoryEntry;
 
 use crate::error::Error;
 use crate::pipeline::{
     Canonicalize, Changes, Context, Each, Insert, ItemPhase, Link, Parse, Pipeline, Prepare,
-    ReindexInput, Remap, Resolve, Resolved, Rewrite, State,
+    ReindexInput, Remap, Resolve, Resolved, Rewrite, Sources, State,
 };
 
 /// Every file of the repository: parse entries go through parse, rewrite,
 /// link and cross-file resolution; everything else becomes a `File` row
 /// carrying the reason it was not parsed.
-pub fn index<'e>(context: Context<'e>, repo: Arc<Vfs>) -> Result<Pipeline<'e, Resolved>, Error> {
-    Pipeline::new(context, repo)
+pub fn index<'e, S>(
+    context: Context<'e>,
+    root: &Path,
+    inventory: S,
+) -> Result<Pipeline<'e, Resolved>, Error>
+where
+    S: IntoIterator<Item = FileInventoryEntry>,
+{
+    let sources = Sources {
+        root: root.to_path_buf(),
+        entries: inventory.into_iter().collect(),
+    };
+    Pipeline::new(context, sources)
         .then(Prepare)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?
         .then(Insert)?
@@ -27,9 +38,14 @@ pub fn index<'e>(context: Context<'e>, repo: Arc<Vfs>) -> Result<Pipeline<'e, Re
 pub fn reindex<'e>(
     context: Context<'e>,
     state: State,
+    root: &Path,
     changes: Changes,
 ) -> Result<Pipeline<'e, Resolved>, Error> {
-    let input = ReindexInput { state, changes };
+    let input = ReindexInput {
+        state,
+        root: root.to_path_buf(),
+        changes,
+    };
     Pipeline::new(context, input)
         .then(Remap)?
         .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))?

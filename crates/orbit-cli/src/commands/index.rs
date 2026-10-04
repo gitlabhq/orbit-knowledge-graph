@@ -579,17 +579,19 @@ fn index_repo(
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
+    let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let filter = code_graph::v2::config::CodeFilter::new(
+    let mut filter = code_graph::v2::config::CodeFilter::new(
         Some(MAX_INDEXED_FILE_BYTES),
         None,
         code_graph::v2::config::detect_language_from_path,
     );
-    let files = std::sync::Arc::new(code_graph::v2::Vfs::new(filter, None));
-    orbit_utils::files::disk::discover(&git.repo_path, &files)
-        .context("failed to walk repository files")?;
+    let file_inventory = std::sync::Arc::new(
+        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
+            .context("failed to walk repository files")?,
+    );
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
@@ -618,7 +620,8 @@ fn index_repo(
 
     let cancel = pipeline_config.cancel.clone();
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
-        files.clone(),
+        std::path::Path::new(&root_path),
+        file_inventory,
         pipeline_config,
         tracer,
         converter,
@@ -657,7 +660,7 @@ fn index_repo(
         &client,
         &doc_table,
         ontology,
-        &files,
+        &git.repo_path,
         git.project_id,
         &git.commit_sha,
     )

@@ -1,9 +1,11 @@
+use std::path::Path;
+
 use std::sync::Arc;
 
 use crate::v2::error::AnalyzerError;
 use crate::v2::pipeline::{
-    BatchTx, FamilyFileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
-    PipelineError, ProgressPhase, VIRTUAL_ROOT,
+    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
+    PipelineError, ProgressPhase,
 };
 use crate::v2::sentinel;
 use rustc_hash::FxHashMap;
@@ -16,10 +18,11 @@ pub struct JsPipeline;
 
 impl LanguagePipeline for JsPipeline {
     fn process_files(
-        files: &[FamilyFileInput],
+        files: &[FileInput],
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
+        let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
         if files.is_empty() {
@@ -33,7 +36,13 @@ impl LanguagePipeline for JsPipeline {
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
         let progress = ctx.config.progress.as_ref();
-        let (analyzed_files, errors) = analyze_files(files, ctx, sentinel_handle, progress);
+        let (analyzed_files, errors) = analyze_files(
+            files,
+            root_path,
+            sentinel_handle,
+            &ctx.config.cancel,
+            progress,
+        );
         progress.files_advanced(ProgressPhase::Resolve, errors.len());
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -57,7 +66,7 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let mut builder = JsModuleGraphBuilder::new(VIRTUAL_ROOT.to_string());
+        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
@@ -83,8 +92,7 @@ impl LanguagePipeline for JsPipeline {
         // One probe: every manifest/config file JS resolution cares about
         // is read exactly once here, then shared with the resolver,
         // evaluator, and tsconfig discovery below.
-        let indexed_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-        let probe = WorkspaceProbe::load(ctx.vfs.clone(), &indexed_paths);
+        let probe = WorkspaceProbe::load(Path::new(root_path), files);
 
         let (mut graph, modules) = builder.into_parts();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
@@ -107,7 +115,14 @@ impl LanguagePipeline for JsPipeline {
         graph.finalize(tracer);
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let resolve_ms = total_ms - parse_ms - graph_build_ms;
-        let total_bytes: u64 = files.iter().map(|f| f.size).sum();
+        let total_bytes: u64 = resolved_files
+            .iter()
+            .map(|f| {
+                std::fs::metadata(format!("{root_path}/{}", f.relative_path))
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            })
+            .sum();
 
         ctx.record_language_timing(LanguageTimings {
             language: "java_script".to_string(),
@@ -134,7 +149,8 @@ impl LanguagePipeline for JsPipeline {
 mod tests {
     use super::*;
     use crate::v2::langs::custom::js::extract::MAX_FILE_BYTES;
-    use crate::v2::pipeline::{GraphStatsCounters, testing};
+    use crate::v2::pipeline::GraphStatsCounters;
+    use crate::v2::pipeline::PipelineConfig;
     use crate::v2::sink::GraphConverter;
     use arrow::record_batch::RecordBatch;
     use std::sync::Mutex;
@@ -150,7 +166,19 @@ mod tests {
         }
     }
 
-    fn run_js(ctx: &Arc<PipelineContext>, files: &[FamilyFileInput]) {
+    fn make_ctx(root: &Path) -> Arc<PipelineContext> {
+        Arc::new(PipelineContext {
+            config: PipelineConfig::default(),
+            tracer: crate::v2::trace::Tracer::new(false),
+            root_path: root.to_string_lossy().into_owned(),
+            skipped: Mutex::new(Vec::new()),
+            faults: Mutex::new(Vec::new()),
+            file_timings: Mutex::new(Vec::new()),
+            language_timings: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn run_js(ctx: &Arc<PipelineContext>, files: &[FileInput]) {
         let conv = NoopConverter;
         let on_batch = |_: &str, _: RecordBatch| Ok(());
         let dirs = AtomicUsize::new(0);
@@ -171,10 +199,14 @@ mod tests {
     #[test]
     fn oversize_js_file_records_skip_not_fault() {
         use crate::v2::error::FileSkip;
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path();
+        std::fs::write(root.join("ok.js"), "export const x = 1;\n").unwrap();
         let big = vec![b'a'; (MAX_FILE_BYTES + 16) as usize];
-        let (ctx, files) = testing::repo(&[("ok.js", b"export const x = 1;\n"), ("big.js", &big)]);
+        std::fs::write(root.join("big.js"), &big).unwrap();
 
-        run_js(&ctx, &files);
+        let ctx = make_ctx(root);
+        run_js(&ctx, &["ok.js".to_string(), "big.js".to_string()]);
 
         let skipped = ctx.skipped.lock().unwrap().clone();
         let faults = ctx.faults.lock().unwrap().clone();
@@ -187,11 +219,17 @@ mod tests {
 
     #[test]
     fn moderately_long_js_line_is_analyzed() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path();
         let long_line: String = "x".repeat(17_000);
-        let source = format!("// header\nconst a = '{long_line}';\n");
-        let (ctx, files) = testing::repo(&[("prettify.js", source.as_bytes())]);
+        std::fs::write(
+            root.join("prettify.js"),
+            format!("// header\nconst a = '{long_line}';\n"),
+        )
+        .unwrap();
 
-        run_js(&ctx, &files);
+        let ctx = make_ctx(root);
+        run_js(&ctx, &["prettify.js".to_string()]);
 
         let skipped = ctx.skipped.lock().unwrap().clone();
         let faults = ctx.faults.lock().unwrap().clone();

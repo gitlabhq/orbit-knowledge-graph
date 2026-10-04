@@ -22,6 +22,8 @@ pub(crate) use tools::run_tools;
 pub(crate) enum ResponseFormat {
     Llm,
     Raw,
+    #[value(help = "Graph pattern table (requires GitLab support)")]
+    Gql,
 }
 
 impl ResponseFormat {
@@ -29,6 +31,7 @@ impl ResponseFormat {
         match self {
             ResponseFormat::Llm => "llm",
             ResponseFormat::Raw => "raw",
+            ResponseFormat::Gql => "gql",
         }
     }
 }

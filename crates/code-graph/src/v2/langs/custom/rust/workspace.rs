@@ -1,7 +1,7 @@
 use super::manifest::{ManifestCache, build_project_workspace};
 use super::sysroot::EmbeddedSysroot;
 use super::*;
-use crate::v2::pipeline::{FamilyFileInput, VIRTUAL_ROOT};
+use crate::v2::pipeline::FileInput;
 
 #[derive(Clone)]
 pub(super) struct WorkspaceIndex {
@@ -13,7 +13,7 @@ pub(super) struct WorkspaceIndex {
 }
 
 pub(super) struct WorkspacePlan {
-    embedded_sysroot: Arc<EmbeddedSysroot>,
+    _embedded_sysroot: Arc<EmbeddedSysroot>,
     repo_rust_files: Vec<AbsPathBuf>,
     entries: Vec<PlannedWorkspace>,
 }
@@ -26,16 +26,14 @@ struct PlannedWorkspace {
 
 impl WorkspaceIndex {
     fn load_planned(
-        repo: &RepoFs,
-        sysroot: &EmbeddedSysroot,
+        root_path: &str,
         manifest_path: &Path,
         workspace: &ProjectWorkspace,
         repo_rust_files: &[AbsPathBuf],
         multiple_roots: bool,
     ) -> Result<Self> {
-        let read = |path: &AbsPath| read_repo_or_sysroot(repo, sysroot, path);
         let (db, vfs) =
-            load_workspace_no_watcher(workspace, repo_rust_files, &read).with_context(|| {
+            load_workspace_no_watcher(workspace, repo_rust_files).with_context(|| {
                 format!(
                     "failed to load rust-analyzer workspace from {}",
                     manifest_path.display()
@@ -48,7 +46,8 @@ impl WorkspaceIndex {
             let Some(abs_path) = path.as_path() else {
                 continue;
             };
-            let Some(relative) = repo_relative_path(repo, abs_path.as_str()) else {
+            let abs_path = abs_path.to_string();
+            let Some(relative) = relative_path_if_under_root(root_path, &abs_path) else {
                 continue;
             };
             file_ids_by_relative_path.insert(relative.clone(), file_id);
@@ -116,11 +115,11 @@ impl WorkspaceIndex {
 }
 
 impl WorkspacePlan {
-    pub(super) fn discover(repo: &RepoFs, files: &[FamilyFileInput]) -> Result<Self> {
-        let mut manifest_cache = ManifestCache::new(repo)?;
+    pub(super) fn discover(root_path: &str, files: &[FileInput]) -> Result<Self> {
+        let mut manifest_cache = ManifestCache::new(root_path)?;
         let manifest_paths = manifest_cache.manifest_paths.clone();
         let embedded_sysroot = Arc::new(EmbeddedSysroot::materialize()?);
-        let (repo_rust_files, inventory_indexes) = collect_abs_rust_files(files);
+        let (repo_rust_files, inventory_indexes) = collect_abs_rust_files(root_path, files);
         let by_path = sorted_by_path(&repo_rust_files);
         let mut entries = Vec::new();
         let mut loaded_roots = HashSet::new();
@@ -165,7 +164,7 @@ impl WorkspacePlan {
         }
 
         Ok(Self {
-            embedded_sysroot,
+            _embedded_sysroot: embedded_sysroot,
             repo_rust_files,
             entries,
         })
@@ -185,11 +184,10 @@ impl WorkspacePlan {
         &self.entries[idx].manifest_path
     }
 
-    pub(super) fn load(&self, idx: usize, repo: &RepoFs) -> Result<WorkspaceIndex> {
+    pub(super) fn load(&self, idx: usize, root_path: &str) -> Result<WorkspaceIndex> {
         let planned = &self.entries[idx];
         WorkspaceIndex::load_planned(
-            repo,
-            &self.embedded_sysroot,
+            root_path,
             &planned.manifest_path,
             &planned.workspace,
             &self.repo_rust_files,
@@ -235,10 +233,7 @@ fn candidate_file_indexes(
                 // Every match sits under one include dir, so walking those path
                 // ranges beats rescanning the whole repo per directory.
                 for include in &dirs.include {
-                    let prefix = match include.as_str() {
-                        dir if dir.ends_with('/') => dir.to_string(),
-                        dir => format!("{dir}/"),
-                    };
+                    let prefix = format!("{}/", include.as_str());
                     let start = by_path
                         .partition_point(|&idx| repo_rust_files[idx].as_str() < prefix.as_str());
                     for &idx in &by_path[start..] {
@@ -258,65 +253,80 @@ fn candidate_file_indexes(
         .collect()
 }
 
-/// The repository filesystem is rooted at `/`; a relative path is made
-/// absolute by that root and `.`/`..` are resolved lexically.
-pub(super) fn to_absolute_path(file_path: &str) -> String {
-    normalize_path(&Path::new(VIRTUAL_ROOT).join(file_path))
+pub(super) fn to_absolute_path(root_path: &str, file_path: &str) -> String {
+    let candidate = if Path::new(file_path).is_absolute() {
+        PathBuf::from(file_path)
+    } else {
+        PathBuf::from(root_path).join(file_path)
+    };
+    normalize_existing_path(&candidate)
+        .unwrap_or(candidate)
         .to_string_lossy()
         .to_string()
 }
 
-/// A repository file's path relative to the root, `None` for anything that
-/// is not a file of the repository (the sysroot, say).
-pub(super) fn repo_relative_path(repo: &RepoFs, abs_path: &str) -> Option<String> {
-    let relative = abs_path.strip_prefix('/')?;
-    repo.is_file(Path::new(abs_path))
-        .then(|| relative.to_string())
+pub(super) fn relative_path(root_path: &str, file_path: &str) -> String {
+    relative_path_if_under_root(root_path, file_path).unwrap_or_else(|| file_path.to_string())
 }
 
-/// Lexical normalization: no filesystem, so `..` never follows a symlink.
-pub(super) fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => normalized.push(other),
-        }
+/// Returns `file_path` made relative to `root_path`.
+///
+/// Callers should pass a pre-canonicalized `root_path` (see
+/// `canonical_root_path`) so this function does not need to re-resolve
+/// symlinks such as the macOS `/var` -> `/private/var` redirection on
+/// every invocation. `file_path` is still normalized here because vfs
+/// paths from rust-analyzer can contain unresolved components.
+pub(super) fn relative_path_if_under_root(root_path: &str, file_path: &str) -> Option<String> {
+    let root = Path::new(root_path);
+    let file = Path::new(file_path);
+    let normalized_file = normalize_existing_path(file).unwrap_or_else(|| file.to_path_buf());
+
+    if let Ok(path) = normalized_file.strip_prefix(root) {
+        return Some(path.to_string_lossy().to_string());
     }
-    normalized
+
+    let normalized_root = normalize_existing_path(root).unwrap_or_else(|| root.to_path_buf());
+    normalized_file
+        .strip_prefix(&normalized_root)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
 }
 
-/// rust-analyzer asks for two kinds of file: the repository's, and the
-/// embedded sysroot's, which live on disk where we materialized them.
-fn read_repo_or_sysroot(
-    repo: &RepoFs,
-    sysroot: &EmbeddedSysroot,
-    path: &AbsPath,
-) -> Option<Vec<u8>> {
-    let path: &Path = path.as_ref();
-    if path.starts_with(sysroot.root_path()) {
-        return std::fs::read(path).ok();
-    }
-    repo.read(path).ok().map(|bytes| bytes.to_vec())
+pub(super) fn canonical_root_path(root_path: &str) -> String {
+    normalize_existing_path(Path::new(root_path))
+        .unwrap_or_else(|| PathBuf::from(root_path))
+        .to_string_lossy()
+        .to_string()
 }
 
-pub(super) fn discover_manifest_paths(repo: &RepoFs) -> Vec<PathBuf> {
-    repo.files()
-        .into_iter()
-        .filter(|file| file.loads())
-        .filter(|file| {
-            Path::new(&file.path)
+fn discover_manifest_paths(root_path: &str) -> Vec<PathBuf> {
+    let mut manifests = WalkBuilder::new(root_path)
+        .standard_filters(true)
+        .build()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .filter_map(|entry| {
+            (entry
+                .path()
                 .file_name()
-                .is_some_and(|name| name == "Cargo.toml")
+                .is_some_and(|name| name == "Cargo.toml"))
+            .then(|| entry.into_path())
         })
-        .map(|file| Path::new(VIRTUAL_ROOT).join(file.path))
-        .collect()
+        .collect::<Vec<_>>();
+    manifests.sort();
+    manifests.dedup();
+    manifests
 }
 
-pub(super) fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {
+pub(super) fn normalize_existing_path(path: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(path).ok()
+}
+
+pub(super) fn standalone_workspace(
+    relative_path: &str,
+    source: String,
+    repo_root: &Path,
+) -> WorkspaceIndex {
     let mut db = RootDatabase::new(None);
     let file_id = FileId::from_raw(0);
     let mut file_set = FileSet::default();
@@ -343,7 +353,7 @@ pub(super) fn standalone_workspace(relative_path: &str, source: String) -> Works
         },
         Vec::new(),
         false,
-        Arc::new(abs_path_from(Path::new(VIRTUAL_ROOT))),
+        Arc::new(abs_path_from(repo_root)),
         Arc::new(CrateWorkspaceData {
             target: Err("standalone file has no target layout".into()),
             toolchain: None,
@@ -367,6 +377,10 @@ pub(super) fn standalone_workspace(relative_path: &str, source: String) -> Works
     }
 }
 
+pub(super) fn discover_manifest_paths_for_root(root_path: &str) -> Vec<PathBuf> {
+    discover_manifest_paths(root_path)
+}
+
 fn abs_path_from(path: &Path) -> AbsPathBuf {
     Utf8PathBuf::from_path_buf(path.to_path_buf())
         .ok()
@@ -382,7 +396,6 @@ fn abs_path_from(path: &Path) -> AbsPathBuf {
 fn load_workspace_no_watcher(
     workspace: &ProjectWorkspace,
     repo_rust_files: &[AbsPathBuf],
-    read: &dyn Fn(&AbsPath) -> Option<Vec<u8>>,
 ) -> Result<(RootDatabase, Vfs)> {
     // Invariant: this function never starts a proc-macro server.
     const _: ProcMacroServerChoice = ProcMacroServerChoice::None;
@@ -393,7 +406,7 @@ fn load_workspace_no_watcher(
 
     // `repo_rust_files` was already walked by the pipeline; this is a filter, not a second walk.
     for entry in &project_folders.load {
-        seed_vfs_from_known_files(&mut vfs, entry, repo_rust_files, read);
+        seed_vfs_from_known_files(&mut vfs, entry, repo_rust_files);
     }
 
     let extra_env = rustc_hash::FxHashMap::default();
@@ -401,7 +414,8 @@ fn load_workspace_no_watcher(
         &mut |path: &AbsPath| {
             let vfs_path = VfsPath::from(path.to_path_buf());
             if vfs.file_id(&vfs_path).is_none() {
-                vfs.set_file_contents(vfs_path.clone(), read(path));
+                let contents = std::fs::read(AsRef::<Path>::as_ref(path)).ok();
+                vfs.set_file_contents(vfs_path.clone(), contents);
             }
             vfs.file_id(&vfs_path)
                 .and_then(|(id, excluded)| (excluded == FileExcluded::No).then_some(id))
@@ -425,31 +439,35 @@ fn load_workspace_no_watcher(
     Ok((db, vfs))
 }
 
-fn seed_vfs_from_known_files(
-    vfs: &mut Vfs,
-    entry: &loader::Entry,
-    known: &[AbsPathBuf],
-    read: &dyn Fn(&AbsPath) -> Option<Vec<u8>>,
-) {
+fn seed_vfs_from_known_files(vfs: &mut Vfs, entry: &loader::Entry, known: &[AbsPathBuf]) {
     match entry {
         loader::Entry::Files(files) => {
             for p in files {
-                vfs.set_file_contents(VfsPath::from(p.clone()), read(p));
+                let contents = std::fs::read(AsRef::<Path>::as_ref(p)).ok();
+                vfs.set_file_contents(VfsPath::from(p.clone()), contents);
             }
         }
         loader::Entry::Directories(dirs) => {
             for abs in known.iter().filter(|abs| dirs_match(dirs, abs)) {
-                vfs.set_file_contents(VfsPath::from(abs.clone()), read(abs));
+                let contents = std::fs::read(AsRef::<Path>::as_ref(abs)).ok();
+                vfs.set_file_contents(VfsPath::from(abs.clone()), contents);
             }
         }
     }
 }
 
-fn collect_abs_rust_files(files: &[FamilyFileInput]) -> (Vec<AbsPathBuf>, Vec<usize>) {
+fn collect_abs_rust_files(root_path: &str, files: &[FileInput]) -> (Vec<AbsPathBuf>, Vec<usize>) {
+    let root = Path::new(root_path);
     let mut paths = Vec::with_capacity(files.len());
     let mut indexes = Vec::with_capacity(files.len());
     for (idx, file) in files.iter().enumerate() {
-        if let Ok(utf8) = Utf8PathBuf::from_path_buf(PathBuf::from(to_absolute_path(&file.path))) {
+        let candidate = if Path::new(file).is_absolute() {
+            PathBuf::from(file)
+        } else {
+            root.join(file)
+        };
+        let normalized = normalize_existing_path(&candidate).unwrap_or(candidate);
+        if let Ok(utf8) = Utf8PathBuf::from_path_buf(normalized) {
             paths.push(AbsPathBuf::assert(utf8));
             indexes.push(idx);
         }
@@ -460,19 +478,24 @@ fn collect_abs_rust_files(files: &[FamilyFileInput]) -> (Vec<AbsPathBuf>, Vec<us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::pipeline::testing;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn load_manifest_populates_index_without_watcher() {
-        let (ctx, files) = testing::repo(&[
-            (
-                "Cargo.toml",
-                b"[package]\nname = \"tiny\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
-            ),
-            ("src/lib.rs", b"pub fn hello() -> u32 { 42 }\n"),
-        ]);
-        let plan = WorkspacePlan::discover(&ctx.vfs, &files).unwrap();
-        let index = plan.load(0, &ctx.vfs).unwrap();
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"tiny\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn hello() -> u32 { 42 }\n").unwrap();
+
+        let root_str = root.to_string_lossy().to_string();
+        let plan = WorkspacePlan::discover(&root_str, &["src/lib.rs".to_string()]).unwrap();
+        let index = plan.load(0, &root_str).unwrap();
 
         assert!(
             index
@@ -488,25 +511,39 @@ mod tests {
     /// belonging to the workspace, so both roots must not parse it.
     #[test]
     fn implicit_member_is_claimed_and_parsed_once_by_the_root_workspace() {
-        let (ctx, files) = testing::repo(&[
-            ("Cargo.toml", b"[workspace]\nmembers = [\"a\"]\n"),
-            (
-                "a/Cargo.toml",
-                b"[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[dependencies]\nb = { path = \"../b\" }\n",
-            ),
-            ("a/src/lib.rs", b"pub fn from_a() {}\n"),
-            (
-                "b/Cargo.toml",
-                b"[package]\nname = \"b\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
-            ),
-            ("b/src/lib.rs", b"pub fn from_b() {}\n"),
-        ]);
-        let plan = WorkspacePlan::discover(&ctx.vfs, &files).unwrap();
+        let temp = tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        fs::create_dir_all(root.join("a/src")).unwrap();
+        fs::create_dir_all(root.join("b/src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = [\"a\"]\n").unwrap();
+        fs::write(
+            root.join("a/Cargo.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[dependencies]\nb = { path = \"../b\" }\n",
+        )
+        .unwrap();
+        fs::write(root.join("a/src/lib.rs"), "pub fn from_a() {}\n").unwrap();
+        fs::write(
+            root.join("b/Cargo.toml"),
+            "[package]\nname = \"b\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("b/src/lib.rs"), "pub fn from_b() {}\n").unwrap();
+
+        let root_str = root.to_string_lossy().to_string();
+        let files = vec!["a/src/lib.rs".to_string(), "b/src/lib.rs".to_string()];
+        let plan = WorkspacePlan::discover(&root_str, &files).unwrap();
 
         assert_eq!(plan.len(), 2);
         assert_eq!(plan.candidates(0), &[0, 1]);
 
-        let output = parse_rust_files_with_workspaces(&files, &ctx, &plan, None);
+        let output = parse_rust_files_with_workspaces(
+            &files,
+            &root_str,
+            &plan,
+            None,
+            &Default::default(),
+            &crate::v2::pipeline::SilentProgress,
+        );
         assert!(output.errors.is_empty(), "{:?}", output.errors);
         let mut paths = output
             .parsed

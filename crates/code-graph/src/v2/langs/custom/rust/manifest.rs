@@ -1,14 +1,13 @@
 use super::sysroot::EmbeddedSysroot;
-use super::workspace::{discover_manifest_paths, normalize_path};
+use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
-use crate::v2::pipeline::VIRTUAL_ROOT;
 
-/// Upper bound on a Cargo.toml file we will read. Real manifests are well
-/// under this; anything larger is rejected before the read allocates.
+/// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
+/// well under this; anything larger is rejected before the read allocates.
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
-pub(super) struct ManifestCache<'a> {
-    pub(super) repo: &'a RepoFs,
+pub(super) struct ManifestCache {
+    pub(super) root_path: PathBuf,
     pub(super) manifest_paths: Vec<PathBuf>,
     parsed: HashMap<PathBuf, ParsedCargoManifest>,
 }
@@ -75,11 +74,21 @@ struct WorkspaceDescriptor {
     workspace_dependencies: BTreeMap<String, cargo_manifest::TomlDependency>,
 }
 
-impl<'a> ManifestCache<'a> {
-    pub(super) fn new(repo: &'a RepoFs) -> Result<Self> {
+impl ManifestCache {
+    pub(super) fn new(root_path: &str) -> Result<Self> {
+        let root_path = PathBuf::from(root_path);
+        let mut manifest_paths =
+            discover_manifest_paths_for_root(root_path.to_string_lossy().as_ref())
+                .into_iter()
+                .filter_map(|path| normalize_existing_path(&path).or(Some(path)))
+                .filter(|path| path.starts_with(&root_path))
+                .collect::<Vec<_>>();
+        manifest_paths.sort();
+        manifest_paths.dedup();
+
         Ok(Self {
-            repo,
-            manifest_paths: discover_manifest_paths(repo),
+            root_path,
+            manifest_paths,
             parsed: HashMap::new(),
         })
     }
@@ -96,17 +105,17 @@ impl<'a> ManifestCache<'a> {
             // Cargo manifests are human-authored config. Anything multi-megabyte is
             // almost certainly adversarial or malformed; bail before `read_to_string`
             // allocates unbounded memory on the indexer.
-            if let Ok(meta) = self.repo.metadata(&manifest_path)
-                && meta.len > MAX_MANIFEST_BYTES
+            if let Ok(meta) = std::fs::metadata(&manifest_path)
+                && meta.len() > MAX_MANIFEST_BYTES
             {
                 bail!(
                     "Cargo manifest {} is {} bytes, exceeds {} byte cap",
                     manifest_path.display(),
-                    meta.len,
+                    meta.len(),
                     MAX_MANIFEST_BYTES
                 );
             }
-            let source = self.repo.read_to_string(&manifest_path).with_context(|| {
+            let source = std::fs::read_to_string(&manifest_path).with_context(|| {
                 format!("failed to read Cargo manifest {}", manifest_path.display())
             })?;
             let manifest =
@@ -131,16 +140,27 @@ impl<'a> ManifestCache<'a> {
     }
 
     fn normalize_manifest_path(&self, manifest_path: &Path) -> Result<Option<PathBuf>> {
-        let normalized = normalize_path(&Path::new(VIRTUAL_ROOT).join(manifest_path));
+        let normalized = normalize_existing_path(manifest_path).unwrap_or_else(|| {
+            if manifest_path.is_absolute() {
+                manifest_path.to_path_buf()
+            } else {
+                self.root_path.join(manifest_path)
+            }
+        });
+
+        if !normalized.starts_with(&self.root_path) {
+            return Ok(None);
+        }
         if normalized
             .file_name()
             .is_none_or(|name| name != "Cargo.toml")
         {
             return Ok(None);
         }
-        if !self.repo.is_file(&normalized) {
+        if !normalized.is_file() {
             return Ok(None);
         }
+
         Ok(Some(normalized))
     }
 
@@ -184,6 +204,9 @@ impl<'a> ManifestCache<'a> {
 
         let mut ancestor = current.root_dir.parent();
         while let Some(dir) = ancestor {
+            if !dir.starts_with(&self.root_path) {
+                break;
+            }
             let candidate = dir.join("Cargo.toml");
             if candidate != manifest_path
                 && self
@@ -233,7 +256,7 @@ impl<'a> ManifestCache<'a> {
 
 pub(super) fn build_project_workspace(
     manifest_path: &Path,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
     embedded_sysroot: &EmbeddedSysroot,
 ) -> Result<ProjectWorkspace> {
     let synthetic = build_synthetic_workspace(manifest_path, manifest_cache)?;
@@ -267,7 +290,7 @@ pub(super) fn build_project_workspace(
 
 fn build_synthetic_workspace(
     manifest_path: &Path,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
 ) -> Result<SyntheticCargoWorkspace> {
     let descriptor = build_workspace_descriptor(manifest_path, manifest_cache)?;
     let mut packages = HashMap::new();
@@ -322,7 +345,7 @@ fn build_synthetic_workspace(
 
 fn build_workspace_descriptor(
     manifest_path: &Path,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
 ) -> Result<WorkspaceDescriptor> {
     let workspace_manifest_path = manifest_cache.workspace_manifest_path_for(manifest_path)?;
     let workspace_manifest = manifest_cache.load(&workspace_manifest_path)?.clone();
@@ -467,7 +490,7 @@ fn workspace_dependencies_map(
 
 fn workspace_members_for_root(
     workspace_manifest: &ParsedCargoManifest,
-    manifest_cache: &ManifestCache<'_>,
+    manifest_cache: &ManifestCache,
 ) -> Result<Vec<PathBuf>> {
     let Some(workspace) = workspace_manifest.manifest.workspace.as_ref() else {
         return Ok(Vec::new());
@@ -498,7 +521,7 @@ fn workspace_default_members(
     workspace_manifest: &ParsedCargoManifest,
     workspace: &cargo_manifest::TomlWorkspace,
     members: &[PathBuf],
-    manifest_cache: &ManifestCache<'_>,
+    manifest_cache: &ManifestCache,
 ) -> Result<Vec<PathBuf>> {
     if let Some(default_members) = workspace.default_members.as_deref() {
         let default_matchers = compile_glob_matchers(default_members)?;
@@ -527,7 +550,7 @@ fn workspace_default_members(
 
 fn expand_workspace_members_via_path_dependencies(
     descriptor: &mut WorkspaceDescriptor,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
 ) -> Result<()> {
     let mut queue = VecDeque::from(descriptor.members.clone());
     let mut seen = descriptor.members.iter().cloned().collect::<HashSet<_>>();
@@ -564,7 +587,7 @@ fn expand_workspace_members_via_path_dependencies(
 fn resolve_local_package(
     manifest_path: &Path,
     descriptor: &WorkspaceDescriptor,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
     is_member: bool,
 ) -> Result<LocalWorkspacePackage> {
     let parsed = manifest_cache.load(manifest_path)?.clone();
@@ -606,7 +629,7 @@ fn resolve_local_package(
     let targets = collect_target_specs(
         &parsed.manifest,
         &parsed.root_dir,
-        manifest_cache.repo,
+        &manifest_cache.root_path,
         &package_name,
         &edition,
     );
@@ -627,7 +650,7 @@ fn resolve_local_package(
 fn resolve_local_dependency_candidates(
     parsed: &ParsedCargoManifest,
     descriptor: &WorkspaceDescriptor,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
 ) -> Result<Vec<ResolvedDependencyCandidate>> {
     let mut dependencies = Vec::new();
     collect_dependency_candidates(
@@ -699,7 +722,7 @@ fn collect_dependency_candidates(
     target: Option<&str>,
     parsed: &ParsedCargoManifest,
     descriptor: &WorkspaceDescriptor,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
     output: &mut Vec<ResolvedDependencyCandidate>,
 ) -> Result<()> {
     let Some(dependencies) = dependencies else {
@@ -732,7 +755,7 @@ fn resolve_dependency_candidate(
     target: Option<&str>,
     parsed: &ParsedCargoManifest,
     descriptor: &WorkspaceDescriptor,
-    manifest_cache: &mut ManifestCache<'_>,
+    manifest_cache: &mut ManifestCache,
 ) -> Result<Option<ResolvedDependencyCandidate>> {
     let (dependency, path_base) = match dependency {
         cargo_manifest::InheritableDependency::Value(dependency) => {
@@ -934,7 +957,7 @@ fn server_target_data() -> TargetData {
 fn collect_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     package_name: &str,
     package_edition: &str,
 ) -> Vec<LocalTargetSpec> {
@@ -944,7 +967,7 @@ fn collect_target_specs(
     if let Some(lib_target) = collect_lib_target(
         manifest,
         package_root,
-        repo,
+        repo_root,
         package_edition,
         &default_lib_name,
     ) {
@@ -954,7 +977,7 @@ fn collect_target_specs(
     collect_bin_targets(
         manifest,
         package_root,
-        repo,
+        repo_root,
         package_edition,
         package_name,
         &mut targets,
@@ -963,7 +986,7 @@ fn collect_target_specs(
         manifest,
         manifest.example.as_ref(),
         package_root,
-        repo,
+        repo_root,
         package_edition,
         "examples",
         "example",
@@ -973,7 +996,7 @@ fn collect_target_specs(
         manifest,
         manifest.test.as_ref(),
         package_root,
-        repo,
+        repo_root,
         package_edition,
         "tests",
         "test",
@@ -983,13 +1006,19 @@ fn collect_target_specs(
         manifest,
         manifest.bench.as_ref(),
         package_root,
-        repo,
+        repo_root,
         package_edition,
         "benches",
         "bench",
         &mut targets,
     );
-    collect_build_target(manifest, package_root, repo, package_edition, &mut targets);
+    collect_build_target(
+        manifest,
+        package_root,
+        repo_root,
+        package_edition,
+        &mut targets,
+    );
 
     dedupe_targets(targets)
 }
@@ -997,18 +1026,18 @@ fn collect_target_specs(
 fn collect_lib_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     package_edition: &str,
     default_lib_name: &str,
 ) -> Option<LocalTargetSpec> {
     let lib = manifest.lib.as_ref();
     let path = lib
         .and_then(|lib| {
-            lib.path
-                .as_ref()
-                .and_then(|path| repo_local_existing_file(package_root.join(path.0.clone()), repo))
+            lib.path.as_ref().and_then(|path| {
+                repo_local_existing_file(package_root.join(path.0.clone()), repo_root)
+            })
         })
-        .or_else(|| repo_local_existing_file(package_root.join("src/lib.rs"), repo))?;
+        .or_else(|| repo_local_existing_file(package_root.join("src/lib.rs"), repo_root))?;
     let name = lib
         .and_then(|lib| lib.name.clone())
         .unwrap_or_else(|| default_lib_name.to_string());
@@ -1034,7 +1063,7 @@ fn collect_lib_target(
 fn collect_bin_targets(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     package_edition: &str,
     package_name: &str,
     targets: &mut Vec<LocalTargetSpec>,
@@ -1045,7 +1074,7 @@ fn collect_bin_targets(
             let Some((name, path)) = resolve_explicit_target_path(
                 bin,
                 package_root,
-                repo,
+                repo_root,
                 package_name,
                 "src/bin",
                 Some("src/main.rs"),
@@ -1078,7 +1107,8 @@ fn collect_bin_targets(
         .and_then(|package| package.autobins)
         .unwrap_or(true)
     {
-        if let Some(main_rs) = repo_local_existing_file(package_root.join("src/main.rs"), repo) {
+        if let Some(main_rs) = repo_local_existing_file(package_root.join("src/main.rs"), repo_root)
+        {
             let dedupe_key = format!("bin:{}:{}", package_name, main_rs.display());
             if seen.insert(dedupe_key) {
                 targets.push(LocalTargetSpec {
@@ -1095,8 +1125,8 @@ fn collect_bin_targets(
             }
         }
 
-        for (name, path) in infer_directory_targets(&package_root.join("src/bin"), repo) {
-            let Some(path) = repo_local_existing_file(path, repo) else {
+        for (name, path) in infer_directory_targets(&package_root.join("src/bin")) {
+            let Some(path) = repo_local_existing_file(path, repo_root) else {
                 continue;
             };
             let dedupe_key = format!("bin:{}:{}", name, path.display());
@@ -1125,7 +1155,7 @@ fn collect_directory_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     explicit_targets: Option<&Vec<cargo_manifest::TomlTarget>>,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     package_edition: &str,
     default_dir: &str,
     kind: &'static str,
@@ -1137,7 +1167,7 @@ fn collect_directory_target_specs(
             let Some((name, path)) = resolve_explicit_target_path(
                 target,
                 package_root,
-                repo,
+                repo_root,
                 default_dir,
                 default_dir,
                 None,
@@ -1173,8 +1203,8 @@ fn collect_directory_target_specs(
     };
 
     if autodiscover {
-        for (name, path) in infer_directory_targets(&package_root.join(default_dir), repo) {
-            let Some(path) = repo_local_existing_file(path, repo) else {
+        for (name, path) in infer_directory_targets(&package_root.join(default_dir)) {
+            let Some(path) = repo_local_existing_file(path, repo_root) else {
                 continue;
             };
             let dedupe_key = format!("{kind}:{name}:{}", path.display());
@@ -1198,7 +1228,7 @@ fn collect_directory_target_specs(
 fn collect_build_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     package_edition: &str,
     targets: &mut Vec<LocalTargetSpec>,
 ) {
@@ -1207,14 +1237,14 @@ fn collect_build_target(
         .and_then(|package| package.build.as_ref());
     let build_path = match build {
         Some(cargo_manifest::TomlPackageBuild::SingleScript(path)) => {
-            repo_local_existing_file(package_root.join(path), repo)
+            repo_local_existing_file(package_root.join(path), repo_root)
         }
         Some(cargo_manifest::TomlPackageBuild::MultipleScript(_)) => None,
         Some(cargo_manifest::TomlPackageBuild::Auto(true)) => {
-            repo_local_existing_file(package_root.join("build.rs"), repo)
+            repo_local_existing_file(package_root.join("build.rs"), repo_root)
         }
         Some(cargo_manifest::TomlPackageBuild::Auto(false)) => None,
-        None => repo_local_existing_file(package_root.join("build.rs"), repo),
+        None => repo_local_existing_file(package_root.join("build.rs"), repo_root),
     };
 
     let Some(build_path) = build_path else {
@@ -1246,7 +1276,7 @@ fn manifest_autodiscover(
 fn resolve_explicit_target_path(
     target: &cargo_manifest::TomlTarget,
     package_root: &Path,
-    repo: &RepoFs,
+    repo_root: &Path,
     default_name: &str,
     default_dir: &str,
     fallback_main: Option<&str>,
@@ -1261,26 +1291,26 @@ fn resolve_explicit_target_path(
     })?;
 
     if let Some(path) = target.path.as_ref() {
-        return repo_local_existing_file(package_root.join(path.0.clone()), repo)
+        return repo_local_existing_file(package_root.join(path.0.clone()), repo_root)
             .map(|path| (name, path));
     }
 
     if let Some(main) = fallback_main
         && name == default_name
-        && let Some(main_path) = repo_local_existing_file(package_root.join(main), repo)
+        && let Some(main_path) = repo_local_existing_file(package_root.join(main), repo_root)
     {
         return Some((name, main_path));
     }
 
     if let Some(file_path) = repo_local_existing_file(
         package_root.join(default_dir).join(format!("{name}.rs")),
-        repo,
+        repo_root,
     ) {
         return Some((name, file_path));
     }
     if let Some(nested_main) = repo_local_existing_file(
         package_root.join(default_dir).join(&name).join("main.rs"),
-        repo,
+        repo_root,
     ) {
         return Some((name, nested_main));
     }
@@ -1288,33 +1318,39 @@ fn resolve_explicit_target_path(
     None
 }
 
-pub(super) fn repo_local_existing_file(path: PathBuf, repo: &RepoFs) -> Option<PathBuf> {
-    let path = normalize_path(&path);
-    repo.is_file(&path).then_some(path)
+pub(super) fn repo_local_existing_file(path: PathBuf, repo_root: &Path) -> Option<PathBuf> {
+    let normalized_root =
+        normalize_existing_path(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
+    orbit_utils::fs::contained_canonical_path(&normalized_root, &path).filter(|p| p.is_file())
 }
 
-fn infer_directory_targets(directory: &Path, repo: &RepoFs) -> Vec<(String, PathBuf)> {
-    let Ok(entries) = repo.read_dir(directory) else {
+fn infer_directory_targets(directory: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new();
     };
 
     let mut targets = Vec::new();
-    for entry in entries {
-        if entry.name.starts_with('.') {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        if file_name.to_string_lossy().starts_with('.') {
             continue;
         }
-        let path = directory.join(&entry.name);
-        if !entry.is_dir && path.extension().is_some_and(|extension| extension == "rs") {
+
+        if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
             let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
             targets.push((name.to_string(), path));
             continue;
         }
-        if entry.is_dir {
+
+        if path.is_dir() {
             let main_rs = path.join("main.rs");
-            if repo.is_file(&main_rs) {
-                targets.push((entry.name.clone(), main_rs));
+            if main_rs.is_file()
+                && let Some(name) = path.file_name().and_then(|name| name.to_str())
+            {
+                targets.push((name.to_string(), main_rs));
             }
         }
     }
@@ -1538,19 +1574,26 @@ fn is_dep_feature_activated(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::pipeline::testing;
+    use tempfile::tempdir;
 
     #[test]
     fn oversized_cargo_manifest_is_rejected() {
+        let temp = tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let manifest = root.join("Cargo.toml");
         let padding = "#".repeat((MAX_MANIFEST_BYTES + 1) as usize);
-        let manifest = format!(
-            "[package]\nname = \"big\"\nversion = \"0.0.0\"\nedition = \"2021\"\n{padding}\n"
-        );
-        let (ctx, _) = testing::repo(&[("Cargo.toml", manifest.as_bytes())]);
+        std::fs::write(
+            &manifest,
+            format!(
+                "[package]\nname = \"big\"\nversion = \"0.0.0\"\nedition = \"2021\"\n{padding}\n"
+            ),
+        )
+        .unwrap();
 
-        let mut cache = ManifestCache::new(&ctx.vfs).expect("cache should open");
+        let mut cache =
+            ManifestCache::new(root.to_string_lossy().as_ref()).expect("cache should open");
         let err = cache
-            .load(Path::new("/Cargo.toml"))
+            .load(&manifest)
             .err()
             .expect("oversized manifest must be rejected");
         assert!(

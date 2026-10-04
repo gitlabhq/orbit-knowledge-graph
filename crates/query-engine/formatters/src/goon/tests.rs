@@ -707,3 +707,13 @@ fn edge_depth_does_not_leak_into_node_rows() {
     let out = enc(&traversal_response());
     assert!(!out.contains(" depth="));
 }
+
+#[test]
+fn edges_at_different_depths_stay_distinct() {
+    let mut direct = edge("MEMBER_OF", "User", 1, "Group", 2);
+    direct.depth = Some(1);
+    let mut nested = direct.clone();
+    nested.depth = Some(2);
+    let out = enc(&response("traversal", vec![], vec![direct, nested]));
+    assert!(out.contains("depth=1") && out.contains("depth=2"), "{out}");
+}

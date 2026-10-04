@@ -1,3 +1,23 @@
+## [0.136.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.135.0...v0.136.0) (2026-09-30)
+
+### Features
+
+* **billing:** send correlation id and User-Agent on CustomersDot quota checks ([f0d9217](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0d9217217ebda00be10db907af8ce5450c0b717)) by Sharmad Nachnolkar
+* **orbit-server:** inline command catalog in list_commands for DWS callers ([e9f7919](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e9f79190c2a46c79c7c0c0b8447ead7624ee96d1)) by Dmitry Gruzd
+
+### Fixes
+
+* **compiler:** bound scope-implied container elision to the exact hop depth ([f6b099a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f6b099a31ae42ae9fdf1735b818ec037bcccbe3b)) by Aaron Algutifan
+* **compiler:** filter narrowed joins after latest-row dedup ([56e7410](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/56e74105e840fc666e5977fb626317fbc2e0a0f4)) by Aaron Algutifan
+* **compiler:** retain FK hops for required target identities ([d17bd81](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d17bd8163c1a76215543b62576ae8a487c7c963d)) by Michael Usachenko
+* **orbit-server:** serialize SourceType as snake_case ([473c147](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/473c14778c8eff6ebd0091d1d1a1540f5f06b497)) by Dmitry Gruzd
+* **query-model:** resolve stored properties and FK endpoints ([e879c0d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e879c0d49c96ccd8ecdb3d72f63e34d5437fb552)) by Michael Usachenko
+
+### Other
+
+* **compiler:** consume explicit lowered node bindings ([32e424e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/32e424e553ee1601c95cec7b7812d2f20722c945)) by Michael Usachenko
+* pin latest Orbit and Siphon versions in self-managed setup ([ec1e17a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ec1e17afb07a14738291bcc93a06b2a02be32a32)) by Bohdan Parkhomchuk
+
 ## [0.135.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.134.0...v0.135.0) (2026-09-29)
 
 ### Features

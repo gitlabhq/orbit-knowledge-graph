@@ -40,7 +40,7 @@ mod id_as_string {
 /// these names after alias removal, the serialized JSON would get
 /// duplicate keys and deserialization would silently shadow the
 /// struct field. Filter them out before inserting into `properties`.
-fn is_reserved_node_key(key: &str) -> bool {
+pub(crate) fn is_reserved_node_key(key: &str) -> bool {
     key == "type" || key == "id"
 }
 
@@ -785,6 +785,39 @@ mod tests {
         assert_eq!(
             rows[0].get("vulnerability_count").and_then(Value::as_i64),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn gql_renders_pipeline_rows_as_tables() {
+        let output = make_property_grouped_aggregation_output();
+        let (value, version, name) = crate::GqlFormatter.format_stamped(&output);
+        assert_eq!(name, FormatName::Gql);
+        assert_eq!(version, crate::GQL_OUTPUT_FORMAT_VERSION.to_string());
+        assert_eq!(
+            value.as_str().unwrap(),
+            "+----------------------------------+\n\
+             | v_severity | vulnerability_count |\n\
+             +----------------------------------+\n\
+             | \"critical\" | 2                   |\n\
+             | \"high\"     | 1                   |\n\
+             +----------------------------------+\n\
+             \n\
+             2 rows\n"
+        );
+        assert_eq!(
+            crate::GqlFormatter
+                .format(&make_search_output())
+                .as_str()
+                .unwrap(),
+            "+-----------------------------------+\n\
+             | p                                 |\n\
+             +-----------------------------------+\n\
+             | (:Project {id: 1, name: \"Alpha\"}) |\n\
+             | (:Project {id: 2, name: \"Beta\"})  |\n\
+             +-----------------------------------+\n\
+             \n\
+             2 rows\n"
         );
     }
 

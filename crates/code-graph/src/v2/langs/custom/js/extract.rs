@@ -1,14 +1,12 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
-use crate::v2::pipeline::{FamilyFileInput, PipelineContext};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
     ImportMode, Position as GraphPosition, Range as GraphRange,
 };
-use orbit_utils::files::SkipReason;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -59,45 +57,64 @@ impl ResolvedJsFile {
 pub type FailedJsFile = (String, AnalyzerError);
 
 pub fn analyze_files(
-    files: &[FamilyFileInput],
-    ctx: &PipelineContext,
+    files: &[String],
+    root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
+    cancel: &crate::v2::pipeline::CancellationToken,
     progress: &dyn crate::v2::pipeline::ProgressObserver,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
+    let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
-        .filter_map(|file| {
-            if ctx.is_cancelled() {
+        .filter_map(|relative_path| {
+            if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
                 return None;
             }
-            let guard = sentinel.map(|s| s.file_start(&file.path));
+            let guard = sentinel.map(|s| s.file_start(relative_path));
             let t_file = std::time::Instant::now();
-            let outcome =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| analyze_file(file, ctx)))
-                    .unwrap_or_else(|panic_payload| {
-                        let message = panic_message(&panic_payload);
-                        Err(AnalyzerError::fault(
-                            FileFault::AnalyzerPanic,
-                            format!("panic during analysis: {message}"),
-                        ))
-                    });
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                analyze_file(relative_path, root_path)
+            }))
+            .unwrap_or_else(|panic_payload| {
+                let message = panic_message(&panic_payload);
+                Err(AnalyzerError::fault(
+                    FileFault::AnalyzerPanic,
+                    format!("panic during analysis: {message}"),
+                ))
+            });
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             progress.files_advanced(crate::v2::pipeline::ProgressPhase::Parse, 1);
             // If the sentinel killed this file while OXC was running,
             // convert whatever result we got into a timeout skip.
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Some((
-                    file.path.clone(),
+                    relative_path.clone(),
                     Err(AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     )),
                 ));
             }
+            if matches!(
+                &outcome,
+                Err(AnalyzerError::Fault {
+                    kind: FileFault::FileRead,
+                    ..
+                })
+            ) && !Path::new(root_path).exists()
+            {
+                if !root_gone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    tracing::warn!(
+                        root_path,
+                        "js: repository tree removed mid-analysis, dropping remaining files"
+                    );
+                }
+                return None;
+            }
             Some((
-                file.path.clone(),
+                relative_path.clone(),
                 outcome.map(|mut f| {
                     f.parse_ms = parse_ms;
                     f
@@ -119,22 +136,58 @@ pub fn analyze_files(
     (analyzed, errors)
 }
 
-/// A path is a graph identity, so it has to be a clean repository-relative
-/// one; the walker never produces anything else, but we defend in depth.
-fn safe_relative_path(relative_path: &str) -> Result<(), AnalyzerError> {
+/// Reject relative paths that could escape the repo clone.
+///
+/// A malicious repository is *not* expected to produce absolute paths or `..`
+/// components through the walker, but we defend in depth: the symlink check
+/// also catches a committed `link -> /etc/...` whose target the walker would
+/// happily hand us as a "file".
+fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, AnalyzerError> {
     if relative_path.contains('\0') || relative_path.contains('\n') {
         return Err(AnalyzerError::skip(
             FileSkip::UnsafePath,
             "relative path contains NUL or newline",
         ));
     }
-    if !orbit_utils::fs::is_safe_relative_path(Path::new(relative_path)) {
+    let input = Path::new(relative_path);
+    // Callers sometimes hand us absolute paths that already live under
+    // `root_path` (the v2 pipeline walker and the integration-test
+    // harness both do). Strip the root so the rest of the check sees a
+    // clean relative form; anything else is refused.
+    let rel = if input.is_absolute() {
+        input.strip_prefix(root_path).map_err(|_| {
+            AnalyzerError::skip(
+                FileSkip::UnsafePath,
+                format!("absolute path outside root: {relative_path} (root: {root_path})"),
+            )
+        })?
+    } else {
+        input
+    };
+    if !orbit_utils::fs::is_safe_relative_path(rel) {
         return Err(AnalyzerError::skip(
             FileSkip::UnsafePath,
             format!("refusing unsafe path: {relative_path}"),
         ));
     }
-    Ok(())
+    let joined = Path::new(root_path).join(rel);
+    let meta = std::fs::symlink_metadata(&joined).map_err(|err| {
+        AnalyzerError::fault(
+            FileFault::FileRead,
+            format!("stat {}: {err}", joined.display()),
+        )
+    })?;
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(AnalyzerError::skip(
+            FileSkip::Oversize,
+            format!(
+                "{} ({} bytes, max {MAX_FILE_BYTES})",
+                joined.display(),
+                meta.len()
+            ),
+        ));
+    }
+    Ok(joined)
 }
 
 /// Per-file ceiling on star-reexport specifiers. Star re-export chains
@@ -200,21 +253,11 @@ fn sanitize_panic_message(raw: &str) -> String {
     out
 }
 
-fn analyze_file(
-    file: &FamilyFileInput,
-    ctx: &PipelineContext,
-) -> Result<AnalyzedJsFile, AnalyzerError> {
-    safe_relative_path(&file.path)?;
-    if file.size > MAX_FILE_BYTES {
-        return Err(AnalyzerError::skip(
-            FileSkip::Oversize,
-            format!("{} ({} bytes, max {MAX_FILE_BYTES})", file.path, file.size),
-        ));
-    }
-    let source = ctx.read_source(file)?;
-    let source = std::str::from_utf8(&source)
-        .map_err(|_| AnalyzerError::skip(FileSkip::Filter(SkipReason::NotUtf8), "not utf-8"))?;
-    let relative_path = file.path.clone();
+fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, AnalyzerError> {
+    let absolute_path = safe_repo_join(root_path, relative_path)?;
+    let source = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| AnalyzerError::fault(FileFault::FileRead, error.to_string()))?;
+    let relative_path = normalize_relative_path(relative_path, root_path);
     let extension = extension_for(&relative_path);
     let language = language_for_extension(extension.as_str());
     if let Some(stub) = file_backed_module(
@@ -225,7 +268,7 @@ fn analyze_file(
     ) {
         return Ok(stub);
     }
-    let (virtual_path, source_text) = prepared_source(&relative_path, &extension, source)?;
+    let (virtual_path, source_text) = prepared_source(&relative_path, &extension, &source)?;
 
     // One analyzer call per file. SFCs with multiple `<script>` blocks
     // go through `frameworks::combine_scripts` first, so the analyzer
@@ -328,6 +371,13 @@ fn language_for_extension(extension: &str) -> Language {
     } else {
         Language::JavaScript
     }
+}
+
+fn normalize_relative_path(path: &str, root_path: &str) -> String {
+    Path::new(path)
+        .strip_prefix(root_path)
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string())
 }
 
 fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> {
@@ -628,39 +678,65 @@ fn to_range(range: crate::utils::Range) -> GraphRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::pipeline::testing;
+    use std::fs;
 
     #[test]
     fn analyze_files_accepts_extended_typescript_extensions() {
-        let (ctx, files) = testing::repo(&[
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+
+        for (path, content) in [
             (
                 "tsx/component.tsx",
-                b"export function renderPanel(): string { return 'panel'; }\n",
+                "export function renderPanel(): string { return 'panel'; }\n",
             ),
             (
                 "tsx/consumer.ts",
-                b"import { renderPanel } from './component.tsx';\nexport function runPanel(): string { return renderPanel(); }\n",
+                "import { renderPanel } from './component.tsx';\nexport function runPanel(): string { return renderPanel(); }\n",
             ),
             (
                 "mts/component.mts",
-                b"export function formatMts(value: string): string { return value.trim(); }\n",
+                "export function formatMts(value: string): string { return value.trim(); }\n",
             ),
             (
                 "mts/consumer.ts",
-                b"import { formatMts } from './component.mts';\nexport function runMts(value: string): string { return formatMts(value); }\n",
+                "import { formatMts } from './component.mts';\nexport function runMts(value: string): string { return formatMts(value); }\n",
             ),
             (
                 "cts/component.cts",
-                b"export function formatCts(value: string): string { return value.toLowerCase(); }\n",
+                "export function formatCts(value: string): string { return value.toLowerCase(); }\n",
             ),
             (
                 "cts/consumer.ts",
-                b"import { formatCts } from './component.cts';\nexport function runCts(value: string): string { return formatCts(value); }\n",
+                "import { formatCts } from './component.cts';\nexport function runCts(value: string): string { return formatCts(value); }\n",
             ),
-        ]);
+        ] {
+            let file_path = root.join(path);
+            fs::create_dir_all(
+                file_path
+                    .parent()
+                    .expect("test fixture path should have a parent"),
+            )
+            .expect("create fixture directories");
+            fs::write(file_path, content).expect("write fixture");
+        }
 
-        let (analyzed, errors) =
-            analyze_files(&files, &ctx, None, &crate::v2::pipeline::SilentProgress);
+        let files = vec![
+            "tsx/component.tsx".to_string(),
+            "tsx/consumer.ts".to_string(),
+            "mts/component.mts".to_string(),
+            "mts/consumer.ts".to_string(),
+            "cts/component.cts".to_string(),
+            "cts/consumer.ts".to_string(),
+        ];
+
+        let (analyzed, errors) = analyze_files(
+            &files,
+            root.to_str().expect("utf8 root path"),
+            None,
+            &Default::default(),
+            &crate::v2::pipeline::SilentProgress,
+        );
 
         assert!(
             errors.is_empty(),
@@ -670,10 +746,12 @@ mod tests {
     }
 
     #[test]
-    fn an_oversize_file_is_a_typed_skip() {
-        let big = vec![b'a'; (MAX_FILE_BYTES + 16) as usize];
-        let (ctx, files) = testing::repo(&[("big.js", &big)]);
-        let result = analyze_file(&files[0], &ctx);
+    fn safe_repo_join_oversize_returns_typed_skip() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path();
+        let big_path = root.join("big.js");
+        fs::write(&big_path, vec![b'a'; (MAX_FILE_BYTES + 16) as usize]).unwrap();
+        let result = safe_repo_join(root.to_str().unwrap(), "big.js");
         assert!(matches!(
             result,
             Err(AnalyzerError::Skip {
@@ -685,14 +763,20 @@ mod tests {
 
     #[test]
     fn a_cancelled_analysis_reads_no_files() {
-        let (ctx, files) = testing::repo(&[
-            ("a.js", b"export const x = 1;\n"),
-            ("b.js", b"export const y = 2;\n"),
-        ]);
-        ctx.config.cancel.cancel();
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::write(root.join("a.js"), "export const x = 1;\n").unwrap();
+        fs::write(root.join("b.js"), "export const y = 2;\n").unwrap();
 
-        let (analyzed, errors) =
-            analyze_files(&files, &ctx, None, &crate::v2::pipeline::SilentProgress);
+        let cancel = crate::v2::pipeline::CancellationToken::new();
+        cancel.cancel();
+        let (analyzed, errors) = analyze_files(
+            &["a.js".to_string(), "b.js".to_string()],
+            root.to_str().expect("utf8 root path"),
+            None,
+            &cancel,
+            &crate::v2::pipeline::SilentProgress,
+        );
 
         assert!(analyzed.is_empty(), "got {} analyzed files", analyzed.len());
         assert!(
@@ -702,9 +786,10 @@ mod tests {
     }
 
     #[test]
-    fn a_path_that_climbs_out_is_an_unsafe_path_skip() {
+    fn safe_repo_join_dotdot_returns_unsafe_path_skip() {
+        let result = safe_repo_join("/repo", "../etc/passwd");
         assert!(matches!(
-            safe_relative_path("../etc/passwd"),
+            result,
             Err(AnalyzerError::Skip {
                 kind: FileSkip::UnsafePath,
                 ..

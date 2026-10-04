@@ -131,6 +131,12 @@ async fn run_webserver(
     serving: Arc<AtomicBool>,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
+    orbit_billing::enforcement::validate(&config.billing)?;
+    info!(
+        billing_enforced = orbit_billing::enforcement::ENFORCED,
+        "billing enforcement"
+    );
+
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,

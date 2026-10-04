@@ -1,13 +1,15 @@
-//! Which files of a repository this crate sees, decided the way production
-//! decides: one `CodeFilter` per run says per file whether it parses, loads
-//! for resolvers, or is only recorded, and why.
+//! The file classification production runs before indexing, for callers to
+//! run the same way: a `CodeFilter` decides per file whether to parse it,
+//! load it for resolvers, or only record it, and why. The pipeline consumes
+//! the resulting inventory; it never classifies.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 pub use code_graph::v2::error::{AbortPhase, FileFault, FileReason, FileSkip};
-use orbit_utils::files::{SourceError, Vfs, disk};
+use orbit_utils::fs_walk::{
+    Decision, FileInventory, FileInventoryEntry, FileStreamHooks, StreamError, step, walk_dir,
+};
 
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -15,19 +17,40 @@ pub fn code_filter() -> CodeFilter {
     CodeFilter::new(Some(MAX_FILE_BYTES), None, detect_language_from_path)
 }
 
-/// Every file of a repository on disk, honouring `.gitignore`, decided the
-/// way production decides.
-pub fn walk(root: &Path) -> Result<Arc<Vfs>, SourceError> {
-    let repo = Vfs::new(code_filter(), None);
-    disk::discover(root, &repo)?;
-    Ok(Arc::new(repo))
+/// Walk a repository on disk, honouring `.gitignore`, and classify every file.
+pub fn walk(root: &Path) -> Result<FileInventory, StreamError> {
+    walk_dir(root, &mut code_filter())
 }
 
-/// The named files under `root`; for a change set, where a walk is not wanted.
-pub fn classify(root: &Path, paths: Vec<String>) -> Result<Arc<Vfs>, SourceError> {
-    let repo = Vfs::new(code_filter(), None);
-    disk::discover_paths(root, paths, &repo)?;
-    Ok(Arc::new(repo))
+/// Classify the named files under `root`; for a change set, where a full
+/// walk is not wanted.
+pub fn classify(root: &Path, paths: impl IntoIterator<Item = String>) -> Vec<FileInventoryEntry> {
+    let mut hooks = code_filter();
+    let mut content = Vec::new();
+    paths
+        .into_iter()
+        .map(|path| {
+            let abs = root.join(&path);
+            let link_meta = std::fs::symlink_metadata(&abs);
+            let is_symlink = link_meta.as_ref().is_ok_and(|m| m.file_type().is_symlink());
+            let mut meta = FileInventoryEntry {
+                path,
+                size: link_meta.map_or(0, |m| m.len()),
+                decision: Decision::ListOnly,
+                label: Default::default(),
+            };
+            let settled = (!is_symlink)
+                .then(|| {
+                    step(&mut hooks, &meta, &mut content, |buf| {
+                        std::io::Read::read_to_end(&mut std::fs::File::open(&abs)?, buf).map(|_| ())
+                    })
+                    .ok()
+                })
+                .flatten();
+            (meta.decision, meta.label) = settled.unwrap_or_else(|| hooks.on_non_regular(&meta));
+            meta
+        })
+        .collect()
 }
 
 /// The reason a file that overran a budget carries, in production's labels.

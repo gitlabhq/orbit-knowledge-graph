@@ -110,8 +110,6 @@ pub enum FileSkip {
     ArrowOffsetOverflow,
     UnsafePath,
     Timeout(AbortPhase),
-    /// The content passes rejected the file when its parser read it.
-    Filter(orbit_utils::files::SkipReason),
 }
 
 impl FileSkip {
@@ -126,7 +124,6 @@ impl FileSkip {
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",
             Self::Timeout(AbortPhase::Sentinel) => "timeout_sentinel",
-            Self::Filter(reason) => reason.into(),
         }
     }
 }
@@ -183,7 +180,7 @@ impl fmt::Display for FileFault {
 /// with the inner enum's `Display` via strum, so a new variant is labelled
 /// automatically (`skip_oversize`, `fault_invalid_utf8`, …; empty for `None`).
 /// `Skip`/`Fault` come from the parse phase; `Filter` from the pre-parse file
-/// stream ([`SkipReason`](orbit_utils::files::SkipReason)), both labelled `skip_`.
+/// stream ([`SkipReason`](orbit_utils::fs_walk::SkipReason)), both labelled `skip_`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display)]
 pub enum FileReason {
     #[default]
@@ -194,7 +191,7 @@ pub enum FileReason {
     #[strum(to_string = "fault_{0}")]
     Fault(FileFault),
     #[strum(to_string = "skip_{0}")]
-    Filter(orbit_utils::files::SkipReason),
+    Filter(orbit_utils::fs_walk::SkipReason),
 }
 
 /// Per-file outcome from a language analyzer. Encodes skip-vs-fault

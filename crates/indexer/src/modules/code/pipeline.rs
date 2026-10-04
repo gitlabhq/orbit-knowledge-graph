@@ -421,15 +421,10 @@ impl CodeIndexer {
         within: Duration,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = repository
-            .files
-            .files()
-            .iter()
-            .filter(|e| {
-                e.decision == code_graph::v2::Decision::Parse
-                    && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
-            })
-            .count();
+        let parseable = repository.file_inventory.count_by(|e| {
+            e.decision == code_graph::v2::Decision::Parse
+                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
+        });
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -462,8 +457,8 @@ impl CodeIndexer {
             .run_indexing(context, request, repository, indexed_at, observer, cancel)
             .await;
 
-        // `repository` is the run's in-memory filesystem; it goes with the handle whether this
-        // returns, errors, or is dropped mid-run on the wall-clock timeout.
+        // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
+        // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         self.metrics.record_cleanup("success");
         let run = indexing_result?;
 
@@ -649,10 +644,20 @@ impl CodeIndexer {
         });
 
         let code_graph_start = Instant::now();
-        let files = repository.files.clone();
+        let repo_dir = repository.path().to_path_buf();
+        let file_inventory = repository.file_inventory.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| Pipeline::run_with_tracer(files, config, tracer, converter, on_batch))
+            span.in_scope(|| {
+                Pipeline::run_with_tracer(
+                    &repo_dir,
+                    file_inventory,
+                    config,
+                    tracer,
+                    converter,
+                    on_batch,
+                )
+            })
         })
         .await;
         let result = match parsed {

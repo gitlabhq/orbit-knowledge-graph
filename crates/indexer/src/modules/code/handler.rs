@@ -445,6 +445,7 @@ mod tests {
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
         mock_repo: Arc<MockRepositoryService>,
+        _cache_dir: tempfile::TempDir,
     }
 
     impl TestContext {
@@ -465,9 +466,14 @@ mod tests {
                     .expect("code tables must resolve"),
             );
 
-            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> = Arc::new(
-                LocalRepositoryCache::new(u64::MAX, 0, u64::MAX, metrics.clone()),
-            );
+            let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
+                Arc::new(LocalRepositoryCache::new(
+                    temp_dir.path().to_path_buf(),
+                    u64::MAX,
+                    0,
+                    metrics.clone(),
+                ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
             let pipeline = Arc::new(CodeIndexer::new(
@@ -498,6 +504,7 @@ mod tests {
                 mock_locks,
                 mock_checkpoints,
                 mock_repo,
+                _cache_dir: temp_dir,
             }
         }
 
