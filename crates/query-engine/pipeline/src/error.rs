@@ -12,6 +12,7 @@ pub enum PipelineError {
         /// (parse/schema/reference/pagination/limit errors) and is safe
         /// to return to clients verbatim.
         client_safe: bool,
+        reason: &'static str,
     },
 
     #[error("Query execution failed: {0}")]
@@ -49,5 +50,25 @@ impl PipelineError {
 
     pub fn custom(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
         Self::Custom(err.into())
+    }
+
+    pub fn is_caller_error(&self) -> bool {
+        matches!(
+            self,
+            Self::Compile {
+                client_safe: true,
+                ..
+            } | Self::Security(_)
+        )
+    }
+}
+
+impl From<compiler::QueryError> for PipelineError {
+    fn from(error: compiler::QueryError) -> Self {
+        Self::Compile {
+            client_safe: error.is_client_safe(),
+            reason: error.failure_reason(),
+            message: error.to_string(),
+        }
     }
 }

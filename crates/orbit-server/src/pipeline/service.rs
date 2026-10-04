@@ -137,7 +137,8 @@ impl QueryPipelineService {
                 .then(&RoutingStage)
                 .await?
                 .finish()
-                .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))?;
+                .ok_or_else(|| PipelineError::custom("RoutingStage produced no output"))
+                .inspect_err(|e| obs.record_error(e))?;
             if let RoutingOutput::Schema(response) = route {
                 return Ok(QueryServiceOutput::Schema(response));
             }
@@ -162,9 +163,8 @@ impl QueryPipelineService {
                 .then(&OutputStage)
                 .await?
                 .finish()
-                .ok_or_else(|| {
-                    PipelineError::custom("OutputStage did not produce PipelineOutput")
-                })?;
+                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+                .inspect_err(|e| obs.record_error(e))?;
             Ok(QueryServiceOutput::Graph(Box::new(output)))
         };
 

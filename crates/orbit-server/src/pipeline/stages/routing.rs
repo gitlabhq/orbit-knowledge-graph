@@ -28,10 +28,7 @@ impl PipelineStage for RoutingStage {
                 &ctx.ontology,
                 ontology::introspection::IntrospectionScope::All,
             )
-            .map_err(|error| PipelineError::Compile {
-                client_safe: error.is_client_safe(),
-                message: error.to_string(),
-            })
+            .map_err(PipelineError::from)
             .inspect_err(|error| obs.record_error(error))?
             {
                 RoutedStatement::Query(input) => {

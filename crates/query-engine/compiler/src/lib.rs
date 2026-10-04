@@ -355,7 +355,7 @@ mod tests {
             err.is_client_safe(),
             "traversal_path scope rejection should be client safe: {err:?}"
         );
-        assert_eq!(crate::metrics::failure_reason(&err), "authorization");
+        assert_eq!(err.failure_reason(), "authorization");
         assert!(
             after > before,
             "count_err must run on traversal_path authorization rejections (before={before}, after={after})"

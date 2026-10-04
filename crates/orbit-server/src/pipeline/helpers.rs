@@ -105,6 +105,7 @@ fn sanitize_error_message(error: &PipelineError) -> String {
         PipelineError::Compile {
             message,
             client_safe: true,
+            ..
         } => message.clone(),
         PipelineError::Compile { .. } => "Query compilation failed.".to_string(),
         PipelineError::Security(_) => "Security context error.".to_string(),
@@ -122,54 +123,54 @@ fn sanitize_error_message(error: &PipelineError) -> String {
 /// No internal details (table names, SQL, infrastructure) are exposed — only
 /// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
-    let code = extract_ch_error_code(msg);
-    match code {
-        Some(241) => {
-            // MEMORY_LIMIT_EXCEEDED
+    match clickhouse_limit(msg) {
+        Some("memory_limit") => {
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
              node_ids to pin specific entities, or reduce hops/max_depth."
-                .to_string()
         }
-        Some(159) | Some(160) => {
-            // TIMEOUT_EXCEEDED / TOO_SLOW
+        Some("too_slow") => {
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
              reduce hops/max_depth, specify rel_types, or use node_ids \
              to pin high-cardinality entities like Definition or File."
-                .to_string()
         }
-        Some(307) => {
-            // TOO_MANY_BYTES
+        Some("too_many_bytes") => {
             "Query read too much data. Try: add a project_id filter to \
              scope the scan, use node_ids for selective endpoints, or \
              narrow filters on high-cardinality entities."
-                .to_string()
         }
-        Some(158) => {
-            // TOO_MANY_ROWS
+        Some("too_many_rows") => {
             "Query scanned too many rows. Filters like name or path on \
              entities like Definition or File may not be selective enough \
              without project_id scoping. Try: add project_id, use node_ids, \
              or pre-resolve broad filters with a separate lookup query."
-                .to_string()
         }
-        Some(191) => {
-            // SET_SIZE_LIMIT_EXCEEDED
+        Some("set_size_limit") => {
             "Query matched too many IDs in a filter subquery. The filter \
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
-                .to_string()
         }
-        Some(53) => {
-            // TYPE_MISMATCH
+        Some("type_mismatch") => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \
              date columns)."
-                .to_string()
         }
-        _ => "Query execution failed.".to_string(),
+        _ => "Query execution failed.",
+    }
+    .to_string()
+}
+
+pub(crate) fn clickhouse_limit(msg: &str) -> Option<&'static str> {
+    match extract_ch_error_code(msg)? {
+        241 => Some("memory_limit"),
+        159 | 160 => Some("too_slow"),
+        307 => Some("too_many_bytes"),
+        158 => Some("too_many_rows"),
+        191 => Some("set_size_limit"),
+        53 => Some("type_mismatch"),
+        _ => None,
     }
 }
 

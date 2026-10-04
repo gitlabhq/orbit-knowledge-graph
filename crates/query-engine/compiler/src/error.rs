@@ -72,6 +72,26 @@ impl QueryError {
                 | Self::LimitExceeded(_)
         )
     }
+
+    pub fn failure_reason(&self) -> &'static str {
+        match self {
+            Self::Parse(_) => "parse",
+            Self::Validation(_) => "schema",
+            Self::ReferenceError(_) => "reference",
+            Self::PaginationError(_) => "pagination",
+            Self::AllowlistRejected(_) => "ontology",
+            Self::Authorization(_) => "authorization",
+            Self::Restrict(_) => "restrict",
+            Self::Ontology(_) => "ontology_internal",
+            Self::DepthExceeded(_) => "depth",
+            Self::LimitExceeded(_) => "limit",
+            Self::Security(_) => "security",
+            Self::Lowering(_) => "lowering",
+            Self::Enforcement(_) => "enforcement",
+            Self::Codegen(_) => "codegen",
+            Self::PipelineInvariant(_) => "pipeline",
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, QueryError>;

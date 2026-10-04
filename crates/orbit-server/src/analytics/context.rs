@@ -8,6 +8,7 @@ use orbit_analytics::{
 use orbit_server_config::AnalyticsConfig;
 use orbit_versions::VERSIONS;
 use query_engine::compiler::ExecMetrics;
+use query_engine::pipeline::PipelineError;
 
 use crate::auth::{Claims, SourceType};
 
@@ -83,6 +84,38 @@ pub(crate) fn build_query(
     };
     apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
     Ok(OrbitQueryContext::new(q))
+}
+
+pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&PipelineError>) {
+    let Some(error) = error else {
+        q.status = Some(orbit_query::OrbitQueryStatus::Ok);
+        q.outcome = Some(orbit_query::OrbitQueryOutcome::Success);
+        return;
+    };
+    q.status = error.code().parse().ok();
+    q.outcome = Some(if error.is_caller_error() {
+        orbit_query::OrbitQueryOutcome::CallerError
+    } else {
+        orbit_query::OrbitQueryOutcome::ServerError
+    });
+    q.failure_reason = failure_reason(error).parse().ok();
+    q.row_count = None;
+    q.redacted_count = None;
+    if q.execute_ms.is_none() {
+        q.ch_read_rows = None;
+        q.ch_read_bytes = None;
+        q.ch_memory_usage = None;
+    }
+}
+
+fn failure_reason(error: &PipelineError) -> &'static str {
+    match error {
+        PipelineError::Compile { reason, .. } => reason,
+        PipelineError::Execution(message) => {
+            crate::pipeline::clickhouse_limit(message).unwrap_or("execution")
+        }
+        _ => crate::pipeline::metrics::failure_reason(error).unwrap_or("custom"),
+    }
 }
 
 fn apply_metrics(

@@ -104,7 +104,7 @@ vendored:
     vendor_script: scripts/vendored/iglu/bump.sh
     check_script: scripts/vendored/iglu/check.sh
     pins:
-      orbit_query: 2-2-0
+      orbit_query: 2-2-1
       orbit_common: 1-0-3
 ```
 
