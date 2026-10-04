@@ -1,0 +1,16 @@
+name: Covered node filters use edge tags without node scans
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+  gql: |
+    MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a, b
+logical:
+  expect: ["(Filter a.definition_type = 'function' (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter e0.source_tags HAS ANY ['definition_type:function'], ... (Scan Table(gl_code_edge) AS e0))"]
+      reject: ["(Scan Table(gl_definition) ...)"]
+    emitted:
+      expect: ["(Filter has(e0.source_tags, 'definition_type:function'), ... (Scan Table(gl_code_edge) AS e0))"]
+      reject: ["(Scan Table(gl_definition) ...)"]

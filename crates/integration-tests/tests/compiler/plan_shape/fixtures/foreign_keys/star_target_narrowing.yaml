@@ -1,0 +1,18 @@
+name: Selective FK centers narrow unfiltered traversal targets
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project) RETURN mr.title, p.name
+logical:
+  expect: ["(Filter mr.id IN [1] (_))"]
+physical:
+  clickhouse:
+    planned:
+      bind: ["(CTE $keys (Project mr.project_id AS id (_)))"]
+      definition_order: [$keys]
+      expect: ["(Filter p.id IN $keys.id (Scan Table(gl_project) AS p))", "(Deduplicate LimitBy p.traversal_path, p.id (_))"]
+      reject: ["(Scan Table(gl_edge) ...)", "(CTE _candidate_mr (_))"]
+    emitted:
+      expect: ["(CTE _narrow_p (_))", "(Deduplicate LimitBy 1 BY p.traversal_path, p.id (_))"]
+      reject: ["(Scan Table(gl_edge) ...)"]

@@ -1,0 +1,16 @@
+name: Leading edge endpoint keys keep cascade membership inside FINAL
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}]}
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) RETURN u, g, p
+logical:
+  expect: ["(EdgeScan CONTAINS g->p AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Bind e1 (Filter e1._deleted = false (SemiJoin e1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS e1)) (_))))
+    emitted:
+      expect:
+        - (Bind e1 (Project * (Filter e1._deleted = false (SemiJoin e1.source_id IN subquery (Deduplicate Final (Scan Table(gl_edge) AS e1)) (_)))))

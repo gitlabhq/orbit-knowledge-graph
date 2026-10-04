@@ -1,0 +1,18 @@
+name: FK aggregation avoids redundant center-derived target narrowing
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"p","entity":"Project"}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"n"}]}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project) RETURN p.name, count(mr) AS n
+logical:
+  expect: ["(Aggregate ... (_))"]
+physical:
+  clickhouse:
+    planned:
+      definition_order: []
+      expect: ["(Join ON p.id = mr.project_id (_) (Bind p (_)))", "(Deduplicate Final (Scan Table(gl_project) AS p))"]
+      reject: ["(Scan Table(gl_edge) ...)"]
+    emitted:
+      definition_order: []
+      expect: ["(Deduplicate Final (Scan Table(gl_project) AS p))"]
+      reject: ["(Scan Table(gl_edge) ...)"]
