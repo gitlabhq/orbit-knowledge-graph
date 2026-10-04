@@ -1,20 +1,23 @@
-//! One Plan struct with a PlanBody enum. Common fields live on Plan;
-//! query-type-specific data lives in the body variant. The Rust enum
-//! enforces that emit functions only access their own variant's data.
-
+pub mod aggregation;
+mod context;
 pub mod edge_chain;
+pub(crate) mod edge_predicates;
+pub mod fk;
+mod flat;
+pub(crate) mod helpers;
+mod hops;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
+pub mod physical;
+pub mod requirements;
 
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::{
-    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
-};
+pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::QueryDataModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
@@ -27,22 +30,30 @@ pub struct BoundFilter {
     pub selectivity: ontology::FieldSelectivity,
 }
 
-/// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
-pub type QueryPlan = Plan;
-
-pub struct Plan {
+pub struct Plan<T> {
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
-    pub strategy: Strategy,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
-    /// Per-table column sets from the ontology. Used by the lowerer to
-    /// push node-level filters (e.g. project_id, branch) down to edge
-    /// scans when the edge table has those columns.
-    pub table_columns: HashMap<String, HashSet<String>>,
-    /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
-    pub table_sort_keys: HashMap<String, Vec<String>>,
-    pub body: PlanBody,
+    pub operation: T,
+}
+
+pub enum QueryPlan {
+    Traversal(Plan<Traversal>),
+    Aggregation(Plan<Aggregation>),
+    Neighbors(Plan<Neighbors>),
+    PathFinding(Plan<PathFinding>),
+    Hydration(Plan<Hydration>),
+}
+
+impl QueryPlan {
+    pub fn hops(&self) -> &[Hop] {
+        match self {
+            Self::Traversal(plan) => &plan.hops,
+            Self::Aggregation(plan) => &plan.hops,
+            _ => &[],
+        }
+    }
 }
 
 pub fn denormalized_facts(
@@ -74,29 +85,29 @@ pub fn denormalized_facts(
         .collect()
 }
 
-pub enum PlanBody {
-    Traversal,
-    Aggregation {
-        aggregations: Vec<InputAggregationMetric>,
-        agg_sort: Option<InputAggSort>,
-    },
-    Neighbors {
-        center: String,
-        direction: Direction,
-        edge: EdgeTableConfig,
-        has_non_denorm: bool,
-        /// (tp source table, key column) when the center is a namespace entity;
-        /// lets the anchor arm pin to the centers' exact traversal_paths.
-        center_tp_lookup: Option<(String, String)>,
-    },
-    PathFinding(PathFindingBody),
-    Hydration {
-        nodes: Vec<HydrationNodePlan>,
-        options: HydrationCompileOptions,
-    },
+pub struct Traversal {
+    pub execution: physical::ExecutionPlan,
 }
 
-pub struct PathFindingBody {
+pub struct Aggregation {
+    pub execution: physical::ExecutionPlan,
+    pub result: aggregation::AggregationPlan,
+}
+
+pub struct Neighbors {
+    pub center: String,
+    pub direction: Direction,
+    pub edge: EdgeTableConfig,
+    pub has_non_denorm: bool,
+    pub fused_table: Option<String>,
+    pub center_tp_lookup: Option<(String, String)>,
+}
+
+pub struct Hydration {
+    pub nodes: Vec<HydrationNodePlan>,
+}
+
+pub struct PathFinding {
     pub start: String,
     pub end: String,
     pub max_depth: u32,
@@ -171,7 +182,7 @@ pub fn plan_clickhouse(
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
-) -> Result<Plan> {
+) -> Result<QueryPlan> {
     plan(input, model, hydration_options, true, table_scans)
 }
 
@@ -180,7 +191,7 @@ pub fn plan_duckdb(
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
-) -> Result<Plan> {
+) -> Result<QueryPlan> {
     plan(input, model, hydration_options, false, table_scans)
 }
 
@@ -190,16 +201,28 @@ fn plan<M>(
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
     table_scans: &HashSet<String>,
-) -> Result<Plan>
+) -> Result<QueryPlan>
 where
     M: QueryDataModel + ?Sized,
 {
+    let context = context::PlanningContext {
+        input,
+        model,
+        nodes: HashMap::new(),
+        hops: Vec::new(),
+        denormalized: HashMap::new(),
+        node_edge_mappings: HashMap::new(),
+    };
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {
-            Ok(edge_chain::plan(input, model, use_fk_elision, table_scans))
+            edge_chain::plan(context, use_fk_elision, table_scans)
         }
-        QueryType::Neighbors => neighbors::plan_neighbors(input, model),
-        QueryType::PathFinding => pathfinding::plan_pathfinding(input, model),
-        QueryType::Hydration => hydration::plan_hydration(input, model, hydration_options),
+        QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
+        QueryType::PathFinding => {
+            pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)
+        }
+        QueryType::Hydration => {
+            hydration::plan_hydration(context, hydration_options).map(QueryPlan::Hydration)
+        }
     }
 }
