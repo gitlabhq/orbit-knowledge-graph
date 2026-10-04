@@ -512,44 +512,6 @@ fn result_context_populated() {
 }
 
 #[test]
-fn multi_hop_traversal_generates_union_subquery() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 3]}],
-        "limit": 25
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    assert!(rendered.contains("UNION ALL"));
-    assert!(rendered.contains("hop_e0_type"));
-    assert!(rendered.contains("depth"));
-}
-
-#[test]
-fn multi_hop_with_floor_filter() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [2, 3]}],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    assert!(rendered.contains("depth"));
-}
-
-#[test]
 fn single_hop_does_not_generate_recursive_cte() {
     let json = r#"{
         "query_type": "traversal",

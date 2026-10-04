@@ -14,5 +14,8 @@ physical:
       reject: ["(Scan Table(gl_edge) ...)"]
     emitted:
       definition_order: []
+      occurrences:
+        - pattern: (Scan Table(gl_merge_request) AS mr)
+          count: 1
       expect: ["(Deduplicate Final (Scan Table(gl_project) AS p))"]
       reject: ["(Scan Table(gl_edge) ...)"]

@@ -1,4 +1,6 @@
 name: Incoming variable hops preserve reverse join endpoints and path output
+missing_frontends:
+  gql: GQL normalizes incoming patterns to outgoing edges; depth_arms.yaml covers that plan.
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming","hops":[1,2]}]}

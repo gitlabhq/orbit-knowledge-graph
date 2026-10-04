@@ -6,7 +6,7 @@ query:
     MATCH (f:File) RETURN f.path
 hydration:
   paths:
-    f: ["1/100/"]
+    f: ["1/", "1/100/"]
 logical:
   expect:
     - (Input hydration (...))

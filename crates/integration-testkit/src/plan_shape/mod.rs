@@ -18,9 +18,36 @@ use serde::Deserialize;
 struct Scenario {
     name: String,
     query: BTreeMap<String, String>,
+    #[serde(default)]
+    missing_frontends: BTreeMap<String, String>,
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
+}
+
+impl Scenario {
+    fn validate_frontends(&self) -> Result<(), String> {
+        for language in self.query.keys().chain(self.missing_frontends.keys()) {
+            if !matches!(language.as_str(), "json" | "gql") {
+                return Err(format!("unknown frontend {language}"));
+            }
+        }
+        for language in ["json", "gql"] {
+            match (
+                self.query.get(language),
+                self.missing_frontends.get(language),
+            ) {
+                (Some(query), None) if !query.trim().is_empty() => {}
+                (None, Some(reason)) if !reason.trim().is_empty() => {}
+                _ => {
+                    return Err(format!(
+                        "supply query.{language} or a nonempty missing_frontends.{language} reason, but not both"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -268,6 +295,9 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             "{}: missing query arms or backend assertions",
             path.display()
         );
+        scenario
+            .validate_frontends()
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {
@@ -282,6 +312,38 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         println!("PASS {}", scenario.name);
     }
     println!("{} plan fixtures passed", paths.len());
+}
+
+#[test]
+fn yaml_requires_both_frontends_or_an_explicit_exception() {
+    for (query, exceptions, valid) in [
+        ("{json: query, gql: query}", "{}", true),
+        (
+            "{json: query}",
+            "{gql: Normalizes the tested direction}",
+            true,
+        ),
+        (
+            "{gql: query}",
+            "{json: Cannot express property comparisons}",
+            true,
+        ),
+        ("{json: query}", "{}", false),
+        ("{json: query}", "{gql: ' '}", false),
+        (
+            "{json: query, gql: query}",
+            "{gql: Redundant exception}",
+            false,
+        ),
+        ("{json: query, gql: query, sql: query}", "{}", false),
+        ("{json: query, gql: ' '}", "{}", false),
+    ] {
+        let yaml = format!(
+            "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nlogical: {{}}\nphysical: {{}}"
+        );
+        let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
+        assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
+    }
 }
 
 #[test]

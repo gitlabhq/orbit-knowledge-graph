@@ -23,6 +23,9 @@ physical:
         - (Project path[(e1.target_id, e1.target_kind), (e2.target_id, e2.target_kind), (e3.target_id, e3.target_kind)] AS path_nodes, ... (_))
     emitted:
       expect:
+        - (Union ALL AS e0 (_) (_) (_))
+        - (Project 3 AS depth, ... (_))
+        - (Project e0.relationship_kind AS hop_e0_type, ... (_))
         - (Project e0.path_nodes AS hop_e0_path_nodes, ... (_))
         - (Project array(tuple(e1.target_id, e1.target_kind), tuple(e2.target_id, e2.target_kind), tuple(e3.target_id, e3.target_kind)) AS path_nodes, ... (_))
   duckdb:

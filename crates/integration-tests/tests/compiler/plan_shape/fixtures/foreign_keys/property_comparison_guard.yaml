@@ -1,4 +1,6 @@
 name: Cross-node comparisons retain pinned FK endpoints
+missing_frontends:
+  json: The JSON frontend does not expose property-to-property comparisons.
 query:
   gql: |
     MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})

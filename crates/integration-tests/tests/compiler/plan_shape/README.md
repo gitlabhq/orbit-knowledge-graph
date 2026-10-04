@@ -4,6 +4,15 @@ Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture checks normalized input, selected requirements, and/or
 the emitted SQL AST. Most fixtures run through both JSON and GQL.
 
+Both `query.json` and `query.gql` are required. If a frontend cannot express the
+tested plan, declare its reason under `missing_frontends`. The runner rejects
+missing, blank, unknown, or redundant exception entries.
+
+```yaml
+missing_frontends:
+  json: The JSON frontend does not expose property-to-property comparisons.
+```
+
 This inventory traces the planner and lowerer at `caecd53c9`, the base of !2681.
 It covers access-path choices and their important eligibility guards. It does
 not measure latency or replace database correctness tests.
@@ -69,3 +78,48 @@ not measure latency or replace database correctness tests.
 - Scope enforcement, role scans, virtual-property hydration, cursor handling,
   and backend code-generation optimizations run outside this harness boundary.
   Existing compiler and database suites cover those phases.
+
+## Rust test migration
+
+The following tests have been removed after moving their assertions to YAML.
+Paths below the fixture root identify the replacements.
+
+| Removed Rust test | Replacement |
+|---|---|
+| `compiler::tests::path_finding_filtered_endpoint_produces_anchor_cte` | `path_finding/filtered_anchor.yaml` |
+| `compiler::tests::cascade_narrowing_skipped_for_convergent_join_target` | `narrowing/convergent_target_guard.yaml` |
+| `compiler::tests::hydration_uses_limit_by_for_latest_rows` | `hydration/projection_pruning.yaml` |
+| `compiler::tests::fk_center_group_by_aggregation_drops_redundant_narrow_scan` | `foreign_keys/aggregation_avoids_target_rescan.yaml` (includes scan count) |
+| `compiler::tests::fk_center_traversal_keeps_narrow_scan` | `foreign_keys/star_target_narrowing.yaml` |
+| `compiler::tests::fk_star_unfiltered_join_narrow_uses_candidate_scan` | `foreign_keys/star_target_narrowing.yaml` (plain candidate, FINAL center, outer deletion check) |
+| `lower::hydration::tests::dynamic_single_tp_emits_starts_with` | `hydration/dynamic_single_leaf.yaml` |
+| `lower::hydration::tests::dynamic_multiple_tps_emit_or_disjunction` | `hydration/leaf_pruning.yaml` |
+| `lower::hydration::tests::static_single_tp_emits_starts_with` | `hydration/without_ids.yaml` |
+| `lower::hydration::tests::static_multiple_tps_emit_or_chain` | `hydration/static_prefixes.yaml` |
+| `lower::hydration::tests::dynamic_no_tp_omits_path_filter` | `hydration/dynamic_without_paths.yaml` |
+| `lower::hydration::tests::static_no_tp_omits_path_filter` | `hydration/projection_pruning.yaml` |
+| `lower::hydration::tests::dynamic_leaf_pruning_drops_broad_prefix` | `hydration/dynamic_single_leaf.yaml` |
+| `lower::hydration::tests::static_leaf_pruning_drops_broad_prefix` | `hydration/without_ids.yaml` |
+| `compiler::ontology::multi_hop_traversal_generates_union_subquery` | `variable_hops/depth_arms.yaml` (union, depth, and edge output) |
+| `compiler::ontology::multi_hop_with_floor_filter` | `variable_hops/exact_hops.yaml` |
+
+### Keep in Rust
+
+These assertions exceed the current YAML contract. Keep them active; they are
+not ignored tests or missing fixture migrations.
+
+| Tests | Reason |
+|---|---|
+| `lower::hydration::tests::large_dynamic_tp_sets_emit_array_exists` | Checks the number and length of bound array parameters, which explain does not expose |
+| `lower::hydration::tests::large_static_tp_sets_emit_or` | Pins 257 static predicates and rejects array mode; complements the dynamic YAML fixture |
+| `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
+| `plan_shape::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
+| `compiler::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
+| `plan::edge_chain::tests::fk_chain_*` | Uses synthetic catalog facts, including all-global chains absent from the embedded ontology |
+| `compiler::tests::cross_namespace_fk_chain_elides_to_node_joins` | Also checks authorization predicates after lowering |
+| `compiler::tests::multi_hop_aggregation_generates_cascade_cte` | Also checks security injection after lowering |
+| Compiler cursor, scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
+| Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
+
+Other existing tests remain where the current fixture has only partial assertion
+overlap. A coverage-index entry alone is not permission to delete a Rust test.

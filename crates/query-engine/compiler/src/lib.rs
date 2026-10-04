@@ -248,7 +248,6 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Arc<Ontology>> =
@@ -745,31 +744,6 @@ mod tests {
         assert!(
             sql.contains("u.id <= 100"),
             "range upper bound must reach the User subquery WHERE, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_filtered_endpoint_produces_anchor_cte() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"eq": "root"}}},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_nf_start"),
-            "filtered endpoint should generate _nf_start CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("username = 'root'") || sql.contains("username = {"),
-            "CTE should contain username filter, got:\n{sql}"
         );
     }
 
@@ -1802,53 +1776,6 @@ mod tests {
     }
 
     #[test]
-    fn fk_star_unfiltered_join_narrow_uses_candidate_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 WHERE"
-            ),
-            "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 FINAL"
-            ),
-            "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_candidate_p1"),
-            "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("p1.id IN (SELECT id FROM _candidate_p1)"),
-            "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM gl_pipeline AS p1 FINAL")
-                && sql.contains(
-                    "LIMIT 1 BY p2.traversal_path, p2.id) AS p2 WHERE (p2._deleted = false)",
-                ),
-            "joined target deletion filtering must run after latest-row dedup, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn narrowed_join_keeps_sort_key_filters_before_dedup() {
         let sql = compile_sql(
             r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
@@ -1858,61 +1785,6 @@ mod tests {
                 "p.id IN (SELECT id FROM _candidate_p) AND startsWith(p.traversal_path, '1/100/'))) ORDER BY"
             ) && sql.contains("LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (startsWith(p.traversal_path, '1/100/') AND (p._deleted = false))"),
             "sort-key filters must prune before dedup and recheck after it, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "proj", "entity": "Project"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
-            "group_by": ["proj"],
-            "aggregations": [{"count": "j", "as": "failed_jobs"}],
-            "limit": 200
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_proj"),
-            "FK-center group-by aggregation must not re-scan the center for narrowing, got:\n{sql}"
-        );
-        assert_eq!(
-            sql.matches("FROM gl_job").count(),
-            1,
-            "gl_job must be scanned exactly once, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("proj.id = j.project_id"),
-            "Project hydration must still join on the center FK, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_traversal_keeps_narrow_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_narrow_p2"),
-            "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
         );
     }
 
@@ -2133,34 +2005,6 @@ mod tests {
     }
 
     #[test]
-    fn cascade_narrowing_skipped_for_convergent_join_target() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "n", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "n"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{"count": "n", "as": "note_count"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_p"),
-            "p is the join target of two hops (IN_PROJECT and CONTAINS), so the cross-hop joins narrow it without a cascade CTE; got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn filtered_redaction_joins_push_filters_into_subquery() {
         let query = r#"{
             "query_type": "traversal",
@@ -2222,41 +2066,6 @@ mod tests {
                 && sql.contains("startsWith(j.traversal_path")
                 && !sql.contains("startsWith(u.traversal_path"),
             "all in-namespace nodes (mr, pipe, j) scoped, global User hub unscoped; got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn hydration_uses_limit_by_for_latest_rows() {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: vec![InputNode {
-                id: "mr".into(),
-                entity: Some("MergeRequest".into()),
-                columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
-                node_ids: vec![1],
-                traversal_paths: vec![TraversalPath::new_unchecked("1/")],
-                ..Default::default()
-            }],
-            limit: 10,
-            ..Default::default()
-        };
-
-        let ont = ONTOLOGY.clone();
-        let compiled = compile_input(
-            input,
-            HydrationCompileOptions::default(),
-            &ont,
-            &security_ctx(),
-        )
-        .expect("hydration input should compile");
-        let sql = compiled.base.render();
-        assert!(
-            !sql.contains(" FINAL"),
-            "hydration should dedup via LIMIT BY, not FINAL, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("LIMIT 1 BY"),
-            "hydration should dedup latest rows via LIMIT 1 BY, got:\n{sql}"
         );
     }
 
