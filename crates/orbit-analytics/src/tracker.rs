@@ -7,7 +7,6 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 const APP_ID: &str = "gkg-server";
 const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait AnalyticsTracker: Send + Sync {
     fn track(&self, event: StructuredEvent);
@@ -54,15 +53,6 @@ impl SnowplowAnalyticsTracker {
 
     pub async fn shutdown(&self) {
         self.tracker.shutdown().await;
-    }
-
-    pub async fn drain(&self) {
-        if tokio::time::timeout(DRAIN_TIMEOUT, self.shutdown())
-            .await
-            .is_err()
-        {
-            tracing::warn!("analytics drain timed out; dropping buffered events");
-        }
     }
 }
 

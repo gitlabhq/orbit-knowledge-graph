@@ -230,7 +230,7 @@ pub async fn run(
     };
 
     shutdown_task.abort();
-    analytics.drain().await;
+    analytics.shutdown().await;
 
     info!("indexer stopped");
     result

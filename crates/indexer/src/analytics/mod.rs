@@ -55,9 +55,9 @@ impl IndexingAnalytics {
         )))
     }
 
-    pub async fn drain(&self) {
+    pub async fn shutdown(&self) {
         if let Some(tracker) = &self.tracker {
-            tracker.drain().await;
+            tracker.shutdown().await;
         }
     }
 }

@@ -274,7 +274,7 @@ async fn run_webserver(
         _ = shutdown.cancelled() => Ok(()),
     };
     if let Some(tracker) = analytics_tracker {
-        tracker.drain().await;
+        tracker.shutdown().await;
     }
     result
 }
