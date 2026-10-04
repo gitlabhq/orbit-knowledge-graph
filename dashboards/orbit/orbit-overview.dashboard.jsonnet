@@ -20,13 +20,13 @@ local items = [
     'short', 6),
   o.stat('Compiler success', 'Share of queries that passed compilation. 1 minus (compile_error share). Drops here mean clients are sending queries the compiler refuses.',
     o.target(
-      '1 - sum(rate(%s{%s, status="compile_error"}[5m])) / clamp_min(sum(rate(%s{%s}[5m])), 1)' %
+      '1 - (sum(rate(%s{%s, status="compile_error"}[5m])) or vector(0)) / (sum(rate(%s{%s}[5m])) > 0)' %
         [pipelineQueries, o.GKG_WEB_SEL, pipelineQueries, o.GKG_WEB_SEL],
       'compiler_ok', 'ORBIT_DS'),
     'percentunit', 6),
   o.stat('Pipeline success (post-compile)', 'Share of post-compile pipeline runs that returned status="ok". Compile rejects are excluded so this isolates server-side reliability.',
     o.target(
-      'sum(rate(%s{%s, status="ok"}[5m])) / clamp_min(sum(rate(%s{%s, status!="compile_error"}[5m])), 1)' %
+      'sum(rate(%s{%s, status="ok"}[5m])) / (sum(rate(%s{%s, status!="compile_error"}[5m])) > 0)' %
         [pipelineQueries, o.GKG_WEB_SEL, pipelineQueries, o.GKG_WEB_SEL],
       'pipeline_ok', 'ORBIT_DS'),
     'percentunit', 6),

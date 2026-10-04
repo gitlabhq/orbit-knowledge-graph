@@ -178,7 +178,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])), 1)",
+          "expr": "1 - (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[5m])) or vector(0)) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])) > 0)",
           "legendFormat": "compiler_ok",
           "refId": "A"
         }
@@ -224,7 +224,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"compile_error\"}[5m])), 1)",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[5m])) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"compile_error\"}[5m])) > 0)",
           "legendFormat": "pipeline_ok",
           "refId": "A"
         }
