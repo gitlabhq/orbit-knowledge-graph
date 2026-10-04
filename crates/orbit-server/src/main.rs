@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         builder = builder.add_readiness_check(name, check);
     }
     builder = builder.probe_tls(internal_tls.clone());
-    let _guard = builder.init().expect("labkit init");
+    let mut guard = builder.init().expect("labkit init");
 
     if config.metrics.prometheus.port.is_some() {
         warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
@@ -121,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     signal_task.abort();
+    guard.shutdown().await;
 
     result
 }
