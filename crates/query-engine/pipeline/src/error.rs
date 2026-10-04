@@ -58,7 +58,7 @@ impl PipelineError {
             Self::Compile {
                 client_safe: true,
                 ..
-            } | Self::Security(_)
+            }
         )
     }
 }

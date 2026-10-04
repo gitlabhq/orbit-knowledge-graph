@@ -115,7 +115,7 @@ impl AnalyticsObserver {
         };
 
         query.data.graph_schema_version = self.schema_version.parse().ok();
-        apply_outcome(&mut query.data, error);
+        apply_outcome(&mut query.data, &self.claims, error);
 
         match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)
@@ -270,45 +270,74 @@ mod tests {
             client_safe,
             reason,
         };
+        let security = || PipelineError::Security("x".into());
         let cases = [
             (
+                false,
                 compile(true, "depth"),
                 "compile_error",
                 "caller_error",
                 "depth",
             ),
             (
+                false,
                 compile(false, "lowering"),
                 "compile_error",
                 "server_error",
                 "lowering",
             ),
             (
-                PipelineError::Security("x".into()),
+                false,
+                security(),
                 "security_error",
                 "caller_error",
-                "security",
+                "no_enabled_namespaces",
             ),
             (
+                true,
+                security(),
+                "security_error",
+                "server_error",
+                "security_context",
+            ),
+            (
+                false,
+                PipelineError::Authorization("x".into()),
+                "authorization_error",
+                "server_error",
+                "redaction",
+            ),
+            (
+                false,
                 PipelineError::Execution("Code: 241. DB::Exception".into()),
                 "execution_error",
                 "server_error",
                 "memory_limit",
             ),
             (
+                false,
                 PipelineError::Execution("x".into()),
                 "execution_error",
                 "server_error",
                 "execution",
             ),
-            (PipelineError::Timeout, "timeout", "server_error", "timeout"),
+            (
+                false,
+                PipelineError::Timeout,
+                "timeout",
+                "server_error",
+                "timeout",
+            ),
         ];
-        for (error, status, outcome, reason) in cases {
+        for (admin, error, status, outcome, reason) in cases {
             let tracker = Arc::new(InMemoryAnalyticsTracker::new());
             let obs = AnalyticsObserver::new(
                 Some(tracker.clone()),
                 Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-                test_claims(),
+                Claims {
+                    admin,
+                    ..test_claims()
+                },
                 "query_graph",
                 None,
                 "33".to_string(),
@@ -318,13 +347,42 @@ mod tests {
             obs.finish(5, 1);
 
             let events = tracker.drain();
-            assert_eq!(events.len(), 1, "{status}");
+            assert_eq!(events.len(), 1, "{reason}");
             let data = &events[0].contexts()[1].data;
             assert_eq!(data["status"], status);
             assert_eq!(data["outcome"], outcome);
             assert_eq!(data["failure_reason"], reason);
             assert!(data["row_count"].is_null());
+            assert!(data["hydration_plan"].is_null());
             assert!(data["ch_read_rows"].is_null());
+        }
+    }
+
+    #[test]
+    fn every_pipeline_error_code_is_a_schema_status() {
+        let errors = [
+            PipelineError::Security(String::new()),
+            PipelineError::Compile {
+                message: String::new(),
+                client_safe: true,
+                reason: "parse",
+            },
+            PipelineError::Execution(String::new()),
+            PipelineError::Authorization(String::new()),
+            PipelineError::ContentResolution(String::new()),
+            PipelineError::Streaming(String::new()),
+            PipelineError::Timeout,
+            PipelineError::custom("x"),
+        ];
+        for error in errors {
+            assert!(
+                error
+                    .code()
+                    .parse::<orbit_analytics::orbit_query::OrbitQueryStatus>()
+                    .is_ok(),
+                "{} is missing from the orbit_query status enum",
+                error.code()
+            );
         }
     }
 

@@ -22,7 +22,7 @@
       "enum": ["ok", "compile_error", "security_error", "execution_error", "authorization_error", "content_resolution_error", "streaming_error", "timeout", "custom_error", null]
     },
     "outcome": {
-      "description": "success, or who caused the failure: caller_error when Orbit rejects the request (invalid query, no access), server_error for a failure in Orbit or its dependencies.",
+      "description": "success, or who caused the failure: caller_error when Orbit rejects the request (invalid query, no enabled namespaces), server_error for any other failure, including timeouts and ClickHouse limits.",
       "type": ["string", "null"],
       "enum": ["success", "caller_error", "server_error", null]
     },

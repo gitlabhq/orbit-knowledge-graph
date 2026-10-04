@@ -92,7 +92,11 @@ impl HydrationStage {
             data_model,
             ctx.security_context()?,
         )
-        .map_err(PipelineError::from)?;
+        .map_err(|e| PipelineError::Compile {
+            client_safe: false,
+            reason: e.failure_reason(),
+            message: e.to_string(),
+        })?;
 
         let rendered_sql = compiled.base.render();
         let debug = if ctx.compiled()?.input.options.include_debug_sql {

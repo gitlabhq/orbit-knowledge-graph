@@ -86,19 +86,33 @@ pub(crate) fn build_query(
     Ok(OrbitQueryContext::new(q))
 }
 
-pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&PipelineError>) {
+pub(crate) fn apply_outcome(
+    q: &mut orbit_query::OrbitQuery,
+    claims: &Claims,
+    error: Option<&PipelineError>,
+) {
     let Some(error) = error else {
         q.status = Some(orbit_query::OrbitQueryStatus::Ok);
         q.outcome = Some(orbit_query::OrbitQueryOutcome::Success);
         return;
     };
+    let no_enabled_namespaces =
+        matches!(error, PipelineError::Security(_)) && !claims.has_enabled_namespaces();
     q.status = error.code().parse().ok();
-    q.outcome = Some(if error.is_caller_error() {
+    q.outcome = Some(if error.is_caller_error() || no_enabled_namespaces {
         orbit_query::OrbitQueryOutcome::CallerError
     } else {
         orbit_query::OrbitQueryOutcome::ServerError
     });
-    q.failure_reason = failure_reason(error).parse().ok();
+    let reason = if no_enabled_namespaces {
+        "no_enabled_namespaces"
+    } else {
+        failure_reason(error)
+    };
+    q.failure_reason = reason.parse().ok();
+    if q.query_type.is_none() {
+        q.hydration_plan = None;
+    }
     q.row_count = None;
     q.redacted_count = None;
     if q.execute_ms.is_none() {
@@ -114,6 +128,8 @@ fn failure_reason(error: &PipelineError) -> &'static str {
         PipelineError::Execution(message) => {
             crate::pipeline::clickhouse_limit(message).unwrap_or("execution")
         }
+        PipelineError::Security(_) => "security_context",
+        PipelineError::Authorization(_) => "redaction",
         _ => crate::pipeline::metrics::failure_reason(error).unwrap_or("custom"),
     }
 }

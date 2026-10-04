@@ -79,6 +79,12 @@ pub struct Claims {
     pub license_checksum: Option<SecretString>,
 }
 
+impl Claims {
+    pub fn has_enabled_namespaces(&self) -> bool {
+        self.admin || !self.group_traversal_ids.is_empty()
+    }
+}
+
 /// Source type of the request, matching the Iglu `orbit_query` enum.
 /// Unknown JWT values deserialize to `Rest` (the catch-all).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]

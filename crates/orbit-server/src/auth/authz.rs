@@ -9,15 +9,15 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
         .organization_id
         .ok_or("missing organization_id in claims")? as i64;
 
+    if !claims.has_enabled_namespaces() {
+        return Err("no enabled namespaces for this user".into());
+    }
     let traversal_paths = if claims.admin {
         vec![AuthorizedPath::new(
             format!("{org_id}/"),
             ADMIN_ORG_ROOT_ACCESS_LEVEL,
         )]
     } else {
-        if claims.group_traversal_ids.is_empty() {
-            return Err("no enabled namespaces for this user".into());
-        }
         claims
             .group_traversal_ids
             .iter()
