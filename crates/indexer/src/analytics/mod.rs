@@ -17,7 +17,7 @@ pub use observer::SnowplowIndexingObserver;
 
 #[derive(Clone)]
 pub struct IndexingAnalytics {
-    tracker: Option<Arc<dyn AnalyticsTracker>>,
+    tracker: Option<SnowplowAnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
 }
 
@@ -48,17 +48,23 @@ impl IndexingAnalytics {
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
-        let tracker = self.tracker.clone()?;
+        let tracker: Arc<dyn AnalyticsTracker> = Arc::new(self.tracker.clone()?);
         Some(Box::new(SnowplowIndexingObserver::new(
             tracker,
             Arc::clone(&self.config),
         )))
     }
+
+    pub async fn drain(&self) {
+        if let Some(tracker) = &self.tracker {
+            tracker.drain().await;
+        }
+    }
 }
 
 fn build_tracker(
     config: &AnalyticsConfig,
-) -> Result<Option<Arc<dyn AnalyticsTracker>>, labkit_events::Error> {
+) -> Result<Option<SnowplowAnalyticsTracker>, labkit_events::Error> {
     if !config.enabled {
         return Ok(None);
     }
@@ -68,6 +74,5 @@ fn build_tracker(
         );
         return Ok(None);
     }
-    let tracker = SnowplowAnalyticsTracker::from_config(config)?;
-    Ok(Some(Arc::new(tracker)))
+    SnowplowAnalyticsTracker::from_config(config).map(Some)
 }
