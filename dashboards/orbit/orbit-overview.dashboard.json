@@ -53,7 +53,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Query pipeline calls per minute.",
+      "description": "Queries that returned status=\"ok\", per minute. Each one sends one gkg_query_executed analytics event, except GQL schema requests (query_type=\"unknown\").",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -86,12 +86,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]) * 60)",
-          "legendFormat": "qpm",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m]) * 60)",
+          "legendFormat": "ok/min",
           "refId": "A"
         }
       ],
-      "title": "Queries / min",
+      "title": "Successful queries / min",
       "type": "stat"
     },
     {
@@ -99,11 +99,11 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of queries that passed compilation. 1 minus (compile_error share). Drops here mean clients are sending queries the compiler refuses.",
+      "description": "Queries that did not return status=\"ok\", per minute: compile errors, authorization errors, execution errors, timeouts, and content resolution errors. Failed queries send no analytics event.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
-          "unit": "percentunit"
+          "unit": "short"
         }
       },
       "gridPos": {
@@ -132,12 +132,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])), 1)",
-          "legendFormat": "compiler_ok",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"ok\"}[5m]) * 60)",
+          "legendFormat": "failed/min",
           "refId": "A"
         }
       ],
-      "title": "Compiler success",
+      "title": "Failed queries / min",
       "type": "stat"
     },
     {
@@ -145,7 +145,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of post-compile pipeline runs that returned status=\"ok\". Compile rejects are excluded so this isolates server-side reliability.",
+      "description": "Share of queries that passed compilation. 1 minus (compile_error share). Drops here mean clients are sending queries the compiler refuses.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -178,7 +178,53 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"compile_error\"}[5m])), 1)",
+          "expr": "1 - (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[5m])) or vector(0)) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])) > 0)",
+          "legendFormat": "compiler_ok",
+          "refId": "A"
+        }
+      ],
+      "title": "Compiler success",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Share of post-compile pipeline runs that returned status=\"ok\". Compile rejects are excluded so this isolates server-side reliability.",
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m])) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"compile_error\"}[5m])) > 0)",
           "legendFormat": "pipeline_ok",
           "refId": "A"
         }
@@ -201,10 +247,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 18,
-        "y": 1
+        "x": 0,
+        "y": 5
       },
-      "id": 5,
+      "id": 6,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -247,10 +293,10 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 0,
+        "x": 6,
         "y": 5
       },
-      "id": 6,
+      "id": 7,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -286,7 +332,7 @@
         "x": 0,
         "y": 9
       },
-      "id": 7,
+      "id": 8,
       "panels": [],
       "title": "GKG indexer",
       "type": "row"
@@ -309,7 +355,7 @@
         "x": 0,
         "y": 10
       },
-      "id": 8,
+      "id": 9,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -355,7 +401,7 @@
         "x": 6,
         "y": 10
       },
-      "id": 9,
+      "id": 10,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -401,7 +447,7 @@
         "x": 12,
         "y": 10
       },
-      "id": 10,
+      "id": 11,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -447,7 +493,7 @@
         "x": 18,
         "y": 10
       },
-      "id": 11,
+      "id": 12,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -483,7 +529,7 @@
         "x": 0,
         "y": 14
       },
-      "id": 12,
+      "id": 13,
       "panels": [],
       "title": "Siphon",
       "type": "row"
@@ -506,7 +552,7 @@
         "x": 0,
         "y": 15
       },
-      "id": 13,
+      "id": 14,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -552,7 +598,7 @@
         "x": 8,
         "y": 15
       },
-      "id": 14,
+      "id": 15,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -598,7 +644,7 @@
         "x": 16,
         "y": 15
       },
-      "id": 15,
+      "id": 16,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -634,7 +680,7 @@
         "x": 0,
         "y": 19
       },
-      "id": 16,
+      "id": 17,
       "panels": [],
       "title": "Rails → KG",
       "type": "row"
@@ -657,7 +703,7 @@
         "x": 0,
         "y": 20
       },
-      "id": 17,
+      "id": 18,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -703,7 +749,7 @@
         "x": 8,
         "y": 20
       },
-      "id": 18,
+      "id": 19,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -749,7 +795,7 @@
         "x": 16,
         "y": 20
       },
-      "id": 19,
+      "id": 20,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
