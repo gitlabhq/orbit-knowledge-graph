@@ -1,7 +1,11 @@
 use std::time::Duration;
 
-use labkit_events::Tracker;
-use orbit_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
+use labkit_events::{StructuredEvent, Tracker};
+use orbit_analytics::{
+    AnalyticsTracker, OrbitCommonContext, OrbitQueryContext, SnowplowAnalyticsTracker,
+    orbit_common, orbit_query,
+};
+use orbit_server_config::AppConfig;
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -137,17 +141,7 @@ fn init_crypto_provider() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
-#[tokio::test]
-async fn snowplow_micro_receives_gkg_query_executed() {
-    init_crypto_provider();
-    let http = reqwest::Client::new();
-    let micro = start_micro(&http).await;
-
-    let tracker = Tracker::builder(&micro.base_url, "orbit-analytics-it")
-        .batch_size(1)
-        .build()
-        .expect("tracker build");
-
+fn query_executed_event() -> StructuredEvent {
     let common = OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type: Some(orbit_common::OrbitCommonDeploymentType::Com),
         surface: Some(orbit_common::OrbitCommonSurface::Server),
@@ -174,24 +168,47 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         ..Default::default()
     });
 
-    let event = labkit_events::StructuredEvent::builder("gkg", "gkg_query_executed")
+    StructuredEvent::builder("gkg", "gkg_query_executed")
         .context(common)
         .context(query)
         .build()
-        .expect("event build");
+        .expect("event build")
+}
 
-    let (good_before, bad_before) = micro_counts(&http, &micro.base_url).await;
-    tracker.track_structured_event(event).expect("track");
-    tracker.shutdown().await;
-
+async fn wait_for_new_events(
+    http: &reqwest::Client,
+    base_url: &str,
+    (good_before, bad_before): (u64, u64),
+) -> (u64, u64) {
     let (mut good, mut bad) = (good_before, bad_before);
-    for _ in 0..30 {
-        (good, bad) = micro_counts(&http, &micro.base_url).await;
+    for _ in 0..75 {
+        (good, bad) = micro_counts(http, base_url).await;
         if good > good_before || bad > bad_before {
             break;
         }
         sleep(Duration::from_millis(200)).await;
     }
+    (good, bad)
+}
+
+#[tokio::test]
+async fn snowplow_micro_receives_gkg_query_executed() {
+    init_crypto_provider();
+    let http = reqwest::Client::new();
+    let micro = start_micro(&http).await;
+
+    let tracker = Tracker::builder(&micro.base_url, "orbit-analytics-it")
+        .batch_size(1)
+        .build()
+        .expect("tracker build");
+
+    let (good_before, bad_before) = micro_counts(&http, &micro.base_url).await;
+    tracker
+        .track_structured_event(query_executed_event())
+        .expect("track");
+    tracker.shutdown().await;
+
+    let (good, bad) = wait_for_new_events(&http, &micro.base_url, (good_before, bad_before)).await;
     if bad > bad_before {
         let bad_events: Value = http
             .get(format!("{}/micro/bad", micro.base_url))
@@ -260,4 +277,27 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         .expect("orbit_query entity");
     assert_eq!(query_data["data"]["outcome"], "caller_error");
     assert_eq!(query_data["data"]["failure_reason"], "depth");
+}
+
+#[tokio::test]
+async fn analytics_tracker_delivers_a_partial_batch_without_flush() {
+    init_crypto_provider();
+    let http = reqwest::Client::new();
+    let micro = start_micro(&http).await;
+
+    let mut config = AppConfig::embedded_defaults().analytics;
+    config.enabled = true;
+    config.collector_url = micro.base_url.clone();
+    let tracker = SnowplowAnalyticsTracker::from_config(&config).expect("tracker build");
+
+    let before = micro_counts(&http, &micro.base_url).await;
+    tracker.track(query_executed_event());
+
+    let (good, bad) = wait_for_new_events(&http, &micro.base_url, before).await;
+    assert_eq!(
+        (good, bad),
+        (before.0 + 1, before.1),
+        "a single tracked event was not delivered without an explicit flush"
+    );
+    tracker.shutdown().await;
 }
