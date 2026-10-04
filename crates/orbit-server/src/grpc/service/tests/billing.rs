@@ -5,87 +5,81 @@ use orbit_analytics::InMemoryAnalyticsTracker;
 use orbit_billing::InMemoryBillingTracker;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
-use tokio_stream::wrappers::ReceiverStream;
 
 use super::*;
 use crate::auth::claims::TraversalPathClaim;
 use crate::proto::{ExecuteQueryRequest, execute_query_message};
 
-async fn clickhouse_with_no_rows(answers: bool) -> (String, Arc<Notify>) {
-    let received = Arc::new(Notify::new());
-    let signal = received.clone();
+#[derive(Default)]
+struct StubClickHouse {
+    received: Notify,
+    answer: Notify,
+}
+
+async fn stub_clickhouse() -> (String, Arc<StubClickHouse>) {
+    let stub = Arc::new(StubClickHouse::default());
+    let state = stub.clone();
     let app = Router::new().fallback(move || {
-        let signal = signal.clone();
+        let state = state.clone();
         async move {
-            signal.notify_one();
-            if !answers {
-                std::future::pending::<()>().await;
-            }
+            state.received.notify_one();
+            state.answer.notified().await;
         }
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (format!("http://{addr}"), received)
+    (format!("http://{addr}"), stub)
 }
 
-struct Trackers {
+struct Harness {
+    client: OrbitServiceClient<tonic::transport::Channel>,
     billing: Arc<InMemoryBillingTracker>,
     analytics: Arc<InMemoryAnalyticsTracker>,
+    clickhouse: Arc<StubClickHouse>,
 }
 
-async fn start(
-    answers: bool,
-) -> (
-    OrbitServiceClient<tonic::transport::Channel>,
-    Trackers,
-    Arc<Notify>,
-) {
-    let (url, received) = clickhouse_with_no_rows(answers).await;
-    let trackers = Trackers {
-        billing: Arc::new(InMemoryBillingTracker::default()),
-        analytics: Arc::new(InMemoryAnalyticsTracker::new()),
-    };
-    let service = OrbitServiceImpl::new(
-        Arc::new(mock_validator()),
-        ActiveSchema::pinned(test_ontology()),
-        &ClickHouseConfiguration {
+impl Harness {
+    async fn start() -> Self {
+        let (url, clickhouse) = stub_clickhouse().await;
+        let billing = Arc::new(InMemoryBillingTracker::default());
+        let analytics = Arc::new(InMemoryAnalyticsTracker::new());
+        let service = test_service_on(&ClickHouseConfiguration {
             url,
             ..test_config()
-        },
-        ClusterHealthChecker::default().into_arc(),
-        60,
-        Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-    )
-    .with_billing(trackers.billing.clone())
-    .with_analytics(trackers.analytics.clone());
-    (serve(service).await, trackers, received)
+        })
+        .with_billing(billing.clone())
+        .with_analytics(analytics.clone());
+        Self {
+            client: serve(service).await,
+            billing,
+            analytics,
+            clickhouse,
+        }
+    }
+
+    async fn analytics_event(&self) {
+        while self.analytics.count() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 }
 
-fn billable_project_query() -> (
-    mpsc::Sender<ExecuteQueryMessage>,
-    Request<ReceiverStream<ExecuteQueryMessage>>,
-) {
-    let (requests, stream) = mpsc::channel(1);
+fn billable_project_query() -> Request<impl tokio_stream::Stream<Item = ExecuteQueryMessage>> {
     let query = serde_json::json!({
         "query_type": "traversal",
         "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
         "limit": 10
     });
-    requests
-        .try_send(ExecuteQueryMessage {
-            content: Some(execute_query_message::Content::Request(
-                ExecuteQueryRequest {
-                    query: query.to_string(),
-                    ..Default::default()
-                },
-            )),
-        })
-        .unwrap();
-    let now = chrono::Utc::now().timestamp();
+    let message = ExecuteQueryMessage {
+        content: Some(execute_query_message::Content::Request(
+            ExecuteQueryRequest {
+                query: query.to_string(),
+                ..Default::default()
+            },
+        )),
+    };
     let claims = Claims {
-        iat: now,
-        exp: now + 3600,
         realm: Some("SaaS".into()),
         group_traversal_ids: vec![TraversalPathClaim {
             path: TraversalPath::new_unchecked("1/"),
@@ -93,28 +87,20 @@ fn billable_project_query() -> (
         }],
         ..test_claims()
     };
-    (
-        requests,
-        signed_request(ReceiverStream::new(stream), claims),
-    )
-}
-
-async fn wait_until(condition: impl Fn() -> bool) {
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !condition() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("condition not met within 10 s");
+    signed_request(tokio_stream::iter([message]), claims)
 }
 
 #[tokio::test]
 async fn bills_a_query_after_the_client_gets_its_result() {
-    let (mut client, trackers, _) = start(true).await;
-    let (_requests, request) = billable_project_query();
+    let mut harness = Harness::start().await;
+    harness.clickhouse.answer.notify_one();
 
-    let mut responses = client.execute_query(request).await.unwrap().into_inner();
+    let mut responses = harness
+        .client
+        .execute_query(billable_project_query())
+        .await
+        .unwrap()
+        .into_inner();
     let message = responses.message().await.unwrap().unwrap();
 
     assert!(
@@ -124,20 +110,28 @@ async fn bills_a_query_after_the_client_gets_its_result() {
         ),
         "{message:?}"
     );
-    wait_until(|| trackers.billing.count() == 1).await;
+    assert!(responses.message().await.unwrap().is_none());
+    assert_eq!(harness.billing.count(), 1);
 }
 
 #[tokio::test]
 async fn does_not_bill_a_query_the_client_abandoned() {
-    let (mut client, trackers, clickhouse_received) = start(false).await;
-    let (requests, request) = billable_project_query();
+    let mut harness = Harness::start().await;
 
-    let responses = client.execute_query(request).await.unwrap();
-    clickhouse_received.notified().await;
-    drop((requests, responses));
+    let responses = harness
+        .client
+        .execute_query(billable_project_query())
+        .await
+        .unwrap();
+    harness.clickhouse.received.notified().await;
+    drop(responses);
+    let _ = tokio::time::timeout(Duration::from_secs(5), harness.analytics_event()).await;
+    harness.clickhouse.answer.notify_one();
 
-    wait_until(|| trackers.analytics.count() == 1).await;
-    assert_eq!(trackers.billing.count(), 0);
-    let event = &trackers.analytics.drain()[0];
+    tokio::time::timeout(Duration::from_secs(10), harness.analytics_event())
+        .await
+        .unwrap();
+    assert_eq!(harness.billing.count(), 0, "billed an abandoned query");
+    let event = &harness.analytics.drain()[0];
     assert_eq!(event.contexts()[1].data["status"], "streaming_error");
 }

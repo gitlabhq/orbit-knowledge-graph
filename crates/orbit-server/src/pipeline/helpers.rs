@@ -12,10 +12,6 @@ use query_engine::pipeline::{ClickHouseLimit, PipelineError};
 
 use crate::pipeline::metrics::failure_reason;
 
-pub(super) fn client_closed() -> PipelineError {
-    PipelineError::Streaming("client closed the result stream".into())
-}
-
 pub(super) async fn send_query_result(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     result: ExecuteQueryResult,
@@ -25,7 +21,7 @@ pub(super) async fn send_query_result(
         content: Some(execute_query_message::Content::Result(result)),
     }))
     .await
-    .map_err(|_| client_closed())
+    .map_err(|_| PipelineError::client_closed())
 }
 
 pub async fn send_invalid_request_error(

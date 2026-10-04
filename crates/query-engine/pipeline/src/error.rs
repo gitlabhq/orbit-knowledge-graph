@@ -56,6 +56,10 @@ impl PipelineError {
         Self::Custom(err.into())
     }
 
+    pub fn client_closed() -> Self {
+        Self::Streaming("client closed the result stream".into())
+    }
+
     pub fn is_caller_error(&self) -> bool {
         matches!(
             self,

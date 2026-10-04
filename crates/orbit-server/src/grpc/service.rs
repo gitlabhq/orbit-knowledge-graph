@@ -455,15 +455,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
                 let result = pipeline
-                    .run_query(&schema, ctx, query, tx.clone(), stream, render)
+                    .run_query(&schema, ctx, query, &tx, stream, render)
                     .await;
 
                 match result {
                     Ok(()) => {}
+                    Err(e) if tx.is_closed() => {
+                        info!(error = %e, "Client left before the query result");
+                    }
                     Err(e @ PipelineError::Timeout) => {
-                        // run_query already logged via send_query_error and
-                        // recorded the metric through the observer chain.
-                        // Translate to deadline_exceeded for the gRPC client.
                         send_query_error(&tx, e).await;
                         let _ = tx
                             .send(Err(Status::deadline_exceeded("Query stream timed out")))
@@ -1009,10 +1009,14 @@ mod tests {
     }
 
     fn test_service() -> OrbitServiceImpl {
+        test_service_on(&test_config())
+    }
+
+    fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            clickhouse,
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1105,12 +1109,9 @@ mod tests {
     }
 
     fn authed_request_from<T>(message: T, user_id: u64, source_type: SourceType) -> Request<T> {
-        let now = chrono::Utc::now().timestamp();
         signed_request(
             message,
             Claims {
-                iat: now,
-                exp: now + 3600,
                 user_id,
                 source_type,
                 ..test_claims()
@@ -1119,6 +1120,12 @@ mod tests {
     }
 
     fn signed_request<T>(message: T, claims: Claims) -> Request<T> {
+        let now = chrono::Utc::now().timestamp();
+        let claims = Claims {
+            iat: now,
+            exp: now + 3600,
+            ..claims
+        };
         let token = encode(
             &Header::new(Algorithm::HS256),
             &claims,

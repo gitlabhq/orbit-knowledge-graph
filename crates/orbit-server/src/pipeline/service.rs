@@ -20,7 +20,7 @@ use query_engine::pipeline::{
 };
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
-use super::helpers::{client_closed, send_query_result};
+use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
@@ -90,7 +90,7 @@ impl QueryPipelineService {
         schema: &SchemaSnapshot,
         request_context: RequestContext,
         query: RawQuery,
-        tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
     ) -> Result<(), PipelineError> {
@@ -113,12 +113,11 @@ impl QueryPipelineService {
             )),
         ]);
 
-        let responses = tx.clone();
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));
         server_extensions.insert(claims);
-        server_extensions.insert(tx);
+        server_extensions.insert(tx.clone());
         server_extensions.insert(stream);
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
@@ -174,28 +173,25 @@ impl QueryPipelineService {
                 .finish()
                 .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
                 .inspect_err(|e| obs.record_error(e))?;
-            Ok(QueryServiceOutput::Graph(Box::new(output)))
+            Ok::<_, PipelineError>(QueryServiceOutput::Graph(Box::new(output)))
         };
 
         let output = tokio::select! {
+            biased;
+            () = tx.closed() => Err(PipelineError::client_closed()),
             result = tokio::time::timeout(self.stream_timeout, pipeline) => {
                 result.map_err(|_| PipelineError::Timeout)
             }
-            () = responses.closed() => Err(client_closed()),
         };
-        let delivered = match output {
-            Ok(Ok(output)) => deliver(&responses, output, render).await,
-            Ok(Err(e)) => return Err(e),
+        let counts = match output {
+            Ok(stages) => deliver(tx, stages?, render).await,
             Err(e) => Err(e),
-        };
+        }
+        .inspect_err(|e| obs.record_error(e))?;
 
-        match delivered {
-            Ok(Some((row_count, redacted_count))) => obs.finish(row_count, redacted_count),
-            Ok(None) => schema_obs.finish_schema(),
-            Err(e) => {
-                obs.record_error(&e);
-                return Err(e);
-            }
+        match counts {
+            Some((row_count, redacted_count)) => obs.finish(row_count, redacted_count),
+            None => schema_obs.finish_schema(),
         }
         Ok(())
     }
