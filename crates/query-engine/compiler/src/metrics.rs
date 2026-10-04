@@ -51,7 +51,7 @@ impl<T, E: Into<QueryError>> CountErr<T, E> for std::result::Result<T, E> {
                 1,
                 &[KeyValue::new(
                     spec::labels::FAILURE_REASON,
-                    qe.failure_reason(),
+                    <&str>::from(qe.rejection_reason()),
                 )],
             );
             #[cfg(test)]

@@ -4,7 +4,6 @@ pub(crate) mod metrics;
 mod service;
 mod stages;
 
-pub(crate) use helpers::clickhouse_limit;
 pub use helpers::{receive_query_request, send_invalid_request_error, send_query_error};
 pub use metrics::OTelPipelineObserver;
 pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};

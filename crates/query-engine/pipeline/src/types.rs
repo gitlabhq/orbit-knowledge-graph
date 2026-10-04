@@ -64,7 +64,7 @@ impl QueryPipelineContext {
             .ok_or_else(|| PipelineError::Compile {
                 message: "compiled query context not yet available".into(),
                 client_safe: false,
-                reason: "pipeline",
+                reason: compiler::RejectionReason::Pipeline,
             })
     }
 

@@ -6623,6 +6623,7 @@ dependencies = [
  "compiler",
  "ontology",
  "orbit-utils",
+ "strum 0.28.0",
  "thiserror 2.0.18",
 ]
 

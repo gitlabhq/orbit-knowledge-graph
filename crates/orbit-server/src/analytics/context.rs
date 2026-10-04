@@ -86,33 +86,16 @@ pub(crate) fn build_query(
     Ok(OrbitQueryContext::new(q))
 }
 
-pub(crate) fn apply_outcome(
-    q: &mut orbit_query::OrbitQuery,
-    claims: &Claims,
-    error: Option<&PipelineError>,
-) {
-    let Some(error) = error else {
-        q.status = Some(orbit_query::OrbitQueryStatus::Ok);
-        q.outcome = Some(orbit_query::OrbitQueryOutcome::Success);
-        return;
-    };
-    let no_enabled_namespaces =
-        matches!(error, PipelineError::Security(_)) && !claims.has_enabled_namespaces();
-    q.status = error.code().parse().ok();
-    q.outcome = Some(if error.is_caller_error() || no_enabled_namespaces {
-        orbit_query::OrbitQueryOutcome::CallerError
-    } else {
-        orbit_query::OrbitQueryOutcome::ServerError
+pub(crate) fn apply_outcome(q: &mut orbit_query::OrbitQuery, error: Option<&PipelineError>) {
+    use orbit_query::OrbitQueryOutcome as Outcome;
+    q.status = Some(status(error));
+    q.outcome = Some(match error {
+        None => Outcome::Success,
+        Some(e) if e.is_caller_error() => Outcome::CallerError,
+        Some(_) => Outcome::ServerError,
     });
-    let reason = if no_enabled_namespaces {
-        "no_enabled_namespaces"
-    } else {
-        failure_reason(error)
-    };
-    q.failure_reason = reason.parse().ok();
-    if q.query_type.is_none() {
-        q.hydration_plan = None;
-    }
+    let Some(error) = error else { return };
+    q.failure_reason = error.failure_reason().as_str().parse().ok();
     q.row_count = None;
     q.redacted_count = None;
     if q.execute_ms.is_none() {
@@ -122,15 +105,20 @@ pub(crate) fn apply_outcome(
     }
 }
 
-fn failure_reason(error: &PipelineError) -> &'static str {
+fn status(error: Option<&PipelineError>) -> orbit_query::OrbitQueryStatus {
+    use orbit_query::OrbitQueryStatus as Status;
+    let Some(error) = error else {
+        return Status::Ok;
+    };
     match error {
-        PipelineError::Compile { reason, .. } => reason,
-        PipelineError::Execution(message) => {
-            crate::pipeline::clickhouse_limit(message).unwrap_or("execution")
-        }
-        PipelineError::Security(_) => "security_context",
-        PipelineError::Authorization(_) => "redaction",
-        _ => crate::pipeline::metrics::failure_reason(error).unwrap_or("custom"),
+        PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => Status::SecurityError,
+        PipelineError::Compile { .. } => Status::CompileError,
+        PipelineError::Execution(_) => Status::ExecutionError,
+        PipelineError::Authorization(_) => Status::AuthorizationError,
+        PipelineError::ContentResolution(_) => Status::ContentResolutionError,
+        PipelineError::Streaming(_) => Status::StreamingError,
+        PipelineError::Timeout => Status::Timeout,
+        PipelineError::Custom(_) => Status::CustomError,
     }
 }
 
@@ -238,13 +226,12 @@ fn apply_metrics(
             Some(to_vec(columns))
         };
         q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
+        let label: &str = metrics
+            .hydration
+            .as_ref()
+            .map_or("none", |h| h.kind().into());
+        q.hydration_plan = label.parse().ok();
     }
-
-    let label: &str = metrics
-        .hydration
-        .as_ref()
-        .map_or("none", |h| h.kind().into());
-    q.hydration_plan = label.parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
     q.compile_ms = metrics.compile_ms.map(|v| v as i64);
     q.execute_ms = metrics.execute_ms.map(|v| v as i64);

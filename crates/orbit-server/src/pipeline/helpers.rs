@@ -7,7 +7,7 @@ use crate::proto::{
     ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, execute_query_message,
 };
 
-use query_engine::pipeline::PipelineError;
+use query_engine::pipeline::{ClickHouseLimit, PipelineError};
 
 use crate::pipeline::metrics::failure_reason;
 
@@ -108,7 +108,9 @@ fn sanitize_error_message(error: &PipelineError) -> String {
             ..
         } => message.clone(),
         PipelineError::Compile { .. } => "Query compilation failed.".to_string(),
-        PipelineError::Security(_) => "Security context error.".to_string(),
+        PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => {
+            "Security context error.".to_string()
+        }
         PipelineError::Execution(msg) => classify_execution_error(msg),
         PipelineError::Authorization(_) => "Authorization failed.".to_string(),
         PipelineError::ContentResolution(_) => {
@@ -123,35 +125,35 @@ fn sanitize_error_message(error: &PipelineError) -> String {
 /// No internal details (table names, SQL, infrastructure) are exposed — only
 /// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
-    match clickhouse_limit(msg) {
-        Some("memory_limit") => {
+    match ClickHouseLimit::from_message(msg) {
+        Some(ClickHouseLimit::MemoryLimit) => {
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
              node_ids to pin specific entities, or reduce hops/max_depth."
         }
-        Some("too_slow") => {
+        Some(ClickHouseLimit::TooSlow) => {
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
              reduce hops/max_depth, specify rel_types, or use node_ids \
              to pin high-cardinality entities like Definition or File."
         }
-        Some("too_many_bytes") => {
+        Some(ClickHouseLimit::TooManyBytes) => {
             "Query read too much data. Try: add a project_id filter to \
              scope the scan, use node_ids for selective endpoints, or \
              narrow filters on high-cardinality entities."
         }
-        Some("too_many_rows") => {
+        Some(ClickHouseLimit::TooManyRows) => {
             "Query scanned too many rows. Filters like name or path on \
              entities like Definition or File may not be selective enough \
              without project_id scoping. Try: add project_id, use node_ids, \
              or pre-resolve broad filters with a separate lookup query."
         }
-        Some("set_size_limit") => {
+        Some(ClickHouseLimit::SetSizeLimit) => {
             "Query matched too many IDs in a filter subquery. The filter \
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
         }
-        Some("type_mismatch") => {
+        Some(ClickHouseLimit::TypeMismatch) => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \
@@ -162,40 +164,9 @@ fn classify_execution_error(msg: &str) -> String {
     .to_string()
 }
 
-pub(crate) fn clickhouse_limit(msg: &str) -> Option<&'static str> {
-    match extract_ch_error_code(msg)? {
-        241 => Some("memory_limit"),
-        159 | 160 => Some("too_slow"),
-        307 => Some("too_many_bytes"),
-        158 => Some("too_many_rows"),
-        191 => Some("set_size_limit"),
-        53 => Some("type_mismatch"),
-        _ => None,
-    }
-}
-
-/// Matches patterns like "Code: 241." or "Code: 241,".
-fn extract_ch_error_code(error: &str) -> Option<u32> {
-    let start = error.find("Code: ")?;
-    let after = &error[start + 6..];
-    let end = after.find(|c: char| !c.is_ascii_digit())?;
-    after[..end].parse().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_ch_error_code_parses_standard_format() {
-        let msg = "query error: bad response: Code: 241. DB::Exception: Memory limit exceeded";
-        assert_eq!(extract_ch_error_code(msg), Some(241));
-    }
-
-    #[test]
-    fn extract_ch_error_code_returns_none_for_unknown() {
-        assert_eq!(extract_ch_error_code("some other error"), None);
-    }
 
     #[test]
     fn classify_memory() {

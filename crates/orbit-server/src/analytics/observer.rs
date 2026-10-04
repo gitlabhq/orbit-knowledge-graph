@@ -115,7 +115,7 @@ impl AnalyticsObserver {
         };
 
         query.data.graph_schema_version = self.schema_version.parse().ok();
-        apply_outcome(&mut query.data, &self.claims, error);
+        apply_outcome(&mut query.data, error);
 
         match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)
@@ -265,79 +265,63 @@ mod tests {
 
     #[test]
     fn emits_one_classified_event_on_error() {
+        use query_engine::compiler::RejectionReason;
         let compile = |client_safe, reason| PipelineError::Compile {
             message: String::new(),
             client_safe,
             reason,
         };
-        let security = || PipelineError::Security("x".into());
         let cases = [
             (
-                false,
-                compile(true, "depth"),
+                compile(true, RejectionReason::Depth),
                 "compile_error",
                 "caller_error",
                 "depth",
             ),
             (
-                false,
-                compile(false, "lowering"),
+                compile(false, RejectionReason::Lowering),
                 "compile_error",
                 "server_error",
                 "lowering",
             ),
             (
-                false,
-                security(),
+                PipelineError::NoEnabledNamespaces,
                 "security_error",
                 "caller_error",
                 "no_enabled_namespaces",
             ),
             (
-                true,
-                security(),
+                PipelineError::Security("x".into()),
                 "security_error",
                 "server_error",
                 "security_context",
             ),
             (
-                false,
                 PipelineError::Authorization("x".into()),
                 "authorization_error",
                 "server_error",
                 "redaction",
             ),
             (
-                false,
                 PipelineError::Execution("Code: 241. DB::Exception".into()),
                 "execution_error",
                 "server_error",
                 "memory_limit",
             ),
             (
-                false,
                 PipelineError::Execution("x".into()),
                 "execution_error",
                 "server_error",
                 "execution",
             ),
-            (
-                false,
-                PipelineError::Timeout,
-                "timeout",
-                "server_error",
-                "timeout",
-            ),
+            (PipelineError::Timeout, "timeout", "server_error", "timeout"),
         ];
-        for (admin, error, status, outcome, reason) in cases {
+        for (error, status, outcome, reason) in cases {
             let tracker = Arc::new(InMemoryAnalyticsTracker::new());
             let obs = AnalyticsObserver::new(
                 Some(tracker.clone()),
                 Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-                Claims {
-                    admin,
-                    ..test_claims()
-                },
+                test_claims(),
                 "query_graph",
                 None,
                 "33".to_string(),
@@ -350,6 +334,7 @@ mod tests {
             assert_eq!(events.len(), 1, "{reason}");
             let data = &events[0].contexts()[1].data;
             assert_eq!(data["status"], status);
+            assert_eq!(data["status"], error.code());
             assert_eq!(data["outcome"], outcome);
             assert_eq!(data["failure_reason"], reason);
             assert!(data["row_count"].is_null());
@@ -359,29 +344,31 @@ mod tests {
     }
 
     #[test]
-    fn every_pipeline_error_code_is_a_schema_status() {
-        let errors = [
-            PipelineError::Security(String::new()),
-            PipelineError::Compile {
-                message: String::new(),
-                client_safe: true,
-                reason: "parse",
-            },
-            PipelineError::Execution(String::new()),
-            PipelineError::Authorization(String::new()),
-            PipelineError::ContentResolution(String::new()),
-            PipelineError::Streaming(String::new()),
-            PipelineError::Timeout,
-            PipelineError::custom("x"),
-        ];
-        for error in errors {
+    fn every_failure_reason_fits_the_schema() {
+        use query_engine::compiler::RejectionReason;
+        use query_engine::pipeline::{ClickHouseLimit, FailureReason};
+        use strum::IntoEnumIterator;
+        let reasons = RejectionReason::iter()
+            .map(FailureReason::Rejected)
+            .chain(ClickHouseLimit::iter().map(FailureReason::ClickHouse))
+            .chain([
+                FailureReason::NoEnabledNamespaces,
+                FailureReason::SecurityContext,
+                FailureReason::Execution,
+                FailureReason::Redaction,
+                FailureReason::ContentResolution,
+                FailureReason::Streaming,
+                FailureReason::Timeout,
+                FailureReason::Custom,
+            ]);
+        for reason in reasons {
             assert!(
-                error
-                    .code()
-                    .parse::<orbit_analytics::orbit_query::OrbitQueryStatus>()
+                reason
+                    .as_str()
+                    .parse::<orbit_analytics::orbit_query::OrbitQueryFailureReason>()
                     .is_ok(),
-                "{} is missing from the orbit_query status enum",
-                error.code()
+                "{} does not fit orbit_query.failure_reason",
+                reason.as_str()
             );
         }
     }

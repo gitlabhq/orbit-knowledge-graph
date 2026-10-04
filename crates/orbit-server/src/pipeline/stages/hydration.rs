@@ -94,7 +94,7 @@ impl HydrationStage {
         )
         .map_err(|e| PipelineError::Compile {
             client_safe: false,
-            reason: e.failure_reason(),
+            reason: e.rejection_reason(),
             message: e.to_string(),
         })?;
 

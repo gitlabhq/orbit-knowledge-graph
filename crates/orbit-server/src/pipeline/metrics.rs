@@ -51,7 +51,7 @@ impl QueryPipelineMetrics {
 /// counted on `gkg.query.engine.compiler.rejected` instead.
 pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     match err {
-        PipelineError::Security(_) => Some("security"),
+        PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => Some("security"),
         PipelineError::Compile { .. } => None,
         PipelineError::Execution(_) => Some("execution"),
         PipelineError::Authorization(_) => Some("authorization"),
