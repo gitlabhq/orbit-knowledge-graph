@@ -25,7 +25,8 @@ physical:
       bind:
         - (CTE $projects (Project p.id AS id (Filter p.star_count = 1, p._deleted = false (Scan Table(gl_project) AS p))))
         - (CTE $requests (Project mr.id AS id (_)))
-      definition_order: [$projects, $requests]
+      ctes:
+        exact_order: [$projects, $requests]
       expect:
         - (Filter mr.id IN $requests.id, ... (_))
         - |

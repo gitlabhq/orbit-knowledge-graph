@@ -9,7 +9,8 @@ logical:
 physical:
   clickhouse:
     planned:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Filter e0.source_id = 1, e0._deleted = false, ... (Scan Table(gl_code_edge) AS e0))"]
       reject: ["(Deduplicate ... (_))", "(Scan Table(gl_definition) ...)"]
     emitted:

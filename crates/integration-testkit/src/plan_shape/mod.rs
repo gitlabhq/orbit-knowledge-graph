@@ -79,12 +79,35 @@ struct Assertions {
     expect: Vec<String>,
     reject: Vec<String>,
     occurrences: Vec<Occurrences>,
-    definition_order: Option<Vec<String>>,
+    ctes: Option<CteAssertions>,
     exact: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CteAssertions {
+    absent: Option<bool>,
+    exact_order: Option<Vec<String>>,
 }
 
 impl Assertions {
     fn check(&self, actual: &pattern::Expression, label: &str) -> Result<(), String> {
+        let cte_order = match &self.ctes {
+            None => None,
+            Some(CteAssertions {
+                absent: Some(true),
+                exact_order: None,
+            }) => Some([].as_slice()),
+            Some(CteAssertions {
+                absent: None,
+                exact_order: Some(order),
+            }) if !order.is_empty() => Some(order.as_slice()),
+            Some(_) => {
+                return Err(format!(
+                    "{label}.ctes: use absent: true or a nonempty exact_order, but not both"
+                ));
+            }
+        };
         let mut captures = terms::Captures::new();
         let parse = |text: &str, path: &str, captures: &terms::Captures, binding: bool| {
             let parsed = pattern::parse(text)
@@ -120,7 +143,7 @@ impl Assertions {
         }
         if self.expect.is_empty()
             && self.exact.is_none()
-            && self.definition_order.is_none()
+            && self.ctes.is_none()
             && !self.occurrences.iter().any(|item| item.count > 0)
         {
             return Err(format!("{label}: missing positive assertions"));
@@ -156,11 +179,11 @@ impl Assertions {
                 ));
             }
         }
-        if let Some(order) = &self.definition_order {
+        if let Some(order) = cte_order {
             for text in order {
                 for name in terms::variables(text)? {
                     if !captures.contains_key(&name) {
-                        return Err(format!("{label}.definition_order: unbound capture {name}"));
+                        return Err(format!("{label}.ctes.exact_order: unbound capture {name}"));
                     }
                 }
             }
@@ -181,7 +204,7 @@ impl Assertions {
                 })
             {
                 return Err(format!(
-                    "{label}.definition_order: expected {order:?}, found {definitions:?}"
+                    "{label}.ctes: expected {order:?}, found {definitions:?}"
                 ));
             }
         }
@@ -399,7 +422,8 @@ fn yaml_assertions_bind_ctes_and_check_consumers_counts_and_order() {
 bind:
   - (CTE $projects (Project p.id AS id (_)))
   - (CTE $requests (Project mr.id AS id (_)))
-definition_order: [$projects, $requests]
+ctes:
+  exact_order: [$projects, $requests]
 expect:
   - (Filter p.id IN $projects.id, mr.id IN $requests.id (_))
 occurrences:
@@ -416,11 +440,7 @@ reject:
     check(yaml).unwrap();
     for (before, after, location) in [
         ("count: 1", "count: 2", "occurrences[0]"),
-        (
-            "[$projects, $requests]",
-            "[$requests, $projects]",
-            "definition_order",
-        ),
+        ("[$projects, $requests]", "[$requests, $projects]", ".ctes"),
         (
             "mr.id IN $requests.id (_)",
             "mr.id IN $projects.id (_)",
@@ -529,7 +549,7 @@ emitted:
 }
 
 #[test]
-fn yaml_definition_order_is_a_standalone_assertion() {
+fn yaml_cte_assertions_check_absence_and_exact_order() {
     let actual =
         pattern::parse("(With (CTE first (Scan a)) (CTE second (Scan b)) (Scan c))").unwrap();
     let check = |yaml: &str, tree: &pattern::Expression| {
@@ -537,14 +557,29 @@ fn yaml_definition_order_is_a_standalone_assertion() {
             .unwrap()
             .check(tree, "definition-order")
     };
-    check("definition_order: [first, second]", &actual).unwrap();
+    check("ctes: {exact_order: [first, second]}", &actual).unwrap();
     assert!(
-        check("definition_order: [second, first]", &actual)
+        check("ctes: {exact_order: [second, first]}", &actual)
             .unwrap_err()
-            .contains("definition_order")
+            .contains(".ctes")
     );
-    check("definition_order: []", &pattern::parse("(Scan a)").unwrap()).unwrap();
-    assert!(check("definition_order: []", &actual).is_err());
+    check("ctes: {absent: true}", &pattern::parse("(Scan a)").unwrap()).unwrap();
+    assert!(check("ctes: {absent: true}", &actual).is_err());
+    assert!(check("ctes: {exact_order: [first]}", &actual).is_err());
+    assert!(check("ctes: {exact_order: [first, second, third]}", &actual).is_err());
+    for ctes in [
+        "{}",
+        "{absent: false}",
+        "{exact_order: []}",
+        "{absent: true, exact_order: [first]}",
+    ] {
+        assert!(
+            check(&format!("expect: ['(Scan a)']\nctes: {ctes}"), &actual)
+                .unwrap_err()
+                .contains(".ctes")
+        );
+    }
+    assert!(orbit_utils::yaml::from_str::<Assertions>("definition_order: []").is_err());
     assert!(
         check("{}", &actual)
             .unwrap_err()

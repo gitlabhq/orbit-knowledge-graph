@@ -11,6 +11,7 @@ physical:
     planned:
       expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
     emitted:
-      definition_order: [forward, backward]
+      ctes:
+        exact_order: [forward, backward]
       expect: ["(Join ON f.end_id = b.end_id (_) (_))"]
       reject: ["(CTE _path_scope_traversal_paths (_))"]

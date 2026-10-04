@@ -11,5 +11,6 @@ physical:
     planned:
       expect: ["(Filter b.id >= 100, b.id <= 200, ... (_))"]
     emitted:
-      definition_order: [_nf_b, forward, backward]
+      ctes:
+        exact_order: [_nf_b, forward, backward]
       expect: ["(CTE _nf_b (Limit 500 (_)))", "(Filter b.id >= 100, b.id <= 200 (_))"]

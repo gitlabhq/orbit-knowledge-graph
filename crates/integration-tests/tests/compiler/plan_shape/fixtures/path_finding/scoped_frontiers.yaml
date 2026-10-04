@@ -24,7 +24,8 @@ physical:
         - (Filter a.id = 1, ... (NodeScan Definition AS a))
         - (Filter b.id = 2, ... (NodeScan Definition AS b))
     emitted:
-      definition_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
+      ctes:
+        exact_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
       expect:
         - (CTE _path_scope_traversal_paths (Union ALL (_) (_)))
         - (Filter e1.traversal_path IN _path_scope_traversal_paths.traversal_path, e1.source_id IN _nf_a.id, ... (_))

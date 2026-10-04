@@ -9,8 +9,10 @@ logical:
 physical:
   clickhouse:
     planned:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Bind a (Filter a.definition_type = 'function', ... (Deduplicate Final (Scan Table(gl_definition) AS a))))"]
     emitted:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Deduplicate Final (Scan Table(gl_definition) AS a))"]

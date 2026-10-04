@@ -17,6 +17,23 @@ This inventory traces the planner and lowerer at `caecd53c9`, the base of !2681.
 It covers access-path choices and their important eligibility guards. It does
 not measure latency or replace database correctness tests.
 
+CTE assertions refer to top-level named query definitions, not execution order.
+Use one of these forms in a planned or emitted assertion block:
+
+```yaml
+ctes:
+  absent: true
+```
+
+```yaml
+ctes:
+  exact_order: [_candidate_p, _candidate_mr]
+```
+
+The exact order must list every top-level CTE and can use bound captures.
+Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
+`absent: false`, and combining both forms are rejected.
+
 ## Edge scans and node access
 
 | Old implementation | Behavior | Fixtures |

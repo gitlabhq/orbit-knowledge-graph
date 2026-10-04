@@ -10,7 +10,8 @@ physical:
   clickhouse:
     planned:
       bind: ["(CTE $keys (Project mr.project_id AS id (Filter mr.id = 1, mr._deleted = false (Scan Table(gl_merge_request) AS mr))))"]
-      definition_order: [$keys]
+      ctes:
+        exact_order: [$keys]
       expect: ["(Filter p.id IN $keys.id (Scan Table(gl_project) AS p))", "(Filter p._deleted = false (Deduplicate LimitBy p.traversal_path, p.id (_)))", "(Deduplicate Final (Scan Table(gl_merge_request) AS mr))"]
       reject: ["(Scan Table(gl_edge) ...)", "(CTE _candidate_mr (_))"]
     emitted:

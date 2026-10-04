@@ -11,7 +11,8 @@ physical:
     planned:
       expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=true ... (_) (_))"]
     emitted:
-      definition_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
+      ctes:
+        exact_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
       expect:
         - (CTE forward (Union ALL (_) (_)))
         - (Join ON (e1.target_id = e2.source_id) AND (e1.traversal_path = e2.traversal_path) AND (e2.relationship_kind = 'CALLS') AND e2.traversal_path IN _path_scope_traversal_paths.traversal_path AND (e2._deleted = false) (_) (_))

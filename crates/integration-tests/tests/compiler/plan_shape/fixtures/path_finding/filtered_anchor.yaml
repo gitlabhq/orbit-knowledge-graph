@@ -11,7 +11,8 @@ physical:
     planned:
       expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
     emitted:
-      definition_order: [_nf_a, forward]
+      ctes:
+        exact_order: [_nf_a, forward]
       expect:
         - (CTE _nf_a (Limit 500 (_)))
         - (Filter a.username = 'alice' (Deduplicate Final (Scan Table(gl_user) AS a)))

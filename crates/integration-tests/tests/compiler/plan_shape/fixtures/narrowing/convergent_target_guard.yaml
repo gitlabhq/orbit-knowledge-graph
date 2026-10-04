@@ -9,7 +9,8 @@ logical:
 physical:
   clickhouse:
     planned:
-      definition_order: [_filter_a]
+      ctes:
+        exact_order: [_filter_a]
       expect: ["(Bind c (Filter c._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS c))))"]
       reject: ["(CTE _narrow_c (_))"]
     emitted:

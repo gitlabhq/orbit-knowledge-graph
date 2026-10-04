@@ -9,11 +9,13 @@ logical:
 physical:
   clickhouse:
     planned:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Join ON p.id = mr.project_id (_) (Bind p (_)))", "(Deduplicate Final (Scan Table(gl_project) AS p))"]
       reject: ["(Scan Table(gl_edge) ...)"]
     emitted:
-      definition_order: []
+      ctes:
+        absent: true
       occurrences:
         - pattern: (Scan Table(gl_merge_request) AS mr)
           count: 1

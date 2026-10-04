@@ -83,7 +83,7 @@ These assertions check plan structure; data-correctness scenarios check executio
 
 ### Plan fixture assertions
 
-Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `definition_order`, and `exact`.
+Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `ctes`, and `exact`.
 Use multiline patterns for nested operations. Expressions use readable column references and preserve explicit grouping and quoted literals.
 
 ```yaml
@@ -97,7 +97,8 @@ physical:
       occurrences:
         - pattern: (CTE $projects (_))
           count: 1
-      definition_order: [$projects]
+      ctes:
+        exact_order: [$projects]
     emitted:
       expect:
         - (Scan Table(gl_project) AS p)
@@ -111,7 +112,9 @@ Quoted `'?'`, `'$name'`, and `'...'` are literal strings. Failed matches do not 
 Item lists match without order, preserve duplicate counts, and require `...` to admit extra items.
 Child order remains significant. Expressions retain token order and grouping; the matcher does not infer algebraic equivalence.
 `exact` compares the whole ordered tree, including projection order, and rejects wildcards and captures.
-`definition_order` checks the complete top-level CTE sequence, including captured names.
+`ctes.exact_order` checks the complete top-level CTE sequence, including captured names.
+Use `ctes.absent: true` to assert that no top-level CTEs exist. Omit `ctes` to leave definitions unchecked.
+The two forms are exclusive. Empty lists, empty blocks, and `absent: false` are rejected.
 Failures report the fixture path, frontend, backend, phase, and assertion index. Missing-pattern errors include the first subtree with the requested operator.
 
 The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.

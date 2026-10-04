@@ -27,7 +27,8 @@ physical:
       bind:
         - (CTE $callers (Project a.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))
         - (CTE $targets (Project e1n.target_id AS id (SemiJoin e1n.source_id IN subquery (Filter ... (Scan Table(gl_code_edge) AS e1n)) (_))))
-      definition_order: [$callers, $targets]
+      ctes:
+        exact_order: [$callers, $targets]
       expect:
         - |
           (Join ON c.id = e1.target_id

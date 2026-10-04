@@ -11,6 +11,7 @@ physical:
     planned:
       expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
     emitted:
-      definition_order: [forward]
+      ctes:
+        exact_order: [forward]
       expect: ["(Filter e1.source_id = 1, ... (Scan Table(gl_edge) AS e1))"]
       reject: ["(Scan Table(gl_user) ...)", "(CTE backward (_))"]

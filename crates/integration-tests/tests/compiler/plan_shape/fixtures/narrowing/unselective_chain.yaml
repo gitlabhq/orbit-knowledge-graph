@@ -9,10 +9,12 @@ logical:
 physical:
   clickhouse:
     planned:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Join ON e0.target_id = e1.source_id (_) (_))"]
       reject: ["(SemiJoin ... (_) (_))", "(Scan Table(gl_definition) ...)"]
     emitted:
-      definition_order: []
+      ctes:
+        absent: true
       expect: ["(Deduplicate Final (Scan Table(gl_code_edge) AS e1))"]
       reject: ["(SemiJoin ... (_) (_))"]
