@@ -10,7 +10,9 @@ use uuid::Uuid;
 use crate::cc_token_source::CloudConnectorTokenSource;
 use crate::constants::APP_ID;
 use crate::metrics::{
-    METRICS, REASON_AUTH, REASON_NON_RETRIABLE_STATUS, REASON_RETRIES_EXHAUSTED, REASON_UNKNOWN,
+    METRICS, REASON_ABANDONED_AT_SHUTDOWN, REASON_AUTH, REASON_INVALID_EVENT,
+    REASON_NON_RETRIABLE_STATUS, REASON_RETRIES_EXHAUSTED, REASON_RETRY_QUEUE_FULL,
+    REASON_SERIALIZATION, REASON_UNKNOWN,
 };
 
 pub trait BillingTracker: Send + Sync {
@@ -49,6 +51,10 @@ impl SnowplowBillingTracker {
                     }
                     DeliveryFailure::RetriesExhausted => (REASON_RETRIES_EXHAUSTED, None),
                     DeliveryFailure::Auth => (REASON_AUTH, None),
+                    DeliveryFailure::RetryQueueFull => (REASON_RETRY_QUEUE_FULL, None),
+                    DeliveryFailure::AbandonedAtShutdown => (REASON_ABANDONED_AT_SHUTDOWN, None),
+                    DeliveryFailure::Serialization => (REASON_SERIALIZATION, None),
+                    DeliveryFailure::InvalidEvent => (REASON_INVALID_EVENT, None),
                     _ => (REASON_UNKNOWN, None),
                 };
                 METRICS.delivery_failed.add(
