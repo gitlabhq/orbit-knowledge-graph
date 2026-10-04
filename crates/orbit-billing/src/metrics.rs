@@ -11,6 +11,10 @@ pub(crate) const REASON_EVENT_BUILD_FAILED: &str = "event_build_failed";
 pub(crate) const REASON_NON_RETRIABLE_STATUS: &str = "non_retriable_status";
 pub(crate) const REASON_RETRIES_EXHAUSTED: &str = "retries_exhausted";
 pub(crate) const REASON_AUTH: &str = "auth";
+pub(crate) const REASON_RETRY_QUEUE_FULL: &str = "retry_queue_full";
+pub(crate) const REASON_ABANDONED_AT_SHUTDOWN: &str = "abandoned_at_shutdown";
+pub(crate) const REASON_SERIALIZATION: &str = "serialization";
+pub(crate) const REASON_INVALID_EVENT: &str = "invalid_event";
 // Fallback for any DeliveryFailure variant added upstream (the enum is
 // #[non_exhaustive]) that this code does not yet map explicitly.
 pub(crate) const REASON_UNKNOWN: &str = "unknown";
@@ -58,6 +62,10 @@ pub fn register() {
         REASON_NON_RETRIABLE_STATUS,
         REASON_RETRIES_EXHAUSTED,
         REASON_AUTH,
+        REASON_RETRY_QUEUE_FULL,
+        REASON_ABANDONED_AT_SHUTDOWN,
+        REASON_SERIALIZATION,
+        REASON_INVALID_EVENT,
         REASON_UNKNOWN,
     ] {
         METRICS
