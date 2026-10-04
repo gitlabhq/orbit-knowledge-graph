@@ -205,6 +205,38 @@ fn the_passes_decide_what_is_kept_listed_and_dropped() {
 }
 
 #[test]
+fn a_drop_decided_by_the_content_leaves_no_trace_either() {
+    struct DropBinaries;
+    impl Pass for DropBinaries {
+        type Tag = ();
+        fn content(&self, file: &mut File<()>, bytes: &[u8]) {
+            if bytes.contains(&0) {
+                file.decide(Decision::Drop("binary"));
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "blob.bin", b"\x00");
+    write(dir.path(), "text.rs", b"fn t() {}");
+    let from_bytes = load(
+        memory(&[("blob.bin", b"\x00"), ("text.rs", b"fn t() {}")]),
+        DropBinaries,
+        Limits::default(),
+    );
+    let from_disk = load(Checkout(dir.path()), DropBinaries, Limits::default());
+
+    for vfs in [&from_bytes, &from_disk] {
+        let paths: Vec<&str> = vfs.files().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["text.rs"]);
+        assert_eq!(vfs.read_dir(Path::new("/")).unwrap(), ["text.rs"]);
+        assert_eq!(
+            vfs.stat(Path::new("blob.bin")).unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+    }
+}
+
+#[test]
 fn caps_are_charged_for_every_file_before_any_decision() {
     let three = || memory(&[("a.log", b"1"), ("b.log", b"22"), ("c.log", b"333")]);
     let files = Limits {

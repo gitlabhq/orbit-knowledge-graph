@@ -238,11 +238,14 @@ impl<T: Tag> Loading<T> {
     fn put_bytes(&self, mut file: File<T>, bytes: Vec<u8>) -> Result<(), SourceError> {
         self.passes.content(&mut file, &bytes);
         file.settle();
-        let slot = match file.keeps() {
-            true => Some(Slot::Stored(self.store(bytes)?)),
-            false => None,
-        };
-        self.keep(file, slot, true)
+        match file.decision() {
+            Decision::Drop(_) => Ok(()),
+            Decision::Keep(_) => {
+                let id = self.store(bytes)?;
+                self.keep(file, Some(Slot::Stored(id)), true)
+            }
+            _ => self.keep(file, None, true),
+        }
     }
 
     /// A pass wants the bytes before deciding: read for the decision only,
@@ -258,8 +261,11 @@ impl<T: Tag> Loading<T> {
         };
         self.passes.content(&mut file, &bytes);
         file.settle();
-        let slot = file.keeps().then_some(Slot::Linked(on_disk));
-        self.keep(file, slot, true)
+        match file.decision() {
+            Decision::Drop(_) => Ok(()),
+            Decision::Keep(_) => self.keep(file, Some(Slot::Linked(on_disk)), true),
+            _ => self.keep(file, None, true),
+        }
     }
 
     fn keep(&self, file: File<T>, slot: Option<Slot>, checked: bool) -> Result<(), SourceError> {
@@ -369,7 +375,9 @@ impl<T: Tag> Vfs<T> {
 
     /// The bytes of a file. On a linked file no pass has seen, the content
     /// passes run on this first read, and a refusal becomes the file's
-    /// decision from here on.
+    /// decision from here on. The node stays either way: a `Drop` decided
+    /// this late is a node that reads as `Unsupported`, and `files()` shows
+    /// it with its reason.
     pub fn read(&self, path: &Path) -> io::Result<Bytes> {
         let key = self.resolve(path)?;
         let Some(node) = self.node(&key) else {

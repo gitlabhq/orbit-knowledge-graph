@@ -85,6 +85,9 @@ impl<T: Tag> File<T> {
 /// A pure function of path, size and bytes. It never sees a symlink, never
 /// counts anything and cannot fail. `header` runs on every file; `content`
 /// runs once, on the one read, for files still `Pending` or `Keep` after it.
+/// A `Drop` from either leaves no node, except when the one read is a
+/// parser's first `read` of a linked file: the store is frozen by then, so
+/// that node stays and reads as `Unsupported`.
 pub trait Pass: Send + Sync {
     type Tag: Tag;
 
