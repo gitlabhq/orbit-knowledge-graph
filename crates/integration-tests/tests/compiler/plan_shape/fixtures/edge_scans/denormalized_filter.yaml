@@ -13,4 +13,5 @@ physical:
       reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
       expect: ["(Filter has(e0.source_tags, 'definition_type:function'), ... (Scan Table(gl_code_edge) AS e0))"]
+      definition_order: []
       reject: ["(Scan Table(gl_definition) ...)"]

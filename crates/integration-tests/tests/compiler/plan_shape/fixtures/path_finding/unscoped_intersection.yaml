@@ -1,0 +1,16 @@
+name: Global path endpoints avoid traversal-path scope on frontier intersections
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project","node_ids":[100]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["MEMBER_OF","CONTAINS"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(b:Project {id: 100}) RETURN p
+logical:
+  expect: ["(Input path_finding (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=false ... (_) (_))"]
+    emitted:
+      definition_order: [forward, backward]
+      expect: ["(Join ON f.end_id = b.end_id (_) (_))"]
+      reject: ["(CTE _path_scope_traversal_paths (_))"]

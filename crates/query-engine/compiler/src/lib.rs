@@ -748,31 +748,6 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_id_range_endpoint_produces_anchor_cte() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "id_range": {"start": 100, "end": 200}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_nf_end"),
-            "id_range endpoint should generate _nf_end CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains(">= 100"),
-            "CTE should contain range lower bound, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
         let query = r#"{
             "query_type": "path_finding",
@@ -977,31 +952,6 @@ mod tests {
         assert!(
             !sql.contains("ORDER BY e.source_id"),
             "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_user_paths_do_not_join_on_traversal_path() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_path_scope_traversal_paths"),
-            "path finding without traversal_path endpoints should not compute traversal_path candidates, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("f.traversal_path = b.traversal_path"),
-            "User paths must not require traversal_path on frontier rows, got:\n{sql}"
         );
     }
 
@@ -1279,87 +1229,6 @@ mod tests {
         assert!(
             !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
-        );
-    }
-
-    fn denorm_traversal_sql(mr_filter: &str) -> String {
-        let query = format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [
-                {{"id": "u", "entity": "User", "node_ids": [1]}},
-                {{"id": "mr", "entity": "MergeRequest", "filters": {{ {mr_filter} }}}}
-            ],
-            "relationships": [{{"type": "REVIEWER", "from": "u", "to": "mr"}}],
-            "limit": 10
-        }}"#
-        );
-        compile_sql(&query)
-    }
-
-    #[test]
-    fn denorm_eq_filter_pushes_to_edge_tags() {
-        let sql = denorm_traversal_sql(r#""state": {"eq": "merged"}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "denorm filter must be pushed to edge target_tags, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_nf_mr"),
-            "no _nf_mr CTE when filter is fully denormalized, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_in_list_filter_uses_has_any() {
-        let sql = denorm_traversal_sql(r#""state": {"in": ["merged", "opened"]}"#);
-        assert!(
-            sql.contains("hasAny(e0.target_tags"),
-            "IN-list denorm filter must use hasAny, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("state:merged") && sql.contains("state:opened"),
-            "both filter values must appear in tag predicate, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_in_list_single_value_uses_has() {
-        let sql = denorm_traversal_sql(r#""state": {"in": ["merged"]}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "single-value IN-list must use has, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_partial_filters_joins_for_non_denorm() {
-        let sql =
-            denorm_traversal_sql(r#""state": {"eq": "merged"}, "source_branch": {"eq": "main"}"#);
-        assert!(
-            sql.contains("INNER JOIN"),
-            "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "denormalized state filter must be pushed to edge tags, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("source_branch") && sql.contains("main"),
-            "JOIN must retain non-denormalized source_branch filter, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_boolean_filter_renders_value_token() {
-        let sql = denorm_traversal_sql(r#""draft": {"eq": true}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'draft:true')"),
-            "boolean denorm filter must render its value token, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("'draft:'"),
-            "boolean denorm filter must not emit an empty-value token, got:\n{sql}"
         );
     }
 

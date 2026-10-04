@@ -102,6 +102,13 @@ Paths below the fixture root identify the replacements.
 | `lower::hydration::tests::static_leaf_pruning_drops_broad_prefix` | `hydration/without_ids.yaml` |
 | `compiler::ontology::multi_hop_traversal_generates_union_subquery` | `variable_hops/depth_arms.yaml` (union, depth, and edge output) |
 | `compiler::ontology::multi_hop_with_floor_filter` | `variable_hops/exact_hops.yaml` |
+| `compiler::tests::denorm_eq_filter_pushes_to_edge_tags` | `edge_scans/denormalized_filter.yaml` (scalar tag and no definitions) |
+| `compiler::tests::denorm_in_list_filter_uses_has_any` | `edge_scans/denormalized_incoming_set.yaml` (both target-tag values) |
+| `compiler::tests::denorm_in_list_single_value_uses_has` | `edge_scans/denormalized_value_forms.yaml` |
+| `compiler::tests::denorm_boolean_filter_renders_value_token` | `edge_scans/denormalized_value_forms.yaml` (true token and empty-token rejection) |
+| `compiler::tests::denorm_partial_filters_joins_for_non_denorm` | `edge_scans/uncovered_filter_fallback.yaml` (join, node filter, and edge tag) |
+| `compiler::tests::path_finding_id_range_endpoint_produces_anchor_cte` | `path_finding/range_anchor.yaml` |
+| `compiler::tests::path_finding_user_paths_do_not_join_on_traversal_path` | `path_finding/unscoped_intersection.yaml` |
 
 ### Keep in Rust
 
@@ -123,3 +130,10 @@ not ignored tests or missing fixture migrations.
 
 Other existing tests remain where the current fixture has only partial assertion
 overlap. A coverage-index entry alone is not permission to delete a Rust test.
+
+The wider compiler audit also retains input deserialization, normalization,
+schema-limit consistency, validation errors, GQL statement hashing, security
+injection/checking, cursor tokens, hydration metadata, and DDL tests. Running a
+valid query through those components does not replace their contract assertions.
+Remaining denormalization tests cover relationship-specific tag availability,
+count arguments, and role enforcement beyond the migrated value-form checks.
