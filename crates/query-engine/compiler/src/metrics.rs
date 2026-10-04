@@ -39,27 +39,6 @@ impl Default for QueryEngineMetrics {
     }
 }
 
-/// Maps to a low-cardinality `failure_reason` label.
-pub(crate) fn failure_reason(err: &QueryError) -> &'static str {
-    match err {
-        QueryError::Parse(_) => "parse",
-        QueryError::Validation(_) => "schema",
-        QueryError::ReferenceError(_) => "reference",
-        QueryError::PaginationError(_) => "pagination",
-        QueryError::AllowlistRejected(_) => "ontology",
-        QueryError::Authorization(_) => "authorization",
-        QueryError::Restrict(_) => "restrict",
-        QueryError::Ontology(_) => "ontology_internal",
-        QueryError::DepthExceeded(_) => "depth",
-        QueryError::LimitExceeded(_) => "limit",
-        QueryError::Security(_) => "security",
-        QueryError::Lowering(_) => "lowering",
-        QueryError::Enforcement(_) => "enforcement",
-        QueryError::Codegen(_) => "codegen",
-        QueryError::PipelineInvariant(_) => "pipeline",
-    }
-}
-
 pub(crate) trait CountErr<T, E> {
     fn count_err(self) -> crate::error::Result<T>;
 }
@@ -72,7 +51,7 @@ impl<T, E: Into<QueryError>> CountErr<T, E> for std::result::Result<T, E> {
                 1,
                 &[KeyValue::new(
                     spec::labels::FAILURE_REASON,
-                    failure_reason(&qe),
+                    <&str>::from(qe.rejection_reason()),
                 )],
             );
             #[cfg(test)]

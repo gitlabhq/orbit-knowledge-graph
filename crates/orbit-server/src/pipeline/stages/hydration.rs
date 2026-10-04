@@ -93,7 +93,8 @@ impl HydrationStage {
             ctx.security_context()?,
         )
         .map_err(|e| PipelineError::Compile {
-            client_safe: e.is_client_safe(),
+            client_safe: false,
+            reason: e.rejection_reason(),
             message: e.to_string(),
         })?;
 
