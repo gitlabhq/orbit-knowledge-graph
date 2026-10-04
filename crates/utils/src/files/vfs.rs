@@ -1,41 +1,16 @@
-//! The store. `Loading` is the write side: sharded, lock-free on the hot
-//! path, filled from any thread. `freeze` sorts the nodes once; the sorted
-//! vec is the tree, so `Vfs` answers every read without a lock or a second
-//! structure. Bytes are content-addressed: identical files at many paths
-//! are kept once, in memory up to a budget and in one scratch file past it.
-//! A checkout on disk is linked, never copied.
+//! The read side. Immutable after `load`; the sorted vec is the tree, so
+//! every verb is a binary search or a range over it, with no lock.
 
-use std::collections::hash_map::Entry;
-use std::hash::{Hash, Hasher};
 use std::io;
-use std::os::unix::fs::FileExt;
-use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use rustc_hash::{FxHashMap, FxHasher};
-use sha2::{Digest, Sha256};
-use tracing::warn;
+use rustc_hash::FxHashMap;
 
-use super::{
-    Bytes, CapExceeded, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage,
-};
-
-/// What a source hands the store for one path.
-pub enum Put<'a> {
-    /// Bytes in hand.
-    Bytes(Vec<u8>),
-    /// Bytes that cost something to produce: `read` is called only when a
-    /// decision needs them, at most once.
-    Lazy {
-        size: u64,
-        read: Box<dyn FnOnce() -> io::Result<Vec<u8>> + 'a>,
-    },
-    /// A file of a checkout: linked where it is, never copied.
-    OnDisk { path: PathBuf, size: u64 },
-    /// A symlink, target as written: relative to the link, or `/`-rooted.
-    Symlink(String),
-}
+use super::loading::{ContentId, Loading, Node, Slot};
+use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
+use super::scratch::{Blob, Scratch};
+use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -55,306 +30,14 @@ pub struct Stat<T> {
     pub link: Option<PathBuf>,
 }
 
-const NODE_SHARDS: usize = 64;
-const BLOB_SHARDS: usize = 256;
-const MAX_LINK_DEPTH: usize = 40;
-const LINK_REASON: &str = "symlink";
-const OVERSIZE_REASON: &str = "oversize";
-
-/// Write side. Nothing is readable until `freeze`.
-pub struct Loading<T> {
-    passes: Arc<dyn Pass<Tag = T>>,
-    limits: Limits,
-    cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
-    nodes: Vec<Mutex<Vec<Node<T>>>>,
-    blobs: Vec<Mutex<FxHashMap<ContentId, Blob>>>,
-    scratch: Scratch,
-    files: AtomicUsize,
-    bytes: AtomicU64,
-    resident: AtomicU64,
-    deduped: AtomicU64,
-}
-
 /// Read side. Immutable; no lock on any verb.
 pub struct Vfs<T> {
-    passes: Arc<dyn Pass<Tag = T>>,
-    nodes: Vec<Node<T>>,
-    links: FxHashMap<String, String>,
-    blobs: FxHashMap<ContentId, Blob>,
-    scratch: Scratch,
-    usage: Usage,
-}
-
-struct Node<T> {
-    file: File<T>,
-    slot: Option<Slot>,
-    /// Whether the content passes have seen this file. A linked file kept on
-    /// its header alone is checked on its first read.
-    checked: bool,
-}
-
-enum Slot {
-    Stored(ContentId),
-    Linked(PathBuf),
-    Link(String),
-}
-
-/// SHA-256 of a file's bytes: the identity content is stored under.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ContentId([u8; 32]);
-
-#[derive(Debug, Clone)]
-enum Blob {
-    Memory(Bytes),
-    Spilled { offset: u64, len: u64, raw_len: u64 },
-}
-
-/// One anonymous append-only file, opened on the first spill: positional
-/// writes from any thread, positional reads, gone when the store is.
-struct Scratch {
-    dir: Option<PathBuf>,
-    compress: bool,
-    cap: Option<u64>,
-    file: OnceLock<std::fs::File>,
-    end: AtomicU64,
-}
-
-impl Scratch {
-    fn new(options: &Options, cap: Option<u64>) -> Self {
-        Self {
-            dir: options.scratch_dir.clone(),
-            compress: options.compress_spill,
-            cap,
-            file: OnceLock::new(),
-            end: AtomicU64::new(0),
-        }
-    }
-
-    fn append(&self, bytes: &[u8]) -> Result<Blob, SourceError> {
-        let raw_len = bytes.len() as u64;
-        let compressed;
-        let bytes = match self.compress {
-            true => {
-                compressed = lz4_flex::block::compress(bytes);
-                compressed.as_slice()
-            }
-            false => bytes,
-        };
-        let len = bytes.len() as u64;
-        let offset = charge(&self.end, "spilled_bytes", len, self.cap)?;
-        self.file()?.write_all_at(bytes, offset)?;
-        Ok(Blob::Spilled {
-            offset,
-            len,
-            raw_len,
-        })
-    }
-
-    fn read(&self, offset: u64, len: u64, raw_len: u64) -> io::Result<Bytes> {
-        let mut bytes = vec![0u8; len as usize];
-        self.file()?.read_exact_at(&mut bytes, offset)?;
-        if self.compress {
-            bytes = lz4_flex::block::decompress(&bytes, raw_len as usize)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        }
-        Ok(bytes.into())
-    }
-
-    fn file(&self) -> io::Result<&std::fs::File> {
-        if let Some(file) = self.file.get() {
-            return Ok(file);
-        }
-        let file = match &self.dir {
-            Some(dir) => tempfile::tempfile_in(dir)?,
-            None => tempfile::tempfile()?,
-        };
-        let _ = self.file.set(file);
-        Ok(self.file.get().expect("scratch file was just set"))
-    }
-
-    fn spilled(&self) -> u64 {
-        self.end.load(Relaxed)
-    }
-}
-
-/// Putting files in, from any thread.
-impl<T: Tag> Loading<T> {
-    pub fn new(passes: impl Pass<Tag = T> + 'static, limits: Limits, options: Options) -> Self {
-        Self {
-            passes: Arc::new(passes),
-            scratch: Scratch::new(&options, limits.spilled_bytes),
-            limits,
-            cancelled: options.cancelled,
-            nodes: (0..NODE_SHARDS).map(|_| Mutex::default()).collect(),
-            blobs: (0..BLOB_SHARDS).map(|_| Mutex::default()).collect(),
-            files: AtomicUsize::new(0),
-            bytes: AtomicU64::new(0),
-            resident: AtomicU64::new(0),
-            deduped: AtomicU64::new(0),
-        }
-    }
-
-    /// One file. The header passes run now; the content passes run on the
-    /// one read, which happens here for `Bytes` and `Lazy`, and on the first
-    /// `read` for a linked file no pass asked to see first. A path that
-    /// climbs above the root is not a file of the repository.
-    pub fn put(&self, path: &str, what: Put<'_>) -> Result<(), SourceError> {
-        if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
-            return Err(SourceError::Cancelled);
-        }
-        let Some(key) = key(Path::new(path)).filter(|key| !key.is_empty()) else {
-            return Ok(());
-        };
-        let size = match &what {
-            Put::Bytes(bytes) => bytes.len() as u64,
-            Put::Lazy { size, .. } | Put::OnDisk { size, .. } => *size,
-            Put::Symlink(_) => 0,
-        };
-        charge(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
-        charge(&self.bytes, "total_bytes", size, self.limits.total_bytes)?;
-
-        let mut file = File::new(key, size);
-        if let Put::Symlink(target) = what {
-            file.decide(Decision::List(LINK_REASON));
-            return self.keep(file, Some(Slot::Link(target)), true);
-        }
-        match self.limits.file_bytes {
-            Some(cap) if size > cap => file.decide(Decision::List(OVERSIZE_REASON)),
-            _ => self.passes.header(&mut file),
-        }
-        match (file.decision(), what) {
-            (Decision::Drop(_), _) => Ok(()),
-            (Decision::List(_), _) => self.keep(file, None, true),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes),
-            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?),
-            (Decision::Keep(_), Put::OnDisk { path, .. }) => {
-                self.keep(file, Some(Slot::Linked(path)), false)
-            }
-            (Decision::Pending, Put::OnDisk { path, .. }) => self.put_sniffed(file, path),
-            (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
-        }
-    }
-
-    fn put_bytes(&self, mut file: File<T>, bytes: Vec<u8>) -> Result<(), SourceError> {
-        self.passes.content(&mut file, &bytes);
-        file.settle();
-        match file.decision() {
-            Decision::Drop(_) => Ok(()),
-            Decision::Keep(_) => {
-                let id = self.store(bytes)?;
-                self.keep(file, Some(Slot::Stored(id)), true)
-            }
-            _ => self.keep(file, None, true),
-        }
-    }
-
-    /// A pass wants the bytes before deciding: read for the decision only,
-    /// then link. A live checkout moves under us; a file gone between its
-    /// listing and this read is not a file of the repository.
-    fn put_sniffed(&self, mut file: File<T>, on_disk: PathBuf) -> Result<(), SourceError> {
-        let bytes = match std::fs::read(&on_disk) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                warn!(path = file.path, error = %e, "skipping a file that vanished before it was read");
-                return Ok(());
-            }
-        };
-        self.passes.content(&mut file, &bytes);
-        file.settle();
-        match file.decision() {
-            Decision::Drop(_) => Ok(()),
-            Decision::Keep(_) => self.keep(file, Some(Slot::Linked(on_disk)), true),
-            _ => self.keep(file, None, true),
-        }
-    }
-
-    fn keep(&self, file: File<T>, slot: Option<Slot>, checked: bool) -> Result<(), SourceError> {
-        let shard = &self.nodes[hash(&file.path) % NODE_SHARDS];
-        lock(shard).push(Node {
-            file,
-            slot,
-            checked,
-        });
-        Ok(())
-    }
-
-    /// Bytes stored once per distinct content. Checked and inserted under
-    /// one shard lock, so two workers adding the same content cannot both
-    /// pay for it.
-    fn store(&self, bytes: Vec<u8>) -> Result<ContentId, SourceError> {
-        let id = ContentId(Sha256::digest(&bytes).into());
-        let len = bytes.len() as u64;
-        let mut shard = lock(&self.blobs[id.0[0] as usize]);
-        match shard.entry(id) {
-            Entry::Occupied(_) => {
-                self.deduped.fetch_add(len, Relaxed);
-            }
-            Entry::Vacant(vacant) => {
-                let blob = match charge(
-                    &self.resident,
-                    "resident_bytes",
-                    len,
-                    self.limits.resident_bytes,
-                ) {
-                    Ok(_) => Blob::Memory(bytes.into()),
-                    Err(_) => {
-                        self.resident.fetch_sub(len, Relaxed);
-                        self.scratch.append(&bytes)?
-                    }
-                };
-                vacant.insert(blob);
-            }
-        }
-        Ok(id)
-    }
-
-    /// Sort once; the sorted vec is the tree. Two entries for one path keep
-    /// the later one, as `tar x` would.
-    fn freeze(self) -> Vfs<T> {
-        let mut nodes: Vec<Node<T>> = self
-            .nodes
-            .into_iter()
-            .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
-            .collect();
-        nodes.sort_by(|a, b| a.file.path.cmp(&b.file.path));
-        let offered = nodes.len();
-        let mut deduped: Vec<Node<T>> = Vec::with_capacity(offered);
-        for node in nodes {
-            match deduped.last_mut() {
-                Some(last) if last.file.path == node.file.path => *last = node,
-                _ => deduped.push(node),
-            }
-        }
-        let links = deduped
-            .iter()
-            .filter_map(|node| match &node.slot {
-                Some(Slot::Link(target)) => Some((node.file.path.clone(), target.clone())),
-                _ => None,
-            })
-            .collect();
-        let blobs = self
-            .blobs
-            .into_iter()
-            .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
-            .collect();
-        let usage = Usage {
-            files: deduped.len(),
-            bytes: self.bytes.load(Relaxed),
-            kept: 0,
-            resident: self.resident.load(Relaxed),
-            spilled: self.scratch.spilled(),
-            deduped_bytes: self.deduped.load(Relaxed),
-            duplicate_paths: offered - deduped.len(),
-        };
-        Vfs {
-            passes: self.passes,
-            nodes: deduped,
-            links,
-            blobs,
-            scratch: self.scratch,
-            usage,
-        }
-    }
+    pub(super) passes: Arc<dyn Pass<Tag = T>>,
+    pub(super) nodes: Vec<Node<T>>,
+    pub(super) links: FxHashMap<String, String>,
+    pub(super) blobs: FxHashMap<ContentId, Blob>,
+    pub(super) scratch: Scratch,
+    pub(super) usage: Usage,
 }
 
 /// Reading, with `std::fs` semantics: a missing path is `NotFound`, reading
@@ -399,12 +82,9 @@ impl<T: Tag> Vfs<T> {
         if node.checked {
             return Ok(bytes);
         }
-        let verdict = node.file.verdict.get_or_init(|| {
-            let mut checked = File::new(node.file.path.clone(), node.file.size);
-            checked.decide(node.file.decided);
-            self.passes.content(&mut checked, &bytes);
-            checked.decided
-        });
+        let verdict = node
+            .file
+            .judge_once(|file| self.passes.content(file, &bytes));
         match verdict {
             Decision::Keep(_) => Ok(bytes),
             _ => Err(unsupported(&node.file)),
@@ -556,103 +236,6 @@ impl<T> std::fmt::Debug for Vfs<T> {
     }
 }
 
-/// A running total with a cap: the first `add` to overflow trips it. Returns
-/// the total before the add, which is the offset for an append.
-fn charge<A: Atomic>(
-    total: &A,
-    metric: &'static str,
-    n: u64,
-    cap: Option<u64>,
-) -> Result<u64, CapExceeded> {
-    let before = total.fetch_add(n);
-    let count = before.saturating_add(n);
-    match cap.filter(|&cap| count > cap) {
-        Some(cap) => Err(CapExceeded { metric, count, cap }),
-        None => Ok(before),
-    }
-}
-
-trait Atomic {
-    fn fetch_add(&self, n: u64) -> u64;
-}
-impl Atomic for AtomicU64 {
-    fn fetch_add(&self, n: u64) -> u64 {
-        AtomicU64::fetch_add(self, n, Relaxed)
-    }
-}
-impl Atomic for AtomicUsize {
-    fn fetch_add(&self, n: u64) -> u64 {
-        AtomicUsize::fetch_add(self, n as usize, Relaxed) as u64
-    }
-}
-
-/// A repo-relative `/`-joined key; the repository root is `""`. `.` and `..`
-/// resolve lexically; `None` if the path climbs above the root.
-fn key(path: &Path) -> Option<String> {
-    let mut key = String::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => {
-                if !key.is_empty() {
-                    key.push('/');
-                }
-                key.push_str(&part.to_string_lossy());
-            }
-            Component::CurDir => {}
-            Component::RootDir => key.clear(),
-            Component::ParentDir => {
-                if key.is_empty() {
-                    return None;
-                }
-                key.truncate(key.rfind('/').unwrap_or(0));
-            }
-            Component::Prefix(_) => return None,
-        }
-    }
-    Some(key)
-}
-
-/// Replace the first symlink component of `key` with its target: the rest of
-/// the key follows. `None` when no component is a symlink; an error when the
-/// target climbs out of the repository.
-fn follow_first_link(key: &str, links: &FxHashMap<String, String>) -> Option<io::Result<String>> {
-    let mut end = 0;
-    loop {
-        end = match key[end..].find('/') {
-            Some(i) => end + i,
-            None => key.len(),
-        };
-        let prefix = &key[..end];
-        if let Some(target) = links.get(prefix) {
-            let rest = &key[end..];
-            let parent = prefix.rsplit_once('/').map_or("", |(parent, _)| parent);
-            let resolved = match target.starts_with('/') {
-                true => PathBuf::from(target),
-                false => Path::new(parent).join(target),
-            };
-            return Some(
-                self::key(&resolved)
-                    .map(|k| format!("{k}{rest}"))
-                    .ok_or_else(not_found),
-            );
-        }
-        if end == key.len() {
-            return None;
-        }
-        end += 1;
-    }
-}
-
-fn hash(path: &str) -> usize {
-    let mut hasher = FxHasher::default();
-    path.hash(&mut hasher);
-    hasher.finish() as usize
-}
-
-fn not_found() -> io::Error {
-    io::Error::new(io::ErrorKind::NotFound, "no such file in the repository")
-}
-
 fn unsupported<T: Tag>(file: &File<T>) -> io::Error {
     let why = match file.decision() {
         Decision::List(why) | Decision::Drop(why) => why,
@@ -662,8 +245,4 @@ fn unsupported<T: Tag>(file: &File<T>) -> io::Error {
         io::ErrorKind::Unsupported,
         format!("{} is listed only: {why}", file.path),
     )
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }

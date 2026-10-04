@@ -13,6 +13,11 @@
 //! Paths resolve lexically under `/`; nothing outside the repository is
 //! reachable, through a symlink or otherwise.
 
+mod limits;
+mod loading;
+mod path;
+mod policy;
+mod scratch;
 pub mod sources;
 #[cfg(test)]
 mod tests;
@@ -20,118 +25,13 @@ mod vfs;
 
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
+pub use limits::{CapExceeded, Limits};
+pub use loading::{Loading, Put};
+pub use policy::{Decision, File, Pass, Tag, Then};
 pub use sources::Source;
-pub use vfs::{Kind, Loading, Put, Stat, Vfs};
-
-/// What becomes of a file. `Pending` is the start state and, after `header`,
-/// means "the bytes decide"; it is never observable once the store is loaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Decision<T> {
-    #[default]
-    Pending,
-    Keep(T),
-    List(&'static str),
-    Drop(&'static str),
-}
-
-/// A domain's tag on a kept file. `Default` is what a `Pending` file becomes
-/// when no pass objected to its bytes.
-pub trait Tag: Copy + Default + Send + Sync + 'static {}
-impl<T: Copy + Default + Send + Sync + 'static> Tag for T {}
-
-/// One file of the repository and what the passes decided about it.
-#[derive(Debug, Clone)]
-pub struct File<T> {
-    pub path: String,
-    pub size: u64,
-    decided: Decision<T>,
-    /// A file linked from disk is checked by the content passes on its first
-    /// read, after the store is frozen; this is that one late verdict.
-    verdict: OnceLock<Decision<T>>,
-}
-
-impl<T: Tag> File<T> {
-    pub fn new(path: String, size: u64) -> Self {
-        Self {
-            path,
-            size,
-            decided: Decision::Pending,
-            verdict: OnceLock::new(),
-        }
-    }
-
-    pub fn decision(&self) -> Decision<T> {
-        self.verdict.get().copied().unwrap_or(self.decided)
-    }
-
-    pub fn decide(&mut self, decision: Decision<T>) {
-        self.decided = decision;
-    }
-
-    pub fn keeps(&self) -> bool {
-        matches!(self.decision(), Decision::Keep(_))
-    }
-
-    /// `Pending` after the content passes means no policy objected.
-    fn settle(&mut self) {
-        if matches!(self.decided, Decision::Pending) {
-            self.decided = Decision::Keep(T::default());
-        }
-    }
-}
-
-/// A pure function of path, size and bytes. It never sees a symlink, never
-/// counts anything and cannot fail. `header` runs on every file; `content`
-/// runs once, on the one read, for files still `Pending` or `Keep` after it.
-/// A `Drop` from either leaves no node, except when the one read is a
-/// parser's first `read` of a linked file: the store is frozen by then, so
-/// that node stays and reads as `Unsupported`.
-pub trait Pass: Send + Sync {
-    type Tag: Tag;
-
-    fn header(&self, _file: &mut File<Self::Tag>) {}
-
-    fn content(&self, _file: &mut File<Self::Tag>, _bytes: &[u8]) {}
-
-    fn then<B: Pass<Tag = Self::Tag>>(self, next: B) -> Then<Self, B>
-    where
-        Self: Sized,
-    {
-        Then(self, next)
-    }
-}
-
-/// Two passes in order: the second sees the first's decision.
-pub struct Then<A, B>(A, B);
-
-impl<A: Pass, B: Pass<Tag = A::Tag>> Pass for Then<A, B> {
-    type Tag = A::Tag;
-
-    fn header(&self, file: &mut File<Self::Tag>) {
-        self.0.header(file);
-        self.1.header(file);
-    }
-
-    fn content(&self, file: &mut File<Self::Tag>, bytes: &[u8]) {
-        self.0.content(file, bytes);
-        self.1.content(file, bytes);
-    }
-}
-
-/// No policy: keep everything.
-impl Pass for () {
-    type Tag = ();
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{metric} cap exceeded ({count} > {cap})")]
-pub struct CapExceeded {
-    pub metric: &'static str,
-    pub count: u64,
-    pub cap: u64,
-}
+pub use vfs::{Kind, Stat, Vfs};
 
 /// Whole-source failure: the run stops rather than index a partial repository.
 #[derive(Debug, thiserror::Error)]
@@ -146,23 +46,6 @@ pub enum SourceError {
     Empty,
     #[error("load cancelled")]
     Cancelled,
-}
-
-/// Resource caps. Every domain wants them, so the store enforces them and the
-/// passes never count. Per store: a process running N loads at once divides
-/// its budget by N.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Limits {
-    /// Over → `List("oversize")`.
-    pub file_bytes: Option<u64>,
-    /// Over → `SourceError::Cap`.
-    pub total_bytes: Option<u64>,
-    /// Over → `SourceError::Cap`.
-    pub files: Option<usize>,
-    /// Over → bytes spill to the scratch file. `Some(0)` spills everything.
-    pub resident_bytes: Option<u64>,
-    /// Over → `SourceError::Cap`, before the disk says `ENOSPC`.
-    pub spilled_bytes: Option<u64>,
 }
 
 /// How the store runs. Nothing here changes what is kept or refused.
