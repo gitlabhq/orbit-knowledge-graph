@@ -1389,6 +1389,7 @@ ai:docs:
 
 e2e:
   stage: e2e
+  resource_group: orbit-e2e-cluster
   extends:
     - .job-template
     - .sccache-template

@@ -43,6 +43,9 @@ E2E_SHA=abc1234 e2e/scripts/test.sh
 ```
 
 In CI the `e2e` job runs automatically on `main` and manually on MRs.
+The `e2e` and `e2e-ha` jobs share the `orbit-e2e-cluster` resource group.
+Only one of these jobs runs at a time across project pipelines, including setup,
+tests, and teardown. Local script runs do not acquire this CI lock.
 
 ## Test suites
 
