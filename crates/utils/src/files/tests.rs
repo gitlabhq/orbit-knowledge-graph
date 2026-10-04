@@ -764,7 +764,7 @@ fn a_linked_checkout_under_the_worst_conditions() {
     let root = dir.path();
     write(root, "blob.rs", b"\x00\x01 not rust");
     write(root, "gone.rs", b"fn gone() {}");
-    let collide = [b"caf\xc3\xa9.rs".as_slice(), b"caf\xff.rs"]
+    let collide = [b"caf\xff.rs".as_slice(), b"caf\xfe.rs"]
         .iter()
         .all(|name| std::fs::write(root.join(std::ffi::OsStr::from_bytes(name)), b"x").is_ok());
     let vfs = load(Checkout(root), CodeFilter, Limits::default());
