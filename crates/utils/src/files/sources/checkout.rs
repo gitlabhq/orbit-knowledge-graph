@@ -2,7 +2,7 @@
 //! linked where it is; the store reads it now only if a pass asks to.
 
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
@@ -66,7 +66,8 @@ impl Source for Checkout<'_> {
                     if !is_file_or_link {
                         return WalkState::Continue;
                     }
-                    match put(root, &path.to_string_lossy(), into) {
+                    let key = path.to_string_lossy().into_owned();
+                    match put(entry.into_path(), &key, into) {
                         Ok(()) => WalkState::Continue,
                         Err(e) => fail(e),
                     }
@@ -83,12 +84,13 @@ impl Source for Changed<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         self.paths
             .into_par_iter()
-            .try_for_each(|path| put(self.root, &path, into))
+            .try_for_each(|path| put(self.root.join(&path), &path, into))
     }
 }
 
-fn put<T: Tag>(root: &Path, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
-    let on_disk = root.join(path);
+/// `on_disk` is the file as the filesystem names it; `path` is its key in
+/// the store, which may be a lossy spelling of a name that is not UTF-8.
+fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
     let metadata = match on_disk.symlink_metadata() {
         Ok(metadata) => metadata,
         Err(e) => {
