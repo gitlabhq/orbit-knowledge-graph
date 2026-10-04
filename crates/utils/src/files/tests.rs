@@ -609,18 +609,65 @@ fn two_entries_for_one_path_keep_the_later_one() {
 }
 
 #[test]
-fn a_cancelled_load_stops_at_the_next_file() {
-    let flag = AtomicBool::new(true);
+fn a_load_stops_when_cancelled_or_when_the_source_cannot_read() {
+    let puts = AtomicUsize::new(0);
     let cancelled = Vfs::load(
-        memory(&[("a.rs", b"a")]),
+        memory(&[("a.rs", b"a"), ("b.rs", b"b"), ("c.rs", b"c")]),
         (),
         Limits::default(),
         Options {
-            cancelled: Some(Box::new(move || flag.load(Ordering::SeqCst))),
+            cancelled: Some(Box::new(move || puts.fetch_add(1, Ordering::SeqCst) == 2)),
             ..Options::default()
         },
     );
-    assert!(matches!(cancelled, Err(SourceError::Cancelled)));
+    assert!(
+        matches!(cancelled, Err(SourceError::Cancelled)),
+        "stopped at the third file"
+    );
+
+    struct Unreadable;
+    impl Source for Unreadable {
+        fn fill<T: super::Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            into.put(
+                "a.rs",
+                Put::Lazy {
+                    size: 1,
+                    read: Box::new(|| Err(std::io::Error::other("stream reset"))),
+                },
+            )
+        }
+    }
+    let failed = Vfs::<()>::load(Unreadable, (), Limits::default(), Options::default());
+    assert!(matches!(failed, Err(SourceError::Io(e)) if e.to_string() == "stream reset"));
+}
+
+/// The scratch file lives where asked, and the load fails if that place
+/// does not exist.
+#[test]
+fn the_scratch_file_lives_where_asked() {
+    let scratch = tempfile::tempdir().unwrap();
+    let spill_into = |dir: &Path| {
+        Vfs::load(
+            memory(&[("a.rs", b"spilled")]),
+            (),
+            Limits {
+                resident_bytes: Some(0),
+                ..Limits::default()
+            },
+            Options {
+                scratch_dir: Some(dir.to_path_buf()),
+                ..Options::default()
+            },
+        )
+    };
+    assert_eq!(
+        text(&spill_into(scratch.path()).unwrap(), "a.rs"),
+        "spilled"
+    );
+    assert!(matches!(
+        spill_into(&scratch.path().join("missing")),
+        Err(SourceError::Io(_))
+    ));
 }
 
 #[test]
@@ -631,6 +678,8 @@ fn a_checkout_lists_what_git_lists() {
     write(root, ".git/config", b"[core]\n");
     write(root, ".gitignore", b"build/\n");
     write(root, "build/out.rs", b"compiled\n");
+    write(root, ".git/info/exclude", b"tmp/\n");
+    write(root, "tmp/scratch.rs", b"local\n");
     write(root, ".ignore", b"notes/\n");
     write(root, "notes/x.rs", b"note\n");
     write(root, ".env", b"secret\n");
@@ -641,7 +690,7 @@ fn a_checkout_lists_what_git_lists() {
     assert_eq!(
         paths,
         [".env", ".gitignore", ".ignore", "notes/x.rs", "src/main.rs"],
-        ".git never, .gitignore honored, .ignore is not a git concept, dotfiles included"
+        ".git never, .gitignore and .git/info/exclude honored, .ignore is not a git concept, dotfiles included"
     );
 }
 
@@ -701,6 +750,48 @@ fn a_linked_checkout_is_checked_on_first_read() {
         Decision::List("binary"),
         "and the inventory shows it"
     );
+}
+
+/// A live checkout keeps changing after the load. Eight parsers taking the
+/// first read of one file agree on one decision; a file deleted after the
+/// load reads as an error, not a panic; two names that collapse to one
+/// string are one node, counted.
+#[test]
+#[cfg(unix)]
+fn a_linked_checkout_under_the_worst_conditions() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "blob.rs", b"\x00\x01 not rust");
+    write(root, "gone.rs", b"fn gone() {}");
+    let collide = [b"caf\xc3\xa9.rs".as_slice(), b"caf\xff.rs"]
+        .iter()
+        .all(|name| std::fs::write(root.join(std::ffi::OsStr::from_bytes(name)), b"x").is_ok());
+    let vfs = load(Checkout(root), CodeFilter, Limits::default());
+    std::fs::remove_file(root.join("gone.rs")).unwrap();
+
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| assert_eq!(read_error(&vfs, "blob.rs"), ErrorKind::Unsupported));
+        }
+    });
+    assert_eq!(
+        vfs.stat(Path::new("blob.rs")).unwrap().decision,
+        Some(Decision::List("binary"))
+    );
+    assert_eq!(read_error(&vfs, "gone.rs"), ErrorKind::NotFound);
+    assert_eq!(
+        vfs.stat(Path::new("gone.rs")).unwrap().kind,
+        Kind::File,
+        "the node outlives the file"
+    );
+    if collide {
+        assert_eq!(
+            vfs.usage().duplicate_paths,
+            1,
+            "two spellings, one lossy name, last wins"
+        );
+    }
 }
 
 #[test]

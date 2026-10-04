@@ -200,19 +200,18 @@ impl<T: Tag> Vfs<T> {
     /// The key a path names once every symlink in it is followed.
     fn resolve(&self, path: &Path) -> io::Result<String> {
         let mut key = key(path).ok_or_else(not_found)?;
-        if self.links.is_empty() {
-            return Ok(key);
-        }
-        for _ in 0..MAX_LINK_DEPTH {
-            match follow_first_link(&key, &self.links) {
-                Some(next) => key = next?,
-                None => return Ok(key),
+        let mut hops = 0;
+        while let Some(next) = follow_first_link(&key, &self.links) {
+            key = next?;
+            hops += 1;
+            if hops > MAX_LINK_DEPTH {
+                return Err(io::Error::other(format!(
+                    "{} passes through more than {MAX_LINK_DEPTH} symlinks",
+                    path.display()
+                )));
             }
         }
-        Err(io::Error::other(format!(
-            "{} passes through too many symlinks",
-            path.display()
-        )))
+        Ok(key)
     }
 
     /// Like `resolve`, but a symlink as the last component stays itself.
