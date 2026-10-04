@@ -5,11 +5,8 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::head;
 use orbit_server_config::{AppConfig, QuotaAuthMode};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
 
 use super::*;
-use crate::proto::orbit_service_client::OrbitServiceClient;
-use crate::proto::orbit_service_server::OrbitServiceServer;
 
 const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -41,21 +38,6 @@ fn license_checksum_quota(customers_dot_url: String) -> QuotaService {
     billing.quota.customers_dot_url = customers_dot_url;
     billing.quota.auth_mode = QuotaAuthMode::LicenseChecksum;
     QuotaService::from_config(&billing).unwrap()
-}
-
-async fn serve(service: OrbitServiceImpl) -> OrbitServiceClient<tonic::transport::Channel> {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        tonic::transport::Server::builder()
-            .add_service(OrbitServiceServer::new(service))
-            .serve_with_incoming(TcpListenerStream::new(listener))
-            .await
-            .unwrap();
-    });
-    OrbitServiceClient::connect(format!("http://{addr}"))
-        .await
-        .unwrap()
 }
 
 // `Claims` never serializes the checksum, so it is set in the raw JSON the way Rails signs it.

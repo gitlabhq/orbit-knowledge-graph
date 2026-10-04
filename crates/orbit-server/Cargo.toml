@@ -80,6 +80,7 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+orbit-billing = { path = "../orbit-billing", features = ["testkit"] }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
