@@ -16,6 +16,18 @@ use std::sync::LazyLock;
 
 pub use clickhouse::codegen;
 
+fn validate_aggregate(
+    function: crate::input::AggFunction,
+    argument: Option<&crate::ast::Expr>,
+    distinct: bool,
+) -> Result<(), String> {
+    if argument.is_none() && (distinct || function != crate::input::AggFunction::Count) {
+        let qualifier = if distinct { "distinct " } else { "" };
+        return Err(format!("{qualifier}{function} requires an argument"));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SqlDialect {
     #[default]
@@ -96,6 +108,54 @@ impl std::fmt::Display for ParameterizedQuery {
 mod tests {
     use super::*;
     use crate::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+
+    #[test]
+    fn aggregate_codegen_rejects_missing_arguments_except_row_count() {
+        use crate::input::AggFunction;
+
+        for function in [
+            AggFunction::Count,
+            AggFunction::Sum,
+            AggFunction::Avg,
+            AggFunction::Min,
+            AggFunction::Max,
+            AggFunction::Collect,
+        ] {
+            for distinct in [false, true] {
+                for filtered in [false, true] {
+                    let ast = Node::Query(Box::new(Query {
+                        select: vec![SelectExpr::new(
+                            Expr::Aggregate {
+                                function,
+                                argument: None,
+                                distinct,
+                                condition: filtered.then(|| Box::new(Expr::col("n", "keep"))),
+                            },
+                            "result",
+                        )],
+                        from: TableRef::scan("nodes", "n"),
+                        ..Default::default()
+                    }));
+                    let remote = codegen(&ast, ResultContext::new(), QueryConfig::default());
+                    let local = duckdb::codegen(&ast, ResultContext::new());
+                    let simple = clickhouse::emit_simple_query(&ast);
+                    if function == AggFunction::Count && !distinct {
+                        assert!(remote.is_ok());
+                        assert!(local.is_ok());
+                        assert!(simple.is_ok());
+                    } else {
+                        for error in [remote.unwrap_err(), local.unwrap_err(), simple.unwrap_err()]
+                        {
+                            assert!(
+                                matches!(error, crate::error::QueryError::Codegen(ref message) if message.contains("requires an argument")),
+                                "{error}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn token_search_uses_clickhouse_modes_and_rejects_duckdb() {

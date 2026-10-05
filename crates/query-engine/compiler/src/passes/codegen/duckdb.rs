@@ -252,6 +252,12 @@ impl Context {
                 distinct,
                 condition,
             } => {
+                if let Err(error) =
+                    super::validate_aggregate(*function, argument.as_deref(), *distinct)
+                {
+                    self.error = Some(error);
+                    return String::new();
+                }
                 let name = match function {
                     crate::input::AggFunction::Count => "COUNT",
                     crate::input::AggFunction::Sum => "SUM",
