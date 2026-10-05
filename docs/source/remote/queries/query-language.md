@@ -598,6 +598,15 @@ node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 The response lists the center node alongside its neighbors, so leave the center out
 when counting neighbors.
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `direction` | `string` | `outgoing`, `incoming`, or `both`. Default `outgoing`. |
+| `rel_types` | `array` | Relationship types to traverse. Default: all types. |
+
+With the default direction, the response has only the relationships that start
+at the center node. To also get the relationships that point at it, set
+`direction` to `incoming` or `both`.
+
 ```json orbit-query
 {
   "query_type": "neighbors",

@@ -654,8 +654,8 @@
       "properties": {
         "direction": {
           "$ref": "#/$defs/Direction",
-          "description": "Traversal direction (default: both).",
-          "default": "both"
+          "description": "Traversal direction (default: outgoing).",
+          "default": "outgoing"
         },
         "rel_types": {
           "type": "array",
