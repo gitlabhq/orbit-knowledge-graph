@@ -72,6 +72,7 @@ All later passes continue to use that AST. Planning does not construct SQL expre
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
 Built-in calls use a closed `Function` vocabulary rather than SQL names. Each renderer owns function spelling, argument placement, and dialect syntax.
+The emitted explain view prints exact `Function` variant names, such as `StartsWith`. ClickHouse codegen renders `startsWith`; DuckDB renders `starts_with`.
 Security checks recognize the prefix operation directly. String byte length is distinct from character substring operations.
 Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
 ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.

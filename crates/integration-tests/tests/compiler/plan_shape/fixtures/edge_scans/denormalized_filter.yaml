@@ -12,7 +12,7 @@ physical:
       expect: ["(Filter e0.source_tags HAS ANY ['definition_type:function'], ... (Scan Table(gl_code_edge) AS e0))"]
       reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
-      expect: ["(Filter array_contains(e0.source_tags, 'definition_type:function'), ... (Scan Table(gl_code_edge) AS e0))"]
+      expect: ["(Filter ArrayContains(e0.source_tags, 'definition_type:function'), ... (Scan Table(gl_code_edge) AS e0))"]
       ctes:
         absent: true
       reject: ["(Scan Table(gl_definition) ...)"]

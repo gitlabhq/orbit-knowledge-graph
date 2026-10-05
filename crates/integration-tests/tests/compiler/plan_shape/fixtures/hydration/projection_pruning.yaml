@@ -13,4 +13,4 @@ physical:
       expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
     emitted:
       expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
-      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter starts_with(f.traversal_path, ?), ... (_))"]
+      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]
