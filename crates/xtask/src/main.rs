@@ -96,7 +96,8 @@ enum Command {
         check: bool,
     },
     /// Run a gRPC load test against a running Orbit server, replaying the
-    /// performance query corpus and reporting latency percentiles.
+    /// performance query corpus and reporting latency percentiles (plus
+    /// optional ClickHouse server-side work per query).
     ///
     /// Requires GKG_JWT_SECRET (base64-encoded HMAC key, same as the server).
     Loadtest {
@@ -104,13 +105,48 @@ enum Command {
         #[arg(long, env = "ORBIT_ENDPOINT", default_value = "http://127.0.0.1:50054")]
         endpoint: String,
 
-        /// Maximum in-flight requests per query.
+        /// Throughput pass: requests per query per round, all in flight at once.
         #[arg(long, default_value_t = 20)]
         concurrency: usize,
 
-        /// Number of rounds; total requests per query = concurrency * rounds.
+        /// Measured rounds; each runs every query once in seeded shuffled order.
+        /// Throughput requests per query = concurrency * rounds.
         #[arg(long, default_value_t = 5)]
         rounds: usize,
+
+        /// Discarded throughput-shaped rounds before measuring (0 = none).
+        #[arg(long, default_value_t = 1)]
+        warmup_rounds: usize,
+
+        /// Seed for the per-round query order.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+
+        /// In-flight requests for a separate latency pass (0 = no latency pass).
+        #[arg(long, default_value_t = 0)]
+        latency_concurrency: usize,
+
+        /// Latency pass: requests per query per round.
+        #[arg(long, default_value_t = 4)]
+        latency_requests: usize,
+
+        /// ClickHouse HTTP URL for server-side stats from system.query_log
+        /// (unset = skip).
+        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_URL")]
+        clickhouse_url: Option<String>,
+
+        /// ClickHouse user for server-side stats.
+        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_USER", default_value = "default")]
+        clickhouse_user: String,
+
+        /// ClickHouse password for server-side stats.
+        #[arg(long, env = "ORBIT_PERF_CLICKHOUSE_PASSWORD", hide_env_values = true)]
+        clickhouse_password: Option<String>,
+
+        /// Run id embedded in every correlation id ([A-Za-z0-9-]; default:
+        /// timestamp-derived).
+        #[arg(long, env = "CI_JOB_ID")]
+        run_id: Option<String>,
 
         /// Directory of scenario YAML files to replay (recursively).
         #[arg(
@@ -341,6 +377,14 @@ async fn main() -> Result<()> {
             endpoint,
             concurrency,
             rounds,
+            warmup_rounds,
+            seed,
+            latency_concurrency,
+            latency_requests,
+            clickhouse_url,
+            clickhouse_user,
+            clickhouse_password,
+            run_id,
             scenarios,
             query,
             no_admin,
@@ -350,10 +394,20 @@ async fn main() -> Result<()> {
                 endpoint,
                 concurrency,
                 rounds,
+                warmup_rounds,
+                seed,
+                latency_concurrency,
+                latency_requests,
                 scenarios,
                 query,
                 admin: !no_admin,
                 per_call_timeout: std::time::Duration::from_secs(timeout),
+                run_id,
+                clickhouse: clickhouse_url.map(|url| loadtest::ClickHouseOptions {
+                    url,
+                    user: clickhouse_user,
+                    password: clickhouse_password,
+                }),
             })
             .await
         }
