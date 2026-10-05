@@ -10,7 +10,7 @@ use orbit_server_config::QueryConfig;
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
-pub use orbit_utils::clickhouse::ParamValue;
+pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -63,7 +63,7 @@ impl ParameterizedQuery {
                     .replace_all(&self.sql, |caps: &regex::Captures| {
                         let name = &caps[1];
                         match self.params.get(name) {
-                            Some(param) => param.render_literal(),
+                            Some(param) => param.render_clickhouse_literal(),
                             None => caps[0].to_string(),
                         }
                     })
@@ -76,7 +76,7 @@ impl ParameterizedQuery {
                     .replace_all(&self.sql, |caps: &regex::Captures| {
                         let key = format!("p{}", &caps[1]);
                         match self.params.get(&key) {
-                            Some(param) => param.render_literal(),
+                            Some(param) => duckdb::render_literal(param),
                             None => caps[0].to_string(),
                         }
                     })

@@ -71,6 +71,8 @@ Planning resolves backend facts into execution requirements. Lowering translates
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
+Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
+ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.
 Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
 Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
 CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.

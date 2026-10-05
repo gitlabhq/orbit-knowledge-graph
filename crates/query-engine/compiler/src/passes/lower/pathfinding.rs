@@ -254,7 +254,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
             edge_filter: Expr::col_in(
                 "e1",
                 edge_col,
-                ChType::Int64,
+                SqlType::Int64,
                 np.node_ids.iter().map(|id| Value::from(*id)).collect(),
             ),
             cte_name: None,
@@ -352,7 +352,7 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
         return Expr::col_in(
             alias,
             col,
-            ChType::Int64,
+            SqlType::Int64,
             np.node_ids.iter().map(|id| Value::from(*id)).collect(),
         );
     }

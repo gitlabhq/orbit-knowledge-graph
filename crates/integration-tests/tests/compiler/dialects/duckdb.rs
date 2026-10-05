@@ -13,6 +13,41 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 }
 
 #[test]
+fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
+    use compiler::ast::{Expr, Node, Query, SelectExpr, SqlType, TableRef, TimeZone};
+
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("parameters.duckdb")).unwrap();
+    database.initialize_schema("CREATE TABLE events(created_at TIMESTAMPTZ); INSERT INTO events VALUES ('2026-10-05T01:02:03.123456Z');").unwrap();
+    let ast = Node::Query(Box::new(Query {
+        select: vec![SelectExpr::col("e", "created_at")],
+        from: TableRef::scan("events", "e"),
+        where_clause: Some(Expr::eq(
+            Expr::col("e", "created_at"),
+            Expr::param(
+                SqlType::Timestamp {
+                    precision: 6,
+                    timezone: Some(TimeZone::Utc),
+                },
+                "2026-10-05T01:02:03.123456Z",
+            ),
+        )),
+        ..Default::default()
+    }));
+    let compiled = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+    assert!(!compiled.render().contains("toDateTime"));
+    let parameter = compiled.params.get("p1").unwrap();
+    let parameters = duckdb_client::to_sql_params(&[parameter]);
+    let bound = database
+        .query_arrow_params(&compiled.sql, &parameters)
+        .unwrap();
+    let rendered = database.query_arrow(&compiled.render()).unwrap();
+    assert_eq!(bound, rendered);
+    assert_eq!(bound[0].num_rows(), 1);
+}
+
+#[test]
 fn nested_cte_codegen_executes_with_its_local_definition() {
     use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
 

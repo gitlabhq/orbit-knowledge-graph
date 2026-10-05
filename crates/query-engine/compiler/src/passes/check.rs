@@ -315,7 +315,7 @@ mod tests {
     fn accepts_bool_false_as_dead_alias_filter() {
         use crate::ast::Op;
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let dead = Expr::param(crate::ast::ChType::Bool, false);
+        let dead = Expr::param(crate::ast::SqlType::Bool, false);
         let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
         assert!(check(&node, &ctx, &ontology).is_ok());
@@ -337,7 +337,7 @@ mod tests {
         let eq_false = Expr::binary(
             Op::Eq,
             Expr::col("p", "archived"),
-            Expr::param(crate::ast::ChType::Bool, false),
+            Expr::param(crate::ast::SqlType::Bool, false),
         );
         let node = project_query(Some(eq_false));
         let ontology = ontology::Ontology::new().with_nodes(["Project"]);
@@ -358,7 +358,7 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let or_expr = Expr::binary(
             Op::Or,
-            Expr::param(crate::ast::ChType::Bool, false),
+            Expr::param(crate::ast::SqlType::Bool, false),
             Expr::lit(true),
         );
         let node = project_query(Some(or_expr));
@@ -381,7 +381,7 @@ mod tests {
         let dead_conjunct = Expr::binary(
             Op::And,
             Expr::binary(Op::Eq, Expr::col("p", "id"), Expr::lit(5)),
-            Expr::param(crate::ast::ChType::Bool, false),
+            Expr::param(crate::ast::SqlType::Bool, false),
         );
         let where_expr = Expr::binary(
             Op::And,
@@ -409,7 +409,7 @@ mod tests {
             Expr::binary(
                 Op::Eq,
                 Expr::col("p", "archived"),
-                Expr::param(crate::ast::ChType::Bool, false),
+                Expr::param(crate::ast::SqlType::Bool, false),
             ),
             Expr::binary(Op::Gt, Expr::col("p", "id"), Expr::lit(0)),
         );

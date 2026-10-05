@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-pub use orbit_utils::clickhouse::{ChScalar, ChType};
+pub use orbit_utils::query_types::{ScalarType, SqlType, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -21,7 +21,7 @@ pub enum Expr {
     /// Constant value, type inferred from Value.
     Literal(Value),
     Param {
-        data_type: ChType,
+        data_type: SqlType,
         value: Value,
     },
     FuncCall {
@@ -332,7 +332,7 @@ impl Expr {
         Expr::Literal(value.into())
     }
 
-    pub fn param(data_type: ChType, value: impl Into<Value>) -> Self {
+    pub fn param(data_type: SqlType, value: impl Into<Value>) -> Self {
         Expr::Param {
             data_type,
             value: value.into(),
@@ -341,21 +341,21 @@ impl Expr {
 
     pub fn string(value: impl Into<String>) -> Self {
         Expr::Param {
-            data_type: ChType::String,
+            data_type: SqlType::String,
             value: Value::String(value.into()),
         }
     }
 
     pub fn int(value: i64) -> Self {
         Expr::Param {
-            data_type: ChType::Int64,
+            data_type: SqlType::Int64,
             value: Value::Number(value.into()),
         }
     }
 
     pub fn uint32(value: u32) -> Self {
         Expr::Param {
-            data_type: ChType::UInt32,
+            data_type: SqlType::UInt32,
             value: Value::Number(value.into()),
         }
     }
@@ -418,7 +418,7 @@ impl Expr {
     pub fn col_in(
         table: impl Into<String>,
         column: impl Into<String>,
-        data_type: ChType,
+        data_type: SqlType,
         values: Vec<Value>,
     ) -> Option<Self> {
         match values.len() {

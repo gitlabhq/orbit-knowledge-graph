@@ -12,7 +12,7 @@ use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
 use crate::passes::lower::LoweredMetadata;
-use orbit_utils::clickhouse::ChType;
+use orbit_utils::query_types::SqlType;
 
 pub fn cursor_column(i: usize) -> String {
     format!("{}cursor_{i}", internal_column_prefix())
@@ -259,7 +259,7 @@ fn inner_order_as_outer(order_by: &[OrderExpr]) -> Vec<OrderExpr> {
 /// FALSE, which is correct: NULLs-last ordering puts such a row at the very
 /// end of the stream.
 fn seek_predicate(order_by: &[OrderExpr], values: &[Option<String>], nullable: &[bool]) -> Expr {
-    let param = |v: &String| Expr::param(ChType::String, v.clone());
+    let param = |v: &String| Expr::param(SqlType::String, v.clone());
     (0..order_by.len())
         .filter_map(|j| {
             let Some(vj) = &values[j] else {

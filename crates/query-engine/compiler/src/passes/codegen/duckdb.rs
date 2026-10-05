@@ -13,13 +13,29 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{Cte, Expr, Insert, JoinType, Node, Op, Query, SqlType, TableRef};
 use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
+
+pub(super) fn render_literal(parameter: &ParamValue) -> String {
+    let literal = orbit_utils::clickhouse::render_value(&parameter.value);
+    match parameter.data_type {
+        SqlType::Date => format!("CAST({literal} AS DATE)"),
+        SqlType::Timestamp { timezone, .. } => format!(
+            "CAST({literal} AS {})",
+            if timezone.is_some() {
+                "TIMESTAMPTZ"
+            } else {
+                "TIMESTAMP"
+            }
+        ),
+        _ => literal,
+    }
+}
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
@@ -323,7 +339,7 @@ impl Context {
         format!("{}({})", duckdb_name, args.join(", "))
     }
 
-    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+    fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
             // DuckDB: no native array bind — always expand element-by-element.
@@ -336,13 +352,13 @@ impl Context {
                         let placeholder = format!("${}", self.param_counter);
                         // TODO: This will be abstracted away with LLQM to generic scalar types
                         let scalar_type = match data_type {
-                            ChType::Array(inner) => ChType::from(inner),
+                            SqlType::Array(inner) => SqlType::from(inner),
                             _ => data_type,
                         };
                         self.params.insert(
                             name,
                             ParamValue {
-                                ch_type: scalar_type,
+                                data_type: scalar_type,
                                 value: item.clone(),
                             },
                         );
@@ -358,11 +374,22 @@ impl Context {
                 self.params.insert(
                     name,
                     ParamValue {
-                        ch_type: data_type,
+                        data_type,
                         value: v.clone(),
                     },
                 );
-                placeholder
+                match data_type {
+                    SqlType::Date => format!("CAST({placeholder} AS DATE)"),
+                    SqlType::Timestamp { timezone, .. } => format!(
+                        "CAST({placeholder} AS {})",
+                        if timezone.is_some() {
+                            "TIMESTAMPTZ"
+                        } else {
+                            "TIMESTAMP"
+                        }
+                    ),
+                    _ => placeholder,
+                }
             }
         }
     }
@@ -373,11 +400,11 @@ impl Context {
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
-                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .map(|item| self.emit_param(SqlType::from_value(item), item))
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
-            _ => self.emit_param(ChType::from_value(v), v),
+            _ => self.emit_param(SqlType::from_value(v), v),
         }
     }
 
@@ -541,7 +568,7 @@ mod tests {
         let type_filter = Expr::col_in(
             "e",
             "kind",
-            ChType::String,
+            SqlType::String,
             vec![Value::from("A"), Value::from("B"), Value::from("C")],
         )
         .unwrap();

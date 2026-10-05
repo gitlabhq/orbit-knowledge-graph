@@ -64,7 +64,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
     if let Some(id_filter) = Expr::col_in(
         alias,
         pk,
-        ChType::Int64,
+        SqlType::Int64,
         node.node_ids
             .iter()
             .map(|id| serde_json::Value::Number((*id).into()))
@@ -133,7 +133,7 @@ fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
                 ),
             ),
             Expr::param(
-                ChType::String.to_array(),
+                SqlType::String.to_array(),
                 serde_json::Value::Array(
                     paths
                         .iter()

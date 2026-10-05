@@ -2,14 +2,14 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, TokenMatchMode};
+use crate::ast::{Cte, Expr, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TokenMatchMode};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
-use orbit_utils::clickhouse::ParamBindings;
+use orbit_utils::query_types::ParamBindings;
 
 pub fn codegen(
     ast: &Node,
@@ -318,28 +318,27 @@ impl Context {
         }
     }
 
-    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+    fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
+        let type_name = orbit_utils::clickhouse::type_name(data_type);
         match v {
             Value::Null => "NULL".into(),
-            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
-            Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
+            Value::Array(_) if matches!(data_type, SqlType::Array(_)) => {
                 let name = self.params.intern(data_type, v);
-                format!("{{{name}:{data_type}}}")
+                format!("{{{name}:{type_name}}}")
             }
-            // Scalar ChType with array value: expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
                     .map(|item| {
                         let name = self.params.intern(data_type, item);
-                        format!("{{{name}:{data_type}}}")
+                        format!("{{{name}:{type_name}}}")
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
                 let name = self.params.intern(data_type, v);
-                format!("{{{name}:{data_type}}}")
+                format!("{{{name}:{type_name}}}")
             }
         }
     }
@@ -350,11 +349,11 @@ impl Context {
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
-                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .map(|item| self.emit_param(SqlType::from_value(item), item))
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
-            _ => self.emit_param(ChType::from_value(v), v),
+            _ => self.emit_param(SqlType::from_value(v), v),
         }
     }
 
@@ -600,7 +599,7 @@ mod tests {
     fn param_interning() {
         let mut ctx = Context::new();
         let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
-        let array_type = ChType::Array(crate::ast::ChScalar::String);
+        let array_type = SqlType::Array(crate::ast::ScalarType::String);
 
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
@@ -608,7 +607,13 @@ mod tests {
         assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
         assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
         assert_eq!(
-            ctx.emit_param(ChType::DateTime64, &Value::from("dup")),
+            ctx.emit_param(
+                SqlType::Timestamp {
+                    precision: 6,
+                    timezone: Some(crate::ast::TimeZone::Utc)
+                },
+                &Value::from("dup")
+            ),
             "{p3:DateTime64(6, 'UTC')}"
         );
         assert_eq!(ctx.params.into_map().len(), 4);
@@ -665,7 +670,7 @@ mod tests {
         let type_filter = Expr::col_in(
             "e",
             "relationship_kind",
-            ChType::String,
+            SqlType::String,
             vec![
                 Value::String("AUTHORED".into()),
                 Value::String("CONTAINS".into()),
@@ -1034,14 +1039,14 @@ mod tests {
         params.insert(
             "p0".into(),
             ParamValue {
-                ch_type: ChType::String,
+                data_type: SqlType::String,
                 value: Value::from("User"),
             },
         );
         params.insert(
             "p1".into(),
             ParamValue {
-                ch_type: ChType::String,
+                data_type: SqlType::String,
                 value: Value::from("active"),
             },
         );
@@ -1066,14 +1071,14 @@ mod tests {
         params.insert(
             "p0".into(),
             ParamValue {
-                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::String),
+                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::String),
                 value: serde_json::json!(["a", "b"]),
             },
         );
         params.insert(
             "p1".into(),
             ParamValue {
-                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::Int64),
+                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::Int64),
                 value: serde_json::json!([10, 20]),
             },
         );

@@ -23,7 +23,7 @@ impl QueryScope {
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -219,11 +219,11 @@ fn propagate_scope_proofs(
 fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let (key, from) = match value {
         PathScopeId::Numeric(id) => (
-            Expr::param(ChType::Int64, *id),
+            Expr::param(SqlType::Int64, *id),
             TableRef::scan(source_table, LOOKUP_ALIAS),
         ),
         PathScopeId::Text(text) => (
-            Expr::param(ChType::String, text.clone()),
+            Expr::param(SqlType::String, text.clone()),
             TableRef::scan_final(source_table, LOOKUP_ALIAS),
         ),
     };
