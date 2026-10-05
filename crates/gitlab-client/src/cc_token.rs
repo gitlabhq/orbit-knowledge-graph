@@ -80,9 +80,13 @@ impl CloudConnectorTokenCache {
             return Ok(token);
         }
 
-        let has_valid_cached_token = {
+        let (has_cached_token, has_valid_cached_token) = {
             let state = self.state.read().unwrap();
-            state.token.is_some() && Utc::now().timestamp() < state.token_exp
+            let has_token = state.token.is_some();
+            (
+                has_token,
+                has_token && Utc::now().timestamp() < state.token_exp,
+            )
         };
         let fetched = if has_valid_cached_token {
             tokio::time::timeout(CC_TOKEN_FETCH_TIMEOUT, self.fetcher.fetch())
@@ -116,7 +120,7 @@ impl CloudConnectorTokenCache {
                     %error,
                     retry_at = state.refresh_at,
                     serving_cached_token = state.token.is_some(),
-                    cached_token_expired = state.token.is_some() && now >= state.token_exp,
+                    cached_token_expired = has_cached_token && !has_valid_cached_token,
                     "cloud connector token refresh failed"
                 );
                 state.token.clone().ok_or(error)
@@ -330,15 +334,23 @@ mod tests {
         assert!(cache.state.read().unwrap().token.is_none());
     }
 
-    /// Call `n` sleeps for `steps[n].0` and returns a token with `exp`
-    /// `steps[n].1`; calls past the end repeat the last step.
+    #[derive(Clone, Copy)]
+    struct FetchStep {
+        delay: Duration,
+        token_exp: i64,
+    }
+
+    fn step(delay: Duration, token_exp: i64) -> FetchStep {
+        FetchStep { delay, token_exp }
+    }
+
     struct DelayedFetcher {
         calls: AtomicUsize,
-        steps: Vec<(Duration, i64)>,
+        steps: Vec<FetchStep>,
     }
 
     impl DelayedFetcher {
-        fn new(steps: Vec<(Duration, i64)>) -> Self {
+        fn new(steps: Vec<FetchStep>) -> Self {
             Self {
                 calls: AtomicUsize::new(0),
                 steps,
@@ -352,12 +364,12 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<CloudConnectorToken, GitlabClientError>> + Send + '_>>
         {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
-            let (delay, exp) = self.steps[n.min(self.steps.len() - 1)];
+            let FetchStep { delay, token_exp } = self.steps[n.min(self.steps.len() - 1)];
             Box::pin(async move {
                 tokio::time::sleep(delay).await;
                 Ok(CloudConnectorToken {
                     token: format!("token-{n}"),
-                    exp,
+                    exp: token_exp,
                 })
             })
         }
@@ -366,8 +378,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_slow_fetch_is_abandoned_at_the_timeout_when_a_valid_cached_token_exists() {
         let fetcher = Arc::new(DelayedFetcher::new(vec![
-            (Duration::ZERO, now() + 3_600),
-            (Duration::from_secs(3_600), now() + 3_600),
+            step(Duration::ZERO, now() + 3_600),
+            step(Duration::from_secs(3_600), now() + 3_600),
         ]));
         let cache = CloudConnectorTokenCache::new(fetcher);
         assert_eq!(cache.token().await.unwrap(), "token-0");
@@ -386,8 +398,8 @@ mod tests {
     async fn a_slow_fetch_is_waited_out_when_the_cached_token_has_expired() {
         let delay = CC_TOKEN_FETCH_TIMEOUT + Duration::from_secs(5);
         let fetcher = Arc::new(DelayedFetcher::new(vec![
-            (Duration::ZERO, now() - 60),
-            (delay, now() + 3_600),
+            step(Duration::ZERO, now() - 60),
+            step(delay, now() + 3_600),
         ]));
         let cache = CloudConnectorTokenCache::new(fetcher);
         assert_eq!(cache.token().await.unwrap(), "token-0");
@@ -403,7 +415,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_slow_fetch_is_not_abandoned_when_no_cached_token_exists() {
         let delay = CC_TOKEN_FETCH_TIMEOUT + Duration::from_secs(5);
-        let fetcher = Arc::new(DelayedFetcher::new(vec![(delay, now() + 3_600)]));
+        let fetcher = Arc::new(DelayedFetcher::new(vec![step(delay, now() + 3_600)]));
         let cache = CloudConnectorTokenCache::new(fetcher);
 
         let started = tokio::time::Instant::now();
