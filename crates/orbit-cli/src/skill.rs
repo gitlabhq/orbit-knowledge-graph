@@ -176,11 +176,12 @@ async fn list_skills() -> Result<()> {
             );
             print_local_list()
         }
-        Ok(response) if matches!(response.status, 401 | 403) => {
-            Err(map_http_error(response.status, body_text(&response)).into())
-        }
-        Ok(response) if response.status >= 500 => {
-            Err(map_http_error(response.status, body_text(&response)).into())
+        Ok(response) if is_degradable_status(response.status) => {
+            eprintln!(
+                "warning: Orbit skills listing returned HTTP {}; using the embedded local skill",
+                response.status
+            );
+            print_local_list()
         }
         Ok(response) => Err(map_http_error(response.status, body_text(&response)).into()),
         Err(error) => {
@@ -288,19 +289,33 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             );
             Ok(None)
         }
-        401 | 403 => Err(map_http_error(response.status, body_text(&response)).into()),
-        status if status >= 500 => {
+        401 | 403 => {
+            eprintln!(
+                "warning: Orbit skill request returned HTTP {}; using the embedded local skill",
+                response.status
+            );
+            Ok(None)
+        }
+        429 | 500.. => {
+            let status = response.status;
             if let Some(cached) = cached {
                 eprintln!(
                     "warning: Orbit skill request returned HTTP {status}; using the last validated tree for {origin}"
                 );
-                Ok(Some(cached.tree))
-            } else {
-                Err(map_http_error(status, body_text(&response)).into())
+                return Ok(Some(cached.tree));
             }
+            eprintln!(
+                "warning: Orbit skill request returned HTTP {status}; using the embedded local skill"
+            );
+            Ok(None)
         }
         status => Err(map_http_error(status, body_text(&response)).into()),
     }
+}
+
+/// The skill is documentation, so auth failures, rate limits and outages degrade to a local copy.
+fn is_degradable_status(status: u16) -> bool {
+    matches!(status, 401 | 403 | 429 | 500..)
 }
 
 fn body_text(response: &SkillHttpResponse) -> &str {

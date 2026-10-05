@@ -462,19 +462,76 @@ fn missing_etag_uses_cache_or_embedded_skill() {
     assert!(String::from_utf8_lossy(&embedded_fallback.stdout).contains("name: orbit-cli"));
 }
 
+fn status_reply(status: u16) -> Reply {
+    Reply {
+        status,
+        reason: "Error",
+        etag: None,
+        body: "error".to_string(),
+    }
+}
+
 #[test]
-fn auth_errors_never_fall_back() {
-    for (status, expected_exit) in [(401, 3), (403, 4)] {
+fn degradable_statuses_without_cache_use_embedded_skill() {
+    for status in [401, 403, 429, 500, 503] {
         let cache = tempfile::tempdir().unwrap();
-        let (url, server) = mock_server(vec![Reply {
-            status,
-            reason: "Denied",
-            etag: None,
-            body: "denied".to_string(),
-        }]);
+        let (url, server) = mock_server(vec![status_reply(status)]);
         let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
         server.join().unwrap();
-        assert_eq!(output.status.code(), Some(expected_exit));
+        assert!(output.status.success(), "{status}: {}", stderr(&output));
+        assert!(stderr(&output).contains(&format!("HTTP {status}")));
+        assert!(stderr(&output).contains("embedded local skill"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
+    }
+}
+
+#[test]
+fn cache_is_used_for_rate_limits_and_server_errors_but_not_auth_errors() {
+    for (status, uses_cache) in [
+        (429, true),
+        (500, true),
+        (503, true),
+        (401, false),
+        (403, false),
+    ] {
+        let cache = tempfile::tempdir().unwrap();
+        let (url, server) = mock_server(vec![
+            tree_reply("1.0.0", "Cached remote"),
+            status_reply(status),
+        ]);
+        let first = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+        let second = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+        server.join().unwrap();
+        assert!(first.status.success(), "{}", stderr(&first));
+        assert!(second.status.success(), "{status}: {}", stderr(&second));
+        let stdout = String::from_utf8_lossy(&second.stdout);
+        assert_eq!(stdout.contains("Cached remote"), uses_cache, "{status}");
+        assert_eq!(stderr(&second).contains("last validated"), uses_cache);
+        assert!(stdout.contains("name: orbit-cli") || uses_cache);
+    }
+}
+
+#[test]
+fn degradable_statuses_fall_back_for_the_skill_listing() {
+    for status in [401, 403, 429, 503] {
+        let cache = tempfile::tempdir().unwrap();
+        let (url, server) = mock_server(vec![status_reply(status)]);
+        let output = run_orbit(Some(&url), &cache, &["skills"]);
+        server.join().unwrap();
+        assert!(output.status.success(), "{status}: {}", stderr(&output));
+        assert!(stderr(&output).contains(&format!("HTTP {status}")));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("orbit"));
+    }
+}
+
+#[test]
+fn other_client_errors_are_still_returned() {
+    for args in [vec!["skills", "get", "orbit"], vec!["skills"]] {
+        let cache = tempfile::tempdir().unwrap();
+        let (url, server) = mock_server(vec![status_reply(400)]);
+        let output = run_orbit(Some(&url), &cache, &args);
+        server.join().unwrap();
+        assert!(!output.status.success());
         assert!(output.stdout.is_empty());
     }
 }
@@ -498,22 +555,6 @@ fn transient_server_error_uses_last_validated_tree() {
     assert!(fallback.status.success(), "{}", stderr(&fallback));
     assert!(stderr(&fallback).contains("last validated"));
     assert!(String::from_utf8_lossy(&fallback.stdout).contains("Cached after 5xx"));
-}
-
-#[test]
-fn server_error_without_cache_is_returned() {
-    let cache = tempfile::tempdir().unwrap();
-    let (url, server) = mock_server(vec![Reply {
-        status: 503,
-        reason: "Unavailable",
-        etag: None,
-        body: "down".to_string(),
-    }]);
-    let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
-    server.join().unwrap();
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(stderr(&output).contains("service unavailable"));
 }
 
 #[test]
