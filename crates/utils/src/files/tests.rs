@@ -205,7 +205,7 @@ fn the_passes_decide_what_is_kept_listed_and_dropped() {
 }
 
 #[test]
-fn a_drop_decided_by_the_content_leaves_no_trace_either() {
+fn a_drop_decided_by_the_content_leaves_no_node_either() {
     struct DropBinaries;
     impl Pass for DropBinaries {
         type Tag = ();
@@ -237,7 +237,7 @@ fn a_drop_decided_by_the_content_leaves_no_trace_either() {
 }
 
 #[test]
-fn caps_are_charged_for_every_file_before_any_decision() {
+fn caps_count_every_file_before_any_decision() {
     let three = || memory(&[("a.log", b"1"), ("b.log", b"22"), ("c.log", b"333")]);
     let files = Limits {
         files: Some(2),
@@ -441,7 +441,7 @@ fn compressed_spill_takes_less_disk_and_a_disk_cap_fails_the_load() {
 }
 
 /// Eight workers putting the same 80 bytes at once; a budget of 100 leaves
-/// no room for a double charge.
+/// no room for counting it twice.
 struct Workers(Vec<u8>);
 
 impl Source for Workers {
@@ -465,7 +465,7 @@ impl Source for Workers {
 }
 
 #[test]
-fn concurrent_puts_share_the_store_and_charge_shared_content_once() {
+fn concurrent_puts_share_the_store_and_count_shared_content_once() {
     let vfs = load(
         Workers(vec![b'x'; 80]),
         (),
@@ -480,7 +480,7 @@ fn concurrent_puts_share_the_store_and_charge_shared_content_once() {
     assert_eq!(
         usage.deduped_bytes,
         7 * 80,
-        "the shared content was charged once"
+        "the shared content was counted once"
     );
     assert_eq!(usage.spilled, 0);
     assert_eq!(text(&vfs, "w3/f7.txt"), "worker 3 file 7");
@@ -644,7 +644,7 @@ fn a_load_stops_when_cancelled_or_when_the_source_cannot_read() {
 /// The scratch file lives where asked, and the load fails if that place
 /// does not exist.
 #[test]
-fn the_scratch_file_lives_where_asked() {
+fn the_scratch_file_goes_in_scratch_dir() {
     let scratch = tempfile::tempdir().unwrap();
     let spill_into = |dir: &Path| {
         Vfs::load(
@@ -758,7 +758,7 @@ fn a_linked_checkout_is_checked_on_first_read() {
 /// string are one node, counted.
 #[test]
 #[cfg(unix)]
-fn a_linked_checkout_under_the_worst_conditions() {
+fn a_linked_checkout_that_changes_after_the_load() {
     use std::os::unix::ffi::OsStrExt;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
-use super::limits::charge;
+use super::limits::add_capped;
 use super::{Bytes, Options, SourceError};
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ impl Scratch {
             false => bytes,
         };
         let len = bytes.len() as u64;
-        let offset = charge(&self.end, "spilled_bytes", len, self.cap)?;
+        let offset = add_capped(&self.end, "spilled_bytes", len, self.cap)?;
         self.file()?.write_all_at(bytes, offset)?;
         Ok(Blob::Spilled {
             offset,

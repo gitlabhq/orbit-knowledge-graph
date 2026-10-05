@@ -13,7 +13,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
-use super::limits::charge;
+use super::limits::add_capped;
 use super::path::key;
 use super::scratch::{Blob, Scratch};
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
@@ -108,8 +108,8 @@ impl<T: Tag> Loading<T> {
             Put::Lazy { size, .. } | Put::OnDisk { size, .. } => *size,
             Put::Symlink(_) => 0,
         };
-        charge(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
-        charge(&self.bytes, "total_bytes", size, self.limits.total_bytes)?;
+        add_capped(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
+        add_capped(&self.bytes, "total_bytes", size, self.limits.total_bytes)?;
 
         let mut file = File::new(key, size);
         if let Put::Symlink(target) = what {
@@ -191,7 +191,7 @@ impl<T: Tag> Loading<T> {
                 self.deduped.fetch_add(len, Relaxed);
             }
             Entry::Vacant(vacant) => {
-                let blob = match charge(
+                let blob = match add_capped(
                     &self.resident,
                     "resident_bytes",
                     len,

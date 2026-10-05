@@ -28,9 +28,9 @@ pub struct Limits {
     pub spilled_bytes: Option<u64>,
 }
 
-/// A running total with a cap: the first `add` to overflow trips it. Returns
+/// Add to a running total; the first add to pass the cap is an error. Returns
 /// the total before the add, which is the offset for an append.
-pub(super) fn charge(
+pub(super) fn add_capped(
     total: &AtomicU64,
     metric: &'static str,
     n: u64,
