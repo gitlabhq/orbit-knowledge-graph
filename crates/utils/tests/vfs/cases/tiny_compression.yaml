@@ -1,0 +1,8 @@
+sources: [memory, puts, lazy, archive]
+entries:
+  - {path: tiny, data: x}
+limits: {resident_bytes: 0, spilled_bytes: 1}
+options: {compress_spill: true}
+steps:
+  - {op: read, path: tiny, expect: {ok: x}}
+  - {op: usage, expect: {spilled: 1, resident: 0}}

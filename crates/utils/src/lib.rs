@@ -1,11 +1,11 @@
 pub mod arrow;
 pub(crate) mod arrow_logical_bytes;
 pub mod clickhouse;
-pub mod files;
 pub mod fs;
 pub mod fs_walk;
 pub mod observability;
 pub mod strings;
 pub mod traversal_path;
 pub mod version;
+pub mod vfs;
 pub mod yaml;

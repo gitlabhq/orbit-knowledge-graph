@@ -588,14 +588,14 @@ fn index_repo(
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory = std::sync::Arc::new(
-        orbit_utils::files::Vfs::load(
-            orbit_utils::files::sources::Checkout(&git.repo_path),
+        orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Checkout(&git.repo_path),
             filter,
-            orbit_utils::files::Limits {
+            orbit_utils::vfs::Limits {
                 file_bytes: Some(MAX_INDEXED_FILE_BYTES),
                 ..Default::default()
             },
-            orbit_utils::files::Options::default(),
+            orbit_utils::vfs::Options::default(),
         )
         .context("failed to walk repository files")?,
     );

@@ -1,5 +1,5 @@
 use crate::v2::config::Role;
-use orbit_utils::files::{Kind, Vfs};
+use orbit_utils::vfs::{Kind, Vfs};
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, Statement};
 use oxc::parser::Parser;

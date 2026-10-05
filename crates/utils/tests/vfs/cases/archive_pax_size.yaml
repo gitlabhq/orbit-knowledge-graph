@@ -1,0 +1,7 @@
+sources: [archive]
+entries:
+  - {path: big.txt, data: {text: a, repeat: 4096}, declared_size: 0, pax_size: 4096}
+limits: {file_bytes: 64}
+steps:
+  - {op: files, expect: [{path: big.txt, size: 4096, decision: {kind: list, value: oversize}}]}
+  - {op: usage, expect: {resident: 0}}

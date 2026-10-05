@@ -1,0 +1,25 @@
+sources: [memory, puts, lazy, checkout, changed, archive]
+entries:
+  - {path: src/main.rs, data: "fn main() {}"}
+  - {path: src/lib/mod.rs, data: "pub mod a;"}
+  - {path: README.md, data: "# hi"}
+steps:
+  - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
+  - {op: read, path: src/lib/../main.rs, expect: {ok: "fn main() {}"}}
+  - {op: read, path: ../escape, expect: {error: NotFound}}
+  - {op: read, path: src/../../escape, expect: {error: NotFound}}
+  - {op: read, path: src, expect: {error: IsADirectory}}
+  - {op: read_dir, path: README.md, expect: {error: NotADirectory}}
+  - {op: read_dir, path: /, expect: {ok: [README.md, src]}}
+  - {op: read_dir, path: src, expect: {ok: [lib, main.rs]}}
+  - {op: stat, path: src/main.rs, expect: {ok: {path: /src/main.rs, kind: file, len: 12, decision: {kind: keep, value: input}}}}
+  - {op: stat, path: /src, expect: {ok: {path: /src, kind: dir, len: 0}}}
+  - {op: subtree, path: src, expect: [src/lib/mod.rs, src/main.rs]}
+  - {op: subtree, path: ../, expect: []}
+  - {op: subtree, path: missing, expect: []}
+  - op: files
+    expect:
+      - {path: README.md, size: 4, decision: {kind: keep, value: input}}
+      - {path: src/lib/mod.rs, size: 10, decision: {kind: keep, value: input}}
+      - {path: src/main.rs, size: 12, decision: {kind: keep, value: input}}
+  - {op: usage, expect: {files: 3, bytes: 26, kept: 26}}

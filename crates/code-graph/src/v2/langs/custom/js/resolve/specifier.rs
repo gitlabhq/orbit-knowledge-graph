@@ -1,6 +1,6 @@
 use crate::utils::Range;
 use crate::v2::config::{CodeFilter, Role, detect_language_from_path};
-use orbit_utils::files::{Kind, Limits, Options, Vfs, sources::Memory};
+use orbit_utils::vfs::{Kind, Limits, Options, Vfs, sources::Memory};
 use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
 use rayon::prelude::*;
 use std::collections::HashSet;

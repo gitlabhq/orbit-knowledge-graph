@@ -1,0 +1,8 @@
+sources: [memory, puts, lazy, archive]
+entries:
+  - {path: large, data: {text: x, repeat: 16}}
+  - {path: small, data: fits}
+limits: {resident_bytes: 4}
+steps:
+  - {op: usage, expect: {resident: 4, spilled: 16}}
+  - {op: read, path: small, expect: {ok: fits}}

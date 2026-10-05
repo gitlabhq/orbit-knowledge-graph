@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::files::{CapExceeded, Limits, Loading, Put, Source, SourceError, Tag, Vfs};
+use orbit_utils::vfs::{CapExceeded, Limits, Loading, Put, Source, SourceError, Tag, Vfs};
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 

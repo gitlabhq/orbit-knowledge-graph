@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
 use futures::StreamExt;
-use orbit_utils::files::{Decision, Limits, Options, SourceError, Vfs, sources::Archive};
+use orbit_utils::vfs::{Decision, Limits, Options, SourceError, Vfs, sources::Archive};
 
 use tokio_util::io::{StreamReader, SyncIoBridge};
 

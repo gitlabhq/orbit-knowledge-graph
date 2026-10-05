@@ -1,0 +1,10 @@
+sources: [checkout, changed]
+entries:
+  - {path: file, data: drop}
+rules:
+  - {phase: header, decision: {kind: keep, value: source}}
+  - {phase: content, decision: {kind: drop, value: content}}
+steps:
+  - {op: read, path: file, expect: {error: Unsupported}}
+  - {op: files, expect: [{path: file, size: 4, decision: {kind: drop, value: content}}]}
+  - {op: read_dir, path: /, expect: {ok: [file]}}

@@ -6,11 +6,11 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use orbit_utils::files::{Decision as FileDecision, File, Pass};
 use orbit_utils::fs_walk::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
     SkipReason,
 };
+use orbit_utils::vfs::{Decision as FileDecision, File, Pass};
 
 use super::Language;
 

@@ -24,8 +24,8 @@ impl GraphConverter for NoopConverter {
 }
 
 fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
-    let vfs = orbit_utils::files::Vfs::load(
-        orbit_utils::files::sources::Checkout(root),
+    let vfs = orbit_utils::vfs::Vfs::load(
+        orbit_utils::vfs::sources::Checkout(root),
         code_graph::v2::config::CodeFilter::new(
             None,
             None,

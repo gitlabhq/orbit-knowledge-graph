@@ -8,7 +8,7 @@ use code_graph::v2::types::EdgeKind;
 use code_graph::v2::{GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use orbit_utils::files::{Vfs, sources::Archive};
+use orbit_utils::vfs::{Vfs, sources::Archive};
 
 use std::io::Write;
 

@@ -4,7 +4,7 @@
 //! filesystem walking happens here.
 
 use crate::v2::config::Role;
-use orbit_utils::files::Vfs;
+use orbit_utils::vfs::Vfs;
 use oxc_resolver::AliasValue;
 use std::path::Path;
 
