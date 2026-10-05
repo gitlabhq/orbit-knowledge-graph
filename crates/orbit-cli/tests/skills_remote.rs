@@ -482,7 +482,8 @@ fn degradable_statuses_without_cache_use_embedded_skill() {
         assert!(stderr(&output).contains(&format!("HTTP {status}")));
         assert!(stderr(&output).contains("embedded local skill"));
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.starts_with("---\n") && !stdout.contains("warning"));
+        assert!(stdout.starts_with("---\n") && stdout.contains("name: orbit-cli"));
+        assert!(!stdout.contains("warning"));
         match status {
             401 => assert!(stderr(&output).contains("glab auth status")),
             403 => assert!(stderr(&output).contains("access to Orbit")),
@@ -513,6 +514,7 @@ fn cache_is_used_for_rate_limits_and_server_errors_but_not_auth_errors() {
         let stdout = String::from_utf8_lossy(&second.stdout);
         assert_eq!(stdout.contains("Cached remote"), uses_cache, "{status}");
         assert_eq!(stderr(&second).contains("last validated"), uses_cache);
+        assert!(uses_cache || stdout.contains("name: orbit-cli"));
         assert!(!stdout.contains("warning"));
     }
 }
