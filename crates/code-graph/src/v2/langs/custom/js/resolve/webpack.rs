@@ -3,6 +3,8 @@
 //! `webpack.config.{js,cjs,mjs,ts}` in any folder is eligible. No
 //! filesystem walking happens here.
 
+use crate::v2::config::Role;
+use orbit_utils::files::Vfs;
 use oxc_resolver::AliasValue;
 use std::path::Path;
 
@@ -15,7 +17,7 @@ use super::evaluator::{
 pub(super) fn load_project_aliases(
     probe: &super::super::WorkspaceProbe,
 ) -> Vec<(String, Vec<AliasValue>)> {
-    let root_dir = probe.root_dir();
+    let root_dir = &probe.vfs;
     let mut cache = ModuleEvalCache::default();
     probe
         .webpack_configs()
@@ -28,7 +30,7 @@ pub(super) fn load_project_aliases(
 }
 
 fn load_webpack_aliases(
-    root_dir: &Path,
+    root_dir: &Vfs<Role>,
     config_path: &Path,
     cache: &mut ModuleEvalCache,
 ) -> Vec<(String, Vec<AliasValue>)> {
@@ -37,7 +39,7 @@ fn load_webpack_aliases(
     };
 
     let mut aliases = Vec::new();
-    let config_dir = config_path.parent().unwrap_or(root_dir);
+    let config_dir = config_path.parent().unwrap_or(Path::new("/"));
     collect_aliases_from_value(&exports, root_dir, config_dir, &mut aliases);
     aliases.sort_by(|left, right| left.0.cmp(&right.0));
     aliases
@@ -47,7 +49,7 @@ fn load_webpack_aliases(
 /// flattened — every entry contributes.
 fn collect_aliases_from_value(
     value: &EvaluatedValue,
-    root_dir: &Path,
+    root_dir: &Vfs<Role>,
     config_dir: &Path,
     aliases: &mut Vec<(String, Vec<AliasValue>)>,
 ) {
@@ -74,7 +76,7 @@ fn collect_aliases_from_value(
 
 fn merge_alias_entries(
     value: &EvaluatedValue,
-    root_dir: &Path,
+    root_dir: &Vfs<Role>,
     config_dir: &Path,
     aliases: &mut Vec<(String, Vec<AliasValue>)>,
 ) {
@@ -93,7 +95,7 @@ fn merge_alias_entries(
 
 fn alias_values_from_evaluated(
     value: &EvaluatedValue,
-    root_dir: &Path,
+    root_dir: &Vfs<Role>,
     config_dir: &Path,
 ) -> Vec<AliasValue> {
     match value {

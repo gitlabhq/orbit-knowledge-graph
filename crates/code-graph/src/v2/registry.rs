@@ -205,9 +205,9 @@ mod tests {
 
     fn test_ctx() -> Arc<PipelineContext> {
         Arc::new(PipelineContext {
+            vfs: crate::v2::pipeline::testing::empty(),
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
-            root_path: "/".to_string(),
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),

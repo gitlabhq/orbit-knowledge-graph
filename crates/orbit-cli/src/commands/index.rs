@@ -579,18 +579,25 @@ fn index_repo(
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
-    let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(
+    let filter = code_graph::v2::config::CodeFilter::new(
         Some(MAX_INDEXED_FILE_BYTES),
         None,
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory = std::sync::Arc::new(
-        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
-            .context("failed to walk repository files")?,
+        orbit_utils::files::Vfs::load(
+            orbit_utils::files::sources::Checkout(&git.repo_path),
+            filter,
+            orbit_utils::files::Limits {
+                file_bytes: Some(MAX_INDEXED_FILE_BYTES),
+                ..Default::default()
+            },
+            orbit_utils::files::Options::default(),
+        )
+        .context("failed to walk repository files")?,
     );
 
     let client =
@@ -620,7 +627,6 @@ fn index_repo(
 
     let cancel = pipeline_config.cancel.clone();
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
-        std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config,
         tracer,

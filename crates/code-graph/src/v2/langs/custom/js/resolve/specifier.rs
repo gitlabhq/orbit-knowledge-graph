@@ -1,9 +1,12 @@
 use crate::utils::Range;
+use crate::v2::config::{CodeFilter, Role, detect_language_from_path};
+use orbit_utils::files::{Kind, Limits, Options, Vfs, sources::Memory};
 use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
@@ -25,80 +28,16 @@ const MAX_RESOLVER_READ_BYTES: u64 = 512 * 1024;
 type ResolvedBinding = (String, ExportedBinding);
 
 struct RepoFileSystem {
-    root_dir: PathBuf,
-    canon_cache: std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>,
+    vfs: Arc<Vfs<Role>>,
 }
 
 impl RepoFileSystem {
-    fn new_for_root(root_dir: &Path) -> Self {
-        Self {
-            root_dir: root_dir
-                .canonicalize()
-                .unwrap_or_else(|_| root_dir.to_path_buf()),
-            canon_cache: std::sync::Mutex::new(rustc_hash::FxHashMap::default()),
-        }
-    }
-
-    fn cached_canonicalize(&self, path: &Path) -> Option<PathBuf> {
-        let cache = self.canon_cache.lock().unwrap();
-        if let Some(cached) = cache.get(path) {
-            return cached.clone();
-        }
-        drop(cache);
-        let result = std::fs::canonicalize(path).ok();
-        self.canon_cache
-            .lock()
-            .unwrap()
-            .insert(path.to_path_buf(), result.clone());
-        result
-    }
-
-    fn candidate_path(&self, path: &Path) -> PathBuf {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.root_dir.join(path)
-        }
-    }
-
-    fn existing_contained_path(&self, path: &Path) -> io::Result<PathBuf> {
-        let path = self.candidate_path(path);
-        let canonical = self
-            .cached_canonicalize(&path)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "path does not exist"))?;
-        if canonical.starts_with(&self.root_dir) {
-            Ok(canonical)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("resolver path outside repository: {}", path.display()),
-            ))
-        }
-    }
-
-    fn contained_or_missing_path(&self, path: &Path) -> io::Result<PathBuf> {
-        let path = self.candidate_path(path);
-        if let Some(canonical) = self.cached_canonicalize(&path)
-            && canonical.starts_with(&self.root_dir)
-        {
-            return Ok(canonical);
-        }
-
-        let ancestor = orbit_utils::fs::longest_existing_ancestor(&path);
-        if let Some(canonical_ancestor) = self.cached_canonicalize(ancestor)
-            && canonical_ancestor.starts_with(&self.root_dir)
-        {
-            return Ok(path);
-        }
-
-        Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("resolver path outside repository: {}", path.display()),
-        ))
+    fn new(vfs: Arc<Vfs<Role>>) -> Self {
+        Self { vfs }
     }
 
     fn check_read_size(&self, path: &Path) -> io::Result<()> {
-        let len = std::fs::metadata(path)?.len();
+        let len = self.vfs.stat(path)?.len;
         if len > MAX_RESOLVER_READ_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -115,15 +54,21 @@ impl RepoFileSystem {
 impl FileSystem for RepoFileSystem {
     fn new() -> Self {
         Self {
-            root_dir: PathBuf::new(),
-            canon_cache: std::sync::Mutex::new(rustc_hash::FxHashMap::default()),
+            vfs: Arc::new(
+                Vfs::load(
+                    Memory(Vec::new()),
+                    CodeFilter::new(None, None, detect_language_from_path),
+                    Limits::default(),
+                    Options::default(),
+                )
+                .expect("empty repository"),
+            ),
         }
     }
 
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        let path = self.existing_contained_path(path)?;
-        self.check_read_size(&path)?;
-        std::fs::read(path)
+        self.check_read_size(path)?;
+        self.vfs.read(path).map(|bytes| bytes.to_vec())
     }
 
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
@@ -131,30 +76,41 @@ impl FileSystem for RepoFileSystem {
     }
 
     fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
-        let path = self.contained_or_missing_path(path)?;
-        FileSystemOs::metadata(&path)
+        let stat = self.vfs.stat(path)?;
+        Ok(FileMetadata::new(
+            stat.kind == Kind::File,
+            stat.kind == Kind::Dir,
+            false,
+        ))
     }
 
     fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
-        let path = self.contained_or_missing_path(path)?;
-        FileSystemOs::symlink_metadata(&path)
+        let stat = self.vfs.stat(path)?;
+        let link = stat.link.is_some();
+        Ok(FileMetadata::new(
+            !link && stat.kind == Kind::File,
+            !link && stat.kind == Kind::Dir,
+            link,
+        ))
     }
 
     fn read_link(&self, path: &Path) -> Result<PathBuf, oxc_resolver::ResolveError> {
-        let path = self.existing_contained_path(path)?;
-        FileSystemOs::read_link(&path)
+        self.vfs
+            .stat(path)?
+            .link
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not a symlink").into())
     }
 
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        self.existing_contained_path(path)
+        self.vfs.stat(path).map(|stat| stat.path)
     }
 }
 
 impl JsCrossFileResolver {
     pub fn new(probe: &WorkspaceProbe) -> Self {
         let root_dir = probe.root_dir().to_path_buf();
-        let import_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Import, vec![]);
-        let require_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Require, vec![]);
+        let import_resolver = create_resolver(probe, JsResolutionMode::Import, vec![]);
+        let require_resolver = create_resolver(probe, JsResolutionMode::Require, vec![]);
         Self {
             import_resolver,
             require_resolver,
@@ -171,14 +127,9 @@ impl JsCrossFileResolver {
     pub fn apply_project_resolution_hints(&mut self, probe: &WorkspaceProbe) {
         let aliases = load_project_aliases(probe);
         if !aliases.is_empty() {
-            self.import_resolver = create_resolver(
-                probe,
-                &self.root_dir,
-                JsResolutionMode::Import,
-                aliases.clone(),
-            );
-            self.require_resolver =
-                create_resolver(probe, &self.root_dir, JsResolutionMode::Require, aliases);
+            self.import_resolver =
+                create_resolver(probe, JsResolutionMode::Import, aliases.clone());
+            self.require_resolver = create_resolver(probe, JsResolutionMode::Require, aliases);
         }
     }
 
@@ -544,19 +495,17 @@ fn module_binding<'a>(
 
 fn create_resolver(
     probe: &WorkspaceProbe,
-    root_dir: &Path,
     resolution_mode: JsResolutionMode,
     aliases: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> ResolverGeneric<RepoFileSystem> {
     ResolverGeneric::new_with_file_system(
-        RepoFileSystem::new_for_root(root_dir),
-        base_resolve_options(probe, root_dir, resolution_mode, aliases),
+        RepoFileSystem::new(probe.vfs.clone()),
+        base_resolve_options(probe, resolution_mode, aliases),
     )
 }
 
 fn base_resolve_options(
     probe: &WorkspaceProbe,
-    root_dir: &Path,
     resolution_mode: JsResolutionMode,
     alias: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> ResolveOptions {
@@ -594,22 +543,6 @@ fn base_resolve_options(
         JsResolutionMode::Require => vec!["node".to_string(), "require".to_string()],
     };
 
-    // Bound every resolution to the repo clone. `Restriction::Path`
-    // in oxc_resolver is stricter than "contained": it only matches
-    // the exact restriction path or `./`. Use the function form to
-    // check containment ourselves.
-    let root_owned = root_dir.to_path_buf();
-    let restrictions = vec![oxc_resolver::Restriction::Fn(std::sync::Arc::new(
-        move |path: &Path| {
-            let path = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                root_owned.join(path)
-            };
-            path.starts_with(&root_owned)
-        },
-    ))];
-
     ResolveOptions {
         extensions,
         main_fields: vec!["module".to_string(), "main".to_string()],
@@ -617,7 +550,6 @@ fn base_resolve_options(
         extension_alias,
         tsconfig,
         alias,
-        restrictions,
         ..ResolveOptions::default()
     }
 }
@@ -640,9 +572,9 @@ mod tests {
         let outside_file = outside_root.join("package.json");
         std::fs::write(&outside_file, "{}").unwrap();
 
-        let fs = RepoFileSystem::new_for_root(&repo_root);
+        let fs = RepoFileSystem::new(crate::v2::pipeline::testing::checkout(&repo_root));
         let err = fs.read(&outside_file).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(err.kind(), ErrorKind::NotFound);
     }
 
     #[test]
@@ -659,8 +591,10 @@ mod tests {
         )
         .unwrap();
 
-        let fs = RepoFileSystem::new_for_root(&repo_root);
-        let err = fs.read(&package_json).unwrap_err();
+        let fs = RepoFileSystem::new(crate::v2::pipeline::testing::checkout(&repo_root));
+        let err = fs
+            .read(std::path::Path::new("/node_modules/pkg/package.json"))
+            .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 
@@ -671,7 +605,7 @@ mod tests {
         std::fs::create_dir_all(repo_root.join("src")).unwrap();
         std::fs::write(repo_root.join("src/index.js"), "export const ok = true;").unwrap();
 
-        let fs = RepoFileSystem::new_for_root(&repo_root);
+        let fs = RepoFileSystem::new(crate::v2::pipeline::testing::checkout(&repo_root));
         let content = fs
             .read_to_string(std::path::Path::new("src/index.js"))
             .unwrap();

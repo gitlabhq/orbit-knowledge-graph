@@ -780,12 +780,12 @@ mod tests {
         let root_path = root.to_str().expect("utf8 root path");
         let (analyzed, _) = analyze_files(
             &files,
-            root_path,
+            &crate::v2::pipeline::testing::context(std::path::Path::new(root_path)),
             None,
             &Default::default(),
             &crate::v2::pipeline::SilentProgress,
         );
-        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let mut builder = JsModuleGraphBuilder::new();
         let mut infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved = Vec::new();
         for file in analyzed {

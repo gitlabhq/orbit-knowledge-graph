@@ -337,9 +337,11 @@ mod tests {
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.path().join("src/main.rs")).unwrap();
-        assert_eq!(content, "fn main() {}");
+        let content = path
+            .files
+            .read(std::path::Path::new("src/main.rs"))
+            .unwrap();
+        assert_eq!(&*content, b"fn main() {}");
     }
 
     #[tokio::test]
@@ -349,13 +351,23 @@ mod tests {
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert!(path1.path().join("src/main.rs").exists());
+        assert!(
+            path1
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .is_ok()
+        );
 
         service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
         let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path2.path().join("src/new.rs").exists());
-        assert!(!path2.path().join("src/main.rs").exists());
+        assert!(path2.files.read(std::path::Path::new("src/new.rs")).is_ok());
+        assert!(
+            path2
+                .files
+                .stat(std::path::Path::new("src/main.rs"))
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -366,21 +378,21 @@ mod tests {
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
+        assert!(path.files.read(std::path::Path::new("src/main.rs")).is_ok());
     }
 
     #[tokio::test]
-    async fn dropping_repository_removes_downloaded_files() {
+    async fn dropping_repository_releases_downloaded_files() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let path = repo.path().to_path_buf();
-        assert!(path.exists());
+        let files = Arc::downgrade(&repo.files);
+        assert!(files.upgrade().is_some());
 
         drop(repo);
-        assert!(!path.exists());
+        assert!(files.upgrade().is_none());
     }
 
     #[tokio::test]
@@ -403,16 +415,22 @@ mod tests {
 
         let repo1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(repo1.path().join("src/main.rs")).unwrap(),
-            "v1"
+            &*repo1
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .unwrap(),
+            b"v1"
         );
         drop(repo1);
 
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
         let repo2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(repo2.path().join("src/main.rs")).unwrap(),
-            "v2"
+            &*repo2
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .unwrap(),
+            b"v2"
         );
     }
 
@@ -506,7 +524,7 @@ mod tests {
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.path().join("src/main.rs").exists());
+        assert!(path.files.read(std::path::Path::new("src/main.rs")).is_ok());
         assert_eq!(service.download_count(), 3);
     }
 
@@ -535,12 +553,25 @@ mod tests {
         let repo1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
         let repo2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
 
-        assert_ne!(repo1.path(), repo2.path());
-        assert!(repo1.path().join("src/main.rs").exists());
-        assert!(repo2.path().join("src/main.rs").exists());
-
-        let path2 = repo2.path().to_path_buf();
+        assert!(!Arc::ptr_eq(&repo1.files, &repo2.files));
+        assert!(
+            repo1
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .is_ok()
+        );
+        assert!(
+            repo2
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .is_ok()
+        );
         drop(repo1);
-        assert!(path2.exists());
+        assert!(
+            repo2
+                .files
+                .read(std::path::Path::new("src/main.rs"))
+                .is_ok()
+        );
     }
 }

@@ -9,11 +9,11 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use orbit_utils::files::{Decision as FileDecision, File, Pass};
 use orbit_utils::fs_walk::{
     CapExceeded, ContentClass, Counter, Decision, FileInventoryEntry, FileLabel, FileStreamHooks,
     SkipReason,
 };
-use rustc_hash::FxHashMap;
 
 use super::Language;
 
@@ -29,20 +29,58 @@ const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
 const LFS_POINTER_MAX_BYTES: usize = 1024;
 const LFS_POINTER_VERSION_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SkipTally {
-    pub count: u64,
-    pub bytes: u64,
-}
-
 /// The code-indexing filter. Construct one per repository stream. Classifies
 /// each file fully (load+parse / load-only / node / drop): the language detector
 /// is injected so the filter never hard-wires the registry.
 pub struct CodeFilter {
     max_file_size: Option<u64>,
     total_bytes: Counter,
-    skips: FxHashMap<SkipReason, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Role {
+    Source,
+    #[default]
+    Input,
+}
+
+impl Pass for CodeFilter {
+    type Tag = Role;
+
+    fn header(&self, file: &mut File<Role>) {
+        if is_excluded_from_indexing(Path::new(&file.path)) {
+            file.decide(FileDecision::List(SkipReason::ExcludedExtension.into()));
+        } else if (self.detect_language)(&file.path).is_some() {
+            file.decide(FileDecision::Keep(Role::Source));
+        }
+    }
+
+    fn content(&self, file: &mut File<Role>, content: &[u8]) {
+        if let Some(reason) = content_skip(content) {
+            file.decide(FileDecision::List(reason.into()));
+        } else {
+            file.decide(FileDecision::Keep(
+                if (self.detect_language)(&file.path).is_some() {
+                    Role::Source
+                } else {
+                    Role::Input
+                },
+            ));
+        }
+    }
+}
+
+fn content_skip(content: &[u8]) -> Option<SkipReason> {
+    if is_lfs_pointer(content) {
+        Some(SkipReason::LfsPointer)
+    } else if looks_binary(&content[..content.len().min(BINARY_SNIFF_BYTES)]) {
+        Some(SkipReason::Binary)
+    } else if std::str::from_utf8(content).is_err() {
+        Some(SkipReason::NotUtf8)
+    } else {
+        minified_skip(content)
+    }
 }
 
 impl CodeFilter {
@@ -56,14 +94,8 @@ impl CodeFilter {
         Self {
             max_file_size,
             total_bytes: Counter::new("total_bytes", max_total_bytes),
-            skips: FxHashMap::default(),
             detect_language,
         }
-    }
-
-    /// Per-reason `(count, bytes)` of files recorded as nodes but not loaded.
-    pub fn skips(&self) -> impl Iterator<Item = (SkipReason, SkipTally)> + '_ {
-        self.skips.iter().map(|(reason, tally)| (*reason, *tally))
     }
 
     fn record(
@@ -72,9 +104,6 @@ impl CodeFilter {
         reason: SkipReason,
         content: ContentClass,
     ) -> (Decision, FileLabel) {
-        let tally = self.skips.entry(reason).or_default();
-        tally.count += 1;
-        tally.bytes += file.size;
         (
             Decision::ListOnly,
             FileLabel {
@@ -109,19 +138,13 @@ impl FileStreamHooks for CodeFilter {
     }
 
     fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> (Decision, FileLabel) {
-        if is_lfs_pointer(content) {
-            return self.record(file, SkipReason::LfsPointer, ContentClass::LfsPointer);
-        }
-        let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
-        if looks_binary(sniff) {
-            return self.record(file, SkipReason::Binary, ContentClass::Binary);
-        }
-        // Parsers all need `&str`; validate once here so they can assume UTF-8.
-        if std::str::from_utf8(content).is_err() {
-            return self.record(file, SkipReason::NotUtf8, ContentClass::Binary);
-        }
-        if let Some(reason) = minified_skip(content) {
-            return self.record(file, reason, ContentClass::MinifiedCode);
+        if let Some(reason) = content_skip(content) {
+            let class = match reason {
+                SkipReason::LfsPointer => ContentClass::LfsPointer,
+                SkipReason::Minified | SkipReason::LineTooLong => ContentClass::MinifiedCode,
+                _ => ContentClass::Binary,
+            };
+            return self.record(file, reason, class);
         }
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.

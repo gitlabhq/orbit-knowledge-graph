@@ -1,13 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::config::{CodeFilter, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
 use futures::StreamExt;
-use orbit_utils::archive::extract_tar_gz;
-use orbit_utils::fs_walk::{FileInventory, StreamError};
+use orbit_utils::files::{Decision, Limits, Options, SourceError, Vfs, sources::Archive};
 
-use tempfile::TempDir;
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
@@ -35,14 +33,7 @@ pub enum RepositoryCacheError {
 
 #[derive(Debug)]
 pub struct CachedRepository {
-    dir: TempDir,
-    pub file_inventory: Arc<FileInventory>,
-}
-
-impl CachedRepository {
-    pub fn path(&self) -> &Path {
-        self.dir.path()
-    }
+    pub files: Arc<Vfs<Role>>,
 }
 
 #[async_trait]
@@ -98,47 +89,50 @@ impl RepositoryCache for LocalRepositoryCache {
         &self,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError> {
-        let dir = TempDir::new_in(&self.base_dir)?;
-
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
-        let mut filter = CodeFilter::new(
-            to_cap(self.max_file_size),
-            to_cap(self.max_total_bytes),
-            detect_language_from_path,
-        );
-        // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
-        // If this future is dropped (a wall-clock timeout), the `spawn_blocking` still runs to
-        // completion detached and drops the `TempDir` itself, so the extractor never writes into a
-        // directory whose cleanup already ran.
+        let filter = CodeFilter::new(None, None, detect_language_from_path);
+        let limits = Limits {
+            file_bytes: to_cap(self.max_file_size),
+            total_bytes: to_cap(self.max_total_bytes),
+            resident_bytes: Some(0),
+            ..Limits::default()
+        };
+        let options = Options {
+            scratch_dir: Some(self.base_dir.clone()),
+            ..Options::default()
+        };
         let extracted = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            let result = extract_tar_gz(bridge, dir.path(), &mut filter).map(|inv| (inv, filter));
-            (dir, result)
+            Vfs::load(Archive(bridge), filter, limits, options)
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?;
 
-        let (dir, (file_inventory, filter)) = match extracted {
-            (dir, Ok(ok)) => (dir, ok),
-            (_dir, Err(e)) => {
+        let files = match extracted {
+            Ok(files) => files,
+            Err(e) => {
                 return Err(match e {
-                    StreamError::Empty => RepositoryCacheError::EmptyArchive,
-                    StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
-                    StreamError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
+                    SourceError::Empty => RepositoryCacheError::EmptyArchive,
+                    SourceError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
+                    SourceError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
+                    SourceError::Cancelled => {
+                        RepositoryCacheError::Archive("load cancelled".into())
+                    }
                 });
             }
         };
 
-        for (reason, tally) in filter.skips() {
-            self.metrics
-                .record_archive_entry_skipped(reason.into(), tally.count, tally.bytes);
+        for file in files.files() {
+            if let Decision::List(reason) | Decision::Drop(reason) = file.decision() {
+                self.metrics
+                    .record_archive_entry_skipped(reason, 1, file.size);
+            }
         }
 
         Ok(CachedRepository {
-            dir,
-            file_inventory: Arc::new(file_inventory),
+            files: Arc::new(files),
         })
     }
 }
@@ -148,6 +142,7 @@ mod tests {
     use super::*;
     use crate::modules::code::repository::service::test_utils::build_tar_gz;
     use code_graph::v2::config::SkipReason;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
@@ -183,7 +178,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extract_archive_populates_directory() {
+    async fn extract_archive_loads_files() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
             ("project-abc123/src/main.rs", b"fn main() {}"),
@@ -195,18 +190,18 @@ mod tests {
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(path.path().join("src/main.rs"))
-            .await
-            .unwrap();
-        assert_eq!(content, "fn main() {}");
-        let content = tokio::fs::read_to_string(path.path().join("src/lib.rs"))
-            .await
-            .unwrap();
-        assert_eq!(content, "pub mod lib;");
+        assert_eq!(
+            &*path.files.read(Path::new("src/main.rs")).unwrap(),
+            b"fn main() {}"
+        );
+        assert_eq!(
+            &*path.files.read(Path::new("src/lib.rs")).unwrap(),
+            b"pub mod lib;"
+        );
     }
 
     #[tokio::test]
-    async fn concurrent_extractions_of_one_repo_get_isolated_dirs() {
+    async fn concurrent_extractions_of_one_repo_get_isolated_stores() {
         let (_dir, cache) = create_cache();
         let first_archive = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
         let first = cache
@@ -220,17 +215,17 @@ mod tests {
             .await
             .unwrap();
 
-        assert_ne!(first.path(), second.path());
-        assert!(first.path().join("old_file.rs").exists());
-        assert!(!first.path().join("new_file.rs").exists());
-        assert!(second.path().join("new_file.rs").exists());
-        assert!(!second.path().join("old_file.rs").exists());
+        assert!(!Arc::ptr_eq(&first.files, &second.files));
+        assert!(first.files.read(Path::new("old_file.rs")).is_ok());
+        assert!(first.files.stat(Path::new("new_file.rs")).is_err());
+        assert!(second.files.read(Path::new("new_file.rs")).is_ok());
+        assert!(second.files.stat(Path::new("old_file.rs")).is_err());
     }
 
     #[tokio::test]
     async fn purge_all_clears_all_cached_repositories() {
         let (dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
         let path_1 = cache
             .extract_archive(archive_stream(archive.clone()))
@@ -240,13 +235,13 @@ mod tests {
             .extract_archive(archive_stream(archive))
             .await
             .unwrap();
-        assert!(path_1.path().exists());
-        assert!(path_2.path().exists());
+        assert!(path_1.files.read(Path::new("file.rs")).is_ok());
+        assert!(path_2.files.read(Path::new("file.rs")).is_ok());
 
         cache.purge_all().await.unwrap();
 
-        assert!(!path_1.path().exists());
-        assert!(!path_2.path().exists());
+        assert!(path_1.files.read(Path::new("file.rs")).is_ok());
+        assert!(path_2.files.read(Path::new("file.rs")).is_ok());
         let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
         assert!(
             entries.next_entry().await.unwrap().is_none(),
@@ -288,22 +283,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extraction_dir_is_removed_when_repository_is_dropped() {
+    async fn dropping_repository_releases_the_store_without_files_on_disk() {
         let (dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
         let repo = cache
             .extract_archive(archive_stream(archive))
             .await
             .unwrap();
-        let path = repo.path().to_path_buf();
-        assert!(path.exists());
+        let files = Arc::downgrade(&repo.files);
+        assert!(repo.files.read(Path::new("file.rs")).is_ok());
 
         drop(repo);
 
-        assert!(
-            !path.exists(),
-            "dropping the repository must remove its tree"
-        );
+        assert!(files.upgrade().is_none());
         let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
         assert!(entries.next_entry().await.unwrap().is_none());
     }
@@ -311,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_repositories_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
         let path_1 = cache
             .extract_archive(archive_stream(archive.clone()))
@@ -322,13 +314,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert_ne!(path_1.path(), path_2.path());
-        assert!(path_1.path().exists());
-        assert!(path_2.path().exists());
+        assert!(!Arc::ptr_eq(&path_1.files, &path_2.files));
+        assert!(path_1.files.read(Path::new("file.rs")).is_ok());
+        assert!(path_2.files.read(Path::new("file.rs")).is_ok());
 
         drop(path_1);
         assert!(
-            path_2.path().exists(),
+            path_2.files.read(Path::new("file.rs")).is_ok(),
             "dropping one must not touch the other"
         );
     }
@@ -396,8 +388,8 @@ mod tests {
             .await
             .unwrap();
         let inventory_paths: Vec<_> = path
-            .file_inventory
-            .iter()
+            .files
+            .files()
             .map(|entry| entry.path.as_str())
             .collect();
         assert!(
@@ -409,19 +401,28 @@ mod tests {
             "retained non-parsable files should be present in archive inventory"
         );
 
-        assert!(path.path().join("src/main.rs").exists());
-        assert!(!path.path().join("assets/logo.png").exists());
-        assert!(!path.path().join("static/banner.gif").exists());
-        assert!(!path.path().join("fonts/Inter.woff2").exists());
-        assert!(!path.path().join("dist/build.zip").exists());
-        assert!(path.path().join("Cargo.toml").exists());
-        assert!(path.path().join("Cargo.lock").exists());
-        assert!(path.path().join("package.json").exists());
-        assert!(path.path().join("tsconfig.json").exists());
-        assert!(path.path().join(".gitignore").exists());
-        // Anything outside the denylist passes through, even if the
-        // parser will ignore it later.
-        assert!(path.path().join("README.md").exists());
+        for name in [
+            "src/main.rs",
+            "Cargo.toml",
+            "Cargo.lock",
+            "package.json",
+            "tsconfig.json",
+            ".gitignore",
+            "README.md",
+        ] {
+            assert!(path.files.read(Path::new(name)).is_ok(), "{name}");
+        }
+        for name in [
+            "assets/logo.png",
+            "static/banner.gif",
+            "fonts/Inter.woff2",
+            "dist/build.zip",
+        ] {
+            assert_eq!(
+                path.files.read(Path::new(name)).unwrap_err().kind(),
+                std::io::ErrorKind::Unsupported
+            );
+        }
     }
 
     #[tokio::test]
@@ -438,14 +439,12 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
-                .any(|entry| entry.path == "big.rs"),
+            path.files.files().any(|entry| entry.path == "big.rs"),
             "oversize files should still be present in archive inventory"
         );
-        assert!(path.path().join("small.rs").exists());
+        assert!(path.files.read(Path::new("small.rs")).is_ok());
         assert!(
-            !path.path().join("big.rs").exists(),
+            path.files.read(Path::new("big.rs")).is_err(),
             "files larger than max_file_size must not be written to disk"
         );
     }
@@ -467,21 +466,20 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
+            path.files
+                .files()
                 .any(|entry| entry.path == "data/train.csv"),
             "LFS pointers should still be present in archive inventory"
         );
         assert_eq!(
-            path.file_inventory
-                .find("data/train.csv")
+            path.files
+                .stat(Path::new("data/train.csv"))
                 .unwrap()
-                .label
-                .skip,
-            Some(SkipReason::LfsPointer)
+                .decision,
+            Some(Decision::List(SkipReason::LfsPointer.into()))
         );
-        assert!(path.path().join("src/main.rs").exists());
-        assert!(!path.path().join("data/train.csv").exists());
+        assert!(path.files.read(Path::new("src/main.rs")).is_ok());
+        assert!(path.files.read(Path::new("data/train.csv")).is_err());
     }
 
     #[tokio::test]
@@ -498,14 +496,14 @@ mod tests {
             .unwrap();
 
         assert!(
-            path.file_inventory
-                .iter()
+            path.files
+                .files()
                 .any(|entry| entry.path == "model/weights.onnx"),
             "binary files should still be present in archive inventory"
         );
-        assert!(path.path().join("src/main.rs").exists());
+        assert!(path.files.read(Path::new("src/main.rs")).is_ok());
         assert!(
-            !path.path().join("model/weights.onnx").exists(),
+            path.files.read(Path::new("model/weights.onnx")).is_err(),
             "binary content must not be written to disk"
         );
     }

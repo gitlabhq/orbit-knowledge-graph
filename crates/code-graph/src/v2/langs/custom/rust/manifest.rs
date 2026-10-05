@@ -1,13 +1,14 @@
 use super::sysroot::EmbeddedSysroot;
-use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
+use crate::v2::config::Role;
+use orbit_utils::files::{Kind, Vfs as FileSystem};
 
 /// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
 /// well under this; anything larger is rejected before the read allocates.
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
-pub(super) struct ManifestCache {
-    pub(super) root_path: PathBuf,
+pub(super) struct ManifestCache<'a> {
+    repo: &'a FileSystem<Role>,
     pub(super) manifest_paths: Vec<PathBuf>,
     parsed: HashMap<PathBuf, ParsedCargoManifest>,
 }
@@ -74,20 +75,22 @@ struct WorkspaceDescriptor {
     workspace_dependencies: BTreeMap<String, cargo_manifest::TomlDependency>,
 }
 
-impl ManifestCache {
-    pub(super) fn new(root_path: &str) -> Result<Self> {
-        let root_path = PathBuf::from(root_path);
-        let mut manifest_paths =
-            discover_manifest_paths_for_root(root_path.to_string_lossy().as_ref())
-                .into_iter()
-                .filter_map(|path| normalize_existing_path(&path).or(Some(path)))
-                .filter(|path| path.starts_with(&root_path))
-                .collect::<Vec<_>>();
-        manifest_paths.sort();
-        manifest_paths.dedup();
+impl<'a> ManifestCache<'a> {
+    pub(super) fn new(repo: &'a FileSystem<Role>) -> Result<Self> {
+        let root_path = PathBuf::from("/");
+        let manifest_paths = repo
+            .files()
+            .filter(|file| {
+                file.keeps()
+                    && Path::new(&file.path)
+                        .file_name()
+                        .is_some_and(|name| name == "Cargo.toml")
+            })
+            .map(|file| root_path.join(&file.path))
+            .collect();
 
         Ok(Self {
-            root_path,
+            repo,
             manifest_paths,
             parsed: HashMap::new(),
         })
@@ -105,23 +108,24 @@ impl ManifestCache {
             // Cargo manifests are human-authored config. Anything multi-megabyte is
             // almost certainly adversarial or malformed; bail before `read_to_string`
             // allocates unbounded memory on the indexer.
-            if let Ok(meta) = std::fs::metadata(&manifest_path)
-                && meta.len() > MAX_MANIFEST_BYTES
+            if let Ok(meta) = self.repo.stat(&manifest_path)
+                && meta.len > MAX_MANIFEST_BYTES
             {
                 bail!(
                     "Cargo manifest {} is {} bytes, exceeds {} byte cap",
                     manifest_path.display(),
-                    meta.len(),
+                    meta.len,
                     MAX_MANIFEST_BYTES
                 );
             }
-            let source = std::fs::read_to_string(&manifest_path).with_context(|| {
+            let source = self.repo.read(&manifest_path).with_context(|| {
                 format!("failed to read Cargo manifest {}", manifest_path.display())
             })?;
             let manifest =
-                toml::from_str::<cargo_manifest::TomlManifest>(&source).with_context(|| {
-                    format!("failed to parse Cargo manifest {}", manifest_path.display())
-                })?;
+                toml::from_str::<cargo_manifest::TomlManifest>(std::str::from_utf8(&source)?)
+                    .with_context(|| {
+                        format!("failed to parse Cargo manifest {}", manifest_path.display())
+                    })?;
             let root_dir = manifest_path
                 .parent()
                 .ok_or_else(|| anyhow!("manifest {} has no parent", manifest_path.display()))?
@@ -140,24 +144,18 @@ impl ManifestCache {
     }
 
     fn normalize_manifest_path(&self, manifest_path: &Path) -> Result<Option<PathBuf>> {
-        let normalized = normalize_existing_path(manifest_path).unwrap_or_else(|| {
-            if manifest_path.is_absolute() {
-                manifest_path.to_path_buf()
-            } else {
-                self.root_path.join(manifest_path)
-            }
-        });
-
-        if !normalized.starts_with(&self.root_path) {
+        let Ok(stat) = self.repo.stat(manifest_path) else {
             return Ok(None);
-        }
+        };
+        let normalized = stat.path;
+
         if normalized
             .file_name()
             .is_none_or(|name| name != "Cargo.toml")
         {
             return Ok(None);
         }
-        if !normalized.is_file() {
+        if stat.kind != Kind::File {
             return Ok(None);
         }
 
@@ -204,9 +202,6 @@ impl ManifestCache {
 
         let mut ancestor = current.root_dir.parent();
         while let Some(dir) = ancestor {
-            if !dir.starts_with(&self.root_path) {
-                break;
-            }
             let candidate = dir.join("Cargo.toml");
             if candidate != manifest_path
                 && self
@@ -629,7 +624,7 @@ fn resolve_local_package(
     let targets = collect_target_specs(
         &parsed.manifest,
         &parsed.root_dir,
-        &manifest_cache.root_path,
+        manifest_cache.repo,
         &package_name,
         &edition,
     );
@@ -957,7 +952,7 @@ fn server_target_data() -> TargetData {
 fn collect_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     package_name: &str,
     package_edition: &str,
 ) -> Vec<LocalTargetSpec> {
@@ -1026,7 +1021,7 @@ fn collect_target_specs(
 fn collect_lib_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     package_edition: &str,
     default_lib_name: &str,
 ) -> Option<LocalTargetSpec> {
@@ -1063,7 +1058,7 @@ fn collect_lib_target(
 fn collect_bin_targets(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     package_edition: &str,
     package_name: &str,
     targets: &mut Vec<LocalTargetSpec>,
@@ -1125,7 +1120,7 @@ fn collect_bin_targets(
             }
         }
 
-        for (name, path) in infer_directory_targets(&package_root.join("src/bin")) {
+        for (name, path) in infer_directory_targets(&package_root.join("src/bin"), repo_root) {
             let Some(path) = repo_local_existing_file(path, repo_root) else {
                 continue;
             };
@@ -1155,7 +1150,7 @@ fn collect_directory_target_specs(
     manifest: &cargo_manifest::TomlManifest,
     explicit_targets: Option<&Vec<cargo_manifest::TomlTarget>>,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     package_edition: &str,
     default_dir: &str,
     kind: &'static str,
@@ -1203,7 +1198,7 @@ fn collect_directory_target_specs(
     };
 
     if autodiscover {
-        for (name, path) in infer_directory_targets(&package_root.join(default_dir)) {
+        for (name, path) in infer_directory_targets(&package_root.join(default_dir), repo_root) {
             let Some(path) = repo_local_existing_file(path, repo_root) else {
                 continue;
             };
@@ -1228,7 +1223,7 @@ fn collect_directory_target_specs(
 fn collect_build_target(
     manifest: &cargo_manifest::TomlManifest,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     package_edition: &str,
     targets: &mut Vec<LocalTargetSpec>,
 ) {
@@ -1276,7 +1271,7 @@ fn manifest_autodiscover(
 fn resolve_explicit_target_path(
     target: &cargo_manifest::TomlTarget,
     package_root: &Path,
-    repo_root: &Path,
+    repo_root: &FileSystem<Role>,
     default_name: &str,
     default_dir: &str,
     fallback_main: Option<&str>,
@@ -1318,26 +1313,33 @@ fn resolve_explicit_target_path(
     None
 }
 
-pub(super) fn repo_local_existing_file(path: PathBuf, repo_root: &Path) -> Option<PathBuf> {
-    let normalized_root =
-        normalize_existing_path(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
-    orbit_utils::fs::contained_canonical_path(&normalized_root, &path).filter(|p| p.is_file())
+pub(super) fn repo_local_existing_file(
+    path: PathBuf,
+    repo_root: &FileSystem<Role>,
+) -> Option<PathBuf> {
+    repo_root
+        .stat(&path)
+        .ok()
+        .filter(|stat| stat.kind == Kind::File)
+        .map(|stat| stat.path)
 }
 
-fn infer_directory_targets(directory: &Path) -> Vec<(String, PathBuf)> {
-    let Ok(entries) = std::fs::read_dir(directory) else {
+fn infer_directory_targets(directory: &Path, repo: &FileSystem<Role>) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = repo.read_dir(directory) else {
         return Vec::new();
     };
 
     let mut targets = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        if file_name.to_string_lossy().starts_with('.') {
+    for entry in entries {
+        let path = directory.join(&entry);
+        if entry.starts_with('.') {
             continue;
         }
 
-        if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
+        let Ok(stat) = repo.stat(&path) else {
+            continue;
+        };
+        if stat.kind == Kind::File && path.extension().is_some_and(|extension| extension == "rs") {
             let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
@@ -1345,9 +1347,11 @@ fn infer_directory_targets(directory: &Path) -> Vec<(String, PathBuf)> {
             continue;
         }
 
-        if path.is_dir() {
+        if stat.kind == Kind::Dir {
             let main_rs = path.join("main.rs");
-            if main_rs.is_file()
+            if repo
+                .stat(&main_rs)
+                .is_ok_and(|stat| stat.kind == Kind::File)
                 && let Some(name) = path.file_name().and_then(|name| name.to_str())
             {
                 targets.push((name.to_string(), main_rs));
@@ -1590,10 +1594,10 @@ mod tests {
         )
         .unwrap();
 
-        let mut cache =
-            ManifestCache::new(root.to_string_lossy().as_ref()).expect("cache should open");
+        let repo = crate::v2::pipeline::testing::checkout(&root);
+        let mut cache = ManifestCache::new(&repo).expect("cache should open");
         let err = cache
-            .load(&manifest)
+            .load(Path::new("/Cargo.toml"))
             .err()
             .expect("oversized manifest must be rejected");
         assert!(

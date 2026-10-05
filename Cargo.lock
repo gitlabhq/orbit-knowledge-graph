@@ -1368,7 +1368,6 @@ dependencies = [
  "crossbeam-channel",
  "either",
  "globset",
- "ignore",
  "jsonschema",
  "memchr",
  "orbit-utils",

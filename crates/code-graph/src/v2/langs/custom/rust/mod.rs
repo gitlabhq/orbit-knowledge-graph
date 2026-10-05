@@ -10,7 +10,6 @@ use cargo_platform::Platform;
 use cargo_util_schemas::manifest as cargo_manifest;
 use either::Either;
 use globset::{Glob, GlobMatcher};
-use ignore::WalkBuilder;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use petgraph::graph::NodeIndex;
 use ra_ap_cfg::CfgAtom;
@@ -71,10 +70,7 @@ use self::local_flow::build_local_flow_index;
 use self::rust_ast::{
     build_parsed_rust_file, fallback_file_module_parts, file_module_parts_from_workspace,
 };
-use self::workspace::{
-    WorkspaceIndex, WorkspacePlan, canonical_root_path, relative_path, relative_path_if_under_root,
-    standalone_workspace, to_absolute_path,
-};
+use self::workspace::{WorkspaceIndex, WorkspacePlan, standalone_workspace};
 
 pub struct RustPipeline;
 
@@ -190,11 +186,8 @@ impl LanguagePipeline for RustPipeline {
         ctx: &std::sync::Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
-        let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
-        let canonical_root = canonical_root_path(root_path);
-        let root_path = canonical_root.as_str();
 
         let sentinel_pair = ctx
             .config
@@ -203,7 +196,7 @@ impl LanguagePipeline for RustPipeline {
         let sentinel_handle = sentinel_pair.as_ref().map(|(h, _)| h);
 
         let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            WorkspacePlan::discover(root_path, files)
+            WorkspacePlan::discover(ctx.vfs.clone(), files)
         })) {
             Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
@@ -225,7 +218,7 @@ impl LanguagePipeline for RustPipeline {
         let db_alive = hold_ty_interner();
         let output = parse_rust_files(
             files,
-            root_path,
+            ctx,
             workspaces.as_ref(),
             sentinel_handle,
             &ctx.config.cancel,
@@ -253,7 +246,7 @@ impl LanguagePipeline for RustPipeline {
         }
 
         let parsed = output.parsed;
-        let mut graph = build_graph(root_path, &parsed);
+        let mut graph = build_graph(&parsed);
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
@@ -358,7 +351,7 @@ impl LanguagePipeline for RustPipeline {
 
 fn parse_rust_files(
     files: &[FileInput],
-    root_path: &str,
+    ctx: &PipelineContext,
     workspaces: Option<&WorkspacePlan>,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
@@ -366,16 +359,16 @@ fn parse_rust_files(
 ) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
         return parse_rust_files_with_workspaces(
-            files, root_path, workspaces, sentinel, cancel, progress,
+            files, ctx, workspaces, sentinel, cancel, progress,
         );
     }
 
-    parse_rust_files_standalone(files, root_path, sentinel, cancel, progress)
+    parse_rust_files_standalone(files, ctx, sentinel, cancel, progress)
 }
 
 fn parse_rust_files_with_workspaces(
     files: &[FileInput],
-    root_path: &str,
+    ctx: &PipelineContext,
     plan: &WorkspacePlan,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
@@ -397,9 +390,8 @@ fn parse_rust_files_with_workspaces(
         }
 
         // A rust-analyzer load panic must cost one root, not the whole pass.
-        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            plan.load(workspace_id, root_path)
-        }));
+        let loaded =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plan.load(workspace_id)));
         let workspace = match loaded {
             Ok(Ok(workspace)) => workspace,
             Ok(Err(err)) => {
@@ -436,13 +428,12 @@ fn parse_rust_files_with_workspaces(
                     return None;
                 }
                 let guard = sentinel.map(|s| s.file_start(file));
-                if let Ok(meta) = std::fs::metadata(to_absolute_path(root_path, file)) {
-                    crate::v2::pipeline::breadcrumb_large_file(file, meta.len(), "rust");
+                if let Ok(meta) = ctx.vfs.stat(Path::new(file)) {
+                    crate::v2::pipeline::breadcrumb_large_file(file, meta.len, "rust");
                 }
                 let t_file = std::time::Instant::now();
-                let result = catch_rust_file_panic(file, || {
-                    parse_workspace_file(file, root_path, workspace)
-                });
+                let result =
+                    catch_rust_file_panic(file, || parse_workspace_file(file, ctx, workspace));
                 let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 progress.files_advanced(ProgressPhase::Parse, 1);
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -484,9 +475,8 @@ fn parse_rust_files_with_workspaces(
             }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
-            let result = catch_rust_file_panic(file_path, || {
-                parse_rust_file_standalone(file_path, root_path)
-            });
+            let result =
+                catch_rust_file_panic(file_path, || parse_rust_file_standalone(file_path, ctx));
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             progress.files_advanced(ProgressPhase::Parse, 1);
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -517,7 +507,7 @@ fn parse_rust_files_with_workspaces(
 
 fn parse_rust_files_standalone(
     files: &[FileInput],
-    root_path: &str,
+    ctx: &PipelineContext,
     sentinel: Option<&sentinel::SentinelHandle>,
     cancel: &CancellationToken,
     progress: &dyn ProgressObserver,
@@ -530,9 +520,8 @@ fn parse_rust_files_standalone(
             }
             let guard = sentinel.map(|s| s.file_start(file_path));
             let t_file = std::time::Instant::now();
-            let result = catch_rust_file_panic(file_path, || {
-                parse_rust_file_standalone(file_path, root_path)
-            });
+            let result =
+                catch_rust_file_panic(file_path, || parse_rust_file_standalone(file_path, ctx));
             let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             progress.files_advanced(ProgressPhase::Parse, 1);
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -594,14 +583,13 @@ fn rust_panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 
 fn parse_workspace_file(
     file_path: &str,
-    root_path: &str,
+    ctx: &PipelineContext,
     workspace: &WorkspaceIndex,
 ) -> Result<ParsedRustFile, RustFileError> {
-    let abs_path = to_absolute_path(root_path, file_path);
-    let relative_path = relative_path(root_path, &abs_path);
+    let relative_path = file_path.trim_start_matches('/').to_string();
 
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
-        return parse_rust_file_standalone(file_path, root_path);
+        return parse_rust_file_standalone(file_path, ctx);
     };
 
     attach_db(&workspace.db, || {
@@ -634,27 +622,21 @@ fn parse_workspace_file(
 
 fn parse_rust_file_standalone(
     file_path: &str,
-    root_path: &str,
+    ctx: &PipelineContext,
 ) -> Result<ParsedRustFile, RustFileError> {
-    let abs_path = to_absolute_path(root_path, file_path);
-    let Some(relative_path) = relative_path_if_under_root(root_path, &abs_path) else {
-        return Err((
-            file_path.to_string(),
-            AnalyzerError::skip(
-                FileSkip::UnsafePath,
-                format!("path escapes repo root: {file_path}"),
-            ),
-        ));
-    };
-    let source = std::fs::read_to_string(&abs_path).map_err(|err| {
+    let relative_path = file_path.trim_start_matches('/').to_string();
+    let bytes = ctx
+        .read_source(file_path)
+        .map_err(|error| (file_path.to_string(), error))?;
+    let source = String::from_utf8(bytes.to_vec()).map_err(|err| {
         (
             file_path.to_string(),
-            AnalyzerError::fault(FileFault::FileRead, err.to_string()),
+            AnalyzerError::fault(FileFault::InvalidUtf8, err.to_string()),
         )
     })?;
     crate::v2::pipeline::breadcrumb_large_file(file_path, source.len() as u64, "rust");
     let file_module_parts = fallback_file_module_parts(&relative_path);
-    let workspace = standalone_workspace(&relative_path, source, Path::new(root_path));
+    let workspace = standalone_workspace(&relative_path, source, Path::new("/"));
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
         return Err((
             file_path.to_string(),
@@ -694,8 +676,8 @@ fn parse_rust_file_standalone(
     Ok(parsed)
 }
 
-fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
-    let mut graph = CodeGraph::new_with_root(root_path.to_string());
+fn build_graph(parsed: &[ParsedRustFile]) -> CodeGraph {
+    let mut graph = CodeGraph::new();
 
     for file in parsed {
         let extension = Path::new(&file.relative_path)
@@ -1568,7 +1550,6 @@ fn definition_site_for_range(
 mod tests {
     use super::manifest::repo_local_existing_file;
     use super::sysroot::{EMBEDDED_RUST_SYSROOT_VERSION, EmbeddedSysroot};
-    use super::workspace::relative_path_if_under_root;
     use super::{
         FORCE_TY_GC_AFTER_JOBS, RUST_JOBS_SINCE_TY_GC, hold_ty_interner, release_ty_interner,
     };
@@ -1576,7 +1557,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn relative_path_if_under_root_rejects_same_prefix_sibling() {
+    fn repository_lookup_rejects_same_prefix_sibling() {
         let temp = tempdir().unwrap();
         let repo_root = temp.path().join("repo");
         let sibling_root = temp.path().join("repo2");
@@ -1585,13 +1566,8 @@ mod tests {
         let sibling_file = sibling_root.join("src/lib.rs");
         fs::write(&sibling_file, "pub fn helper() {}\n").unwrap();
 
-        assert_eq!(
-            relative_path_if_under_root(
-                repo_root.to_string_lossy().as_ref(),
-                sibling_file.to_string_lossy().as_ref(),
-            ),
-            None
-        );
+        let repo = crate::v2::pipeline::testing::checkout(&repo_root);
+        assert_eq!(repo_local_existing_file(sibling_file, &repo), None);
     }
 
     #[test]
@@ -1607,9 +1583,10 @@ mod tests {
         fs::write(&inside_file, "pub fn inside() {}\n").unwrap();
         fs::write(&outside_file, "pub fn outside() {}\n").unwrap();
 
-        let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
-        assert!(inside.ends_with("repo/src/lib.rs"));
-        assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+        let repo = crate::v2::pipeline::testing::checkout(&repo_root);
+        let inside = repo_local_existing_file("/src/lib.rs".into(), &repo).unwrap();
+        assert!(inside.ends_with("src/lib.rs"));
+        assert_eq!(repo_local_existing_file(outside_file, &repo), None);
     }
 
     #[test]
@@ -1622,7 +1599,7 @@ mod tests {
         cancel.cancel();
         let output = super::parse_rust_files_standalone(
             &["a.rs".to_string()],
-            &root.to_string_lossy(),
+            &crate::v2::pipeline::testing::context(&root),
             None,
             &cancel,
             &crate::v2::pipeline::SilentProgress,
@@ -1649,7 +1626,14 @@ mod tests {
                 unreachable_code,
                 reason = "deliberately unreachable — the preceding panic!() is the test subject; this call exists only to give the closure a concrete return type"
             )]
-            super::parse_rust_file_standalone("src/lib.rs", "/tmp")
+            super::parse_rust_file_standalone(
+                "src/lib.rs",
+                &crate::v2::pipeline::PipelineContext::new(
+                    crate::v2::pipeline::testing::empty(),
+                    Default::default(),
+                    crate::v2::trace::Tracer::new(false),
+                ),
+            )
         }) {
             Ok(_) => panic!("panic should be converted to a fault"),
             Err(pair) => pair,

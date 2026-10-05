@@ -22,7 +22,6 @@ cpu-time = { workspace = true }
 crossbeam-channel = "0.5"
 either = { workspace = true }
 globset = { workspace = true }
-ignore = { workspace = true }
 jsonschema = { workspace = true }
 memchr = { workspace = true }
 parking_lot = { workspace = true }

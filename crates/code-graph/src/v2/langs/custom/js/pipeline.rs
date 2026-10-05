@@ -22,7 +22,6 @@ impl LanguagePipeline for JsPipeline {
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
-        let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
         if files.is_empty() {
@@ -36,13 +35,8 @@ impl LanguagePipeline for JsPipeline {
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
         let progress = ctx.config.progress.as_ref();
-        let (analyzed_files, errors) = analyze_files(
-            files,
-            root_path,
-            sentinel_handle,
-            &ctx.config.cancel,
-            progress,
-        );
+        let (analyzed_files, errors) =
+            analyze_files(files, ctx, sentinel_handle, &ctx.config.cancel, progress);
         progress.files_advanced(ProgressPhase::Resolve, errors.len());
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -66,7 +60,7 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let mut builder = JsModuleGraphBuilder::new();
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
@@ -92,7 +86,7 @@ impl LanguagePipeline for JsPipeline {
         // One probe: every manifest/config file JS resolution cares about
         // is read exactly once here, then shared with the resolver,
         // evaluator, and tsconfig discovery below.
-        let probe = WorkspaceProbe::load(Path::new(root_path), files);
+        let probe = WorkspaceProbe::load(ctx.vfs.clone(), files);
 
         let (mut graph, modules) = builder.into_parts();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
@@ -118,8 +112,9 @@ impl LanguagePipeline for JsPipeline {
         let total_bytes: u64 = resolved_files
             .iter()
             .map(|f| {
-                std::fs::metadata(format!("{root_path}/{}", f.relative_path))
-                    .map(|m| m.len())
+                ctx.vfs
+                    .stat(Path::new(&f.relative_path))
+                    .map(|m| m.len)
                     .unwrap_or(0)
             })
             .sum();
@@ -168,9 +163,9 @@ mod tests {
 
     fn make_ctx(root: &Path) -> Arc<PipelineContext> {
         Arc::new(PipelineContext {
+            vfs: crate::v2::pipeline::testing::checkout(root),
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
-            root_path: root.to_string_lossy().into_owned(),
             skipped: Mutex::new(Vec::new()),
             faults: Mutex::new(Vec::new()),
             file_timings: Mutex::new(Vec::new()),

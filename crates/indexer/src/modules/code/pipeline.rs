@@ -421,10 +421,15 @@ impl CodeIndexer {
         within: Duration,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = repository.file_inventory.count_by(|e| {
-            e.decision == code_graph::v2::Decision::Parse
-                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
-        });
+        let parseable = repository
+            .files
+            .files()
+            .filter(|e| {
+                e.decision()
+                    == orbit_utils::files::Decision::Keep(code_graph::v2::config::Role::Source)
+                    && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
+            })
+            .count();
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -644,19 +649,11 @@ impl CodeIndexer {
         });
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path().to_path_buf();
-        let file_inventory = repository.file_inventory.clone();
+        let file_inventory = repository.files.clone();
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
-                Pipeline::run_with_tracer(
-                    &repo_dir,
-                    file_inventory,
-                    config,
-                    tracer,
-                    converter,
-                    on_batch,
-                )
+                Pipeline::run_with_tracer(file_inventory, config, tracer, converter, on_batch)
             })
         })
         .await;

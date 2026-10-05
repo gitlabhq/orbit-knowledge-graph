@@ -24,18 +24,25 @@ impl GraphConverter for NoopConverter {
 }
 
 fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
-    Arc::new(PipelineContext {
-        config: PipelineConfig {
+    let vfs = orbit_utils::files::Vfs::load(
+        orbit_utils::files::sources::Checkout(root),
+        code_graph::v2::config::CodeFilter::new(
+            None,
+            None,
+            code_graph::v2::config::detect_language_from_path,
+        ),
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    Arc::new(PipelineContext::new(
+        Arc::new(vfs),
+        PipelineConfig {
             cancel,
             ..Default::default()
         },
-        tracer: code_graph::v2::trace::Tracer::new(false),
-        root_path: root.to_string_lossy().into_owned(),
-        skipped: Mutex::new(Vec::new()),
-        faults: Mutex::new(Vec::new()),
-        file_timings: Mutex::new(Vec::new()),
-        language_timings: Mutex::new(Vec::new()),
-    })
+        code_graph::v2::trace::Tracer::new(false),
+    ))
 }
 
 /// Bypasses the orchestrator's pre-spawn cancellation check.

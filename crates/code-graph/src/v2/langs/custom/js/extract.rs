@@ -1,8 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
 use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
+use crate::v2::pipeline::PipelineContext;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
     ImportMode, Position as GraphPosition, Range as GraphRange,
@@ -58,24 +59,23 @@ pub type FailedJsFile = (String, AnalyzerError);
 
 pub fn analyze_files(
     files: &[String],
-    root_path: &str,
+    ctx: &PipelineContext,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
     cancel: &crate::v2::pipeline::CancellationToken,
     progress: &dyn crate::v2::pipeline::ProgressObserver,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
-    let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
         .filter_map(|relative_path| {
-            if cancel.is_cancelled() || root_gone.load(std::sync::atomic::Ordering::Relaxed) {
+            if cancel.is_cancelled() {
                 return None;
             }
             let guard = sentinel.map(|s| s.file_start(relative_path));
             let t_file = std::time::Instant::now();
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                analyze_file(relative_path, root_path)
+                analyze_file(relative_path, ctx)
             }))
             .unwrap_or_else(|panic_payload| {
                 let message = panic_message(&panic_payload);
@@ -96,22 +96,6 @@ pub fn analyze_files(
                         "per-file watchdog killed analysis",
                     )),
                 ));
-            }
-            if matches!(
-                &outcome,
-                Err(AnalyzerError::Fault {
-                    kind: FileFault::FileRead,
-                    ..
-                })
-            ) && !Path::new(root_path).exists()
-            {
-                if !root_gone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    tracing::warn!(
-                        root_path,
-                        "js: repository tree removed mid-analysis, dropping remaining files"
-                    );
-                }
-                return None;
             }
             Some((
                 relative_path.clone(),
@@ -134,60 +118,6 @@ pub fn analyze_files(
     }
 
     (analyzed, errors)
-}
-
-/// Reject relative paths that could escape the repo clone.
-///
-/// A malicious repository is *not* expected to produce absolute paths or `..`
-/// components through the walker, but we defend in depth: the symlink check
-/// also catches a committed `link -> /etc/...` whose target the walker would
-/// happily hand us as a "file".
-fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, AnalyzerError> {
-    if relative_path.contains('\0') || relative_path.contains('\n') {
-        return Err(AnalyzerError::skip(
-            FileSkip::UnsafePath,
-            "relative path contains NUL or newline",
-        ));
-    }
-    let input = Path::new(relative_path);
-    // Callers sometimes hand us absolute paths that already live under
-    // `root_path` (the v2 pipeline walker and the integration-test
-    // harness both do). Strip the root so the rest of the check sees a
-    // clean relative form; anything else is refused.
-    let rel = if input.is_absolute() {
-        input.strip_prefix(root_path).map_err(|_| {
-            AnalyzerError::skip(
-                FileSkip::UnsafePath,
-                format!("absolute path outside root: {relative_path} (root: {root_path})"),
-            )
-        })?
-    } else {
-        input
-    };
-    if !orbit_utils::fs::is_safe_relative_path(rel) {
-        return Err(AnalyzerError::skip(
-            FileSkip::UnsafePath,
-            format!("refusing unsafe path: {relative_path}"),
-        ));
-    }
-    let joined = Path::new(root_path).join(rel);
-    let meta = std::fs::symlink_metadata(&joined).map_err(|err| {
-        AnalyzerError::fault(
-            FileFault::FileRead,
-            format!("stat {}: {err}", joined.display()),
-        )
-    })?;
-    if meta.len() > MAX_FILE_BYTES {
-        return Err(AnalyzerError::skip(
-            FileSkip::Oversize,
-            format!(
-                "{} ({} bytes, max {MAX_FILE_BYTES})",
-                joined.display(),
-                meta.len()
-            ),
-        ));
-    }
-    Ok(joined)
 }
 
 /// Per-file ceiling on star-reexport specifiers. Star re-export chains
@@ -253,11 +183,24 @@ fn sanitize_panic_message(raw: &str) -> String {
     out
 }
 
-fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, AnalyzerError> {
-    let absolute_path = safe_repo_join(root_path, relative_path)?;
-    let source = std::fs::read_to_string(&absolute_path)
+fn analyze_file(
+    relative_path: &str,
+    ctx: &PipelineContext,
+) -> Result<AnalyzedJsFile, AnalyzerError> {
+    let metadata = ctx
+        .vfs
+        .stat(Path::new(relative_path))
         .map_err(|error| AnalyzerError::fault(FileFault::FileRead, error.to_string()))?;
-    let relative_path = normalize_relative_path(relative_path, root_path);
+    if metadata.len > MAX_FILE_BYTES {
+        return Err(AnalyzerError::skip(
+            FileSkip::Oversize,
+            "file exceeds JS parser limit",
+        ));
+    }
+    let bytes = ctx.read_source(relative_path)?;
+    let source = std::str::from_utf8(&bytes)
+        .map_err(|error| AnalyzerError::fault(FileFault::InvalidUtf8, error.to_string()))?;
+    let relative_path = relative_path.trim_start_matches('/').to_string();
     let extension = extension_for(&relative_path);
     let language = language_for_extension(extension.as_str());
     if let Some(stub) = file_backed_module(
@@ -268,7 +211,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
     ) {
         return Ok(stub);
     }
-    let (virtual_path, source_text) = prepared_source(&relative_path, &extension, &source)?;
+    let (virtual_path, source_text) = prepared_source(&relative_path, &extension, source)?;
 
     // One analyzer call per file. SFCs with multiple `<script>` blocks
     // go through `frameworks::combine_scripts` first, so the analyzer
@@ -371,13 +314,6 @@ fn language_for_extension(extension: &str) -> Language {
     } else {
         Language::JavaScript
     }
-}
-
-fn normalize_relative_path(path: &str, root_path: &str) -> String {
-    Path::new(path)
-        .strip_prefix(root_path)
-        .map(|value| value.to_string_lossy().to_string())
-        .unwrap_or_else(|_| path.to_string())
 }
 
 fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> {
@@ -732,7 +668,7 @@ mod tests {
 
         let (analyzed, errors) = analyze_files(
             &files,
-            root.to_str().expect("utf8 root path"),
+            &crate::v2::pipeline::testing::context(root),
             None,
             &Default::default(),
             &crate::v2::pipeline::SilentProgress,
@@ -746,12 +682,12 @@ mod tests {
     }
 
     #[test]
-    fn safe_repo_join_oversize_returns_typed_skip() {
+    fn oversize_returns_typed_skip() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let root = tmp.path();
         let big_path = root.join("big.js");
         fs::write(&big_path, vec![b'a'; (MAX_FILE_BYTES + 16) as usize]).unwrap();
-        let result = safe_repo_join(root.to_str().unwrap(), "big.js");
+        let result = analyze_file("big.js", &crate::v2::pipeline::testing::context(root));
         assert!(matches!(
             result,
             Err(AnalyzerError::Skip {
@@ -772,7 +708,7 @@ mod tests {
         cancel.cancel();
         let (analyzed, errors) = analyze_files(
             &["a.js".to_string(), "b.js".to_string()],
-            root.to_str().expect("utf8 root path"),
+            &crate::v2::pipeline::testing::context(root),
             None,
             &cancel,
             &crate::v2::pipeline::SilentProgress,
@@ -786,12 +722,17 @@ mod tests {
     }
 
     #[test]
-    fn safe_repo_join_dotdot_returns_unsafe_path_skip() {
-        let result = safe_repo_join("/repo", "../etc/passwd");
+    fn analysis_rejects_paths_above_the_root() {
+        let ctx = PipelineContext::new(
+            crate::v2::pipeline::testing::empty(),
+            Default::default(),
+            crate::v2::trace::Tracer::new(false),
+        );
+        let result = analyze_file("../etc/passwd", &ctx);
         assert!(matches!(
             result,
-            Err(AnalyzerError::Skip {
-                kind: FileSkip::UnsafePath,
+            Err(AnalyzerError::Fault {
+                kind: FileFault::FileRead,
                 ..
             })
         ));

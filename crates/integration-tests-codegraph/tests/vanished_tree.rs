@@ -1,9 +1,10 @@
-use std::path::Path;
 use std::sync::Arc;
 
-use code_graph::v2::{
-    Decision, FileInventory, FileInventoryEntry, GraphConverter, OnBatch, Pipeline, PipelineConfig,
-    PipelineResult,
+use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
+use code_graph::v2::{GraphConverter, OnBatch, Pipeline, PipelineConfig, PipelineResult};
+use orbit_utils::files::{
+    Vfs,
+    sources::{Checkout, Memory},
 };
 
 struct NoopConverter;
@@ -17,28 +18,18 @@ impl GraphConverter for NoopConverter {
     }
 }
 
-fn run_pipeline(root: &Path, inventory: Vec<FileInventoryEntry>) -> PipelineResult {
+fn run_pipeline(vfs: Vfs<Role>) -> PipelineResult {
     let on_batch: Arc<OnBatch> = Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
     Pipeline::run(
-        root,
-        Arc::new(FileInventory::new(inventory)),
+        Arc::new(vfs),
         PipelineConfig::default(),
         Arc::new(NoopConverter),
         on_batch,
     )
 }
 
-fn js_entry(path: &str) -> FileInventoryEntry {
-    FileInventoryEntry {
-        path: path.to_string(),
-        size: 20,
-        decision: Decision::Parse,
-        label: Default::default(),
-    }
-}
-
 #[test]
-fn vanished_repository_tree_does_not_fault_remaining_js_files() {
+fn stored_repository_does_not_depend_on_the_original_directory() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let root = tmp.path().join("repo");
     std::fs::create_dir(&root).expect("create repo dir");
@@ -46,11 +37,18 @@ fn vanished_repository_tree_does_not_fault_remaining_js_files() {
     for i in 0..8 {
         let name = format!("mod{i}.js");
         std::fs::write(root.join(&name), "export const x = 1;\n").expect("write fixture");
-        inventory.push(js_entry(&name));
+        inventory.push((name, b"export const x = 1;\n".to_vec()));
     }
     std::fs::remove_dir_all(&root).expect("remove repo dir");
 
-    let result = run_pipeline(&root, inventory);
+    let vfs = Vfs::load(
+        Memory(inventory),
+        CodeFilter::new(None, None, detect_language_from_path),
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let result = run_pipeline(vfs);
 
     assert!(
         result.faults.is_empty(),
@@ -65,8 +63,17 @@ fn missing_js_file_still_faults_while_tree_exists() {
     let root = tmp.path().join("repo");
     std::fs::create_dir(&root).expect("create repo dir");
     std::fs::write(root.join("present.js"), "export const x = 1;\n").expect("write fixture");
+    std::fs::write(root.join("absent.js"), "export const y = 2;\n").expect("write fixture");
+    let vfs = Vfs::load(
+        Checkout(&root),
+        CodeFilter::new(None, None, detect_language_from_path),
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    std::fs::remove_file(root.join("absent.js")).unwrap();
 
-    let result = run_pipeline(&root, vec![js_entry("present.js"), js_entry("absent.js")]);
+    let result = run_pipeline(vfs);
 
     assert_eq!(
         result.faults.len(),

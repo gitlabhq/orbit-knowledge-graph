@@ -138,15 +138,15 @@ pub struct JsModuleGraphBuilder {
 }
 
 impl JsModuleGraphBuilder {
-    pub fn new(root_path: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            graph: CodeGraph::new_with_root(root_path),
+            graph: CodeGraph::new(),
             modules: JsModuleIndex::default(),
         }
     }
 
     pub fn add_file(&mut self, file: JsPhase1File) -> JsPhase1FileInfo {
-        let relative_path = self.graph.relative_path(&file.path);
+        let relative_path = file.path.clone();
         let module_def = synthesize_module_definition(&relative_path);
         let module_scope = module_def.fqn.as_str().to_string();
 
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn phase1_builder_synthesizes_module_and_export_defs() {
-        let mut builder = JsModuleGraphBuilder::new(String::new());
+        let mut builder = JsModuleGraphBuilder::new();
         let file = JsPhase1File {
             path: "src/utils.ts".to_string(),
             extension: "ts".to_string(),
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn phase1_builder_preserves_star_reexports_and_file_targets() {
-        let mut builder = JsModuleGraphBuilder::new(String::new());
+        let mut builder = JsModuleGraphBuilder::new();
         let file = JsPhase1File {
             path: "src/index.ts".to_string(),
             extension: "ts".to_string(),

@@ -6,14 +6,18 @@
 //! `JsCrossFileResolver`, tsconfig discovery, the webpack evaluator, and
 //! `is_bun` detection.
 
+use crate::v2::config::Role;
+use orbit_utils::files::{Kind, Vfs};
 use oxc_resolver::{TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::constants::{BUN_SIGNAL_FILES, is_webpack_config_path};
 
 /// Every manifest/config fact the JS pipeline derives from the
 /// repository root, computed once.
 pub struct WorkspaceProbe {
+    pub(crate) vfs: Arc<Vfs<Role>>,
     root_dir: PathBuf,
     /// Raw `package.json` text. Kept for substring probes (e.g.
     /// `"@types/bun"`) without re-reading from disk.
@@ -28,33 +32,22 @@ impl WorkspaceProbe {
     /// Load every interesting manifest / config once. `indexed_paths`
     /// are the repo-relative files the outer walker already surfaced;
     /// the probe does not re-walk the tree.
-    pub fn load(root_dir: &Path, indexed_paths: &[String]) -> Self {
-        // Canonicalize once so downstream path containment checks
-        // (webpack evaluator, specifier resolver) all operate in the
-        // same absolute form. If canonicalization fails we fail
-        // *closed*: return a probe with no manifests so resolution
-        // silently degrades instead of comparing canonical paths
-        // against a non-canonical root and flipping a containment
-        // check on a coincidental prefix match.
-        let Ok(root_dir) = std::fs::canonicalize(root_dir) else {
-            tracing::warn!(
-                root_dir = %root_dir.display(),
-                "js: failed to canonicalize root_dir, disabling workspace probe"
-            );
-            return Self {
-                root_dir: root_dir.to_path_buf(),
-                manifest_raw: None,
-                tsconfig_path: None,
-                jsconfig_path: None,
-                webpack_configs: Vec::new(),
-                bun_signal_present: false,
-            };
+    pub fn load(vfs: Arc<Vfs<Role>>, indexed_paths: &[String]) -> Self {
+        let root_dir = PathBuf::from("/");
+        let manifest_raw = vfs
+            .stat(Path::new("package.json"))
+            .ok()
+            .filter(|stat| stat.len <= super::extract::MAX_FILE_BYTES)
+            .and_then(|_| vfs.read(Path::new("package.json")).ok())
+            .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok());
+        let existing_file = |name: &str| {
+            vfs.stat(Path::new(name))
+                .ok()
+                .filter(|stat| stat.kind == Kind::File)
+                .map(|stat| stat.path)
         };
-
-        let manifest_raw = read_bounded(&root_dir.join("package.json"));
-
-        let tsconfig_path = existing_file(&root_dir, "tsconfig.json");
-        let jsconfig_path = existing_file(&root_dir, "jsconfig.json");
+        let tsconfig_path = existing_file("tsconfig.json");
+        let jsconfig_path = existing_file("jsconfig.json");
 
         // webpack configs live anywhere in the repo — pop-culture
         // convention is root or `config/`, monolith convention is
@@ -67,10 +60,14 @@ impl WorkspaceProbe {
             .collect();
 
         let bun_signal_present = BUN_SIGNAL_FILES.iter().any(|name| {
-            indexed_paths.iter().any(|p| p == name) || is_regular_file(&root_dir.join(name))
+            indexed_paths.iter().any(|p| p == name)
+                || vfs
+                    .stat(Path::new(name))
+                    .is_ok_and(|stat| stat.kind == Kind::File && stat.link.is_none())
         });
 
         Self {
+            vfs,
             root_dir,
             manifest_raw,
             tsconfig_path,
@@ -121,28 +118,4 @@ impl WorkspaceProbe {
     pub fn webpack_configs(&self) -> &[PathBuf] {
         &self.webpack_configs
     }
-}
-
-fn existing_file(root_dir: &Path, filename: &str) -> Option<PathBuf> {
-    let path = root_dir.join(filename);
-    path.is_file().then_some(path)
-}
-
-/// `Path::is_file` follows symlinks. Use `symlink_metadata` so a
-/// committed `bun.lock -> /some/other/target` cannot flip the probe's
-/// bun detection based on the target's type.
-fn is_regular_file(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .map(|meta| meta.file_type().is_file())
-        .unwrap_or(false)
-}
-
-/// Read a manifest-sized file or skip it. Guards against a hostile
-/// `package.json` the size of the whole repo.
-fn read_bounded(path: &Path) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > super::extract::MAX_FILE_BYTES {
-        return None;
-    }
-    std::fs::read_to_string(path).ok()
 }

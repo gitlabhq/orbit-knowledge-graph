@@ -200,7 +200,6 @@ pub struct CodeGraph {
     pub imports: Vec<GraphImport>,
     pub strings: StringPool,
     pub indexes: GraphIndexes,
-    pub root_path: String,
     pub output: GraphOutput,
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
@@ -227,16 +226,8 @@ impl CodeGraph {
             imports: Vec::new(),
             strings: StringPool::new(),
             indexes: GraphIndexes::new(),
-            root_path: String::new(),
             output: GraphOutput::Complete,
             rules: None,
-        }
-    }
-
-    pub fn new_with_root(root_path: String) -> Self {
-        Self {
-            root_path,
-            ..Self::new()
         }
     }
 
@@ -341,7 +332,7 @@ impl CodeGraph {
         imports: &[CanonicalImport],
         reason: crate::v2::error::FileReason,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
-        let relative_path = self.relative_path(path);
+        let relative_path = path.to_string();
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
 
         let file_name = Path::new(&relative_path)
@@ -586,14 +577,6 @@ impl CodeGraph {
 
         let parent_dir = dir_to_string(path.parent()?);
         dir_index.get(&parent_dir).copied()
-    }
-
-    pub fn relative_path(&self, file_path: &str) -> String {
-        file_path
-            .strip_prefix(&self.root_path)
-            .map(|p| p.strip_prefix('/').unwrap_or(p))
-            .unwrap_or(file_path)
-            .to_string()
     }
 
     /// Pre-resolve all imports for a file into a name → defs map.
@@ -1385,10 +1368,17 @@ mod tests {
     }
 
     fn build_graph_multi(files: Vec<(&str, Vec<CanonicalDefinition>)>) -> CodeGraph {
-        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        let mut cg = CodeGraph::new();
         for (path, defs) in &files {
             let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-            cg.add_file(path, ext, Language::Python, 100, defs, &[]);
+            cg.add_file(
+                path.strip_prefix("/repo/").unwrap_or(path),
+                ext,
+                Language::Python,
+                100,
+                defs,
+                &[],
+            );
         }
         let tracer = crate::v2::trace::Tracer::new(false);
         cg.finalize(&tracer);
@@ -1621,9 +1611,9 @@ mod tests {
             ..import_a.clone()
         };
 
-        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        let mut cg = CodeGraph::new();
         cg.add_file(
-            "/repo/gen.rs",
+            "gen.rs",
             "rs",
             Language::Python,
             100,
@@ -1646,7 +1636,7 @@ mod tests {
     #[test]
     fn def_on_import_panics_with_typed_unexpected_node_type() {
         use crate::v2::error::CodeGraphError;
-        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        let mut cg = CodeGraph::new();
         let import = CanonicalImport {
             import_type: "NamedImport",
             binding_kind: ImportBindingKind::Named,
@@ -1659,8 +1649,7 @@ mod tests {
             is_type_only: false,
             wildcard: false,
         };
-        let (_, _, import_nodes) =
-            cg.add_file("/repo/x.rs", "rs", Language::Python, 1, &[], &[import]);
+        let (_, _, import_nodes) = cg.add_file("x.rs", "rs", Language::Python, 1, &[], &[import]);
         let import_idx = import_nodes[0];
 
         let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
