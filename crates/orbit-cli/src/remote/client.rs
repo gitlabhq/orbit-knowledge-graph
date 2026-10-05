@@ -10,7 +10,6 @@ const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
-/// Skills fall back to a local copy, so a dead host should not stall callers for the full request timeout.
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
