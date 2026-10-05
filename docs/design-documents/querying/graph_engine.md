@@ -67,8 +67,9 @@ Foreign-key facts identify the source or target endpoint that holds the key, its
 The endpoint remains unambiguous for self-relationships and incoming traversals.
 Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
-Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
-All later passes continue to use that AST.
+Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
+All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
+Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 
 Each edge-chain emitter builds node bindings as it emits scans and joins.
 Each binding contains the graph identity, visible table alias, and hydration path expression when available.

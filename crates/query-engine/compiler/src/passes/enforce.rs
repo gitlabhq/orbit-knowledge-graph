@@ -4,8 +4,10 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
+use crate::passes::lower::sql::{
+    deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
+};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
