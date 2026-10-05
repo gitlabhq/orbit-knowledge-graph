@@ -293,17 +293,16 @@ fn path_finding_prints_each_distinct_path_once() {
 }
 
 #[test]
-fn truncated_text_reports_its_length_and_long_cells_skip_padding() {
+fn truncated_text_reports_its_length_and_long_cells_widen_the_table() {
     let mut properties = Map::new();
     properties.insert("description".into(), json!("x".repeat(250)));
     assert!(node_literal("Issue", 1, &properties).ends_with("description_len: 250})"));
 
     let long = "y".repeat(200);
     let table = render(&cells(&["n"]), &[cells(&[&long]), cells(&["short"])], None);
-    let short = table.lines().find(|line| line.contains("short")).unwrap();
-    assert_eq!(short.chars().count(), 124, "{table}");
-    assert!(
-        table.starts_with(&format!("+{}+\n", "-".repeat(122))),
-        "{table}"
-    );
+    let border = format!("+{}+", "-".repeat(202));
+    assert!(table.starts_with(&format!("{border}\n")), "{table}");
+    for line in table.lines().take_while(|line| !line.is_empty()) {
+        assert_eq!(line.chars().count(), border.chars().count(), "{table}");
+    }
 }

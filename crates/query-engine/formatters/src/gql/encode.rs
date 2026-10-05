@@ -225,8 +225,6 @@ fn null() -> String {
     "NULL".into()
 }
 
-const MAX_PADDED_WIDTH: usize = 120;
-
 fn render(columns: &[String], rows: &[Vec<String>], page: Option<&PaginationMeta>) -> String {
     let widths: Vec<usize> = columns
         .iter()
@@ -235,7 +233,6 @@ fn render(columns: &[String], rows: &[Vec<String>], page: Option<&PaginationMeta
             let header = column.chars().count();
             rows.iter()
                 .map(|row| row[index].chars().count())
-                .map(|width| width.min(MAX_PADDED_WIDTH))
                 .fold(header, usize::max)
         })
         .collect();
