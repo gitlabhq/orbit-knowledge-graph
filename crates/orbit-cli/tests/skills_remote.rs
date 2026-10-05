@@ -481,7 +481,13 @@ fn degradable_statuses_without_cache_use_embedded_skill() {
         assert!(output.status.success(), "{status}: {}", stderr(&output));
         assert!(stderr(&output).contains(&format!("HTTP {status}")));
         assert!(stderr(&output).contains("embedded local skill"));
-        assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.starts_with("---\n") && !stdout.contains("warning"));
+        match status {
+            401 => assert!(stderr(&output).contains("glab auth status")),
+            403 => assert!(stderr(&output).contains("access to Orbit")),
+            _ => {}
+        }
     }
 }
 
@@ -507,20 +513,22 @@ fn cache_is_used_for_rate_limits_and_server_errors_but_not_auth_errors() {
         let stdout = String::from_utf8_lossy(&second.stdout);
         assert_eq!(stdout.contains("Cached remote"), uses_cache, "{status}");
         assert_eq!(stderr(&second).contains("last validated"), uses_cache);
-        assert!(stdout.contains("name: orbit-cli") || uses_cache);
+        assert!(!stdout.contains("warning"));
     }
 }
 
 #[test]
 fn degradable_statuses_fall_back_for_the_skill_listing() {
-    for status in [401, 403, 429, 503] {
+    for status in [401, 403, 429, 500, 503] {
         let cache = tempfile::tempdir().unwrap();
         let (url, server) = mock_server(vec![status_reply(status)]);
         let output = run_orbit(Some(&url), &cache, &["skills"]);
         server.join().unwrap();
         assert!(output.status.success(), "{status}: {}", stderr(&output));
         assert!(stderr(&output).contains(&format!("HTTP {status}")));
-        assert!(String::from_utf8_lossy(&output.stdout).contains("orbit"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.starts_with("orbit \u{2014} ") && !stdout.contains("warning"));
+        assert_eq!(stdout.lines().count(), 1);
     }
 }
 
