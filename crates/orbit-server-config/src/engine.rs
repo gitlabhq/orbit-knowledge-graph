@@ -229,6 +229,12 @@ pub struct CodeIndexingPipelineConfig {
     /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
     /// concurrency can rise without exhausting the pod volume. 0 = no limit.
     pub max_total_bytes: u64,
+    #[serde(default)]
+    pub source_memory_budget_bytes: u64,
+    #[serde(default)]
+    pub source_compress_spill: bool,
+    #[serde(default)]
+    pub source_scratch_dir: Option<std::path::PathBuf>,
     pub worker_threads: usize,
     pub max_concurrent_languages: usize,
     /// Global per-file resolution timeout in milliseconds.

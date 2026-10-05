@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
@@ -46,10 +47,20 @@ pub trait RepositoryCache: Send + Sync {
 
 const CACHE_DIR_NAME: &str = "gkg-repository-cache";
 
+struct CancelLoad(Arc<AtomicBool>);
+
+impl Drop for CancelLoad {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     max_file_size: u64,
     max_total_bytes: u64,
+    resident_bytes: u64,
+    compress_spill: bool,
     metrics: CodeMetrics,
 }
 
@@ -64,6 +75,8 @@ impl LocalRepositoryCache {
             base_dir,
             max_file_size,
             max_total_bytes,
+            resident_bytes: 0,
+            compress_spill: false,
             metrics,
         }
     }
@@ -72,14 +85,10 @@ impl LocalRepositoryCache {
         std::env::temp_dir().join(CACHE_DIR_NAME)
     }
 
-    pub async fn purge_all(&self) -> Result<(), RepositoryCacheError> {
-        match tokio::fs::remove_dir_all(&self.base_dir).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        tokio::fs::create_dir_all(&self.base_dir).await?;
-        Ok(())
+    pub fn with_storage(mut self, resident_bytes: u64, compress_spill: bool) -> Self {
+        self.resident_bytes = resident_bytes;
+        self.compress_spill = compress_spill;
+        self
     }
 }
 
@@ -89,6 +98,7 @@ impl RepositoryCache for LocalRepositoryCache {
         &self,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError> {
+        tokio::fs::create_dir_all(&self.base_dir).await?;
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
@@ -96,12 +106,15 @@ impl RepositoryCache for LocalRepositoryCache {
         let limits = Limits {
             file_bytes: to_cap(self.max_file_size),
             total_bytes: to_cap(self.max_total_bytes),
-            resident_bytes: Some(0),
+            resident_bytes: Some(self.resident_bytes),
             ..Limits::default()
         };
+        let cancel = CancelLoad(Arc::new(AtomicBool::new(false)));
+        let cancelled = cancel.0.clone();
         let options = Options {
             scratch_dir: Some(self.base_dir.clone()),
-            ..Options::default()
+            compress_spill: self.compress_spill,
+            cancelled: Some(Box::new(move || cancelled.load(Ordering::Relaxed))),
         };
         let extracted = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
@@ -178,6 +191,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn storage_options_preserve_archive_contents() {
+        let dir = TempDir::new().unwrap();
+        let body = b"pub fn source() {}\n".repeat(100);
+        for resident in [0, 4096] {
+            for compress in [false, true] {
+                let cache = LocalRepositoryCache::new(
+                    dir.path().into(),
+                    u64::MAX,
+                    0,
+                    CodeMetrics::default(),
+                )
+                .with_storage(resident, compress);
+                let repo = cache
+                    .extract_archive(archive_stream(build_tar_gz(&[("root/source.rs", &body)])))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    &*repo.files.read(Path::new("source.rs")).unwrap(),
+                    body.as_slice()
+                );
+                let usage = repo.files.usage();
+                if resident == 0 {
+                    assert_eq!(usage.resident, 0);
+                    assert!(usage.spilled > 0);
+                    if compress {
+                        assert!(usage.spilled < body.len() as u64);
+                    }
+                } else {
+                    assert_eq!(usage.resident, body.len() as u64);
+                    assert_eq!(usage.spilled, 0);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn extract_archive_loads_files() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
@@ -223,7 +272,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn purge_all_clears_all_cached_repositories() {
+    async fn loading_repositories_does_not_create_named_files() {
         let (dir, cache) = create_cache();
         let archive = build_tar_gz(&[("root/file.rs", b"content")]);
 
@@ -237,11 +286,6 @@ mod tests {
             .unwrap();
         assert!(path_1.files.read(Path::new("file.rs")).is_ok());
         assert!(path_2.files.read(Path::new("file.rs")).is_ok());
-
-        cache.purge_all().await.unwrap();
-
-        assert!(path_1.files.read(Path::new("file.rs")).is_ok());
-        assert!(path_2.files.read(Path::new("file.rs")).is_ok());
         let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
         assert!(
             entries.next_entry().await.unwrap().is_none(),
@@ -250,14 +294,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn purge_all_recreates_missing_base_dir() {
+    async fn loading_creates_a_missing_scratch_directory() {
         let temp_dir = TempDir::new().unwrap();
         let base = temp_dir.path().join("not-yet-created");
         let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, 0, CodeMetrics::default());
 
-        cache.purge_all().await.unwrap();
+        let archive = build_tar_gz(&[("root/file.rs", b"content")]);
+        let repo = cache
+            .extract_archive(archive_stream(archive))
+            .await
+            .unwrap();
 
         assert!(base.exists());
+        assert_eq!(&*repo.files.read(Path::new("file.rs")).unwrap(), b"content");
     }
 
     #[tokio::test]

@@ -522,6 +522,23 @@
           "format": "uint64",
           "minimum": 0
         },
+        "source_memory_budget_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "source_compress_spill": {
+          "type": "boolean",
+          "default": false
+        },
+        "source_scratch_dir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "worker_threads": {
           "type": "integer",
           "format": "uint",

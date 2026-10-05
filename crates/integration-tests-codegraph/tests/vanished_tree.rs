@@ -83,3 +83,27 @@ fn missing_js_file_still_faults_while_tree_exists() {
     );
     assert_eq!(result.faults[0].path, "absent.js");
 }
+
+#[test]
+fn content_rejected_on_first_read_is_a_skip_not_a_fault() {
+    let root = tempfile::tempdir().unwrap();
+    for name in ["binary.py", "binary.js", "binary.rs"] {
+        std::fs::write(root.path().join(name), b"\0not source").unwrap();
+    }
+    let vfs = Vfs::load(
+        Checkout(root.path()),
+        CodeFilter::new(None, None, detect_language_from_path),
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let result = run_pipeline(vfs);
+    assert!(result.faults.is_empty(), "{:?}", result.faults);
+    assert_eq!(result.skipped.len(), 3);
+    assert!(
+        result
+            .skipped
+            .iter()
+            .all(|file| file.kind.as_metric_label() == "binary")
+    );
+}

@@ -234,7 +234,6 @@ pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     "*.{mp3,mp4,mov,webm,ogg,wav,flac,m4a,m4v,avi,mkv,opus}",
     // Archives.
     "*.{zip,tar,gz,tgz,bz2,xz,7z,rar,lz4,zst}",
-    // Compiled artifacts.
     "*.{exe,dll,so,dylib,class,jar,war,pyc,pyo,o,a,lib}",
     // Documents.
     "*.{pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp}",

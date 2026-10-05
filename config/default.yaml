@@ -115,6 +115,8 @@ engine:
         max_file_size_bytes: 5000000
         max_files: 1000000
         max_total_bytes: 2000000000
+        source_memory_budget_bytes: 1073741824
+        source_compress_spill: false
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000
