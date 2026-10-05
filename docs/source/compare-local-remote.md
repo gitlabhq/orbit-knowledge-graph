@@ -279,4 +279,3 @@ For more information, see
 | Repository map helper | {{< yes >}} | {{< yes >}} |
 | Reporting and coverage guidance | {{< no >}} | {{< yes >}} |
 | Setup checklist and troubleshooting | {{< yes >}} | {{< yes >}} |
-
