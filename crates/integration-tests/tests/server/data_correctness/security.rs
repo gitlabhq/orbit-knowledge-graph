@@ -1592,7 +1592,7 @@ pub(super) async fn aggregation_over_shortest_path_rejects_at_compile(ctx: &Test
             {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             {"id": "p", "entity": "Project"}
         ],
-        "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+        "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3, "rel_types": ["*"]},
         "group_by": ["p"],
         "aggregations": [{"count": "u", "as": "hit"}],
         "limit": 10
