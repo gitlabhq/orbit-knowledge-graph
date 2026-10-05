@@ -1,4 +1,3 @@
-pub mod archive;
 pub mod arrow;
 pub(crate) mod arrow_logical_bytes;
 pub mod clickhouse;

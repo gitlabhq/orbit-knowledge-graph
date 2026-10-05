@@ -954,6 +954,7 @@ fn an_archive_is_read_below_its_root_and_only_its_root() {
     );
     assert_eq!(text(&vfs, "src/main.rs"), "fn main() {}");
     assert_eq!(text(&vfs, "bin/run"), "fn main() {}");
+    assert_eq!(text(&vfs, &long["root/".len()..]), "fn f() {}");
     assert_eq!(
         text(&vfs, "dup.rs"),
         "fn main() {}",
@@ -964,6 +965,82 @@ fn an_archive_is_read_below_its_root_and_only_its_root() {
         vfs.stat(Path::new("root")).unwrap_err().kind(),
         ErrorKind::NotFound
     );
+}
+
+#[test]
+fn archived_content_is_complete_and_excluded_files_remain_listed() {
+    let body: Vec<_> = (0..12_000).map(|index| b'a' + (index % 26) as u8).collect();
+    let data = archive(&[
+        Entry::File("root/big.txt", &body),
+        Entry::File("root/logo.png", b"image"),
+        Entry::File("root/binary.rs", b"\0binary"),
+    ]);
+    for resident_bytes in [None, Some(0)] {
+        let vfs = load(
+            Archive(&data[..]),
+            CodeFilter,
+            Limits {
+                resident_bytes,
+                ..Limits::default()
+            },
+        );
+        assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), body.as_slice());
+        assert_eq!(
+            rows(&vfs),
+            [
+                ("big.txt".into(), Decision::Keep(Role::Input)),
+                ("binary.rs".into(), Decision::List("binary")),
+                ("logo.png".into(), Decision::List("excluded_extension")),
+            ]
+        );
+        for path in ["binary.rs", "logo.png"] {
+            assert_eq!(read_error(&vfs, path), ErrorKind::Unsupported);
+        }
+    }
+}
+
+#[test]
+fn archive_links_cannot_write_or_resolve_through_host_directories() {
+    let outside = tempfile::tempdir().unwrap();
+    write(outside.path(), "existing.txt", b"unchanged");
+    let target = outside.path().to_str().unwrap();
+    let data = archive(&[
+        Entry::File("root/ok.txt", b"ok"),
+        Entry::Symlink("root/escape", target),
+        Entry::Symlink("root/chain", "escape"),
+        Entry::File("root/escape/existing.txt", b"replacement"),
+        Entry::File("root/chain/new/file.txt", b"new"),
+        Entry::Symlink("root/dangling", "missing"),
+        Entry::Symlink("root/escape2", target),
+        Entry::Symlink("root/internal", "ok.txt"),
+    ]);
+    let vfs = load(Archive(&data[..]), (), Limits::default());
+    assert_eq!(text(&vfs, "internal"), "ok");
+    for path in [
+        "escape",
+        "escape/existing.txt",
+        "chain/new/file.txt",
+        "dangling",
+        "escape2",
+    ] {
+        assert_eq!(read_error(&vfs, path), ErrorKind::NotFound, "{path}");
+        assert!(vfs.stat(Path::new(path)).is_err(), "{path}");
+    }
+    for path in ["escape", "chain", "dangling", "escape2"] {
+        assert_eq!(
+            vfs.files()
+                .find(|file| file.path == path)
+                .unwrap()
+                .decision(),
+            Decision::List("symlink")
+        );
+    }
+    assert_eq!(
+        std::fs::read(outside.path().join("existing.txt")).unwrap(),
+        b"unchanged"
+    );
+    assert!(!outside.path().join("new").exists());
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1);
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::fs_walk::{CapExceeded, Counter};
+use orbit_utils::files::CapExceeded;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
@@ -185,8 +185,8 @@ impl ReadOntologyFile for OntologyArchive {
 }
 
 fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {
-    let mut source_bytes = Counter::new("ontology source bytes", Some(MAX_SOURCE_BYTES));
-    let mut file_count = Counter::new("ontology files", Some(MAX_FILES));
+    let mut source_bytes = 0u64;
+    let mut file_count = 0u64;
     let mut sources = BTreeMap::new();
 
     let mut archive = tar::Archive::new(GzDecoder::new(bytes));
@@ -197,8 +197,16 @@ fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> 
         }
 
         let relative_path = source_path(&entry.path()?)?;
-        file_count.add(1)?;
-        source_bytes.add(entry.size())?;
+        file_count += 1;
+        source_bytes = source_bytes.saturating_add(entry.size());
+        for (metric, count, cap) in [
+            ("ontology files", file_count, MAX_FILES),
+            ("ontology source bytes", source_bytes, MAX_SOURCE_BYTES),
+        ] {
+            if count > cap {
+                return Err(CapExceeded { metric, count, cap }.into());
+            }
+        }
 
         let mut content = String::new();
         entry.read_to_string(&mut content)?;
@@ -355,8 +363,60 @@ mod tests {
 
         assert!(matches!(
             OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes),
-            Err(ArchiveError::Cap(_))
+            Err(ArchiveError::Cap(cap)) if cap.metric == "ontology source bytes"
+                && cap.count == OVERSIZED_SOURCE_BYTES && cap.cap == super::MAX_SOURCE_BYTES
         ));
+    }
+
+    #[test]
+    fn duplicate_entries_count_toward_the_file_limit() {
+        let mut builder = tar::Builder::new(Vec::new());
+        for _ in 0..super::MAX_FILES {
+            super::append_file(&mut builder, "repeated.yaml", b"").unwrap();
+        }
+        let mut raw = builder.into_inner().unwrap();
+        raw.truncate(super::MAX_FILES as usize * 512);
+        let mut header = tar::Header::new_gnu();
+        header.set_path("ontology/extra.yaml").unwrap();
+        header.set_size(1);
+        header.set_cksum();
+        raw.extend_from_slice(header.as_bytes());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        let bytes = encoder.finish().unwrap();
+        assert!(
+            matches!(OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes),
+            Err(ArchiveError::Cap(cap)) if cap.metric == "ontology files"
+                && cap.count == super::MAX_FILES + 1 && cap.cap == super::MAX_FILES)
+        );
+    }
+
+    #[test]
+    fn source_byte_limit_is_cumulative_and_inclusive() {
+        let manifest = format!(r#"{{"format_version":1,"schema_version":{SCHEMA_VERSION}}}"#);
+        let body = vec![b' '; super::MAX_SOURCE_BYTES as usize - manifest.len()];
+        let mut builder = tar::Builder::new(Vec::new());
+        super::append_file(&mut builder, "manifest.json", manifest.as_bytes()).unwrap();
+        super::append_file(&mut builder, "schema.yaml", &body).unwrap();
+        let mut raw = builder.into_inner().unwrap();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        assert!(OntologyArchive::from_bytes(SCHEMA_VERSION, &encoder.finish().unwrap()).is_ok());
+
+        let end = 512 + manifest.len().div_ceil(512) * 512 + 512 + body.len().div_ceil(512) * 512;
+        raw.truncate(end);
+        let mut header = tar::Header::new_gnu();
+        header.set_path("ontology/extra.yaml").unwrap();
+        header.set_size(1);
+        header.set_cksum();
+        raw.extend_from_slice(header.as_bytes());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        assert!(
+            matches!(OntologyArchive::from_bytes(SCHEMA_VERSION, &encoder.finish().unwrap()),
+            Err(ArchiveError::Cap(cap)) if cap.metric == "ontology source bytes"
+                && cap.count == super::MAX_SOURCE_BYTES + 1 && cap.cap == super::MAX_SOURCE_BYTES)
+        );
     }
 
     #[test]
