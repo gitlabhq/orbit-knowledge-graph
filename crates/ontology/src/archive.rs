@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::files::CapExceeded;
+use orbit_utils::files::{CapExceeded, Limits, Loading, Put, Source, SourceError, Tag, Vfs};
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,7 @@ struct Manifest {
 pub struct OntologyArchive {
     schema_version: u32,
     bytes: Vec<u8>,
-    sources: BTreeMap<String, String>,
+    files: Vfs<()>,
 }
 
 impl OntologyArchive {
@@ -112,12 +112,37 @@ impl OntologyArchive {
     }
 
     pub fn from_bytes(schema_version: u32, bytes: &[u8]) -> Result<Self, ArchiveError> {
-        let mut sources = read_sources(bytes)?;
+        let files = Vfs::load(
+            OntologySource(bytes),
+            (),
+            Limits {
+                files: Some(MAX_FILES as usize),
+                total_bytes: Some(MAX_SOURCE_BYTES),
+                ..Limits::default()
+            },
+            Default::default(),
+        )
+        .map_err(|error| match error {
+            SourceError::Cap(mut cap) => {
+                cap.metric = match cap.metric {
+                    "files" => "ontology files",
+                    "total_bytes" => "ontology source bytes",
+                    metric => metric,
+                };
+                ArchiveError::Cap(cap)
+            }
+            SourceError::Io(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                ArchiveError::Invalid(error.to_string())
+            }
+            SourceError::Io(error) => ArchiveError::Io(error),
+            error => ArchiveError::Invalid(error.to_string()),
+        })?;
 
-        let manifest_json = sources
-            .remove(MANIFEST_PATH)
+        let manifest_json = files
+            .read(Path::new(MANIFEST_PATH))
+            .ok()
             .ok_or_else(|| ArchiveError::Invalid("missing manifest.json".into()))?;
-        let manifest: Manifest = serde_json::from_str(&manifest_json)?;
+        let manifest: Manifest = serde_json::from_slice(&manifest_json)?;
 
         if manifest.format_version != FORMAT_VERSION {
             return Err(ArchiveError::UnsupportedFormat(manifest.format_version));
@@ -130,14 +155,14 @@ impl OntologyArchive {
             });
         }
 
-        if !sources.contains_key("schema.yaml") {
+        if !files.files().any(|file| file.path == "schema.yaml") {
             return Err(ArchiveError::Invalid("missing schema.yaml".into()));
         }
 
         Ok(Self {
             schema_version,
             bytes: bytes.to_vec(),
-            sources,
+            files,
         })
     }
 
@@ -150,7 +175,18 @@ impl OntologyArchive {
     }
 
     pub fn matches_sources(&self, sources: &BTreeMap<String, String>) -> bool {
-        &self.sources == sources
+        self.files.usage().files == sources.len() + 1
+            && self
+                .files
+                .files()
+                .filter(|file| file.path != MANIFEST_PATH)
+                .all(|file| {
+                    sources.get(&file.path).is_some_and(|source| {
+                        self.files
+                            .read(Path::new(&file.path))
+                            .is_ok_and(|bytes| bytes.as_ref() == source.as_bytes())
+                    })
+                })
     }
 
     pub fn load_ontology(&self) -> Result<Ontology, ArchiveError> {
@@ -171,65 +207,70 @@ impl OntologyArchive {
 
 impl ReadOntologyFile for OntologyArchive {
     fn read(&self, path: &str) -> Result<String, OntologyError> {
-        self.sources
-            .get(path)
-            .cloned()
-            .ok_or_else(|| OntologyError::Io {
-                path: path.into(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "file missing from ontology archive",
-                ),
+        let result = if Path::new(path) == Path::new(MANIFEST_PATH)
+            || !orbit_utils::fs::is_safe_relative_path(Path::new(path))
+        {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "file missing from ontology archive",
+            ))
+        } else {
+            self.files.read(Path::new(path)).and_then(|bytes| {
+                String::from_utf8(bytes.to_vec())
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
             })
+        };
+        result.map_err(|source| OntologyError::Io {
+            path: path.into(),
+            source,
+        })
     }
 }
 
-fn read_sources(bytes: &[u8]) -> Result<BTreeMap<String, String>, ArchiveError> {
-    let mut source_bytes = 0u64;
-    let mut file_count = 0u64;
-    let mut sources = BTreeMap::new();
+struct OntologySource<'a>(&'a [u8]);
 
-    let mut archive = tar::Archive::new(GzDecoder::new(bytes));
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        if entry.header().entry_type() != tar::EntryType::Regular {
-            continue;
-        }
-
-        let relative_path = source_path(&entry.path()?)?;
-        file_count += 1;
-        source_bytes = source_bytes.saturating_add(entry.size());
-        for (metric, count, cap) in [
-            ("ontology files", file_count, MAX_FILES),
-            ("ontology source bytes", source_bytes, MAX_SOURCE_BYTES),
-        ] {
-            if count > cap {
-                return Err(CapExceeded { metric, count, cap }.into());
+impl Source for OntologySource<'_> {
+    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+        let mut archive = tar::Archive::new(GzDecoder::new(self.0));
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            if entry.header().entry_type() != tar::EntryType::Regular {
+                continue;
             }
+            let path = source_path(&entry.path()?)?;
+            into.put(
+                &path,
+                Put::Lazy {
+                    size: entry.size(),
+                    read: Box::new(move || {
+                        let mut content = String::new();
+                        entry.read_to_string(&mut content)?;
+                        Ok(content.into_bytes())
+                    }),
+                },
+            )?;
         }
-
-        let mut content = String::new();
-        entry.read_to_string(&mut content)?;
-        sources.insert(relative_path, content);
+        Ok(())
     }
-
-    Ok(sources)
 }
 
-fn source_path(entry_path: &Path) -> Result<String, ArchiveError> {
+fn source_path(entry_path: &Path) -> io::Result<String> {
     let relative_path = entry_path.strip_prefix(ARCHIVE_ROOT).map_err(|_| {
-        ArchiveError::Invalid(format!(
-            "entry {} is outside the {ARCHIVE_ROOT} root",
-            entry_path.display()
-        ))
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "entry {} is outside the {ARCHIVE_ROOT} root",
+                entry_path.display()
+            ),
+        )
     })?;
     if relative_path.as_os_str().is_empty()
         || !orbit_utils::fs::is_safe_relative_path(relative_path)
     {
-        return Err(ArchiveError::Invalid(format!(
-            "path traversal detected: {}",
-            entry_path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("path traversal detected: {}", entry_path.display()),
+        ));
     }
     Ok(relative_path.to_string_lossy().into_owned())
 }
@@ -426,6 +467,67 @@ mod tests {
         let error = OntologyArchive::from_bytes(SCHEMA_VERSION, &bytes).unwrap_err();
 
         assert!(error.to_string().contains("path traversal"), "{error}");
+    }
+
+    #[test]
+    fn archive_source_preserves_root_text_and_link_rules() {
+        use crate::loading::ReadOntologyFile;
+
+        let manifest = format!(r#"{{"format_version":1,"schema_version":{SCHEMA_VERSION}}}"#);
+        for extra in [
+            "other/file.yaml",
+            "ontology/extra.yaml",
+            "ontology/schema.yaml",
+        ] {
+            let mut builder = tar::Builder::new(Vec::new());
+            super::append_file(&mut builder, "manifest.json", manifest.as_bytes()).unwrap();
+            super::append_file(&mut builder, "schema.yaml", b"first").unwrap();
+            let mut header = tar::Header::new_gnu();
+            header.set_size(1);
+            header.set_mode(0o644);
+            builder
+                .append_data(&mut header, extra, &[0xff][..])
+                .unwrap();
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+            encoder.write_all(&builder.into_inner().unwrap()).unwrap();
+            let result = OntologyArchive::from_bytes(SCHEMA_VERSION, &encoder.finish().unwrap());
+            if extra.starts_with("other/") {
+                assert!(matches!(result, Err(ArchiveError::Invalid(_))));
+            } else {
+                assert!(
+                    matches!(result, Err(ArchiveError::Io(error)) if error.kind() == std::io::ErrorKind::InvalidData)
+                );
+            }
+        }
+
+        let mut builder = tar::Builder::new(Vec::new());
+        super::append_file(&mut builder, "manifest.json", manifest.as_bytes()).unwrap();
+        super::append_file(&mut builder, "schema.yaml", b"first").unwrap();
+        super::append_file(&mut builder, "schema.yaml", b"last").unwrap();
+        for kind in [tar::EntryType::Symlink, tar::EntryType::Link] {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(kind);
+            header.set_size(0);
+            header.set_mode(0o777);
+            builder
+                .append_link(&mut header, "ontology/link.yaml", "ontology/schema.yaml")
+                .unwrap();
+        }
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&builder.into_inner().unwrap()).unwrap();
+        let archive =
+            OntologyArchive::from_bytes(SCHEMA_VERSION, &encoder.finish().unwrap()).unwrap();
+        assert_eq!(archive.read("schema.yaml").unwrap(), "last");
+        for path in [
+            "link.yaml",
+            "manifest.json",
+            "manifest.json/",
+            "/manifest.json",
+            "../schema.yaml",
+        ] {
+            assert!(archive.read(path).is_err(), "{path}");
+        }
+        assert!(archive.matches_sources(&[("schema.yaml".into(), "last".into())].into()));
     }
 
     fn embedded_archive() -> OntologyArchive {
