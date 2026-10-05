@@ -44,7 +44,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 siphon-proto = { workspace = true }
 tar = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
@@ -55,6 +54,7 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+tempfile = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }

@@ -160,11 +160,18 @@ mod tests {
             )
             .unwrap();
         let search = g.search();
+        let files = orbit_utils::files::Vfs::load(
+            orbit_utils::files::sources::Checkout(root.path()),
+            (),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
         duckdb_client::search::populate_def_doc_sources(
             search.client(),
             "gl_def_doc_7",
             &ontology::Ontology::load_embedded().unwrap(),
-            root.path(),
+            &files,
             7,
             "sha",
         )

@@ -20,7 +20,6 @@ use super::webpack::load_project_aliases;
 pub struct JsCrossFileResolver {
     import_resolver: ResolverGeneric<RepoFileSystem>,
     require_resolver: ResolverGeneric<RepoFileSystem>,
-    root_dir: PathBuf,
 }
 
 const MAX_EXPORT_RESOLUTION_DEPTH: usize = 10;
@@ -108,13 +107,11 @@ impl FileSystem for RepoFileSystem {
 
 impl JsCrossFileResolver {
     pub fn new(probe: &WorkspaceProbe) -> Self {
-        let root_dir = probe.root_dir().to_path_buf();
         let import_resolver = create_resolver(probe, JsResolutionMode::Import, vec![]);
         let require_resolver = create_resolver(probe, JsResolutionMode::Require, vec![]);
         Self {
             import_resolver,
             require_resolver,
-            root_dir,
         }
     }
 
@@ -166,7 +163,7 @@ impl JsCrossFileResolver {
         calls: &[JsCallEdge],
         modules: &JsModuleIndex,
     ) -> Vec<JsResolvedCallRelationship> {
-        let abs_path = self.root_dir.join(file_path);
+        let abs_path = Path::new("/").join(file_path);
         let mut relationships = Vec::new();
 
         'call_loop: for call in calls {
@@ -189,7 +186,7 @@ impl JsCrossFileResolver {
                 Err(_) => continue,
             };
             let resolved_path = resolved.into_path_buf();
-            let relative_resolved = match resolved_path.strip_prefix(&self.root_dir) {
+            let relative_resolved = match resolved_path.strip_prefix("/") {
                 Ok(rel) => rel.to_string_lossy().to_string(),
                 Err(_) => continue,
             };
@@ -270,12 +267,12 @@ impl JsCrossFileResolver {
         specifier: &str,
         resolution_mode: JsResolutionMode,
     ) -> Option<String> {
-        let abs_path = self.root_dir.join(from_file);
+        let abs_path = Path::new("/").join(from_file);
         let resolved = self
             .resolve_specifier(&abs_path, specifier, resolution_mode)
             .ok()?;
         let resolved_path = resolved.into_path_buf();
-        let relative = resolved_path.strip_prefix(&self.root_dir).ok()?;
+        let relative = resolved_path.strip_prefix("/").ok()?;
         Some(relative.to_string_lossy().to_string())
     }
 

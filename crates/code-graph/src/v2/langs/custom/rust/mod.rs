@@ -636,7 +636,7 @@ fn parse_rust_file_standalone(
     })?;
     crate::v2::pipeline::breadcrumb_large_file(file_path, source.len() as u64, "rust");
     let file_module_parts = fallback_file_module_parts(&relative_path);
-    let workspace = standalone_workspace(&relative_path, source, Path::new("/"));
+    let workspace = standalone_workspace(&relative_path, source);
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
         return Err((
             file_path.to_string(),

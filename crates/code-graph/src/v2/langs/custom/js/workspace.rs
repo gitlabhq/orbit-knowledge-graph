@@ -1,10 +1,5 @@
-//! One-shot filesystem probe for a JS workspace.
-//!
-//! `WorkspaceProbe::load` reads every manifest/config file the pipeline
-//! cares about *exactly once* at the start of `JsPipeline::process_files`
-//! and hands the parsed results to every downstream consumer:
-//! `JsCrossFileResolver`, tsconfig discovery, the webpack evaluator, and
-//! `is_bun` detection.
+//! Workspace configuration comes from the VFS inventory without another walk.
+//! Package metadata is read once; the resolver and evaluator share the store.
 
 use crate::v2::config::Role;
 use orbit_utils::files::{Kind, Vfs};
@@ -14,13 +9,8 @@ use std::sync::Arc;
 
 use super::constants::{BUN_SIGNAL_FILES, is_webpack_config_path};
 
-/// Every manifest/config fact the JS pipeline derives from the
-/// repository root, computed once.
 pub struct WorkspaceProbe {
     pub(crate) vfs: Arc<Vfs<Role>>,
-    root_dir: PathBuf,
-    /// Raw `package.json` text. Kept for substring probes (e.g.
-    /// `"@types/bun"`) without re-reading from disk.
     manifest_raw: Option<String>,
     tsconfig_path: Option<PathBuf>,
     jsconfig_path: Option<PathBuf>,
@@ -29,11 +19,7 @@ pub struct WorkspaceProbe {
 }
 
 impl WorkspaceProbe {
-    /// Load every interesting manifest / config once. `indexed_paths`
-    /// are the repo-relative files the outer walker already surfaced;
-    /// the probe does not re-walk the tree.
     pub fn load(vfs: Arc<Vfs<Role>>, indexed_paths: &[String]) -> Self {
-        let root_dir = PathBuf::from("/");
         let manifest_raw = vfs
             .stat(Path::new("package.json"))
             .ok()
@@ -49,14 +35,10 @@ impl WorkspaceProbe {
         let tsconfig_path = existing_file("tsconfig.json");
         let jsconfig_path = existing_file("jsconfig.json");
 
-        // webpack configs live anywhere in the repo — pop-culture
-        // convention is root or `config/`, monolith convention is
-        // `ee/`, and we have seen them in package sub-folders too. We
-        // reuse the indexed file list instead of re-walking the tree.
         let webpack_configs = indexed_paths
             .iter()
             .filter(|path| is_webpack_config_path(path))
-            .map(|relative| root_dir.join(relative))
+            .map(|relative| Path::new("/").join(relative))
             .collect();
 
         let bun_signal_present = BUN_SIGNAL_FILES.iter().any(|name| {
@@ -68,17 +50,12 @@ impl WorkspaceProbe {
 
         Self {
             vfs,
-            root_dir,
             manifest_raw,
             tsconfig_path,
             jsconfig_path,
             webpack_configs,
             bun_signal_present,
         }
-    }
-
-    pub fn root_dir(&self) -> &Path {
-        &self.root_dir
     }
 
     pub fn is_bun(&self) -> bool {
@@ -93,26 +70,16 @@ impl WorkspaceProbe {
         self.tsconfig_path.is_some() || self.jsconfig_path.is_some()
     }
 
-    /// Resolver configuration for the tsconfig/jsconfig the repo exposes.
-    ///
-    /// Always `Manual` and pinned to a file inside the repo, or `None`
-    /// if neither config was discovered. `Auto` walks parent directories
-    /// past `root_dir` and would pick up any ambient `tsconfig.json` from
-    /// the server's filesystem; a hostile repo cannot make us honor a
-    /// tsconfig we did not find underneath `root_dir`.
     pub fn tsconfig_discovery(&self) -> Option<TsconfigDiscovery> {
-        if let Some(jsconfig) = &self.jsconfig_path {
-            return Some(TsconfigDiscovery::Manual(TsconfigOptions {
-                config_file: jsconfig.clone(),
-                references: TsconfigReferences::Auto,
-            }));
-        }
-        self.tsconfig_path.as_ref().map(|tsconfig| {
-            TsconfigDiscovery::Manual(TsconfigOptions {
-                config_file: tsconfig.clone(),
-                references: TsconfigReferences::Auto,
+        self.jsconfig_path
+            .as_ref()
+            .or(self.tsconfig_path.as_ref())
+            .map(|config| {
+                TsconfigDiscovery::Manual(TsconfigOptions {
+                    config_file: config.clone(),
+                    references: TsconfigReferences::Auto,
+                })
             })
-        })
     }
 
     pub fn webpack_configs(&self) -> &[PathBuf] {

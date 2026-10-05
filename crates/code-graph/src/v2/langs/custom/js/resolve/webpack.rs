@@ -17,30 +17,29 @@ use super::evaluator::{
 pub(super) fn load_project_aliases(
     probe: &super::super::WorkspaceProbe,
 ) -> Vec<(String, Vec<AliasValue>)> {
-    let root_dir = &probe.vfs;
     let mut cache = ModuleEvalCache::default();
     probe
         .webpack_configs()
         .iter()
         .find_map(|config_path| {
-            let aliases = load_webpack_aliases(root_dir, config_path, &mut cache);
+            let aliases = load_webpack_aliases(&probe.vfs, config_path, &mut cache);
             (!aliases.is_empty()).then_some(aliases)
         })
         .unwrap_or_default()
 }
 
 fn load_webpack_aliases(
-    root_dir: &Vfs<Role>,
+    repo: &Vfs<Role>,
     config_path: &Path,
     cache: &mut ModuleEvalCache,
 ) -> Vec<(String, Vec<AliasValue>)> {
-    let Some(exports) = evaluate_module_exports(root_dir, config_path, cache, 0) else {
+    let Some(exports) = evaluate_module_exports(repo, config_path, cache, 0) else {
         return vec![];
     };
 
     let mut aliases = Vec::new();
     let config_dir = config_path.parent().unwrap_or(Path::new("/"));
-    collect_aliases_from_value(&exports, root_dir, config_dir, &mut aliases);
+    collect_aliases_from_value(&exports, repo, config_dir, &mut aliases);
     aliases.sort_by(|left, right| left.0.cmp(&right.0));
     aliases
 }
@@ -49,7 +48,7 @@ fn load_webpack_aliases(
 /// flattened — every entry contributes.
 fn collect_aliases_from_value(
     value: &EvaluatedValue,
-    root_dir: &Vfs<Role>,
+    repo: &Vfs<Role>,
     config_dir: &Path,
     aliases: &mut Vec<(String, Vec<AliasValue>)>,
 ) {
@@ -58,16 +57,16 @@ fn collect_aliases_from_value(
             if let Some(EvaluatedValue::Object(resolve)) = object.get("resolve")
                 && let Some(alias_value) = resolve.get("alias")
             {
-                merge_alias_entries(alias_value, root_dir, config_dir, aliases);
+                merge_alias_entries(alias_value, repo, config_dir, aliases);
             }
 
             if let Some(alias_value) = object.get("alias") {
-                merge_alias_entries(alias_value, root_dir, config_dir, aliases);
+                merge_alias_entries(alias_value, repo, config_dir, aliases);
             }
         }
         EvaluatedValue::Array(items) => {
             for item in items {
-                collect_aliases_from_value(item, root_dir, config_dir, aliases);
+                collect_aliases_from_value(item, repo, config_dir, aliases);
             }
         }
         _ => {}
@@ -76,7 +75,7 @@ fn collect_aliases_from_value(
 
 fn merge_alias_entries(
     value: &EvaluatedValue,
-    root_dir: &Vfs<Role>,
+    repo: &Vfs<Role>,
     config_dir: &Path,
     aliases: &mut Vec<(String, Vec<AliasValue>)>,
 ) {
@@ -85,7 +84,7 @@ fn merge_alias_entries(
     };
 
     for (alias_key, alias_value) in object {
-        let resolved_values = alias_values_from_evaluated(alias_value, root_dir, config_dir);
+        let resolved_values = alias_values_from_evaluated(alias_value, repo, config_dir);
         if resolved_values.is_empty() {
             continue;
         }
@@ -95,31 +94,25 @@ fn merge_alias_entries(
 
 fn alias_values_from_evaluated(
     value: &EvaluatedValue,
-    root_dir: &Vfs<Role>,
+    repo: &Vfs<Role>,
     config_dir: &Path,
 ) -> Vec<AliasValue> {
     match value {
         EvaluatedValue::String(path) => {
             if Path::new(path).is_absolute() || path.starts_with('.') {
-                // Dropped silently unless it resolves inside the repo, so a
-                // hostile `webpack.config.js` cannot redirect an alias at
-                // `/etc/...`, a parent-of-repo path, or a Windows absolute.
-                contained_repo_path(root_dir, config_dir, path)
+                contained_repo_path(repo, config_dir, path)
                     .map(|resolved| vec![AliasValue::Path(resolved.to_string_lossy().to_string())])
                     .unwrap_or_default()
             } else if is_safe_package_specifier(path) {
                 vec![AliasValue::Path(path.clone())]
             } else {
-                // Anything else — `node:child_process`, URLs, paths that
-                // fell through the absolute/`.` filter because of platform
-                // differences — is refused.
                 vec![]
             }
         }
         EvaluatedValue::Bool(false) => vec![AliasValue::Ignore],
         EvaluatedValue::Array(values) => values
             .iter()
-            .flat_map(|value| alias_values_from_evaluated(value, root_dir, config_dir))
+            .flat_map(|value| alias_values_from_evaluated(value, repo, config_dir))
             .collect(),
         _ => vec![],
     }

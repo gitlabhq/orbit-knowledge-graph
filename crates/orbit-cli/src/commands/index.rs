@@ -666,7 +666,7 @@ fn index_repo(
         &client,
         &doc_table,
         ontology,
-        &git.repo_path,
+        &v2_result.ctx.vfs,
         git.project_id,
         &git.commit_sha,
     )

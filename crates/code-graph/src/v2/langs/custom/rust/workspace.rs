@@ -15,7 +15,7 @@ pub(super) struct WorkspaceIndex {
 }
 
 pub(super) struct WorkspacePlan {
-    _embedded_sysroot: Arc<EmbeddedSysroot>,
+    embedded_sysroot: Arc<EmbeddedSysroot>,
     repo: std::sync::Arc<FileSystem<Role>>,
     repo_rust_files: Vec<AbsPathBuf>,
     entries: Vec<PlannedWorkspace>,
@@ -187,7 +187,7 @@ impl WorkspacePlan {
 
         Ok(Self {
             repo,
-            _embedded_sysroot: embedded_sysroot,
+            embedded_sysroot,
             repo_rust_files,
             entries,
         })
@@ -211,7 +211,7 @@ impl WorkspacePlan {
         let planned = &self.entries[idx];
         WorkspaceIndex::load_planned(
             &self.repo,
-            &self._embedded_sysroot,
+            &self.embedded_sysroot,
             &planned.manifest_path,
             &planned.workspace,
             &self.repo_rust_files,
@@ -277,11 +277,7 @@ fn candidate_file_indexes(
         .collect()
 }
 
-pub(super) fn standalone_workspace(
-    relative_path: &str,
-    source: String,
-    repo_root: &Path,
-) -> WorkspaceIndex {
+pub(super) fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {
     let mut db = RootDatabase::new(None);
     let file_id = FileId::from_raw(0);
     let mut file_set = FileSet::default();
@@ -308,7 +304,7 @@ pub(super) fn standalone_workspace(
         },
         Vec::new(),
         false,
-        Arc::new(abs_path_from(repo_root)),
+        Arc::new(AbsPathBuf::assert(Utf8PathBuf::from("/"))),
         Arc::new(CrateWorkspaceData {
             target: Err("standalone file has no target layout".into()),
             toolchain: None,
@@ -330,13 +326,6 @@ pub(super) fn standalone_workspace(
         crate_names_by_file_id: Arc::new(HashMap::new()),
         include_crate_name_in_fqn: false,
     }
-}
-
-fn abs_path_from(path: &Path) -> AbsPathBuf {
-    Utf8PathBuf::from_path_buf(path.to_path_buf())
-        .ok()
-        .map(AbsPathBuf::assert)
-        .unwrap_or_else(|| AbsPathBuf::assert(Utf8PathBuf::from("/")))
 }
 
 /// Load a rust-analyzer `ProjectWorkspace` into a fresh `RootDatabase` without
@@ -418,11 +407,7 @@ fn collect_abs_rust_files(files: &[FileInput]) -> (Vec<AbsPathBuf>, Vec<usize>) 
     let mut paths = Vec::with_capacity(files.len());
     let mut indexes = Vec::with_capacity(files.len());
     for (idx, file) in files.iter().enumerate() {
-        let candidate = if Path::new(file).is_absolute() {
-            PathBuf::from(file)
-        } else {
-            root.join(file)
-        };
+        let candidate = root.join(file);
         if let Ok(utf8) = Utf8PathBuf::from_path_buf(candidate) {
             paths.push(AbsPathBuf::assert(utf8));
             indexes.push(idx);

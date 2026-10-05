@@ -7,6 +7,7 @@ use arrow::array::{Int64Array, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
+use orbit_utils::files::{Tag, Vfs};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -187,11 +188,11 @@ FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
     ))
 }
 
-pub fn populate_def_doc_sources(
+pub fn populate_def_doc_sources<T: Tag>(
     client: &DuckDbClient,
     doc_table: &str,
     ontology: &Ontology,
-    repository_root: &Path,
+    repository: &Vfs<T>,
     project_id: i64,
     commit_sha: &str,
 ) -> Result<()> {
@@ -236,14 +237,17 @@ ORDER BY {file_path}, {id}",
     for index in 0..ids.len() {
         if current_path != paths[index] {
             current_path.clone_from(&paths[index]);
-            let path = repository_root.join(&current_path);
-            content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                eprintln!(
-                    "warning: skipping body search for {}: {error}",
-                    path.display()
-                );
-                String::new()
-            });
+            content = repository
+                .read(Path::new(&current_path))
+                .and_then(|bytes| {
+                    String::from_utf8(bytes.to_vec()).map_err(|error| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, error)
+                    })
+                })
+                .unwrap_or_else(|error| {
+                    eprintln!("warning: skipping body search for {current_path}: {error}");
+                    String::new()
+                });
         }
         let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
             (Ok(start), Ok(end)) if start < content.len() => content
