@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_on_finish() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.finish(42, 3);
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn billing_observer_skips_on_error() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.record_error(&PipelineError::Execution("test error".into()));
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_with_lowercase_realm_alias() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("saas".into()),
             ..test_inputs()
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_with_self_managed_realm_alias() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("self-managed".into()),
             ..test_inputs()
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn billing_observer_skips_when_realm_absent() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: None,
             ..test_inputs()
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn billing_observer_skips_when_realm_unrecognized() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("bogus".into()),
             ..test_inputs()
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_when_optional_fields_absent() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             organization_id: None,
             instance_id: None,

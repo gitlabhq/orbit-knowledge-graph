@@ -1,9 +1,10 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
-use crate::proto::ExecuteQueryMessage;
+use crate::proto::{ExecuteQueryMessage, ExecuteQueryResult};
 use clickhouse_client::ArrowClickHouseClient;
 use nats_client::NatsClient;
 use orbit_billing::{BillingObserver, BillingTracker};
@@ -19,6 +20,7 @@ use query_engine::pipeline::{
 };
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
+use super::helpers::send_query_result;
 use super::metrics::OTelPipelineObserver;
 use super::stages::{
     AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, RoutingOutput,
@@ -43,10 +45,15 @@ pub struct QueryPipelineService {
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
+    stream_timeout: Duration,
 }
 
 impl QueryPipelineService {
-    pub fn new(client: Arc<ArrowClickHouseClient>, analytics_config: Arc<AnalyticsConfig>) -> Self {
+    pub fn new(
+        client: Arc<ArrowClickHouseClient>,
+        analytics_config: Arc<AnalyticsConfig>,
+        stream_timeout: Duration,
+    ) -> Self {
         Self {
             client,
             resolver_registry: None,
@@ -54,6 +61,7 @@ impl QueryPipelineService {
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
+            stream_timeout,
         }
     }
 
@@ -82,10 +90,10 @@ impl QueryPipelineService {
         schema: &SchemaSnapshot,
         request_context: RequestContext,
         query: RawQuery,
-        tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+        tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        timeout: std::time::Duration,
-    ) -> Result<QueryServiceOutput, PipelineError> {
+        render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+    ) -> Result<(), PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
         let schema_obs = OTelPipelineObserver::start();
@@ -109,7 +117,7 @@ impl QueryPipelineService {
         server_extensions.insert(Arc::clone(&self.client));
         server_extensions.insert(Arc::clone(&schema.data_model));
         server_extensions.insert(claims);
-        server_extensions.insert(tx);
+        server_extensions.insert(tx.clone());
         server_extensions.insert(stream);
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
@@ -165,25 +173,39 @@ impl QueryPipelineService {
                 .finish()
                 .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
                 .inspect_err(|e| obs.record_error(e))?;
-            Ok(QueryServiceOutput::Graph(Box::new(output)))
+            Ok::<_, PipelineError>(QueryServiceOutput::Graph(Box::new(output)))
         };
 
-        let output = match tokio::time::timeout(timeout, pipeline).await {
-            Ok(Ok(output)) => output,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                let e = PipelineError::Timeout;
-                obs.record_error(&e);
-                return Err(e);
+        let output = tokio::select! {
+            biased;
+            () = tx.closed() => Err(PipelineError::client_closed()),
+            result = tokio::time::timeout(self.stream_timeout, pipeline) => {
+                result.map_err(|_| PipelineError::Timeout)
             }
         };
-
-        match &output {
-            QueryServiceOutput::Graph(output) => {
-                obs.finish(output.row_count, output.redacted_count)
-            }
-            QueryServiceOutput::Schema(_) => schema_obs.finish_schema(),
+        let counts = match output {
+            Ok(stages) => deliver(tx, stages?, render).await,
+            Err(e) => Err(e),
         }
-        Ok(output)
+        .inspect_err(|e| obs.record_error(e))?;
+
+        match counts {
+            Some((row_count, redacted_count)) => obs.finish(row_count, redacted_count),
+            None => schema_obs.finish_schema(),
+        }
+        Ok(())
     }
+}
+
+async fn deliver(
+    responses: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    output: QueryServiceOutput,
+    render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+) -> Result<Option<(usize, usize)>, PipelineError> {
+    let counts = match &output {
+        QueryServiceOutput::Graph(output) => Some((output.row_count, output.redacted_count)),
+        QueryServiceOutput::Schema(_) => None,
+    };
+    send_query_result(responses, render(output)?).await?;
+    Ok(counts)
 }
