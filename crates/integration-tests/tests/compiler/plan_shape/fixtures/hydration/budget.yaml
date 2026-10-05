@@ -1,0 +1,22 @@
+name: Hydration widens prefixes to the budget during planning
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}]}
+  gql: |
+    MATCH (f:File {id: 1}) RETURN f.path
+hydration:
+  dynamic: true
+  path_segment_budget: 1
+  paths:
+    f: ["1/100/10/", "1/200/20/"]
+logical:
+  expect:
+    - (Input hydration (...))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter f.traversal_path PREFIX UNION ['1/'], f.id IN [1] (_))
+    emitted:
+      expect:
+        - (Filter startsWith(f.traversal_path, '1/'), f.id = 1 (_))

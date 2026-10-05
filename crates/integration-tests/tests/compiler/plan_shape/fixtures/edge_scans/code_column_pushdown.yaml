@@ -1,0 +1,15 @@
+name: Code scope columns push to edges once while reserved IDs keep endpoint meaning
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"project_id":9,"branch":"main"},"node_ids":[1]},{"id":"b","entity":"Definition","filters":{"project_id":9,"branch":"main"}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+  gql: |
+    MATCH (a:Definition {id: 1, project_id: 9, branch: 'main'})-[:CALLS]->(b:Definition {project_id: 9, branch: 'main'}) RETURN a, b
+logical:
+  expect: ["(Filter a.project_id = 9, a.branch = 'main', ... (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter e0.branch = 'main', e0.project_id = 9, e0.source_id = 1, e0.relationship_kind = 'CALLS', e0.source_kind = 'Definition', e0.target_kind = 'Definition', e0._deleted = false (Scan Table(gl_code_edge) AS e0))"]
+      reject: ["(Filter e0.id = 1, ... (_))"]
+    emitted:
+      expect: ["(Filter e0.branch = 'main', e0.project_id = 9, e0.source_id = 1, ... (_))"]

@@ -1,0 +1,29 @@
+name: Single-edge aggregation retains latest-row dedup and conditional counting
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1]},
+        {"id": "b", "entity": "Definition"}
+      ],
+      "relationships": [{"type": "CALLS", "from": "a", "to": "b"}],
+      "aggregations": [{"count": "b", "as": "n"}]
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN count(b) AS n
+logical:
+  expect:
+    - (Aggregate COUNT(b) AS n (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS e0))))
+        - (Aggregate COUNT() FILTER [e0.relationship_kind = 'CALLS', e0.source_kind = 'Definition', e0.target_kind = 'Definition', e0._deleted = false, e0.source_id = 1] AS n (_))
+      reject:
+        - (Deduplicate Final (Scan Table(gl_code_edge) AS e0))
+    emitted:
+      expect:
+        - (Deduplicate LimitBy 1 BY ... (_))
+        - (Aggregate countIf((e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)) AS n (_))

@@ -1,0 +1,24 @@
+name: Hydration without pinned IDs has no ID predicate
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["path"]}]}
+  gql: |
+    MATCH (f:File) RETURN f.path
+hydration:
+  paths:
+    f: ["1/", "1/100/"]
+logical:
+  expect:
+    - (Input hydration (...))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter f.traversal_path PREFIX UNION ['1/100/'] (Scan Table(gl_file) AS f))
+      reject:
+        - (Filter f.id IN ?, ... (_))
+    emitted:
+      expect:
+        - (Filter startsWith(f.traversal_path, '1/100/') (Scan Table(gl_file) AS f))
+      reject:
+        - (Filter f.id IN ?, ... (_))

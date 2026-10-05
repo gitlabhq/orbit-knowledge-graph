@@ -1,0 +1,16 @@
+name: A shared denormalized node filter is emitted only once
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"definition_type":"function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {definition_type: 'function'})-[:CALLS]->(c:Definition) RETURN a, b, c
+logical:
+  expect: ["(Filter b.definition_type = 'function' (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter e0.target_tags HAS ANY ['definition_type:function'], ... (_))"]
+      reject: ["(Filter e1.source_tags HAS ANY ?, ... (_))", "(Scan Table(gl_definition) ...)"]
+    emitted:
+      expect: ["(Filter has(e0.target_tags, 'definition_type:function'), ... (_))"]
+      reject: ["(Filter has(e1.source_tags, ?), ... (_))"]

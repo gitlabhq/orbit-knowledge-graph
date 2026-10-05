@@ -1,0 +1,16 @@
+name: Conditional edge aggregation survives a grouped node join
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["b.name"],"aggregations":[{"count":"a","as":"n"}]}
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN b.name, count(a) AS n
+logical:
+  expect: ["(Aggregate ... (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON b.id = e0.target_id (Deduplicate LimitBy ... (_)) (Bind b (_)))
+        - (Aggregate COUNT() FILTER ? AS n, ... (_))
+    emitted:
+      expect: ["(Aggregate countIf((e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)) AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]

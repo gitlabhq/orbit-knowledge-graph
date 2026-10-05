@@ -236,95 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_single_tp_emits_starts_with() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
-        let sql = render(&node);
-        assert!(
-            sql.contains("startsWith"),
-            "dynamic single TP should emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic path set should not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn dynamic_multiple_tps_emit_or_disjunction() {
-        let node = emit_dynamic(
-            &[plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/100/", "1/9970/200/"],
-            )],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 2,
-            "two leaf TPs should produce two startsWith calls: {sql}"
-        );
-        assert!(sql.contains(" OR "), "two TPs should use OR: {sql}");
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic path set should use OR not arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_single_tp_emits_starts_with() {
-        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
-        let sql = render(&node);
-        assert!(
-            sql.contains("startsWith"),
-            "static single TP should emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "static path should not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_multiple_tps_emit_or_chain() {
-        let node = emit_static(
-            &[plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/100/", "1/9970/200/", "1/9970/300/"],
-            )],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 3,
-            "static should emit one startsWith per leaf path: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "static path must not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains(" OR "),
-            "static path should OR multiple startsWith calls: {sql}"
-        );
-    }
-
-    #[test]
     fn large_dynamic_tp_sets_emit_array_exists() {
         let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
@@ -382,30 +293,6 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_no_tp_omits_path_filter() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
-        let sql = render(&node);
-        assert!(
-            !sql.contains("startsWith"),
-            "empty TPs should not emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "empty TPs should not emit arrayExists: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_no_tp_omits_path_filter() {
-        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
-        let sql = render(&node);
-        assert!(
-            !sql.contains("startsWith"),
-            "empty TPs should not emit startsWith: {sql}"
-        );
-    }
-
-    #[test]
     fn dynamic_tp_filter_precedes_id_filter() {
         let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10);
         let sql = render(&node);
@@ -426,38 +313,6 @@ mod tests {
         assert!(
             tp_pos < in_pos,
             "TP filter should precede ID filter for primary key pruning: {sql}"
-        );
-    }
-
-    #[test]
-    fn dynamic_leaf_pruning_drops_broad_prefix() {
-        let node = emit_dynamic(
-            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
-            10,
-        );
-        let sql = render(&node);
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            1,
-            "ancestor should be pruned, only one startsWith for the leaf: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic leaf set should not emit arrayExists: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_leaf_pruning_drops_broad_prefix() {
-        let node = emit_static(
-            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 1,
-            "ancestor should be pruned, only one startsWith for the leaf: {sql}"
         );
     }
 }

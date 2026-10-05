@@ -1,0 +1,14 @@
+name: ID ranges constrain edge endpoints and seed downstream cascades
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","id_range":{"start":1,"end":10}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) WHERE a.id >= 1 AND a.id <= 10 RETURN a, b, c
+logical:
+  expect: ["(Filter ... (NodeScan Definition AS a))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter e0.source_id >= 1, e0.source_id <= 10, ... (_))", "(SemiJoin e1.source_id IN subquery (_) (Project ... (Filter e0p.source_id >= 1, e0p.source_id <= 10, ... (_))))"]
+    emitted:
+      expect: ["(Filter e0.source_id >= 1, e0.source_id <= 10, ... (_))", "(SemiJoin e1.source_id IN subquery (_) (_))"]
