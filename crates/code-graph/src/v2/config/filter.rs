@@ -1,9 +1,6 @@
-//! The single filtering policy for code indexing, shared by every file source
-//! as a [`FileStreamHooks`] implementation. Per file it produces the full
-//! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
-//! parsed), `ListOnly` (excluded/oversize/binary/minified/LFS pointer: a node,
-//! no bytes), or `Drop`. Resolver inputs are never in the denylist, so they
-//! survive. A total-bytes [`Counter`] aborts an oversized repo.
+//! Code-indexing policy for source files and resolver inputs. VFS callers use `Pass`;
+//! the incremental engine still uses `FileStreamHooks` until its inventory migration.
+//! Both interfaces share the content rules. VFS limits belong to the store.
 
 use std::path::Path;
 use std::sync::LazyLock;
