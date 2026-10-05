@@ -3,7 +3,7 @@ query:
   json: |
     {
       "query_type": "neighbors",
-      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [5001]}],
       "neighbors": {"direction": "both"}
     }
 expect:
