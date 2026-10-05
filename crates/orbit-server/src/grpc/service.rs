@@ -460,7 +460,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 match result {
                     Ok(()) => {}
-                    Err(e) if tx.is_closed() => {
+                    Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
                         info!(error = %e, "Client left before the query result");
                     }
                     Err(e @ PipelineError::Timeout) => {
