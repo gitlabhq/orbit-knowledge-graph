@@ -10,6 +10,7 @@ use flate2::read::GzDecoder;
 use tar::EntryType;
 use tracing::warn;
 
+use super::super::path::is_safe_relative_path;
 use super::{Loading, Put, Source, SourceError, Tag};
 
 pub struct Archive<R: Read>(pub R);
@@ -66,7 +67,7 @@ fn relative_path<R: Read>(
     root: &mut Option<OsString>,
 ) -> Result<Option<String>, SourceError> {
     let entry_path = entry.path().map_err(std::io::Error::other)?;
-    if !crate::fs::is_safe_relative_path(&entry_path) {
+    if !is_safe_relative_path(&entry_path) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "path traversal detected in archive entry",
@@ -106,7 +107,7 @@ fn link_target<R: Read>(
                 "archive link has no target",
             )
         })?;
-    if kind == EntryType::Link && !crate::fs::is_safe_relative_path(Path::new(&target)) {
+    if kind == EntryType::Link && !is_safe_relative_path(Path::new(&target)) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid archive hard link",

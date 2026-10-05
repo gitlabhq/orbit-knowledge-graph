@@ -13,6 +13,7 @@ use rustix::fs::{AtFlags, FileType, readlinkat, statat};
 use tracing::warn;
 
 use super::super::disk;
+use super::super::path::is_safe_relative_path;
 use super::{Loading, Put, Source, SourceError, Tag};
 
 pub struct Checkout<'a>(pub &'a Path);
@@ -83,7 +84,7 @@ impl Source for Changed<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         let root = self.root.canonicalize()?;
         self.paths.into_par_iter().try_for_each(|path| {
-            if !crate::fs::is_safe_relative_path(Path::new(&path)) || path.is_empty() {
+            if !is_safe_relative_path(Path::new(&path)) || path.is_empty() {
                 return Err(
                     std::io::Error::new(ErrorKind::InvalidInput, "invalid changed path").into(),
                 );

@@ -8,6 +8,11 @@ use rustc_hash::FxHashMap;
 
 pub(super) const MAX_LINK_DEPTH: usize = 40;
 
+pub(super) fn is_safe_relative_path(path: &Path) -> bool {
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
 pub(super) fn key(path: &Path) -> Option<String> {
     let mut key = String::new();
     for component in path.components() {
