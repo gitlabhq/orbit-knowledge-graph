@@ -1,15 +1,28 @@
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, execute_query_message,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, ExecuteQueryResult,
+    execute_query_message,
 };
 
 use query_engine::pipeline::{ClickHouseLimit, PipelineError};
 
 use crate::pipeline::metrics::failure_reason;
+
+pub(super) async fn send_query_result(
+    tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    result: ExecuteQueryResult,
+) -> Result<(), PipelineError> {
+    info!("Sending final query result");
+    tx.send(Ok(ExecuteQueryMessage {
+        content: Some(execute_query_message::Content::Result(result)),
+    }))
+    .await
+    .map_err(|_| PipelineError::client_closed())
+}
 
 pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,

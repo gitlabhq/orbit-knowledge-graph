@@ -109,25 +109,20 @@ impl BillingTracker for SnowplowBillingTracker {
     }
 }
 
-#[cfg(test)]
-pub(crate) struct InMemoryBillingTracker {
+#[cfg(any(test, feature = "testkit"))]
+#[derive(Default)]
+pub struct InMemoryBillingTracker {
     count: std::sync::atomic::AtomicUsize,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 impl InMemoryBillingTracker {
-    pub fn new() -> Self {
-        Self {
-            count: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-
     pub fn count(&self) -> usize {
         self.count.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 impl BillingTracker for InMemoryBillingTracker {
     fn track(&self, _event: BillingEvent) -> Result<Uuid, labkit_events::Error> {
         self.count
