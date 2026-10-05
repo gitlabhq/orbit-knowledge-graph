@@ -1,0 +1,9 @@
+sources: [memory, puts, lazy, archive]
+entries:
+  - {path: one, data: {text: x, repeat: 80}}
+  - {path: two, data: {text: x, repeat: 80}}
+  - {path: three, data: {text: x, repeat: 80}}
+limits: {resident_bytes: 100}
+steps:
+  - {op: usage, expect: {files: 3, resident: 80, kept: 240, deduped_bytes: 160, spilled: 0}}
+  - {op: read, path: two, expect: {ok: {text: x, repeat: 80}}}

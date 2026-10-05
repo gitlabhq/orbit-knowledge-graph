@@ -18,6 +18,8 @@
 //! Cancellation is cooperative between files, not an interrupt for blocked source I/O.
 //! Memory limits cover stored content, not node metadata, decompression or caller buffers.
 
+#![doc = include_str!("README.md")]
+
 mod disk;
 mod limits;
 mod loading;
@@ -25,9 +27,7 @@ mod path;
 mod policy;
 mod scratch;
 pub mod sources;
-#[cfg(test)]
-mod tests;
-mod vfs;
+mod store;
 
 use std::io;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ pub use limits::{CapExceeded, Limits};
 pub use loading::{Loading, Put};
 pub use policy::{Decision, File, Pass, Tag, Then};
 pub use sources::Source;
-pub use vfs::{Kind, Stat, Vfs};
+pub use store::{Kind, Stat, Vfs};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {

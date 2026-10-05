@@ -1,0 +1,4 @@
+sources: [changed]
+entries: []
+changed: [../outside]
+load_error: InvalidInput

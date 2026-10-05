@@ -1,0 +1,4 @@
+sources: [archive]
+entries:
+  - {path: link, hardlink: ../secret}
+load_error: InvalidData

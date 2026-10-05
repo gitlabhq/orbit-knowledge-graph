@@ -1,0 +1,12 @@
+sources: [memory, puts, lazy, archive]
+entries:
+  - {path: large, data: {text: a, repeat: 4096}}
+  - {path: duplicate, data: {text: a, repeat: 4096}}
+  - {path: small, data: fits}
+limits: {resident_bytes: 4}
+options: {scratch: existing, compress_spill: true}
+steps:
+  - {op: read, path: large, expect: {ok: {text: a, repeat: 4096}}}
+  - {op: read, path: duplicate, expect: {ok: {text: a, repeat: 4096}}}
+  - {op: read, path: small, expect: {ok: fits}}
+  - {op: usage, expect: {files: 3, resident: 4, deduped_bytes: 4096, spilled_below: 100}}
