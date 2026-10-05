@@ -1,0 +1,16 @@
+name: Filter-only multi-ID FK targets elide into holder membership
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[1000,1001]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}]}
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1001] RETURN count(mr) AS n
+logical:
+  expect: ["(Filter p.id IN [1000, 1001] (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter mr.project_id IN [1000, 1001], ... (_))"]
+      reject: ["(Scan Table(gl_project) ...)", "(Scan Table(gl_edge) ...)"]
+    emitted:
+      expect: ["(Filter mr.project_id IN [1000, 1001], ... (_))"]
+      reject: ["(Scan Table(gl_project) ...)"]

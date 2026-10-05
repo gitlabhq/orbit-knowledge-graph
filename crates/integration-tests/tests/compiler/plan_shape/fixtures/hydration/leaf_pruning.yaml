@@ -1,0 +1,27 @@
+name: Hydration plans pruned path prefixes before current-row rendering
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["path"]}]}
+  gql: |
+    MATCH (f:File) WHERE f.id IN [1, 2] RETURN f.path
+hydration:
+  dynamic: true
+  paths:
+    f: ["1/", "1/100/", "1/200/"]
+logical:
+  expect:
+    - (Input hydration (...))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - |
+          (Hydration
+            (Project f.path
+              (Filter f._deleted = false
+                (Deduplicate LimitBy ...
+                  (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
+                    (Scan Table(gl_file) AS f))))))
+    emitted:
+      expect:
+        - (Filter startsWith(f.traversal_path, '1/100/') OR startsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))

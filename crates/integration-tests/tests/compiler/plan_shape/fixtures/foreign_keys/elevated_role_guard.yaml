@@ -1,0 +1,16 @@
+name: Elevated-role FK targets retain their hop for later authorization
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability"},{"id":"n","entity":"Note","node_ids":[3000]},{"id":"f","entity":"VulnerabilityOccurrence","node_ids":[90000,90001]}],"relationships":[{"type":"HAS_NOTE","from":"v","to":"n"},{"type":"HAS_FINDING","from":"v","to":"f"}],"aggregations":[{"count":"v","as":"n"}]}
+  gql: |
+    MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
+    MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
+    WHERE f.id IN [90000, 90001] RETURN count(v) AS n
+logical:
+  expect: ["(EdgeScan HAS_FINDING v->f AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Join ON e0.source_id = e1.source_id (_) (_))", "(Filter ?.relationship_kind = 'HAS_FINDING', ... (_))"]
+    emitted:
+      expect: ["(Filter ?.relationship_kind = 'HAS_FINDING', ... (_))"]

@@ -1,0 +1,17 @@
+name: Incoming neighbors pin traversal paths from the namespace center
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[100]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
+  gql: |
+    MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor) RETURN g, neighbor
+logical:
+  expect: ["(Input neighbors (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Neighbors center=g direction=incoming directional ... (_))"]
+    emitted:
+      expect:
+        - (SemiJoin e.traversal_path IN subquery (_) (Project _tpd.traversal_path AS traversal_path (_)))
+        - (Filter _tpd.id = 100, _tpd._deleted = false (Scan Table(gl_group) AS _tpd))
+      reject: ["(Join ... (_) (_))"]

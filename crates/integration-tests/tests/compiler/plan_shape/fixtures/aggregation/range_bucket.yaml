@@ -1,0 +1,25 @@
+name: Planned range and time bucket lower to comparisons and typed date expressions
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 100}}],
+      "group_by": [{"key": "n.created_at", "truncate": "month"}],
+      "aggregations": [{"count": "n", "as": "n"}]
+    }
+  gql: |
+    MATCH (n:Note) WHERE n.id >= 1 AND n.id <= 100
+    RETURN date_trunc('month', n.created_at), count(n) AS n
+logical:
+  expect:
+    - (Filter n.id >= 1, n.id <= 100 (NodeScan Note AS n))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Aggregate group bucket(month, n.created_at), bucket(month, n.created_at) AS n_created_at_month, COUNT() AS n (_))
+        - (Filter n.id >= 1, n.id <= 100, n._deleted = false (_))
+    emitted:
+      expect:
+        - (Aggregate group toDate32(toStartOfMonth(n.created_at)), toDate32(toStartOfMonth(n.created_at)) AS n_created_at_month, COUNT() AS n (_))
+        - (Filter n.id >= 1, n.id <= 100, n._deleted = false (_))

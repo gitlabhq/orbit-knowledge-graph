@@ -1,0 +1,17 @@
+name: Narrowed node scans push immutable sort-key filters inside latest-row resolution
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]},{"id":"p","entity":"Project","node_ids":[1000,1001],"filters":{"star_count":2}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"n"}]}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT]->(p:Project {star_count: 2}) WHERE p.id IN [1000, 1001] RETURN p.name, count(mr) AS n
+logical:
+  expect: ["(Filter p.star_count = 2, p.id IN [1000, 1001] (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Bind p (Filter p.star_count = 2, p.id IN [1000, 1001], p._deleted = false (Deduplicate LimitBy p.traversal_path, p.id (Filter p.id IN _candidate_p.id, p.id IN [1000, 1001] (Scan Table(gl_project) AS p)))))
+    emitted:
+      expect:
+        - (Filter p.id IN _candidate_p.id, p.id IN [1000, 1001] (Scan Table(gl_project) AS p))
+        - (Filter p.star_count = 2, p.id IN [1000, 1001], p._deleted = false (_))

@@ -1,0 +1,19 @@
+name: A pinned final endpoint reverses the edge chain
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition","node_ids":[7]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
+logical:
+  expect: ["(EdgeScan CALLS a->b AS e0)"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON e0.source_id = e1.target_id (_) (_))
+        - (Filter e0.target_id = 7, ... (Deduplicate Final (Scan Table(gl_code_edge) AS e0)))
+      reject: ["(Scan Table(gl_definition) ...)"]
+    emitted:
+      expect:
+        - (Join ON e0.source_id = e1.target_id (_) (_))
+        - (Filter e0.target_id = 7, ... (Deduplicate Final (Scan Table(gl_code_edge) AS e0)))

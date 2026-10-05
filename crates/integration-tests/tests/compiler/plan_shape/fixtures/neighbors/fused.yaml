@@ -1,0 +1,18 @@
+name: Default identity neighbors select a single fused scan
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1000]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}
+  gql: |
+    MATCH (p:Project {id: 1000})-[:IN_PROJECT]-(neighbor) RETURN p, neighbor
+logical:
+  expect:
+    - (Input neighbors (...))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Neighbors center=p direction=both fused table=gl_edge center_filter=false relationships=[IN_PROJECT] ... (_))
+    emitted:
+      occurrences:
+        - pattern: (Scan Table(gl_edge) AS e)
+          count: 1
