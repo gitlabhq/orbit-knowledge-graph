@@ -343,7 +343,11 @@ fn degradation_warning(response: &SkillHttpResponse) -> String {
 }
 
 fn body_excerpt(body: &str) -> String {
-    let single_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let single_line = body
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(char::is_control, "");
     match single_line.char_indices().nth(BODY_EXCERPT_CHARS) {
         Some((end, _)) => format!("{}…", &single_line[..end]),
         None => single_line,

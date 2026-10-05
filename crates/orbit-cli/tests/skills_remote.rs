@@ -467,7 +467,7 @@ fn status_reply(status: u16) -> Reply {
         status,
         reason: "Error",
         etag: None,
-        body: format!("server said\n  {status}   nope"),
+        body: format!("server said\n  {status}   nope\x1b[0m\x07"),
     }
 }
 
@@ -481,7 +481,8 @@ fn degradable_statuses_without_cache_use_embedded_skill() {
         assert!(output.status.success(), "{status}: {}", stderr(&output));
         assert!(stderr(&output).contains(&format!("HTTP {status}")));
         assert!(stderr(&output).contains("embedded local skill"));
-        assert!(stderr(&output).contains(&format!("(server said {status} nope)")));
+        assert!(stderr(&output).contains(&format!("(server said {status} nope[0m)")));
+        assert!(!stderr(&output).contains(['\x1b', '\x07']));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.starts_with("---\n") && stdout.contains("name: orbit-cli"));
         assert!(!stdout.contains("warning"));
