@@ -1,0 +1,4 @@
+sources: [lazy]
+entries:
+  - {path: file, read_error: stream_reset}
+load_error: Other

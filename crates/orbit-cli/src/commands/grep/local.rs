@@ -160,8 +160,8 @@ mod tests {
             )
             .unwrap();
         let search = g.search();
-        let files = orbit_utils::files::Vfs::load(
-            orbit_utils::files::sources::Checkout(root.path()),
+        let files = orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Checkout(root.path()),
             (),
             Default::default(),
             Default::default(),

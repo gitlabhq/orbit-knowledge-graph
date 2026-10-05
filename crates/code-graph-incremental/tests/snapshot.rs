@@ -5,7 +5,7 @@ use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, State, templates};
-use orbit_utils::files::sources::{Changed, Checkout};
+use orbit_utils::vfs::sources::{Changed, Checkout};
 mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";

@@ -4,10 +4,10 @@ use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Wo
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
 use code_graph_incremental::{Context, Env, Limits, Pipeline};
-use orbit_utils::files::sources::{Changed, Checkout};
+use orbit_utils::vfs::sources::{Changed, Checkout};
 mod common;
 use code_graph::v2::config::Role;
-use orbit_utils::files::Decision;
+use orbit_utils::vfs::Decision;
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     for (path, content) in files {

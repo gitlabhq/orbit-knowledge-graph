@@ -2,7 +2,7 @@ use crate::v2::config::{Language, LanguageFamily, Role, detect_language_from_pat
 use crate::v2::error::{AnalyzerError, FileFault, FileReason, FileSkip};
 use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
-use orbit_utils::files::{Decision as FileDecision, Vfs};
+use orbit_utils::vfs::{Decision as FileDecision, Vfs};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1738,7 +1738,7 @@ pub(crate) mod testing {
     }
 
     use super::*;
-    use orbit_utils::files::{
+    use orbit_utils::vfs::{
         File, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag,
         sources::{Checkout, Memory},
     };

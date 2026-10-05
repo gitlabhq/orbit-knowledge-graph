@@ -3,7 +3,7 @@ use super::sysroot::EmbeddedSysroot;
 use super::*;
 use crate::v2::config::Role;
 use crate::v2::pipeline::FileInput;
-use orbit_utils::files::{Kind, Vfs as FileSystem};
+use orbit_utils::vfs::{Kind, Vfs as FileSystem};
 
 #[derive(Clone)]
 pub(super) struct WorkspaceIndex {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
 use code_graph::v2::{GraphConverter, OnBatch, Pipeline, PipelineConfig, PipelineResult};
-use orbit_utils::files::{
+use orbit_utils::vfs::{
     Vfs,
     sources::{Checkout, Memory},
 };

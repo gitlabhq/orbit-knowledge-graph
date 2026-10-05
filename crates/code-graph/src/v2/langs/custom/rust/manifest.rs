@@ -1,7 +1,7 @@
 use super::sysroot::EmbeddedSysroot;
 use super::*;
 use crate::v2::config::Role;
-use orbit_utils::files::{Kind, Vfs as FileSystem};
+use orbit_utils::vfs::{Kind, Vfs as FileSystem};
 
 /// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
 /// well under this; anything larger is rejected before the read allocates.

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use orbit_utils::files::{Decision as FileDecision, File, Pass};
+use orbit_utils::vfs::{Decision as FileDecision, File, Pass};
 
 use super::Language;
 
@@ -215,7 +215,7 @@ mod tests {
     use super::*;
     use crate::v2::config::detect_language_from_path;
 
-    use orbit_utils::files::{Limits, SourceError, Vfs, sources::Memory};
+    use orbit_utils::vfs::{Limits, SourceError, Vfs, sources::Memory};
 
     fn classify(path: &str, bytes: &[u8]) -> FileDecision<Role> {
         let repo = Vfs::load(

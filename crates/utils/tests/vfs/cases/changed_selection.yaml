@@ -1,0 +1,9 @@
+sources: [changed]
+entries:
+  - {path: a, data: a}
+  - {path: untouched, data: x}
+  - {path: dir/child, data: x}
+changed: [a, dir, missing]
+steps:
+  - {op: read_dir, path: /, expect: {ok: [a]}}
+  - {op: usage, expect: {files: 1}}

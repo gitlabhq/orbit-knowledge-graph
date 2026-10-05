@@ -3,7 +3,7 @@
 
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::config::Role;
-use orbit_utils::files::Vfs;
+use orbit_utils::vfs::Vfs;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 

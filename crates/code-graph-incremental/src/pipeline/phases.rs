@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use code_graph::v2::config::Role;
-use orbit_utils::files::Decision;
+use orbit_utils::vfs::Decision;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 

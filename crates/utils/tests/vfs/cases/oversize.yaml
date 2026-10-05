@@ -1,0 +1,8 @@
+sources: [memory, puts, lazy, checkout, changed, archive]
+entries:
+  - {path: big, data: large}
+limits: {file_bytes: 4}
+steps:
+  - {op: files, expect: [{path: big, size: 5, decision: {kind: list, value: oversize}}]}
+  - {op: usage, expect: {resident: 0, kept: 0}}
+  - {op: lazy_reads, expect: 0}

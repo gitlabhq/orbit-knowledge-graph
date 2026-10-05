@@ -7,7 +7,7 @@ use code_graph_incremental::pipeline::{
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State};
-use orbit_utils::files::sources::Checkout;
+use orbit_utils::vfs::sources::Checkout;
 mod common;
 
 const MAIN: &str = "\

@@ -2,7 +2,7 @@
 //! Package metadata is read once; the resolver and evaluator share the store.
 
 use crate::v2::config::Role;
-use orbit_utils::files::{Kind, Vfs};
+use orbit_utils::vfs::{Kind, Vfs};
 use oxc_resolver::{TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

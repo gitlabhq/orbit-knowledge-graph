@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{Display, Emit, Export, Exported};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
-use orbit_utils::files::sources::Checkout;
+use orbit_utils::vfs::sources::Checkout;
 mod common;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;

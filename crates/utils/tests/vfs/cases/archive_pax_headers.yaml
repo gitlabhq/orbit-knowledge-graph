@@ -1,0 +1,8 @@
+sources: [archive]
+entries:
+  - {path: pax_global_header, raw_type: 103, data: "comment=x\n"}
+  - {path: PaxHeader/file, raw_type: 120, data: "path=root/file\n"}
+  - {path: file, data: content}
+steps:
+  - {op: read, path: file, expect: {ok: content}}
+  - {op: usage, expect: {files: 1}}

@@ -1,0 +1,5 @@
+sources: [memory, puts, lazy, archive]
+entries:
+  - {path: big, data: large}
+limits: {resident_bytes: 0, spilled_bytes: 4}
+load_error: cap:spilled_bytes

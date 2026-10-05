@@ -1,0 +1,6 @@
+sources: [lazy]
+entries:
+  - {path: huge, declared_size: 18446744073709551615, read_error: must_not_read}
+  - {path: extra, data: x}
+limits: {file_bytes: 0}
+load_error: cap:total_bytes

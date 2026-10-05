@@ -426,7 +426,7 @@ impl CodeIndexer {
             .files()
             .filter(|e| {
                 e.decision()
-                    == orbit_utils::files::Decision::Keep(code_graph::v2::config::Role::Source)
+                    == orbit_utils::vfs::Decision::Keep(code_graph::v2::config::Role::Source)
                     && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
             })
             .count();

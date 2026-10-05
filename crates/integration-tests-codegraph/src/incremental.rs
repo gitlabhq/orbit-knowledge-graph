@@ -52,12 +52,12 @@ pub fn run_incremental_suite(yaml: &str) {
     let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
 
     let inventory = Arc::new(
-        orbit_utils::files::Vfs::load(
-            orbit_utils::files::sources::Checkout(repo.path()),
+        orbit_utils::vfs::Vfs::load(
+            orbit_utils::vfs::sources::Checkout(repo.path()),
             code_graph::v2::config::CodeFilter::new(
                 code_graph::v2::config::detect_language_from_path,
             ),
-            orbit_utils::files::Limits {
+            orbit_utils::vfs::Limits {
                 file_bytes: Some(5 * 1024 * 1024),
                 ..Default::default()
             },
@@ -85,15 +85,15 @@ pub fn run_incremental_suite(yaml: &str) {
         let changed = changed.into_iter().map(|(path, _)| path).collect();
         let changes = Changes {
             changed: Arc::new(
-                orbit_utils::files::Vfs::load(
-                    orbit_utils::files::sources::Changed {
+                orbit_utils::vfs::Vfs::load(
+                    orbit_utils::vfs::sources::Changed {
                         root: repo.path(),
                         paths: changed,
                     },
                     code_graph::v2::config::CodeFilter::new(
                         code_graph::v2::config::detect_language_from_path,
                     ),
-                    orbit_utils::files::Limits {
+                    orbit_utils::vfs::Limits {
                         file_bytes: Some(5 * 1024 * 1024),
                         ..Default::default()
                     },

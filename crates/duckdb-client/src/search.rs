@@ -7,7 +7,7 @@ use arrow::array::{Int64Array, StringBuilder};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
-use orbit_utils::files::{Tag, Vfs};
+use orbit_utils::vfs::{Tag, Vfs};
 use serde_json::{Map, Value};
 
 use crate::{

@@ -1,0 +1,4 @@
+sources: [archive]
+entries:
+  - {path: ignored, archive_path: /root/escape, data: x}
+load_error: InvalidData

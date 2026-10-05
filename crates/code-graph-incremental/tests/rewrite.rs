@@ -5,7 +5,7 @@ use code_graph_incremental::pipeline::{Canonical, Canonicalize, Each, Parse, Pre
 use code_graph_incremental::tree::{Cursor, Tree};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline};
-use orbit_utils::files::sources::Checkout;
+use orbit_utils::vfs::sources::Checkout;
 mod common;
 
 const MAIN: &str = "\
