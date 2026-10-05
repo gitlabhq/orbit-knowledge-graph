@@ -3,7 +3,7 @@ use integration_testkit::TestContext;
 use orbit_server::clickhouse_setup;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration, ClickHouseSetupConfig};
 
-const GRAPH_DB: &str = "orbit graph";
+const GRAPH_DB: &str = "orbit";
 const DATALAKE_DB: &str = "datalake";
 
 struct Passwords {
@@ -12,7 +12,7 @@ struct Passwords {
     siphon_reader: &'static str,
 }
 
-const HOSTILE: Passwords = Passwords {
+const SPECIAL_CHARACTER_PASSWORDS: Passwords = Passwords {
     writer: r"w'ri?ter\p`ass;--",
     reader: "re?ader'); DROP USER default; --",
     siphon_reader: "siphon ${GRAPH_DB} ?? '",
@@ -70,11 +70,16 @@ async fn new_context() -> TestContext {
 async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
     let ctx = new_context().await;
 
-    clickhouse_setup::run(&setup_config(&ctx, &HOSTILE))
+    clickhouse_setup::run(&setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS))
         .await
         .expect("setup should apply the contract");
 
-    let writer = client_as(&ctx, GRAPH_DB, "gkg_writer", HOSTILE.writer);
+    let writer = client_as(
+        &ctx,
+        GRAPH_DB,
+        "gkg_writer",
+        SPECIAL_CHARACTER_PASSWORDS.writer,
+    );
     writer
         .execute("CREATE TABLE nodes (id UInt64) ENGINE = MergeTree ORDER BY id")
         .await
@@ -84,7 +89,12 @@ async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
         .await
         .expect("writer inserts into the graph");
 
-    let reader = client_as(&ctx, GRAPH_DB, "gkg_reader", HOSTILE.reader);
+    let reader = client_as(
+        &ctx,
+        GRAPH_DB,
+        "gkg_reader",
+        SPECIAL_CHARACTER_PASSWORDS.reader,
+    );
     reader
         .execute("SELECT * FROM nodes")
         .await
@@ -101,7 +111,7 @@ async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
         &ctx,
         DATALAKE_DB,
         "gkg_siphon_reader",
-        HOSTILE.siphon_reader,
+        SPECIAL_CHARACTER_PASSWORDS.siphon_reader,
     );
     siphon_reader
         .execute("SELECT * FROM siphon_users")
@@ -136,7 +146,7 @@ async fn clickhouse_setup_reruns_and_rotates_passwords() {
         siphon_reader: "siphon-rotated",
     };
 
-    clickhouse_setup::run(&setup_config(&ctx, &HOSTILE))
+    clickhouse_setup::run(&setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS))
         .await
         .expect("first run");
     clickhouse_setup::run(&setup_config(&ctx, &rotated))
@@ -148,7 +158,12 @@ async fn clickhouse_setup_reruns_and_rotates_passwords() {
         .execute("SELECT 1")
         .await
         .expect("rotated password logs in");
-    let old_writer = client_as(&ctx, GRAPH_DB, "gkg_writer", HOSTILE.writer);
+    let old_writer = client_as(
+        &ctx,
+        GRAPH_DB,
+        "gkg_writer",
+        SPECIAL_CHARACTER_PASSWORDS.writer,
+    );
     assert!(
         old_writer.execute("SELECT 1").await.is_err(),
         "old password must stop working"

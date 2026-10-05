@@ -5640,7 +5640,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
- "clickhouse",
  "clickhouse-client",
  "compiler",
  "futures",

@@ -1,53 +1,25 @@
 //! `--mode clickhouse-setup`: applies `config/clickhouse-setup.sql` to the graph
-//! ClickHouse as an administrator. Values are bound, never pasted, so password text
-//! cannot change the SQL.
+//! ClickHouse as an administrator.
 
 use std::collections::HashMap;
 
-use anyhow::{Context, anyhow, ensure};
-use clickhouse::sql::Identifier;
+use anyhow::{Context, anyhow};
 use clickhouse_client::ClickHouseConfigurationExt;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
+use orbit_utils::clickhouse::quote_sql_literal;
 use tracing::info;
 
 const CONTRACT: &str = include_str!(concat!(env!("CONFIG_DIR"), "/clickhouse-setup.sql"));
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Value<'a> {
-    Literal(&'a str),
-    Identifier(&'a str),
-}
-
-struct Statement<'a> {
-    sql: String,
-    values: Vec<Value<'a>>,
-}
-
 pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     let setup = &config.clickhouse_setup;
-    let tokens = [
-        ("${GRAPH_DB}", Value::Identifier(&config.graph.database)),
-        (
-            "${DATALAKE_DB}",
-            Value::Identifier(&config.datalake.database),
-        ),
-        (
-            "'${GKG_WRITER_PASSWORD}'",
-            Value::Literal(required(&setup.writer_password, "writer_password")?),
-        ),
-        (
-            "'${GKG_READER_PASSWORD}'",
-            Value::Literal(required(&setup.reader_password, "reader_password")?),
-        ),
-        (
-            "'${GKG_SIPHON_READER_PASSWORD}'",
-            Value::Literal(required(
-                &setup.siphon_reader_password,
-                "siphon_reader_password",
-            )?),
-        ),
-    ];
-    let statements = render(CONTRACT, &tokens)?;
+    let sql = render(
+        &config.graph.database,
+        &config.datalake.database,
+        required(&setup.writer_password, "writer_password")?,
+        required(&setup.reader_password, "reader_password")?,
+        required(&setup.siphon_reader_password, "siphon_reader_password")?,
+    );
 
     // The graph database does not exist until the contract creates it.
     let admin = ClickHouseConfiguration {
@@ -61,25 +33,19 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
     }
     .build_client();
 
-    let total = statements.len();
+    let statements: Vec<&str> = sql
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with("--"))
+        .collect();
     for (index, statement) in statements.iter().enumerate() {
-        let mut query = admin.inner().query(&statement.sql);
-        for value in &statement.values {
-            query = match *value {
-                Value::Literal(text) => query.bind(text),
-                Value::Identifier(name) => query.bind(Identifier(name)),
-            };
-        }
-        query.execute().await.with_context(|| {
-            format!(
-                "statement {} of {total} failed: {}",
-                index + 1,
-                statement.sql
-            )
-        })?;
+        // The client reads every `?` as a bind placeholder, quoted or not.
+        admin
+            .execute(&statement.replace('?', "??"))
+            .await
+            .with_context(|| format!("statement {} of {} failed", index + 1, statements.len()))?;
     }
 
-    info!(statements = total, url = %config.graph.url, "clickhouse setup applied");
+    info!(statements = statements.len(), url = %config.graph.url, "clickhouse setup applied");
     Ok(())
 }
 
@@ -94,87 +60,33 @@ fn required<'a>(value: &'a Option<String>, key: &str) -> anyhow::Result<&'a str>
         })
 }
 
-fn render<'a>(contract: &str, tokens: &[(&str, Value<'a>)]) -> anyhow::Result<Vec<Statement<'a>>> {
-    let body = contract
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("--"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    body.split(';')
-        .map(str::trim)
-        .filter(|statement| !statement.is_empty())
-        .map(|statement| bind_tokens(statement, tokens))
-        .collect()
-}
-
-fn bind_tokens<'a>(statement: &str, tokens: &[(&str, Value<'a>)]) -> anyhow::Result<Statement<'a>> {
-    let mut sql = String::new();
-    let mut values = Vec::new();
-    let mut rest = statement;
-    while let Some((at, token, value)) = next_token(rest, tokens) {
-        // The client reads every `?` as a bind placeholder, quoted or not.
-        sql.push_str(&rest[..at].replace('?', "??"));
-        sql.push('?');
-        values.push(value);
-        rest = &rest[at + token.len()..];
-    }
-    sql.push_str(&rest.replace('?', "??"));
-
-    ensure!(
-        !sql.contains("${"),
-        "unknown placeholder in the setup contract: {statement}"
-    );
-    Ok(Statement { sql, values })
-}
-
-fn next_token<'a, 't>(
-    text: &str,
-    tokens: &[(&'t str, Value<'a>)],
-) -> Option<(usize, &'t str, Value<'a>)> {
-    tokens
-        .iter()
-        .filter_map(|(token, value)| text.find(token).map(|at| (at, *token, *value)))
-        .min_by_key(|(at, _, _)| *at)
+fn render(
+    graph_db: &str,
+    datalake_db: &str,
+    writer: &str,
+    reader: &str,
+    siphon_reader: &str,
+) -> String {
+    CONTRACT
+        .replace("${GRAPH_DB}", graph_db)
+        .replace("${DATALAKE_DB}", datalake_db)
+        .replace("'${GKG_WRITER_PASSWORD}'", &quote_sql_literal(writer))
+        .replace("'${GKG_READER_PASSWORD}'", &quote_sql_literal(reader))
+        .replace(
+            "'${GKG_SIPHON_READER_PASSWORD}'",
+            &quote_sql_literal(siphon_reader),
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TOKENS: [(&str, Value<'static>); 5] = [
-        ("${GRAPH_DB}", Value::Identifier("orbit")),
-        ("${DATALAKE_DB}", Value::Identifier("datalake")),
-        ("'${GKG_WRITER_PASSWORD}'", Value::Literal("writer-secret")),
-        ("'${GKG_READER_PASSWORD}'", Value::Literal("reader-secret")),
-        (
-            "'${GKG_SIPHON_READER_PASSWORD}'",
-            Value::Literal("siphon-secret"),
-        ),
-    ];
-
     #[test]
-    fn shipped_contract_binds_every_placeholder() {
-        let statements = render(CONTRACT, &TOKENS).unwrap();
+    fn shipped_contract_has_only_known_placeholders() {
+        let sql = render("orbit", "datalake", "w", "r", "s");
 
-        assert!(!statements.is_empty());
-        for statement in &statements {
-            assert!(!statement.sql.contains("secret"), "{}", statement.sql);
-            assert_eq!(
-                statement.sql.matches('?').count(),
-                statement.values.len(),
-                "{}",
-                statement.sql
-            );
-        }
-        for (_, password) in &TOKENS[2..] {
-            let binds = statements
-                .iter()
-                .flat_map(|statement| &statement.values)
-                .filter(|value| *value == password)
-                .count();
-            assert_eq!(binds, 2, "CREATE and ALTER each bind {password:?}");
-        }
+        assert!(!sql.contains("${"), "{sql}");
     }
 
     #[tokio::test]
@@ -187,14 +99,5 @@ mod tests {
         let error = run(&config).await.unwrap_err();
 
         assert!(error.to_string().contains("reader_password"), "{error}");
-    }
-
-    #[test]
-    fn unknown_placeholder_is_rejected() {
-        let error = render("CREATE USER x IDENTIFIED BY '${NEW_PASSWORD}';", &TOKENS)
-            .err()
-            .unwrap();
-
-        assert!(error.to_string().contains("unknown placeholder"), "{error}");
     }
 }

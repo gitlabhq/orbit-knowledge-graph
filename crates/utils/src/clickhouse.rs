@@ -5,6 +5,10 @@ use std::fmt;
 
 use serde_json::Value;
 
+pub fn quote_sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
 pub enum ChScalar {
     String,

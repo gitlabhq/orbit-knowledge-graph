@@ -21,7 +21,6 @@ base64 = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
-clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-billing = { path = "../orbit-billing" }
