@@ -179,7 +179,7 @@ async fn list_skills() -> Result<()> {
         Ok(response) if degradation(response.status).is_some() => {
             eprintln!(
                 "warning: {}; using the embedded local skill",
-                degradation_warning(response.status)
+                degradation_warning(&response)
             );
             print_local_list()
         }
@@ -293,14 +293,14 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             Some(Degradation::Unavailable) if cached.is_some() => {
                 eprintln!(
                     "warning: {}; using the last validated tree for {origin}",
-                    degradation_warning(status)
+                    degradation_warning(&response)
                 );
                 Ok(cached.map(|cached| cached.tree))
             }
             Some(_) => {
                 eprintln!(
                     "warning: {}; using the embedded local skill",
-                    degradation_warning(status)
+                    degradation_warning(&response)
                 );
                 Ok(None)
             }
@@ -308,6 +308,8 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
         },
     }
 }
+
+const BODY_EXCERPT_CHARS: usize = 200;
 
 enum Degradation {
     /// The cache is skipped so a rejected token is not hidden behind a validated copy.
@@ -324,13 +326,28 @@ fn degradation(status: u16) -> Option<Degradation> {
     }
 }
 
-fn degradation_warning(status: u16) -> String {
+fn degradation_warning(response: &SkillHttpResponse) -> String {
+    let status = response.status;
     let hint = match status {
         401 => ". Run `glab auth status` to check your token",
         403 => ". Check that your account has access to Orbit on this instance",
         _ => "",
     };
-    format!("Orbit skill request returned HTTP {status}{hint}")
+    let excerpt = body_excerpt(body_text(response));
+    let detail = if excerpt.is_empty() {
+        String::new()
+    } else {
+        format!(" ({excerpt})")
+    };
+    format!("Orbit skill request returned HTTP {status}{detail}{hint}")
+}
+
+fn body_excerpt(body: &str) -> String {
+    let single_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    match single_line.char_indices().nth(BODY_EXCERPT_CHARS) {
+        Some((end, _)) => format!("{}…", &single_line[..end]),
+        None => single_line,
+    }
 }
 
 fn body_text(response: &SkillHttpResponse) -> &str {

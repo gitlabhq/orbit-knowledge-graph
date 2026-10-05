@@ -467,7 +467,7 @@ fn status_reply(status: u16) -> Reply {
         status,
         reason: "Error",
         etag: None,
-        body: "error".to_string(),
+        body: format!("server said\n  {status}   nope"),
     }
 }
 
@@ -481,6 +481,7 @@ fn degradable_statuses_without_cache_use_embedded_skill() {
         assert!(output.status.success(), "{status}: {}", stderr(&output));
         assert!(stderr(&output).contains(&format!("HTTP {status}")));
         assert!(stderr(&output).contains("embedded local skill"));
+        assert!(stderr(&output).contains(&format!("(server said {status} nope)")));
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.starts_with("---\n") && stdout.contains("name: orbit-cli"));
         assert!(!stdout.contains("warning"));
@@ -517,6 +518,21 @@ fn cache_is_used_for_rate_limits_and_server_errors_but_not_auth_errors() {
         assert!(uses_cache || stdout.contains("name: orbit-cli"));
         assert!(!stdout.contains("warning"));
     }
+}
+
+#[test]
+fn long_error_bodies_are_truncated_in_the_warning() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut reply = status_reply(503);
+    reply.body = "x".repeat(5000);
+    let (url, server) = mock_server(vec![reply]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "orbit"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let warning = stderr(&output);
+    assert!(warning.contains(&format!("({}…)", "x".repeat(200))));
+    assert!(!warning.contains(&"x".repeat(201)));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("warning"));
 }
 
 #[test]
