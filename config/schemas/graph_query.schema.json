@@ -611,7 +611,7 @@
     "PathConfig": {
       "type": "object",
       "description": "Configuration for path finding queries",
-      "required": ["type", "from", "to", "max_depth"],
+      "required": ["type", "from", "to", "max_depth", "rel_types"],
       "properties": {
         "type": {
           "$ref": "#/$defs/PathType",
@@ -637,6 +637,7 @@
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
+          "minItems": 1,
           "maxItems": 10
         }
       },
