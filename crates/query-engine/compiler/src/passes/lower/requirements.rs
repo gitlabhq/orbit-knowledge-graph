@@ -60,10 +60,12 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                 OutputValue::Text(value) => Expr::string(value),
                 OutputValue::Depth(value) => Expr::int(i64::from(*value)),
                 OutputValue::Path(steps) => Expr::func(
-                    "array",
+                    Function::Array,
                     steps
                         .iter()
-                        .map(|(id, kind)| Expr::func("tuple", vec![column(id), column(kind)]))
+                        .map(|(id, kind)| {
+                            Expr::func(Function::Tuple, vec![column(id), column(kind)])
+                        })
                         .collect(),
                 ),
             };

@@ -256,11 +256,11 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         },
         QueryPlan::PathFinding(_) => vec![
             OrderExpr::asc(Expr::func(
-                "toString",
+                Function::ToString,
                 vec![Expr::col("paths", crate::constants::path_column())],
             )),
             OrderExpr::asc(Expr::func(
-                "toString",
+                Function::ToString,
                 vec![Expr::col("paths", crate::constants::edge_kinds_column())],
             )),
         ],

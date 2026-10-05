@@ -25,9 +25,10 @@ pub enum Expr {
         value: Value,
     },
     FuncCall {
-        name: String,
+        name: Function,
         args: Vec<Expr>,
     },
+    EmptyTupleArray(Vec<SqlType>),
     Aggregate {
         function: crate::input::AggFunction,
         argument: Option<Box<Expr>>,
@@ -81,6 +82,55 @@ pub enum TokenMatchMode {
     Single,
     All,
     Any,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum Function {
+    StartsWith,
+    EndsWith,
+    ContainsInsensitive,
+    ToString,
+    ToJson,
+    Object,
+    If,
+    Coalesce,
+    ByteLength,
+    Substring,
+    Concat,
+    CountSubstrings,
+    Array,
+    Tuple,
+    ArrayConcat,
+    ArrayReverse,
+    ArrayResize,
+    ArrayContains,
+    ArrayContainsAny,
+    ArrayContainsAll,
+    ArrayFilter,
+    ArrayMap,
+    ArrayExists,
+    Unnest,
+    TupleElement,
+    ArgMax,
+    ArgMaxOrNull,
+}
+
+impl Function {
+    pub fn accepts_arity(self, count: usize) -> bool {
+        match self {
+            Self::Array | Self::Tuple => true,
+            Self::Object => count.is_multiple_of(2),
+            Self::Coalesce | Self::Concat | Self::ArrayConcat => count >= 1,
+            Self::ToString
+            | Self::ToJson
+            | Self::ByteLength
+            | Self::ArrayReverse
+            | Self::Unnest => count == 1,
+            Self::If | Self::Substring => count == 3,
+            _ => count == 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -360,10 +410,16 @@ impl Expr {
         }
     }
 
-    pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
-        Expr::FuncCall {
-            name: name.into(),
-            args,
+    pub fn func(name: Function, args: Vec<Expr>) -> Self {
+        Expr::FuncCall { name, args }
+    }
+
+    pub fn aggregate(function: crate::input::AggFunction, argument: Option<Expr>) -> Self {
+        Self::Aggregate {
+            function,
+            argument: argument.map(Box::new),
+            distinct: false,
+            condition: None,
         }
     }
 

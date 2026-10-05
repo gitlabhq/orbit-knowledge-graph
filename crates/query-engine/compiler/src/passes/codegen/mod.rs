@@ -180,18 +180,27 @@ mod tests {
                         "{}",
                         remote.sql
                     );
-                    assert_eq!(
-                        local_query.sql,
-                        format!(
-                            "SELECT {local}({}n.value){} AS result FROM nodes AS n",
-                            if distinct { "DISTINCT " } else { "" },
-                            if filtered {
-                                " FILTER (WHERE n.keep)"
-                            } else {
-                                ""
-                            }
-                        )
+                    let aggregate = format!(
+                        "SELECT {local}({}n.value){} AS result FROM nodes AS n",
+                        if distinct { "DISTINCT " } else { "" },
+                        if filtered {
+                            " FILTER (WHERE n.keep)"
+                        } else {
+                            ""
+                        }
                     );
+                    if function == AggFunction::Collect {
+                        assert!(
+                            local_query.sql.contains("coalesce(array_agg("),
+                            "{}",
+                            local_query.sql
+                        );
+                        assert!(local_query.sql.contains("n.value IS NOT NULL"));
+                        assert_eq!(local_query.sql.contains("n.keep"), filtered);
+                        assert_eq!(local_query.sql.contains("DISTINCT"), distinct);
+                    } else {
+                        assert_eq!(local_query.sql, aggregate);
+                    }
                 }
             }
         }

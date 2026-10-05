@@ -77,9 +77,9 @@ pub(crate) fn filter_expression(
         }
         op => {
             let function = match op {
-                FilterOp::Contains => "positionCaseInsensitive",
-                FilterOp::StartsWith => "startsWith",
-                FilterOp::EndsWith => "endsWith",
+                FilterOp::Contains => Function::ContainsInsensitive,
+                FilterOp::StartsWith => Function::StartsWith,
+                FilterOp::EndsWith => Function::EndsWith,
                 _ => unreachable!(),
             };
             let value = filter
@@ -193,13 +193,16 @@ pub fn denorm_tag_expr(
 
 pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Expr {
     if let [value] = values {
-        Expr::func("has", vec![Expr::col(alias, column), Expr::string(value)])
+        Expr::func(
+            Function::ArrayContains,
+            vec![Expr::col(alias, column), Expr::string(value)],
+        )
     } else {
         Expr::func(
-            "hasAny",
+            Function::ArrayContainsAny,
             vec![
                 Expr::col(alias, column),
-                Expr::func("array", values.iter().map(Expr::string).collect()),
+                Expr::func(Function::Array, values.iter().map(Expr::string).collect()),
             ],
         )
     }

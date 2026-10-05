@@ -362,7 +362,7 @@ fn build_fused_both_arm(
 
     // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
     let out_tuple = Expr::func(
-        "tuple",
+        Function::Tuple,
         vec![
             source_arm.clone(),
             Expr::int(1),
@@ -372,7 +372,7 @@ fn build_fused_both_arm(
         ],
     );
     let in_tuple = Expr::func(
-        "tuple",
+        Function::Tuple,
         vec![
             target_arm.clone(),
             Expr::int(0),
@@ -382,16 +382,19 @@ fn build_fused_both_arm(
         ],
     );
     let matched_only = Expr::func(
-        "arrayFilter",
+        Function::ArrayFilter,
         vec![
             Expr::lambda(
                 "_gkg_arm",
-                Expr::func("tupleElement", vec![Expr::ident("_gkg_arm"), Expr::int(1)]),
+                Expr::func(
+                    Function::TupleElement,
+                    vec![Expr::ident("_gkg_arm"), Expr::int(1)],
+                ),
             ),
-            Expr::func("array", vec![out_tuple, in_tuple]),
+            Expr::func(Function::Array, vec![out_tuple, in_tuple]),
         ],
     );
-    let dir_row = Expr::func("arrayJoin", vec![matched_only]);
+    let dir_row = Expr::func(Function::Unnest, vec![matched_only]);
 
     const ROW_COL: &str = "_gkg_arm_row";
     let rel_col = relationship_type_column();
@@ -425,7 +428,7 @@ fn build_fused_both_arm(
     let inner_alias = "_gkg_fused";
     let te = |n: i64| {
         Expr::func(
-            "tupleElement",
+            Function::TupleElement,
             vec![Expr::col(inner_alias, ROW_COL), Expr::int(n)],
         )
     };

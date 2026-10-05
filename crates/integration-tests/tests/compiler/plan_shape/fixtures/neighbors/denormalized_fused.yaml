@@ -12,7 +12,7 @@ physical:
       expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
     emitted:
       expect:
-        - (Filter ((e.source_kind = 'MergeRequest') AND (e.source_id = 1) AND has(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND (e.target_id = 1) AND has(e.target_tags, 'state:merged')), ... (_))
+        - (Filter ((e.source_kind = 'MergeRequest') AND (e.source_id = 1) AND array_contains(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND (e.target_id = 1) AND array_contains(e.target_tags, 'state:merged')), ... (_))
       occurrences:
         - pattern: (Scan Table(gl_edge) AS e)
           count: 1

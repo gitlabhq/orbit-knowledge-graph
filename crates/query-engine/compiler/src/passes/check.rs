@@ -9,14 +9,12 @@
 use serde_json::Value;
 
 use crate::ast::visit::visit_queries;
-use crate::ast::{Expr, Node, Op, Query};
+use crate::ast::{Expr, Function, Node, Op, Query};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::passes::security::{SecurityContext, collect_node_aliases};
 #[cfg(test)]
 use ontology::Ontology;
-
-const STARTS_WITH_FNAME: &str = "startsWith";
 
 pub fn check_ast(
     node: &Node,
@@ -70,7 +68,10 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
             has_valid_path_filter(Some(left), alias, ctx)
                 && has_valid_path_filter(Some(right), alias, ctx)
         }
-        Expr::FuncCall { name, args } if name == STARTS_WITH_FNAME => {
+        Expr::FuncCall {
+            name: Function::StartsWith,
+            args,
+        } => {
             let [Expr::Column { table, column }, path] = args.as_slice() else {
                 return false;
             };
@@ -187,7 +188,13 @@ mod tests {
                 }
                 "lambda" => {
                     query.select = vec![SelectExpr::new(
-                        Expr::func("arrayMap", vec![Expr::lambda("x", scalar)]),
+                        Expr::func(
+                            Function::ArrayMap,
+                            vec![
+                                Expr::lambda("x", scalar),
+                                Expr::func(Function::Array, vec![Expr::int(1)]),
+                            ],
+                        ),
                         "result",
                     )]
                 }
@@ -222,7 +229,7 @@ mod tests {
                     assert_eq!(
                         query.where_clause,
                         Some(Expr::func(
-                            "startsWith",
+                            Function::StartsWith,
                             vec![
                                 Expr::col("protected", "traversal_path"),
                                 Expr::string("42/43/")
@@ -255,7 +262,7 @@ mod tests {
         let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = Ontology::new().with_nodes(["Project"]);
         let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
-        let starts_with = |left, right| Expr::func(STARTS_WITH_FNAME, vec![left, right]);
+        let starts_with = |left, right| Expr::func(Function::StartsWith, vec![left, right]);
         let authorized = starts_with(column.clone(), Expr::string("42/43/"));
         let condition = Expr::eq(Expr::col("p", "id"), Expr::int(1));
         for (predicate, valid) in [
@@ -285,7 +292,7 @@ mod tests {
     fn fails_with_wrong_path_literal() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let wrong_filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("99/")],
         );
         let node = project_query(Some(wrong_filter));
@@ -386,7 +393,7 @@ mod tests {
         let where_expr = Expr::binary(
             Op::And,
             Expr::func(
-                STARTS_WITH_FNAME,
+                Function::StartsWith,
                 vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
             ),
             dead_conjunct,
@@ -482,7 +489,7 @@ mod tests {
         let mut wrapped = Node::Query(Box::new(inner.clone()));
         apply_security(&mut wrapped, &ctx, &ontology::Ontology::new());
         let filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
                 Expr::string("42/43/"),
@@ -499,14 +506,14 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let inner = Query {
             select: vec![SelectExpr {
-                expr: Expr::func("count", vec![Expr::col("p", "id")]),
+                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
             group_by: vec![Expr::col("p", "namespace_id")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
-                Expr::func("count", vec![Expr::col("p", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
                 Expr::lit(1),
             )),
             ..Default::default()
@@ -524,7 +531,7 @@ mod tests {
     fn accepts_aggregate_subquery_with_inner_security_filter() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
                 Expr::string("42/43/"),
@@ -532,7 +539,7 @@ mod tests {
         );
         let inner = Query {
             select: vec![SelectExpr {
-                expr: Expr::func("count", vec![Expr::col("p", "id")]),
+                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
                 alias: Some("cnt".into()),
             }],
             from: TableRef::scan("gl_project", "p"),
@@ -540,7 +547,7 @@ mod tests {
             group_by: vec![Expr::col("p", "namespace_id")],
             having: Some(Expr::binary(
                 crate::ast::Op::Gt,
-                Expr::func("count", vec![Expr::col("p", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
                 Expr::lit(1),
             )),
             ..Default::default()
@@ -571,7 +578,7 @@ mod tests {
     fn rejects_union_all_arm_without_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![Expr::col("u", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
         let node = Node::Query(Box::new(Query {
@@ -667,7 +674,7 @@ mod tests {
         use crate::ast::Cte;
 
         let filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![
                 Expr::col("p", TRAVERSAL_PATH_COLUMN),
                 Expr::string("42/43/"),
@@ -705,7 +712,7 @@ mod tests {
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![Expr::col("e", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
         );
         let node = Node::Query(Box::new(Query {
@@ -748,14 +755,14 @@ mod tests {
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let outer_filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![
                 Expr::col("e", TRAVERSAL_PATH_COLUMN),
                 Expr::string("42/43/"),
             ],
         );
         let arm_filter = Expr::func(
-            STARTS_WITH_FNAME,
+            Function::StartsWith,
             vec![
                 Expr::col("e1", TRAVERSAL_PATH_COLUMN),
                 Expr::string("42/43/"),

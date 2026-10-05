@@ -2,7 +2,9 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{Cte, Expr, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TokenMatchMode};
+use crate::ast::{
+    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TokenMatchMode,
+};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -21,6 +23,9 @@ pub fn codegen(
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if let Some(error) = ctx.error {
+        return Err(crate::error::QueryError::Codegen(error));
+    }
 
     // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
@@ -59,17 +64,22 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if let Some(error) = ctx.error {
+        return Err(crate::error::QueryError::Codegen(error));
+    }
     Ok((sql, ctx.params.into_map()))
 }
 
 struct Context {
     params: ParamBindings,
+    error: Option<String>,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
             params: ParamBindings::default(),
+            error: None,
         }
     }
 
@@ -164,7 +174,12 @@ impl Context {
         }
 
         for union_q in &q.union_all {
-            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
+            let arm = self.emit_query(union_q)?;
+            parts.push(if union_q.ctes.is_empty() {
+                format!("UNION ALL {arm}")
+            } else {
+                format!("UNION ALL ({arm})")
+            });
         }
 
         // ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an
@@ -205,9 +220,22 @@ impl Context {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
+            Expr::EmptyTupleArray(fields) => format!(
+                "CAST([], 'Array(Tuple({}))')",
+                fields
+                    .iter()
+                    .map(|field| orbit_utils::clickhouse::type_name(*field))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
+                if !name.accepts_arity(args.len()) {
+                    self.error = Some(format!("{name} does not accept {} arguments", args.len()));
+                    return String::new();
+                }
+                let name = function_name(*name);
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
             }
@@ -403,6 +431,38 @@ impl Context {
     }
 }
 
+pub(crate) fn function_name(function: Function) -> &'static str {
+    match function {
+        Function::StartsWith => "startsWith",
+        Function::EndsWith => "endsWith",
+        Function::ContainsInsensitive => "positionCaseInsensitive",
+        Function::ToString => "toString",
+        Function::ToJson => "toJSONString",
+        Function::Object => "map",
+        Function::If => "if",
+        Function::Coalesce => "coalesce",
+        Function::ByteLength => "length",
+        Function::Substring => "substringUTF8",
+        Function::Concat => "concat",
+        Function::CountSubstrings => "countSubstrings",
+        Function::Array => "array",
+        Function::Tuple => "tuple",
+        Function::ArrayConcat => "arrayConcat",
+        Function::ArrayReverse => "arrayReverse",
+        Function::ArrayResize => "arrayResize",
+        Function::ArrayContains => "has",
+        Function::ArrayContainsAny => "hasAny",
+        Function::ArrayContainsAll => "hasAll",
+        Function::ArrayFilter => "arrayFilter",
+        Function::ArrayMap => "arrayMap",
+        Function::ArrayExists => "arrayExists",
+        Function::Unnest => "arrayJoin",
+        Function::TupleElement => "tupleElement",
+        Function::ArgMax => "argMax",
+        Function::ArgMaxOrNull => "argMaxOrNull",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,14 +550,17 @@ mod tests {
                     alias: Some("type".into()),
                 },
                 SelectExpr {
-                    expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                    expr: Expr::aggregate(
+                        crate::input::AggFunction::Count,
+                        Some(Expr::col("n", "id")),
+                    ),
                     alias: Some("count".into()),
                 },
             ],
             from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
             order_by: vec![OrderExpr {
-                expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 desc: true,
             }],
             ..Default::default()
@@ -725,13 +788,16 @@ mod tests {
         let q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("n", "label"), "type"),
-                SelectExpr::new(Expr::func("COUNT", vec![Expr::col("n", "id")]), "count"),
+                SelectExpr::new(
+                    Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                    "count",
+                ),
             ],
             from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(5),
             )),
             ..Default::default()
@@ -753,13 +819,13 @@ mod tests {
     fn having_without_group_by() {
         let q = Query {
             select: vec![SelectExpr::new(
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 "total",
             )],
             from: TableRef::scan("nodes", "n"),
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(0),
             )),
             ..Default::default()
@@ -812,7 +878,7 @@ mod tests {
             group_by: vec![Expr::col("e", "source_id")],
             having: Some(Expr::eq(
                 Expr::func(
-                    "argMax",
+                    Function::ArgMax,
                     vec![Expr::col("e", "_deleted"), Expr::col("e", "_version")],
                 ),
                 Expr::lit(false),

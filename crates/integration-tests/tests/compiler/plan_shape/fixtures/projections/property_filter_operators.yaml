@@ -32,4 +32,4 @@ physical:
         - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
     emitted:
       expect:
-        - (Filter positionCaseInsensitive(p.name, 'orbit'), startsWith(p.name, 'git'), endsWith(p.name, 'lab'), tokens_single(p.name, 'graph'), tokens_all(p.name, 'graph query'), tokens_any(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
+        - (Filter contains_insensitive(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), tokens_single(p.name, 'graph'), tokens_all(p.name, 'graph query'), tokens_any(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))

@@ -19,6 +19,6 @@ physical:
         - (Filter f.id IN ?, ... (_))
     emitted:
       expect:
-        - (Filter startsWith(f.traversal_path, '1/100/') (Scan Table(gl_file) AS f))
+        - (Filter starts_with(f.traversal_path, '1/100/') (Scan Table(gl_file) AS f))
       reject:
         - (Filter f.id IN ?, ... (_))

@@ -141,7 +141,7 @@ pub fn apply(
 fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
     for (i, o) in order_by.iter().enumerate() {
         let hidden = SelectExpr::new(
-            Expr::func("toString", vec![o.expr.clone()]),
+            Expr::func(crate::ast::Function::ToString, vec![o.expr.clone()]),
             cursor_column(i),
         );
         for arm in &mut q.union_all {

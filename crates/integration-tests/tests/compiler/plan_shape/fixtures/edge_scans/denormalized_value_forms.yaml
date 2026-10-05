@@ -14,5 +14,5 @@ physical:
       expect: ["(Filter e0.target_tags HAS ANY ['draft:true'], e0.target_tags HAS ANY ['state:merged'], ... (_))"]
       reject: ["(Scan Table(gl_merge_request) ...)"]
     emitted:
-      expect: ["(Filter has(e0.target_tags, 'draft:true'), has(e0.target_tags, 'state:merged'), ... (_))"]
-      reject: ["(CTE _nf_mr (_))", "(Filter has(e0.target_tags, 'draft:'), ... (_))"]
+      expect: ["(Filter array_contains(e0.target_tags, 'draft:true'), array_contains(e0.target_tags, 'state:merged'), ... (_))"]
+      reject: ["(CTE _nf_mr (_))", "(Filter array_contains(e0.target_tags, 'draft:'), ... (_))"]

@@ -50,6 +50,23 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
             arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
             expected
         );
+        let Node::Query(arm) = ast else {
+            unreachable!()
+        };
+        let union = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::int(0), "n")],
+            from: TableRef::scan("system.one", "one"),
+            union_all: vec![*arm],
+            ..Default::default()
+        }));
+        let compiled =
+            compiler::passes::codegen::codegen(&union, Default::default(), Default::default())
+                .unwrap();
+        let result = ctx.query(&compiled.render()).await;
+        assert_eq!(
+            result.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            2
+        );
     }
 }
 
