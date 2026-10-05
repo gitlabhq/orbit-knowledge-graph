@@ -62,11 +62,17 @@ pub fn visit_expressions<'a>(
     callback: &mut impl FnMut(&'a Expr) -> Result<()>,
 ) -> Result<()> {
     match expression {
-        Expr::BinaryOp { left, right, .. } => {
+        Expr::BinaryOp { left, right, .. }
+        | Expr::TokenSearch {
+            value: left,
+            query: right,
+            ..
+        } => {
             visit_expressions(left, callback)?;
             visit_expressions(right, callback)?;
         }
         Expr::UnaryOp { expr, .. }
+        | Expr::TimeBucket { value: expr, .. }
         | Expr::InSubquery { expr, .. }
         | Expr::InSelect { expr, .. }
         | Expr::Lambda { body: expr, .. } => {
@@ -75,6 +81,15 @@ pub fn visit_expressions<'a>(
         Expr::FuncCall { args, .. } => {
             for argument in args {
                 visit_expressions(argument, callback)?;
+            }
+        }
+        Expr::Aggregate {
+            argument,
+            condition,
+            ..
+        } => {
+            for child in argument.iter().chain(condition.iter()) {
+                visit_expressions(child, callback)?;
             }
         }
         Expr::Column { .. }
@@ -158,16 +173,32 @@ fn visit_expr_queries(
             visit_queries_mut(query, callback)
         }
         Expr::Scalar(query) => visit_queries_mut(query, callback),
-        Expr::BinaryOp { left, right, .. } => {
+        Expr::BinaryOp { left, right, .. }
+        | Expr::TokenSearch {
+            value: left,
+            query: right,
+            ..
+        } => {
             visit_expr_queries(left, callback)?;
             visit_expr_queries(right, callback)
         }
         Expr::UnaryOp { expr, .. }
+        | Expr::TimeBucket { value: expr, .. }
         | Expr::InSubquery { expr, .. }
         | Expr::Lambda { body: expr, .. } => visit_expr_queries(expr, callback),
         Expr::FuncCall { args, .. } => {
             for argument in args {
                 visit_expr_queries(argument, callback)?;
+            }
+            Ok(())
+        }
+        Expr::Aggregate {
+            argument,
+            condition,
+            ..
+        } => {
+            for child in argument.iter_mut().chain(condition.iter_mut()) {
+                visit_expr_queries(child, callback)?;
             }
             Ok(())
         }

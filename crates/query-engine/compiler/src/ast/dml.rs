@@ -28,6 +28,21 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    Aggregate {
+        function: crate::input::AggFunction,
+        argument: Option<Box<Expr>>,
+        distinct: bool,
+        condition: Option<Box<Expr>>,
+    },
+    TimeBucket {
+        unit: crate::input::TruncateUnit,
+        value: Box<Expr>,
+    },
+    TokenSearch {
+        mode: TokenMatchMode,
+        value: Box<Expr>,
+        query: Box<Expr>,
+    },
     Lambda {
         param: String,
         body: Box<Expr>,
@@ -59,6 +74,13 @@ pub enum Expr {
     /// to a constant before index analysis, so it still drives PK pruning.
     Scalar(Box<Query>),
     Star,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+pub enum TokenMatchMode {
+    Single,
+    All,
+    Any,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]

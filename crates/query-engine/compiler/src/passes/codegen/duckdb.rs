@@ -14,7 +14,7 @@
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -27,6 +27,11 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if ctx.unsupported_token_search {
+        return Err(QueryError::Codegen(
+            "token search is not supported by the DuckDB backend".into(),
+        ));
+    }
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
@@ -39,6 +44,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 struct Context {
     params: HashMap<String, ParamValue>,
     param_counter: usize,
+    unsupported_token_search: bool,
 }
 
 impl Context {
@@ -46,6 +52,7 @@ impl Context {
         Self {
             params: HashMap::new(),
             param_counter: 0,
+            unsupported_token_search: false,
         }
     }
 
@@ -183,6 +190,40 @@ impl Context {
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(name, args),
+            Expr::TokenSearch { .. } => {
+                self.unsupported_token_search = true;
+                String::new()
+            }
+            Expr::TimeBucket { unit, value } => {
+                format!("date_trunc('{}', {})", unit.name(), self.emit_expr(value))
+            }
+            Expr::Aggregate {
+                function,
+                argument,
+                distinct,
+                condition,
+            } => {
+                let name = match function {
+                    crate::input::AggFunction::Count => "COUNT",
+                    crate::input::AggFunction::Sum => "SUM",
+                    crate::input::AggFunction::Avg => "AVG",
+                    crate::input::AggFunction::Min => "MIN",
+                    crate::input::AggFunction::Max => "MAX",
+                    crate::input::AggFunction::Collect => "array_agg",
+                };
+                let argument = argument
+                    .as_ref()
+                    .map(|value| self.emit_expr(value))
+                    .unwrap_or_else(|| "*".into());
+                let mut expression = format!(
+                    "{name}({}{argument})",
+                    if *distinct { "DISTINCT " } else { "" }
+                );
+                if let Some(condition) = condition {
+                    expression.push_str(&format!(" FILTER (WHERE {})", self.emit_expr(condition)));
+                }
+                expression
+            }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);
                 format!("{param} -> {body}")
@@ -255,31 +296,16 @@ impl Context {
             return self.emit_expr(&args[0]);
         }
 
-        // ClickHouse `toStartOf<Unit>(x)` → DuckDB `date_trunc('<unit>', x)`.
-        if let Some(unit) = name.strip_prefix("toStartOf")
-            && args.len() == 1
-            && let Some(duckdb_unit) = duckdb_trunc_unit(unit)
-        {
-            let inner = self.emit_expr(&args[0]);
-            return format!("date_trunc('{duckdb_unit}', {inner})");
-        }
-
         if name == "positionCaseInsensitive" && args.len() == 2 {
             let col = self.emit_expr(&args[0]);
             let search = self.emit_expr(&args[1]);
             return format!("contains(lower({col}), lower({search}))");
-        }
-        if name == "sumIf" && args.len() == 2 {
-            let col = self.emit_expr(&args[0]);
-            let cond = self.emit_expr(&args[1]);
-            return format!("SUM({col}) FILTER (WHERE {cond})");
         }
 
         let duckdb_name = match name {
             "startsWith" => "starts_with",
             "endsWith" => "ends_with",
             "substringUTF8" => "substring",
-            "countIf" => "count_if",
             "has" => "list_contains",
             "hasAny" => "list_has_any",
             "hasAll" => "list_has_all",
@@ -393,19 +419,6 @@ impl Context {
 /// True if the expression is a reference to `_version` or `_deleted`.
 fn is_dedup_column(expr: &Expr) -> bool {
     matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
-}
-
-fn duckdb_trunc_unit(suffix: &str) -> Option<&'static str> {
-    match suffix {
-        "Minute" => Some("minute"),
-        "Hour" => Some("hour"),
-        "Day" => Some("day"),
-        "Week" => Some("week"),
-        "Month" => Some("month"),
-        "Quarter" => Some("quarter"),
-        "Year" => Some("year"),
-        _ => None,
-    }
 }
 
 fn is_deleted_predicate(expr: &Expr) -> bool {

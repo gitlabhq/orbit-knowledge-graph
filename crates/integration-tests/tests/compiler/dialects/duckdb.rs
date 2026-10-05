@@ -13,6 +13,99 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 }
 
 #[test]
+fn nested_cte_codegen_executes_with_its_local_definition() {
+    use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("nested.duckdb")).unwrap();
+    database
+        .initialize_schema("CREATE TABLE nodes(id BIGINT); INSERT INTO nodes VALUES (7);")
+        .unwrap();
+    let ast = Node::Query(Box::new(Query {
+        ctes: vec![Cte::new(
+            "result",
+            Query {
+                ctes: vec![Cte::new(
+                    "seed",
+                    Query {
+                        select: vec![SelectExpr::col("n", "id")],
+                        from: TableRef::scan("nodes", "n"),
+                        ..Default::default()
+                    },
+                )],
+                select: vec![SelectExpr::col("s", "id")],
+                from: TableRef::scan("seed", "s"),
+                ..Default::default()
+            },
+        )],
+        select: vec![SelectExpr::new(Expr::col("r", "id"), "id")],
+        from: TableRef::scan("result", "r"),
+        ..Default::default()
+    }));
+    let query = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+    let result = database.query_arrow(&query.render()).unwrap();
+    assert_eq!(
+        arrow::util::display::array_value_to_string(result[0].column(0), 0).unwrap(),
+        "7"
+    );
+}
+
+#[test]
+fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
+    use compiler::ast::{Expr, Node, Query, SelectExpr, TableRef};
+    use compiler::input::AggFunction;
+
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("aggregate.duckdb")).unwrap();
+    database.initialize_schema("CREATE TABLE measurements(value BIGINT, keep BOOLEAN); INSERT INTO measurements VALUES (2, true), (2, true), (NULL, true), (9, false);").unwrap();
+    for (function, argument, distinct, filtered, expected) in [
+        (AggFunction::Count, false, false, false, "4"),
+        (AggFunction::Count, true, false, false, "3"),
+        (AggFunction::Count, false, false, true, "3"),
+        (AggFunction::Count, true, false, true, "2"),
+        (AggFunction::Count, true, true, true, "1"),
+        (AggFunction::Sum, true, false, true, "4"),
+        (AggFunction::Avg, true, false, true, "2.0"),
+        (AggFunction::Min, true, false, true, "2"),
+        (AggFunction::Max, true, false, true, "2"),
+    ] {
+        for empty in [false, true] {
+            let ast = Node::Query(Box::new(Query {
+                select: vec![SelectExpr::new(
+                    Expr::Aggregate {
+                        function,
+                        argument: argument.then(|| Box::new(Expr::col("m", "value"))),
+                        distinct,
+                        condition: filtered.then(|| Box::new(Expr::col("m", "keep"))),
+                    },
+                    "result",
+                )],
+                from: TableRef::scan("measurements", "m"),
+                where_clause: empty.then(|| Expr::lit(false)),
+                ..Default::default()
+            }));
+            let query =
+                compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();
+            let results = database.query_arrow(&query.render()).unwrap();
+            let actual =
+                arrow::util::display::array_value_to_string(results[0].column(0), 0).unwrap();
+            let expected = if empty {
+                if function == AggFunction::Count {
+                    "0"
+                } else {
+                    ""
+                }
+            } else {
+                expected
+            };
+            assert_eq!(actual, expected, "{}", query.sql);
+        }
+    }
+}
+
+#[test]
 fn search_uses_positional_params() {
     let result = compile(
         r#"{

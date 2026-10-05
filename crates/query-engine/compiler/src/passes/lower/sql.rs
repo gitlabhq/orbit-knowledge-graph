@@ -57,14 +57,29 @@ pub(crate) fn filter_expression(
         }
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
+        op @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens) => {
+            Expr::TokenSearch {
+                mode: match op {
+                    FilterOp::TokenMatch => TokenMatchMode::Single,
+                    FilterOp::AllTokens => TokenMatchMode::All,
+                    _ => TokenMatchMode::Any,
+                },
+                value: Box::new(col),
+                query: Box::new(Expr::param(
+                    ChType::String,
+                    filter
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.as_str())
+                        .unwrap_or(""),
+                )),
+            }
+        }
         op => {
             let function = match op {
                 FilterOp::Contains => "positionCaseInsensitive",
                 FilterOp::StartsWith => "startsWith",
                 FilterOp::EndsWith => "endsWith",
-                FilterOp::TokenMatch => "hasToken",
-                FilterOp::AllTokens => "hasAllTokens",
-                FilterOp::AnyTokens => "hasAnyTokens",
                 _ => unreachable!(),
             };
             let value = filter

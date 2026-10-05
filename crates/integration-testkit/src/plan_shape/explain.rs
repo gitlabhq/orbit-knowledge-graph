@@ -1,5 +1,5 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
-use compiler::input::{AggFunction, ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
+use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
 use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
@@ -646,6 +646,35 @@ fn literal(value: &serde_json::Value) -> String {
 
 fn expression(value: &Expr) -> String {
     match value {
+        Expr::TokenSearch { mode, value, query } => format!(
+            "tokens_{}({}, {})",
+            mode.to_string().to_lowercase(),
+            expression(value),
+            expression(query)
+        ),
+        Expr::TimeBucket { unit, value } => {
+            format!("bucket({}, {})", unit.name(), expression(value))
+        }
+        Expr::Aggregate {
+            function,
+            argument,
+            distinct,
+            condition,
+        } => {
+            let argument = argument
+                .as_ref()
+                .map(|value| expression(value))
+                .unwrap_or_default();
+            let mut value = format!(
+                "{}({}{argument})",
+                function.to_string().to_uppercase(),
+                if *distinct { "DISTINCT " } else { "" }
+            );
+            if let Some(condition) = condition {
+                value.push_str(&format!(" FILTER [{}]", expression(condition)));
+            }
+            value
+        }
         Expr::Column { table, column } => format!("{table}.{column}"),
         Expr::Identifier(name) => name.clone(),
         Expr::Literal(value) | Expr::Param { value, .. } => literal(value),
@@ -747,9 +776,11 @@ fn query(value: &Query) -> Tree {
         tree = query_filter(predicate, tree);
     }
     let projection = projections(&value.select);
-    let aggregate = !value.group_by.is_empty() || value.select.iter().any(|value| {
-        matches!(&value.expr, Expr::FuncCall { name, .. } if [AggFunction::Count, AggFunction::Sum, AggFunction::Avg, AggFunction::Min, AggFunction::Max, AggFunction::Collect].iter().any(|function| name == function.as_sql() || name == function.as_sql_if()))
-    });
+    let aggregate = !value.group_by.is_empty()
+        || value
+            .select
+            .iter()
+            .any(|value| matches!(value.expr, Expr::Aggregate { .. }));
     if !aggregate {
         tree = Tree::node(Operator::Project, projection, vec![tree]);
     } else {

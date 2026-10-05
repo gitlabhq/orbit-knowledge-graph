@@ -2,7 +2,7 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef, TokenMatchMode};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -210,6 +210,67 @@ impl Context {
             Expr::FuncCall { name, args } => {
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
+            }
+            Expr::TimeBucket { unit, value } => {
+                use crate::input::TruncateUnit;
+                let function = match unit {
+                    TruncateUnit::Minute => "toStartOfMinute",
+                    TruncateUnit::Hour => "toStartOfHour",
+                    TruncateUnit::Day => "toStartOfDay",
+                    TruncateUnit::Week => "toStartOfWeek",
+                    TruncateUnit::Month => "toStartOfMonth",
+                    TruncateUnit::Quarter => "toStartOfQuarter",
+                    TruncateUnit::Year => "toStartOfYear",
+                };
+                let bucket = format!("{function}({})", self.emit_expr(value));
+                if matches!(unit, TruncateUnit::Minute | TruncateUnit::Hour) {
+                    format!("toDateTime64({bucket}, 0)")
+                } else {
+                    format!("toDate32({bucket})")
+                }
+            }
+            Expr::TokenSearch { mode, value, query } => {
+                let function = match mode {
+                    TokenMatchMode::Single => "hasToken",
+                    TokenMatchMode::All => "hasAllTokens",
+                    TokenMatchMode::Any => "hasAnyTokens",
+                };
+                format!(
+                    "{function}({}, {})",
+                    self.emit_expr(value),
+                    self.emit_expr(query)
+                )
+            }
+            Expr::Aggregate {
+                function,
+                argument,
+                distinct,
+                condition,
+            } => {
+                let base = match function {
+                    crate::input::AggFunction::Count => "count",
+                    crate::input::AggFunction::Sum => "sum",
+                    crate::input::AggFunction::Avg => "avg",
+                    crate::input::AggFunction::Min => "min",
+                    crate::input::AggFunction::Max => "max",
+                    crate::input::AggFunction::Collect => "groupArray",
+                };
+                let name = if *distinct || condition.is_some() {
+                    format!(
+                        "{base}{}{}",
+                        if *distinct { "Distinct" } else { "" },
+                        if condition.is_some() { "If" } else { "" }
+                    )
+                } else if base == "groupArray" {
+                    base.into()
+                } else {
+                    base.to_uppercase()
+                };
+                let mut args: Vec<_> = argument.iter().map(|value| self.emit_expr(value)).collect();
+                if let Some(condition) = condition {
+                    args.push(self.emit_expr(condition));
+                }
+                format!("{name}({})", args.join(", "))
             }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);

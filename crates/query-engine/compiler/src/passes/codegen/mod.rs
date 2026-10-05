@@ -98,6 +98,106 @@ mod tests {
     use crate::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
 
     #[test]
+    fn token_search_uses_clickhouse_modes_and_rejects_duckdb() {
+        use crate::ast::TokenMatchMode;
+        for (mode, function) in [
+            (TokenMatchMode::Single, "hasToken"),
+            (TokenMatchMode::All, "hasAllTokens"),
+            (TokenMatchMode::Any, "hasAnyTokens"),
+        ] {
+            let ast = Node::Query(Box::new(Query {
+                select: vec![SelectExpr::col("n", "id")],
+                from: TableRef::scan("nodes", "n"),
+                where_clause: Some(Expr::TokenSearch {
+                    mode,
+                    value: Box::new(Expr::col("n", "text")),
+                    query: Box::new(Expr::string("graph query")),
+                }),
+                ..Default::default()
+            }));
+            let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+            assert!(
+                remote
+                    .render()
+                    .contains(&format!("{function}(n.text, 'graph query')"))
+            );
+            let error = duckdb::codegen(&ast, ResultContext::new()).unwrap_err();
+            assert!(error.to_string().contains("token search is not supported"));
+        }
+    }
+
+    #[test]
+    fn semantic_aggregates_render_arguments_distinctness_and_conditions() {
+        use crate::input::AggFunction;
+
+        for (function, plain, conditional, local) in [
+            (AggFunction::Count, "COUNT", "countIf", "COUNT"),
+            (AggFunction::Sum, "SUM", "sumIf", "SUM"),
+            (AggFunction::Avg, "AVG", "avgIf", "AVG"),
+            (AggFunction::Min, "MIN", "minIf", "MIN"),
+            (AggFunction::Max, "MAX", "maxIf", "MAX"),
+            (
+                AggFunction::Collect,
+                "groupArray",
+                "groupArrayIf",
+                "array_agg",
+            ),
+        ] {
+            for filtered in [false, true] {
+                for distinct in [false, true] {
+                    let ast = Node::Query(Box::new(Query {
+                        select: vec![SelectExpr::new(
+                            Expr::Aggregate {
+                                function,
+                                argument: Some(Box::new(Expr::col("n", "value"))),
+                                distinct,
+                                condition: filtered.then(|| Box::new(Expr::col("n", "keep"))),
+                            },
+                            "result",
+                        )],
+                        from: TableRef::scan("nodes", "n"),
+                        ..Default::default()
+                    }));
+                    let remote =
+                        codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+                    let local_query = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+                    let name = if distinct {
+                        format!(
+                            "{}Distinct{}",
+                            conditional.strip_suffix("If").unwrap(),
+                            if filtered { "If" } else { "" }
+                        )
+                    } else if filtered {
+                        conditional.into()
+                    } else {
+                        plain.into()
+                    };
+                    assert!(
+                        remote.sql.starts_with(&format!(
+                            "SELECT {name}(n.value{}) AS result",
+                            if filtered { ", n.keep" } else { "" }
+                        )),
+                        "{}",
+                        remote.sql
+                    );
+                    assert_eq!(
+                        local_query.sql,
+                        format!(
+                            "SELECT {local}({}n.value){} AS result FROM nodes AS n",
+                            if distinct { "DISTINCT " } else { "" },
+                            if filtered {
+                                " FILTER (WHERE n.keep)"
+                            } else {
+                                ""
+                            }
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn nested_cte_definitions_survive_both_renderers() {
         for recursive in [false, true] {
             let seed = Query {

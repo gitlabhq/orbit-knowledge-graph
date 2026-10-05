@@ -70,6 +70,10 @@ The current ontology files, archives, DDL, and indexing declarations remain unch
 Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
+The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
+Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
+Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
+CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.
