@@ -1,6 +1,6 @@
-//! A Gitaly tar.gz: one sequential pass over the inflating stream. Each
-//! entry is offered lazily, so a file the header already decided is never
-//! inflated into memory.
+//! Gitaly tar.gz input is processed sequentially. Rejected bodies are streamed past, not retained.
+//! Entry paths are validated before stripping the archive root. Hard links name archive entries;
+//! symlink targets stay virtual. Malformed streams fail rather than returning partial contents.
 
 use std::ffi::OsString;
 use std::io::Read;
@@ -34,8 +34,6 @@ impl<R: Read> Source for Archive<R> {
 
             let kind = entry.header().entry_type();
             let is_link = matches!(kind, EntryType::Symlink | EntryType::Link);
-            // Directories exist because files are in them; PAX headers,
-            // devices and fifos have no place in a checkout.
             if kind != EntryType::Regular && !is_link {
                 continue;
             }
@@ -49,29 +47,37 @@ impl<R: Read> Source for Archive<R> {
             }
             let size = entry.size();
             let read = Box::new(move || {
-                let mut bytes = Vec::with_capacity(size as usize);
+                let mut bytes = Vec::new();
                 entry.read_to_end(&mut bytes)?;
                 Ok(bytes)
             });
             into.put(&path, Put::Lazy { size, read })?;
         }
-        Ok(())
+        if any_entry_seen {
+            Ok(())
+        } else {
+            Err(SourceError::Empty)
+        }
     }
 }
 
-/// The entry's path below the archive root, or `None` for the root itself
-/// and for an entry under a different root, which Gitaly never produces.
 fn relative_path<R: Read>(
     entry: &tar::Entry<'_, R>,
     root: &mut Option<OsString>,
 ) -> Result<Option<String>, SourceError> {
     let entry_path = entry.path().map_err(std::io::Error::other)?;
+    if !crate::fs::is_safe_relative_path(&entry_path) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "path traversal detected in archive entry",
+        )
+        .into());
+    }
     let shown = entry_path.to_string_lossy();
-    if shown == "/" || shown == "." || shown.is_empty() {
+    if shown.is_empty() {
         return Ok(None);
     }
-    let below_root = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-    let relative = match strip_root(below_root, root) {
+    let relative = match strip_root(&entry_path, root) {
         Ok(path) => path,
         Err(e) => {
             warn!(entry = %shown, error = %e, "skipping archive entry outside the archive root");
@@ -81,17 +87,9 @@ fn relative_path<R: Read>(
     if relative.as_os_str().is_empty() {
         return Ok(None);
     }
-    if !crate::fs::is_safe_relative_path(&relative) {
-        return Err(SourceError::Io(std::io::Error::other(format!(
-            "path traversal detected: {}",
-            relative.display()
-        ))));
-    }
     Ok(Some(relative.to_string_lossy().into_owned()))
 }
 
-/// A hard link names another archive entry under the root; a symlink's
-/// target is already relative to the link.
 fn link_target<R: Read>(
     entry: &tar::Entry<'_, R>,
     kind: EntryType,
@@ -101,15 +99,26 @@ fn link_target<R: Read>(
         .link_name()
         .map_err(std::io::Error::other)?
         .map(|t| t.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .filter(|target| !target.is_empty())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "archive link has no target",
+            )
+        })?;
+    if kind == EntryType::Link && !crate::fs::is_safe_relative_path(Path::new(&target)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid archive hard link",
+        )
+        .into());
+    }
     Ok(match kind {
         EntryType::Link => format!("/{}", strip_root(Path::new(&target), root)?.display()),
         _ => target,
     })
 }
 
-/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records
-/// the root; later entries must share it.
 fn strip_root(path: &Path, root: &mut Option<OsString>) -> Result<PathBuf, SourceError> {
     let mut components = path.components();
     let Some(first) = components.next() else {

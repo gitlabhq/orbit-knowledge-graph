@@ -1,5 +1,7 @@
-//! A checkout on disk. Listing is cheap and reading is not, so every file is
-//! linked where it is; the store reads it now only if a pass asks to.
+//! Checkout walks with git ignore rules; Changed loads explicit relative paths without walking.
+//! Metadata and link targets are read through pinned parent descriptors without following links.
+//! Missing files are skipped; other I/O errors fail loading. Real host paths remain separate from
+//! lossy inventory keys. Relative roots are canonicalized once so later reads do not depend on cwd.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -7,34 +9,31 @@ use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
 use rayon::prelude::*;
+use rustix::fs::{AtFlags, FileType, readlinkat, statat};
 use tracing::warn;
 
+use super::super::disk;
 use super::{Loading, Put, Source, SourceError, Tag};
 
-/// Every file below the root with git's listing semantics: .gitignore,
-/// .git/info/exclude and dotfiles honored; ripgrep .ignore and ancestor
-/// ignores not; `.git` itself never. The walk is parallel and puts each
-/// file in as it is found.
 pub struct Checkout<'a>(pub &'a Path);
 
-/// The named files below the root: a change set, where a walk is not wanted.
 pub struct Changed<'a> {
     pub root: &'a Path,
     pub paths: Vec<String>,
 }
 
-/// A live checkout changes under us: an entry deleted since it was listed is
-/// skipped. Anything else (a directory we may not read, an I/O fault) would
-/// make the graph claim a repository it did not see, so the run fails.
 impl Source for Checkout<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        let root = self.0;
+        let root = self.0.canonicalize()?;
         let failed: Mutex<Option<SourceError>> = Mutex::new(None);
         let fail = |error: SourceError| {
-            *failed.lock().unwrap_or_else(|e| e.into_inner()) = Some(error);
+            failed
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_or_insert(error);
             WalkState::Quit
         };
-        WalkBuilder::new(root)
+        WalkBuilder::new(&root)
             .hidden(false)
             .git_ignore(true)
             .git_exclude(true)
@@ -60,7 +59,7 @@ impl Source for Checkout<'_> {
                     let is_file_or_link = entry
                         .file_type()
                         .is_some_and(|kind| kind.is_file() || kind.is_symlink());
-                    let Ok(path) = entry.path().strip_prefix(root) else {
+                    let Ok(path) = entry.path().strip_prefix(&root) else {
                         return WalkState::Continue;
                     };
                     if !is_file_or_link {
@@ -82,41 +81,48 @@ impl Source for Checkout<'_> {
 
 impl Source for Changed<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        self.paths
-            .into_par_iter()
-            .try_for_each(|path| put(self.root.join(&path), &path, into))
+        let root = self.root.canonicalize()?;
+        self.paths.into_par_iter().try_for_each(|path| {
+            if !crate::fs::is_safe_relative_path(Path::new(&path)) || path.is_empty() {
+                return Err(
+                    std::io::Error::new(ErrorKind::InvalidInput, "invalid changed path").into(),
+                );
+            }
+            put(root.join(&path), &path, into)
+        })
     }
 }
 
-/// `on_disk` is the file as the filesystem names it; `path` is its key in
-/// the store, which may be a lossy spelling of a name that is not UTF-8.
-/// Only regular files and symlinks are files of the repository; a
-/// directory, fifo or socket named by a caller is not.
 fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
-    let metadata = match on_disk.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            warn!(path, error = %e, "skipping a file deleted during discovery");
-            return Ok(());
-        }
+    let parent = match disk::open_parent(&on_disk) {
+        Ok(parent) => parent,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
     };
-    if metadata.is_file() {
+    let name = on_disk
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "missing filename"))?;
+    let metadata = match statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(metadata) => metadata,
+        Err(rustix::io::Errno::NOENT) => return Ok(()),
+        Err(e) => return Err(std::io::Error::from(e).into()),
+    };
+    let kind = FileType::from_raw_mode(metadata.st_mode);
+    if kind == FileType::RegularFile {
         return into.put(
             path,
             Put::OnDisk {
                 path: on_disk,
-                size: metadata.len(),
+                size: metadata.st_size as u64,
             },
         );
     }
-    if !metadata.is_symlink() {
+    if kind != FileType::Symlink {
         return Ok(());
     }
-    match std::fs::read_link(&on_disk) {
+    match readlinkat(&parent, name, Vec::new()) {
         Ok(target) => into.put(path, Put::Symlink(target.to_string_lossy().into_owned())),
-        Err(e) => {
-            warn!(path, error = %e, "skipping a symlink deleted during discovery");
-            Ok(())
-        }
+        Err(rustix::io::Errno::NOENT) => Ok(()),
+        Err(e) => Err(std::io::Error::from(e).into()),
     }
 }

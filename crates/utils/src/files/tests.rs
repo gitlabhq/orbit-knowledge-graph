@@ -17,8 +17,6 @@ enum Role {
     Input,
 }
 
-/// The shape of a code filter: pngs are listed at the header, `.rs` is a
-/// source, a `.toml` is read before deciding, and a NUL in the bytes lists the file.
 struct CodeFilter;
 
 impl Pass for CodeFilter {
@@ -274,8 +272,6 @@ fn caps_count_every_file_before_any_decision() {
     );
 }
 
-/// A source that offers each file lazily and counts how often it was asked
-/// to produce bytes.
 struct Lazy<'a> {
     files: Vec<(&'static str, &'static [u8])>,
     reads: &'a AtomicUsize,
@@ -438,10 +434,24 @@ fn compressed_spill_takes_less_disk_and_a_disk_cap_fails_the_load() {
         capped,
         Err(SourceError::Cap(cap)) if cap.metric == "spilled_bytes"
     ));
+    let tiny = Vfs::load(
+        memory(&[("tiny", b"x")]),
+        (),
+        Limits {
+            resident_bytes: Some(0),
+            spilled_bytes: Some(1),
+            ..Limits::default()
+        },
+        Options {
+            compress_spill: true,
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(tiny.usage().spilled, 1);
+    assert_eq!(text(&tiny, "tiny"), "x");
 }
 
-/// Eight workers putting the same 80 bytes at once; a budget of 100 leaves
-/// no room for counting it twice.
 struct Workers(Vec<u8>);
 
 impl Source for Workers {
@@ -554,9 +564,6 @@ fn symlinks_are_listed_followed_inside_the_repository_and_never_escape() {
     assert!(vfs.read(Path::new("ping/deeper")).is_err());
 }
 
-/// The store has no host. A symlink whose target exists on this machine,
-/// absolute or relative, reads as nothing, from an archive and from a
-/// checkout alike; a symlinked directory is not walked into.
 #[test]
 #[cfg(unix)]
 fn nothing_on_the_host_is_reachable_through_a_symlink() {
@@ -641,8 +648,6 @@ fn a_load_stops_when_cancelled_or_when_the_source_cannot_read() {
     assert!(matches!(failed, Err(SourceError::Io(e)) if e.to_string() == "stream reset"));
 }
 
-/// The scratch file lives where asked, and the load fails if that place
-/// does not exist.
 #[test]
 fn the_scratch_file_goes_in_scratch_dir() {
     let scratch = tempfile::tempdir().unwrap();
@@ -694,10 +699,6 @@ fn a_checkout_lists_what_git_lists() {
     );
 }
 
-/// A checkout is linked, never copied. The header decides what it can at
-/// discovery; a file whose fate needs its bytes is read then for the
-/// decision only; the rest are checked on the first read, where a content
-/// pass can still turn them down, and the inventory records it.
 #[test]
 #[cfg(unix)]
 fn a_linked_checkout_is_checked_on_first_read() {
@@ -752,10 +753,6 @@ fn a_linked_checkout_is_checked_on_first_read() {
     );
 }
 
-/// A live checkout keeps changing after the load. Eight parsers taking the
-/// first read of one file agree on one decision; a file deleted after the
-/// load reads as an error, not a panic; two names that collapse to one
-/// string are one node, counted.
 #[test]
 #[cfg(unix)]
 fn a_linked_checkout_that_changes_after_the_load() {
@@ -767,14 +764,36 @@ fn a_linked_checkout_that_changes_after_the_load() {
     let collide = [b"caf\xff.rs".as_slice(), b"caf\xfe.rs"]
         .iter()
         .all(|name| std::fs::write(root.join(std::ffi::OsStr::from_bytes(name)), b"x").is_ok());
-    let vfs = load(Checkout(root), CodeFilter, Limits::default());
+    struct CountReads(std::sync::Arc<AtomicUsize>);
+    impl Pass for CountReads {
+        type Tag = Role;
+        fn header(&self, file: &mut File<Role>) {
+            CodeFilter.header(file);
+        }
+        fn content(&self, file: &mut File<Role>, bytes: &[u8]) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            CodeFilter.content(file, bytes);
+        }
+    }
+    let checks = std::sync::Arc::new(AtomicUsize::new(0));
+    let vfs = load(
+        Checkout(root),
+        CountReads(checks.clone()),
+        Limits::default(),
+    );
     std::fs::remove_file(root.join("gone.rs")).unwrap();
 
+    let start = std::sync::Barrier::new(8);
     std::thread::scope(|scope| {
         for _ in 0..8 {
-            scope.spawn(|| assert_eq!(read_error(&vfs, "blob.rs"), ErrorKind::Unsupported));
+            let start = &start;
+            scope.spawn(|| {
+                start.wait();
+                assert_eq!(read_error(&vfs, "blob.rs"), ErrorKind::Unsupported);
+            });
         }
     });
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
     assert_eq!(
         vfs.stat(Path::new("blob.rs")).unwrap().decision,
         Some(Decision::List("binary"))
@@ -985,9 +1004,6 @@ fn empty_and_truncated_archives_are_empty_not_faults() {
     assert!(matches!(truncated, Err(SourceError::Empty)));
 }
 
-/// An entry can carry its real size in a PAX record with the base header
-/// size left at zero. The cap must see the real size, or the body is
-/// inflated into memory before anything can refuse it.
 #[test]
 fn an_oversize_entry_is_listed_when_its_size_comes_from_a_pax_record() {
     let body = vec![b'a'; 4096];
@@ -1039,9 +1055,14 @@ fn the_same_repository_reads_the_same_from_a_checkout_and_an_archive() {
         write(root, path, body);
     }
     std::os::unix::fs::symlink("src/main.rs", root.join("link.rs")).unwrap();
-    let mut entries: Vec<Entry> = fixture
+    let paths: Vec<_> = fixture
         .iter()
-        .map(|(path, body)| Entry::File(Box::leak(format!("repo/{path}").into_boxed_str()), body))
+        .map(|(path, _)| format!("repo/{path}"))
+        .collect();
+    let mut entries: Vec<Entry> = paths
+        .iter()
+        .zip(&fixture)
+        .map(|(path, (_, body))| Entry::File(path, body))
         .collect();
     entries.push(Entry::Symlink("repo/link.rs", "src/main.rs"));
     let data = archive(&entries);
@@ -1063,5 +1084,222 @@ fn the_same_repository_reads_the_same_from_a_checkout_and_an_archive() {
         from_checkout.usage().kept,
         from_archive.usage().kept,
         "after the reads, the checkout's late verdicts match the archive's early ones"
+    );
+}
+
+struct Inputs<'a>(Vec<(&'a str, Put<'a>)>);
+
+impl Source for Inputs<'_> {
+    fn fill<T: super::Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+        self.0
+            .into_iter()
+            .try_for_each(|(path, input)| into.put(path, input))
+    }
+}
+
+#[test]
+fn directory_queries_resolve_links_and_reject_escaping_paths() {
+    let vfs = load(
+        Inputs(vec![
+            ("d/child", Put::Bytes(b"child".to_vec())),
+            ("d-name", Put::Bytes(b"sibling".to_vec())),
+            ("alias", Put::Symlink("d".into())),
+            ("root", Put::Symlink("/".into())),
+        ]),
+        (),
+        Limits::default(),
+    );
+    for path in ["../", "d/../../", "missing", "d-name"] {
+        assert_eq!(vfs.subtree(Path::new(path)).count(), 0, "{path}");
+    }
+    assert_eq!(
+        vfs.subtree(Path::new("alias"))
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["d/child"]
+    );
+    assert_eq!(text(&vfs, "root/d/child"), "child");
+    assert_eq!(
+        vfs.read_dir(Path::new("/")).unwrap(),
+        ["alias", "d", "d-name", "root"]
+    );
+}
+
+#[test]
+fn changed_paths_and_replaced_checkout_files_cannot_read_outside_the_root() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    write(root.path(), "file.rs", b"inside");
+    write(root.path(), "dir/file.rs", b"inside");
+    write(outside.path(), "file.rs", b"secret");
+    symlink(outside.path(), root.path().join("escape")).unwrap();
+
+    for path in [
+        outside.path().join("file.rs").to_str().unwrap(),
+        "../file.rs",
+        "escape/file.rs",
+    ] {
+        let result = Vfs::load(
+            Changed {
+                root: root.path(),
+                paths: vec![path.into()],
+            },
+            CodeFilter,
+            Limits::default(),
+            Options::default(),
+        );
+        assert!(result.is_err(), "{path}");
+    }
+
+    let vfs = load(Checkout(root.path()), CodeFilter, Limits::default());
+    std::fs::remove_file(root.path().join("file.rs")).unwrap();
+    symlink(outside.path().join("file.rs"), root.path().join("file.rs")).unwrap();
+    std::fs::rename(root.path().join("dir"), root.path().join("old-dir")).unwrap();
+    symlink(outside.path(), root.path().join("dir")).unwrap();
+    for path in ["file.rs", "dir/file.rs"] {
+        assert!(vfs.read(Path::new(path)).is_err(), "{path}");
+    }
+}
+
+#[test]
+fn file_sizes_are_checked_before_storing_and_after_disk_changes() {
+    let mismatch = Vfs::load(
+        Inputs(vec![(
+            "small",
+            Put::Lazy {
+                size: 1,
+                read: Box::new(|| Ok(vec![0; 32])),
+            },
+        )]),
+        (),
+        Limits::default(),
+        Options::default(),
+    );
+    assert!(
+        matches!(mismatch, Err(SourceError::Io(error)) if error.kind() == ErrorKind::InvalidData)
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "file.rs", b"small");
+    let vfs = load(
+        Checkout(root.path()),
+        CodeFilter,
+        Limits {
+            file_bytes: Some(8),
+            ..Limits::default()
+        },
+    );
+    write(root.path(), "file.rs", b"much larger than the limit");
+    assert_eq!(read_error(&vfs, "file.rs"), ErrorKind::InvalidData);
+}
+
+#[test]
+fn byte_totals_do_not_wrap_and_failed_reservations_do_not_use_memory() {
+    let overflow = Vfs::load(
+        Inputs(vec![
+            (
+                "huge",
+                Put::Lazy {
+                    size: u64::MAX,
+                    read: Box::new(|| panic!("oversize content read")),
+                },
+            ),
+            ("extra", Put::Bytes(vec![1])),
+        ]),
+        (),
+        Limits {
+            file_bytes: Some(0),
+            ..Limits::default()
+        },
+        Options::default(),
+    );
+    assert!(matches!(overflow, Err(SourceError::Cap(cap)) if cap.metric == "total_bytes"));
+
+    let vfs = load(
+        memory(&[("large", &[0; 16]), ("small", b"fits")]),
+        (),
+        Limits {
+            resident_bytes: Some(4),
+            ..Limits::default()
+        },
+    );
+    assert_eq!((vfs.usage().resident, vfs.usage().spilled), (4, 16));
+    assert_eq!(text(&vfs, "small"), "fits");
+}
+
+#[test]
+fn content_decisions_are_finalized_and_dropped_replacements_remove_old_nodes() {
+    struct Content;
+    impl Pass for Content {
+        type Tag = ();
+        fn header(&self, file: &mut File<()>) {
+            file.decide(Decision::Keep(()));
+        }
+        fn content(&self, file: &mut File<()>, bytes: &[u8]) {
+            file.decide(if bytes == b"drop" {
+                Decision::Drop("content")
+            } else {
+                Decision::Pending
+            });
+        }
+    }
+    let vfs = load(
+        memory(&[("file", b"keep"), ("file", b"drop")]),
+        Content,
+        Limits::default(),
+    );
+    assert_eq!(vfs.files().count(), 0);
+    assert_eq!(vfs.usage().duplicate_paths, 1);
+
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "file", b"keep");
+    let vfs = load(Checkout(root.path()), Content, Limits::default());
+    assert_eq!(text(&vfs, "file"), "keep");
+    assert_eq!(vfs.files().next().unwrap().decision(), Decision::Keep(()));
+}
+
+#[test]
+fn archive_paths_are_validated_before_stripping_the_root() {
+    for path in ["../escape", "/root/escape", "root/../../escape"] {
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.as_mut_bytes()[..path.len()].copy_from_slice(path.as_bytes());
+        header.set_cksum();
+        builder.append(&header, &b"x"[..]).unwrap();
+        let data = gzip(&builder.into_inner().unwrap());
+        assert!(
+            Vfs::load(
+                Archive(&data[..]),
+                (),
+                Limits::default(),
+                Options::default()
+            )
+            .is_err(),
+            "{path}"
+        );
+    }
+    let data = archive(&[]);
+    assert!(matches!(
+        Vfs::load(
+            Archive(&data[..]),
+            (),
+            Limits::default(),
+            Options::default()
+        ),
+        Err(SourceError::Empty)
+    ));
+    let data = archive(&[Entry::Hardlink("root/link", "../secret")]);
+    assert!(
+        Vfs::load(
+            Archive(&data[..]),
+            (),
+            Limits::default(),
+            Options::default()
+        )
+        .is_err()
     );
 }

@@ -1,6 +1,7 @@
-//! The write side. A source puts files in from any thread; nodes and blobs
-//! are sharded so the hot path takes no shared lock. `freeze` sorts once
-//! and hands the result to `Vfs`.
+//! Concurrent loading uses per-shard locks for nodes and content-addressed blobs.
+//! Limits count offered files before policy runs. Rejected content is not materialized.
+//! Disk files are linked; header-pending files are read for classification during loading.
+//! Freezing sorts and deduplicates nodes in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
@@ -11,35 +12,30 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
-use tracing::warn;
 
+use super::disk;
 use super::limits::add_capped;
 use super::path::key;
 use super::scratch::{Blob, Scratch};
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
 
-/// What a source hands the store for one path.
 pub enum Put<'a> {
-    /// Bytes in hand.
     Bytes(Vec<u8>),
-    /// Bytes that cost something to produce: `read` is called only when a
-    /// decision needs them, at most once.
+    /// Called synchronously at most once, only for `Keep` or `Pending`.
     Lazy {
         size: u64,
         read: Box<dyn FnOnce() -> io::Result<Vec<u8>> + 'a>,
     },
-    /// A file of a checkout: linked where it is, never copied.
-    OnDisk { path: PathBuf, size: u64 },
-    /// A symlink, target as written: relative to the link, or `/`-rooted.
+    OnDisk {
+        path: PathBuf,
+        size: u64,
+    },
     Symlink(String),
 }
 
 const NODE_SHARDS: usize = 64;
 const BLOB_SHARDS: usize = 256;
-const LINK_REASON: &str = "symlink";
-const OVERSIZE_REASON: &str = "oversize";
 
-/// Write side. Nothing is readable until `freeze`.
 pub struct Loading<T> {
     passes: Arc<dyn Pass<Tag = T>>,
     limits: Limits,
@@ -56,8 +52,6 @@ pub struct Loading<T> {
 pub(super) struct Node<T> {
     pub(super) file: File<T>,
     pub(super) slot: Option<Slot>,
-    /// Whether the content passes have seen this file. A linked file kept on
-    /// its header alone is checked on its first read.
     pub(super) checked: bool,
 }
 
@@ -67,11 +61,9 @@ pub(super) enum Slot {
     Link(String),
 }
 
-/// SHA-256 of a file's bytes: the identity content is stored under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ContentId(pub(super) [u8; 32]);
 
-/// Putting files in, from any thread.
 impl<T: Tag> Loading<T> {
     pub(super) fn new(
         passes: impl Pass<Tag = T> + 'static,
@@ -92,17 +84,15 @@ impl<T: Tag> Loading<T> {
         }
     }
 
-    /// One file. The header passes run now; the content passes run on the
-    /// one read, which happens here for `Bytes` and `Lazy`, and on the first
-    /// `read` for a linked file no pass asked to see first. A path that
-    /// climbs above the root is not a file of the repository.
     pub fn put(&self, path: &str, what: Put<'_>) -> Result<(), SourceError> {
         if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
             return Err(SourceError::Cancelled);
         }
-        let Some(key) = key(Path::new(path)).filter(|key| !key.is_empty()) else {
-            return Ok(());
-        };
+        let key = key(Path::new(path))
+            .filter(|key| !key.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
+            })?;
         let size = match &what {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::Lazy { size, .. } | Put::OnDisk { size, .. } => *size,
@@ -113,61 +103,52 @@ impl<T: Tag> Loading<T> {
 
         let mut file = File::new(key, size);
         if let Put::Symlink(target) = what {
-            file.decide(Decision::List(LINK_REASON));
-            return self.add_node(file, Some(Slot::Link(target)), true);
+            file.decide(Decision::List("symlink"));
+            self.add_node(file, Some(Slot::Link(target)), true);
+            return Ok(());
         }
         match self.limits.file_bytes {
-            Some(cap) if size > cap => file.decide(Decision::List(OVERSIZE_REASON)),
+            Some(cap) if size > cap => file.decide(Decision::List("oversize")),
             _ => self.passes.header(&mut file),
         }
         match (file.decision(), what) {
-            (Decision::Drop(_), _) => Ok(()),
-            (Decision::List(_), _) => self.add_node(file, None, true),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None),
-            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None),
+            (Decision::Drop(_) | Decision::List(_), _) => self.add_node(file, None, true),
+            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None)?,
+            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None)?,
             (Decision::Keep(_), Put::OnDisk { path, .. }) => {
                 self.add_node(file, Some(Slot::Linked(path)), false)
             }
-            // A pass wants the bytes before deciding: read for the decision
-            // only, then link. A live checkout changes under us; a file
-            // deleted between its listing and this read is not a file of
-            // the repository.
-            (Decision::Pending, Put::OnDisk { path, .. }) => match std::fs::read(&path) {
-                Ok(bytes) => self.put_bytes(file, bytes, Some(path)),
-                Err(e) => {
-                    warn!(path = file.path, error = %e, "skipping a file deleted before it was read");
-                    Ok(())
-                }
+            (Decision::Pending, Put::OnDisk { path, .. }) => match disk::read(&path, size) {
+                Ok(bytes) => self.put_bytes(file, bytes, Some(path))?,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
             },
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
         }
+        Ok(())
     }
 
-    /// The one read: the content passes see the bytes, and a kept file
-    /// keeps them, stored by content or linked where they already are.
     fn put_bytes(
         &self,
         mut file: File<T>,
         bytes: Vec<u8>,
         on_disk: Option<PathBuf>,
     ) -> Result<(), SourceError> {
+        if bytes.len() as u64 != file.size {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "source size mismatch").into());
+        }
         self.passes.content(&mut file, &bytes);
         file.keep_if_pending();
         let slot = match (file.decision(), on_disk) {
-            (Decision::Drop(_), _) => return Ok(()),
             (Decision::Keep(_), Some(path)) => Some(Slot::Linked(path)),
             (Decision::Keep(_), None) => Some(Slot::Stored(self.store(bytes)?)),
             _ => None,
         };
-        self.add_node(file, slot, true)
+        self.add_node(file, slot, true);
+        Ok(())
     }
 
-    fn add_node(
-        &self,
-        file: File<T>,
-        slot: Option<Slot>,
-        checked: bool,
-    ) -> Result<(), SourceError> {
+    fn add_node(&self, file: File<T>, slot: Option<Slot>, checked: bool) {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
         let shard = &self.nodes[hasher.finish() as usize % NODE_SHARDS];
@@ -176,12 +157,8 @@ impl<T: Tag> Loading<T> {
             slot,
             checked,
         });
-        Ok(())
     }
 
-    /// Bytes stored once per distinct content. Checked and inserted under
-    /// one shard lock, so two workers adding the same content cannot both
-    /// pay for it.
     fn store(&self, bytes: Vec<u8>) -> Result<ContentId, SourceError> {
         let id = ContentId(Sha256::digest(&bytes).into());
         let len = bytes.len() as u64;
@@ -198,10 +175,7 @@ impl<T: Tag> Loading<T> {
                     self.limits.resident_bytes,
                 ) {
                     Ok(_) => Blob::Memory(bytes.into()),
-                    Err(_) => {
-                        self.resident.fetch_sub(len, Relaxed);
-                        self.scratch.append(&bytes)?
-                    }
+                    Err(_) => self.scratch.append(&bytes)?,
                 };
                 vacant.insert(blob);
             }
@@ -209,8 +183,6 @@ impl<T: Tag> Loading<T> {
         Ok(id)
     }
 
-    /// Sort once; the sorted vec is the tree. Two entries for one path keep
-    /// the later one, as `tar x` would.
     pub(super) fn freeze(self) -> Vfs<T> {
         let mut nodes: Vec<Node<T>> = self
             .nodes
@@ -219,14 +191,16 @@ impl<T: Tag> Loading<T> {
             .collect();
         nodes.sort_by(|a, b| a.file.path.cmp(&b.file.path));
         let offered = nodes.len();
-        let mut deduped: Vec<Node<T>> = Vec::with_capacity(offered);
-        for node in nodes {
-            match deduped.last_mut() {
-                Some(last) if last.file.path == node.file.path => *last = node,
-                _ => deduped.push(node),
+        nodes.dedup_by(|later, earlier| {
+            if later.file.path != earlier.file.path {
+                return false;
             }
-        }
-        let links = deduped
+            std::mem::swap(later, earlier);
+            true
+        });
+        let duplicate_paths = offered - nodes.len();
+        nodes.retain(|node| !matches!(node.file.decision(), Decision::Drop(_)));
+        let links = nodes
             .iter()
             .filter_map(|node| match &node.slot {
                 Some(Slot::Link(target)) => Some((node.file.path.clone(), target.clone())),
@@ -239,17 +213,17 @@ impl<T: Tag> Loading<T> {
             .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
             .collect();
         let usage = Usage {
-            files: deduped.len(),
+            files: nodes.len(),
             bytes: self.bytes.load(Relaxed),
             kept: 0,
             resident: self.resident.load(Relaxed),
             spilled: self.scratch.end.load(Relaxed),
             deduped_bytes: self.deduped.load(Relaxed),
-            duplicate_paths: offered - deduped.len(),
+            duplicate_paths,
         };
         Vfs {
             passes: self.passes,
-            nodes: deduped,
+            nodes,
             links,
             blobs,
             scratch: self.scratch,

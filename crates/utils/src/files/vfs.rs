@@ -1,5 +1,7 @@
-//! The read side. Immutable after `load`; the sorted vec is the tree, so
-//! every verb is a binary search or a range over it, with no lock.
+//! Read-side nodes are sorted and immutable. File lookups and subtree bounds use binary search.
+//! Directory listing scans the matching subtree. Content decisions on linked files use OnceLock;
+//! concurrent first reads may wait for classification. Stored content reads do not take store locks.
+//! Virtual links resolve within `/`. Missing paths return NotFound and listed files Unsupported.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -7,6 +9,7 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
+use super::disk;
 use super::loading::{ContentId, Loading, Node, Slot};
 use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
 use super::scratch::{Blob, Scratch};
@@ -20,17 +23,13 @@ pub enum Kind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stat<T> {
-    /// Canonical: `/`-rooted, `.` and `..` resolved, symlinks followed.
     pub path: PathBuf,
     pub kind: Kind,
     pub len: u64,
-    /// Of the file reached. A directory has none.
     pub decision: Option<Decision<T>>,
-    /// `Some(target)` when the path named a symlink itself.
     pub link: Option<PathBuf>,
 }
 
-/// Read side. Immutable; no lock on any verb.
 pub struct Vfs<T> {
     pub(super) passes: Arc<dyn Pass<Tag = T>>,
     pub(super) nodes: Vec<Node<T>>,
@@ -40,11 +39,7 @@ pub struct Vfs<T> {
     pub(super) usage: Usage,
 }
 
-/// Reading, with `std::fs` semantics: a missing path is `NotFound`, reading
-/// a directory is `IsADirectory`, a file kept without bytes is
-/// `Unsupported`, and every verb follows symlinks.
 impl<T: Tag> Vfs<T> {
-    /// The one constructor: fill from `source`, then freeze.
     pub fn load(
         source: impl Source,
         passes: impl Pass<Tag = T> + 'static,
@@ -56,11 +51,6 @@ impl<T: Tag> Vfs<T> {
         Ok(loading.freeze())
     }
 
-    /// The bytes of a file. On a linked file no pass has seen, the content
-    /// passes run on this first read, and their decision is the file's from
-    /// here on. The node stays either way: a `Drop` decided this late is a
-    /// node that reads as `Unsupported`, and `files()` shows it with its
-    /// reason.
     pub fn read(&self, path: &Path) -> io::Result<Bytes> {
         let key = self.resolve(path)?;
         let Some(node) = self.node(&key) else {
@@ -76,7 +66,7 @@ impl<T: Tag> Vfs<T> {
         };
         let bytes = match slot {
             Slot::Stored(id) => self.blob(id)?,
-            Slot::Linked(on_disk) => std::fs::read(on_disk)?.into(),
+            Slot::Linked(on_disk) => disk::read(on_disk, node.file.size)?.into(),
             Slot::Link(_) => return Err(not_found()),
         };
         if node.checked {
@@ -91,7 +81,6 @@ impl<T: Tag> Vfs<T> {
         }
     }
 
-    /// Direct child names, in order.
     pub fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
         let key = self.resolve(path)?;
         if self.node(&key).is_some() {
@@ -111,11 +100,11 @@ impl<T: Tag> Vfs<T> {
                 names.push(name.to_owned());
             }
         }
+        names.sort_unstable();
+        names.dedup();
         Ok(names)
     }
 
-    /// What is at `path`: the node reached through any symlinks, plus the
-    /// link target if `path` itself is one. A dangling link is `NotFound`.
     pub fn stat(&self, path: &Path) -> io::Result<Stat<T>> {
         let link = self
             .links
@@ -144,19 +133,15 @@ impl<T: Tag> Vfs<T> {
         })
     }
 
-    /// Every file, sorted by path. Reflects decisions made on reads.
     pub fn files(&self) -> impl Iterator<Item = &File<T>> + use<'_, T> {
         self.nodes.iter().map(|node| &node.file)
     }
 
-    /// The files below `dir`, sorted. Finding them is a binary search; the
-    /// range is contiguous because the vec is sorted.
     pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<T>> + use<'_, T> {
-        let key = key(dir).unwrap_or_default();
-        self.subtree_of(&key)
+        let key = self.resolve(dir).ok();
+        key.into_iter().flat_map(|key| self.subtree_of(&key))
     }
 
-    /// `kept` is summed now, so a refusal on a first read is reflected.
     pub fn usage(&self) -> Usage {
         Usage {
             kept: self.files().filter(|f| f.keeps()).map(|f| f.size).sum(),
@@ -197,9 +182,11 @@ impl<T: Tag> Vfs<T> {
         }
     }
 
-    /// The key a path names once every symlink in it is followed.
     fn resolve(&self, path: &Path) -> io::Result<String> {
         let mut key = key(path).ok_or_else(not_found)?;
+        if self.links.is_empty() {
+            return Ok(key);
+        }
         let mut hops = 0;
         while let Some(next) = follow_first_link(&key, &self.links) {
             key = next?;
@@ -214,7 +201,6 @@ impl<T: Tag> Vfs<T> {
         Ok(key)
     }
 
-    /// Like `resolve`, but a symlink as the last component stays itself.
     fn resolve_parents(&self, path: &Path) -> io::Result<String> {
         let key = key(path).ok_or_else(not_found)?;
         let Some((parent, name)) = key.rsplit_once('/') else {

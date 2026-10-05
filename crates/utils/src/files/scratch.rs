@@ -1,7 +1,7 @@
 //! Where bytes live when they are not in memory: one anonymous append-only
 //! file, opened on the first spill, positional writes from any thread,
 //! positional reads, gone when the store is. Each blob is one independent
-//! LZ4 block when asked, so reads stay random-access.
+//! LZ4 block when compression reduces its size, so reads stay random-access.
 
 use std::io;
 use std::os::unix::fs::FileExt;
@@ -43,7 +43,11 @@ impl Scratch {
         let bytes = match self.compress {
             true => {
                 compressed = lz4_flex::block::compress(bytes);
-                compressed.as_slice()
+                if compressed.len() < bytes.len() {
+                    compressed.as_slice()
+                } else {
+                    bytes
+                }
             }
             false => bytes,
         };
@@ -60,7 +64,7 @@ impl Scratch {
     pub(super) fn read(&self, offset: u64, len: u64, raw_len: u64) -> io::Result<Bytes> {
         let mut bytes = vec![0u8; len as usize];
         self.file()?.read_exact_at(&mut bytes, offset)?;
-        if self.compress {
+        if len < raw_len {
             bytes = lz4_flex::block::decompress(&bytes, raw_len as usize)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         }

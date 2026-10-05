@@ -1,10 +1,11 @@
-//! What a domain writes: a `Pass` that turns a file's path, size and bytes
-//! into a `Decision`.
+//! Passes classify files by path, size and content. They do not enforce limits or see symlinks.
+//! Header `Pending` requests content during loading; after content it becomes `Keep(Default)`.
+//! Linked files kept by the header run content passes on first read. A late `Drop` remains
+//! in the inventory with its reason because nodes are frozen; reading it returns `Unsupported`.
+//! Passes are trusted policy code and should only change the decision.
 
 use std::sync::OnceLock;
 
-/// What becomes of a file. `Pending` is the start state and, after `header`,
-/// means "the bytes decide"; it is never observable once the store is loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Decision<T> {
     #[default]
@@ -14,20 +15,15 @@ pub enum Decision<T> {
     Drop(&'static str),
 }
 
-/// A domain's tag on a kept file. `Default` is what a `Pending` file becomes
-/// when no pass objected to its bytes.
 pub trait Tag: Copy + Default + Send + Sync + 'static {}
 impl<T: Copy + Default + Send + Sync + 'static> Tag for T {}
 
-/// One file of the repository and what the passes decided about it.
 #[derive(Debug, Clone)]
 pub struct File<T> {
     pub path: String,
     pub size: u64,
     decided: Decision<T>,
-    /// A file linked from disk is checked by the content passes on its first
-    /// read, after the store is frozen; this is that one late verdict.
-    verdict: OnceLock<Decision<T>>,
+    content_decision: OnceLock<Decision<T>>,
 }
 
 impl<T: Tag> File<T> {
@@ -36,34 +32,33 @@ impl<T: Tag> File<T> {
             path,
             size,
             decided: Decision::Pending,
-            verdict: OnceLock::new(),
+            content_decision: OnceLock::new(),
         }
     }
 
     pub fn decision(&self) -> Decision<T> {
-        self.verdict.get().copied().unwrap_or(self.decided)
+        self.content_decision.get().copied().unwrap_or(self.decided)
     }
 
     pub fn decide(&mut self, decision: Decision<T>) {
         self.decided = decision;
+        self.content_decision.take();
     }
 
     pub fn keeps(&self) -> bool {
         matches!(self.decision(), Decision::Keep(_))
     }
 
-    /// The one decision after the store is frozen: `content` runs once, on
-    /// a copy, and its outcome is this file's decision from then on.
     pub(super) fn decide_once(&self, content: impl FnOnce(&mut Self)) -> Decision<T> {
-        *self.verdict.get_or_init(|| {
+        *self.content_decision.get_or_init(|| {
             let mut copy = Self::new(self.path.clone(), self.size);
             copy.decided = self.decided;
             content(&mut copy);
+            copy.keep_if_pending();
             copy.decided
         })
     }
 
-    /// `Pending` after the content passes means no policy objected.
     pub(super) fn keep_if_pending(&mut self) {
         if matches!(self.decided, Decision::Pending) {
             self.decided = Decision::Keep(T::default());
@@ -71,12 +66,6 @@ impl<T: Tag> File<T> {
     }
 }
 
-/// A pure function of path, size and bytes. It never sees a symlink, never
-/// counts anything and cannot fail. `header` runs on every file; `content`
-/// runs once, on the one read, for files still `Pending` or `Keep` after it.
-/// A `Drop` from either leaves no node, except when the one read is a
-/// parser's first `read` of a linked file: the store is frozen by then, so
-/// that node stays and reads as `Unsupported`.
 pub trait Pass: Send + Sync {
     type Tag: Tag;
 
@@ -92,7 +81,6 @@ pub trait Pass: Send + Sync {
     }
 }
 
-/// Two passes in order: the second sees the first's decision.
 pub struct Then<A, B>(A, B);
 
 impl<A: Pass, B: Pass<Tag = A::Tag>> Pass for Then<A, B> {
@@ -109,7 +97,6 @@ impl<A: Pass, B: Pass<Tag = A::Tag>> Pass for Then<A, B> {
     }
 }
 
-/// No policy: keep everything.
 impl Pass for () {
     type Tag = ();
 }
