@@ -114,7 +114,7 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query_body(&cte.query)?;
+                let inner = self.emit_query(&cte.query)?;
                 if cte.materialized {
                     Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
                 } else {

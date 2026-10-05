@@ -91,3 +91,44 @@ impl std::fmt::Display for ParameterizedQuery {
         write!(f, "{}", self.render())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+
+    #[test]
+    fn nested_cte_definitions_survive_both_renderers() {
+        for recursive in [false, true] {
+            let seed = Query {
+                select: vec![SelectExpr::new(Expr::int(7), "id")],
+                from: TableRef::scan("system.one", "one"),
+                ..Default::default()
+            };
+            let body = Query {
+                ctes: vec![Cte::new("seed", seed)],
+                select: vec![SelectExpr::col("s", "id")],
+                from: TableRef::scan("seed", "s"),
+                limit: Some(1),
+                ..Default::default()
+            };
+            let mut outer = Cte::new("result", body);
+            outer.recursive = recursive;
+            let ast = Node::Query(Box::new(Query {
+                ctes: vec![outer],
+                select: vec![SelectExpr::col("r", "id")],
+                from: TableRef::scan("result", "r"),
+                ..Default::default()
+            }));
+            let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+            let local = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+            for sql in [&remote.sql, &local.sql] {
+                assert!(sql.contains("result AS (WITH seed AS (SELECT"), "{sql}");
+                assert_eq!(sql.starts_with("WITH RECURSIVE"), recursive, "{sql}");
+                assert!(sql.contains("FROM seed AS s"), "{sql}");
+            }
+            assert!(remote.sql.contains("LIMIT 1"));
+            assert_eq!(local.sql.contains("LIMIT 1"), !recursive);
+        }
+    }
+}

@@ -68,13 +68,17 @@ impl Context {
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
+        self.emit_query_with_limit(q, true)
+    }
+
+    fn emit_query_with_limit(&mut self, q: &Query, include_limit: bool) -> Result<String> {
         let mut parts = Vec::new();
 
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
 
-        parts.push(self.emit_query_body(q)?);
+        parts.push(self.emit_query_body_inner(q, include_limit)?);
 
         Ok(parts.join(" "))
     }
@@ -90,14 +94,8 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                if cte.recursive {
-                    // DuckDB: recursive CTE bodies must not have LIMIT/OFFSET.
-                    let inner = self.emit_query_body_without_limit(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
-                } else {
-                    let inner = self.emit_query_body(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
-                }
+                let inner = self.emit_query_with_limit(&cte.query, !cte.recursive)?;
+                Ok(format!("{} AS ({})", cte.name, inner))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -106,10 +104,6 @@ impl Context {
 
     fn emit_query_body(&mut self, q: &Query) -> Result<String> {
         self.emit_query_body_inner(q, true)
-    }
-
-    fn emit_query_body_without_limit(&mut self, q: &Query) -> Result<String> {
-        self.emit_query_body_inner(q, false)
     }
 
     fn emit_query_body_inner(&mut self, q: &Query, include_limit: bool) -> Result<String> {
