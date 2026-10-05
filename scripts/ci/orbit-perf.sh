@@ -7,7 +7,7 @@
 # indexing), and runs the gRPC load test (xtask loadtest) against gkg.
 #
 # Env (from the CI job): SYNTH_CONFIG, ROUNDS, CONCURRENCY, WARMUP_ROUNDS, SEED,
-# LATENCY_CONCURRENCY, LATENCY_REQUESTS, LOAD_JOBS, GKG_IMAGE, GKG_IMAGE_TAG.
+# LOAD_JOBS, GKG_IMAGE, GKG_IMAGE_TAG.
 set -euo pipefail
 
 ROOT="$(pwd)"                                   # knowledge-graph checkout (xtask lives here)
@@ -16,8 +16,6 @@ ROUNDS="${ROUNDS:-5}"
 CONCURRENCY="${CONCURRENCY:-20}"
 WARMUP_ROUNDS="${WARMUP_ROUNDS:-1}"
 SEED="${SEED:-42}"
-LATENCY_CONCURRENCY="${LATENCY_CONCURRENCY:-1}"
-LATENCY_REQUESTS="${LATENCY_REQUESTS:-4}"
 LOAD_JOBS="${LOAD_JOBS:-4}"
 # ClickHouse gets requests = limits after DDL; leaves room for the webserver (2 CPU / 8Gi) on 8 vCPU / 32 GB.
 CH_CPU="${CH_CPU:-4}"
@@ -264,14 +262,15 @@ done
 # ---------------------------------------------------------------------------
 # 4. Port-forward gkg gRPC + run the gRPC load test (xtask loadtest).
 # ---------------------------------------------------------------------------
-log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY warmup_rounds=$WARMUP_ROUNDS seed=$SEED latency_concurrency=$LATENCY_CONCURRENCY latency_requests=$LATENCY_REQUESTS)"
+log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY warmup_rounds=$WARMUP_ROUNDS seed=$SEED)"
 
 kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >/tmp/gkg-pf.log 2>&1 &
 PF_PID=$!
 # ClickHouse HTTP for the load test's server-side query stats; best effort, not checked.
 kc -n gitlab-dev-stack port-forward svc/gitlab-dev-stack-clickhouse 8123:8123 >/tmp/ch-pf.log 2>&1 &
 CH_PF_PID=$!
-trap 'kill "$PF_PID" "$CH_PF_PID" 2>/dev/null || true' EXIT
+MEM_PID=""
+trap 'kill "$PF_PID" "$CH_PF_PID" ${MEM_PID:+"$MEM_PID"} 2>/dev/null || true' EXIT
 
 # Fail fast rather than load-testing a dead endpoint.
 ready=0
@@ -303,6 +302,97 @@ export ORBIT_PERF_CLICKHOUSE_URL=http://127.0.0.1:8123 ORBIT_PERF_CLICKHOUSE_USE
 ORBIT_PERF_CLICKHOUSE_PASSWORD="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.graph-password}' | base64 -d)" \
   || { ORBIT_PERF_CLICKHOUSE_PASSWORD=""; log "     could not read the ClickHouse password; server-side stats may be missing"; }
 
+# Peak container memory during the load test, from the kubelet Summary API (the
+# gkg image may have no shell to read cgroups from). Best effort: never fails the job.
+CH_NS=gitlab-dev-stack CH_POD=gitlab-dev-stack-clickhouse-0 CH_CONTAINER=clickhouse
+GKG_NS=gitlab GKG_CONTAINER=gkg-webserver
+GKG_POD="$(kc -n "$GKG_NS" get pod -l "$GKG_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || GKG_POD=""
+pod_field() { kc -n "$1" get pod "$2" -o jsonpath="$3" 2>/dev/null || true; }
+mem_limit() { pod_field "$1" "$2" "{.spec.containers[?(@.name==\"$3\")].resources.limits.memory}"; }
+CH_NODE="$(pod_field "$CH_NS" "$CH_POD" '{.spec.nodeName}')"
+GKG_NODE="$(pod_field "$GKG_NS" "$GKG_POD" '{.spec.nodeName}')"
+CH_LIMIT="$(mem_limit "$CH_NS" "$CH_POD" "$CH_CONTAINER")"
+GKG_LIMIT="$(mem_limit "$GKG_NS" "$GKG_POD" "$GKG_CONTAINER")"
+# Node's Summary API document with whitespace removed, so the awk below can match on it.
+node_summary() { kc get --raw "/api/v1/nodes/$1/proxy/stats/summary" 2>/dev/null | tr -d ' \t\n'; }
+# workingSetBytes of one container (args: summary namespace pod container); empty if absent.
+working_set() {
+  awk -v ns="$2" -v pod="$3" -v c="$4" 'BEGIN { RS = "\"podRef\":" }
+    index($0, "{\"name\":\"" pod "\",\"namespace\":\"" ns "\"") == 1 {
+      s = substr($0, index($0, "\"containers\":"))
+      i = index(s, "{\"name\":\"" c "\""); if (!i) exit
+      s = substr(s, i); j = index(s, "\"rootfs\""); if (j) s = substr(s, 1, j)
+      if (match(s, /"workingSetBytes":[0-9]+/)) print substr(s, RSTART + 18, RLENGTH - 18)
+      exit
+    }' <<< "$1"
+}
+MEM_PEAK="$ROOT/.loadtest_mem_peak"
+# Keeps the max of each container in MEM_PEAK, sampling about every 2s until killed.
+sample_memory() {
+  local ch_max="" gkg_max="" json ch gkg
+  while :; do
+    json="$(node_summary "$CH_NODE")" || json=""
+    ch="$(working_set "$json" "$CH_NS" "$CH_POD" "$CH_CONTAINER")" || ch=""
+    if [ "$GKG_NODE" != "$CH_NODE" ]; then json="$(node_summary "$GKG_NODE")" || json=""; fi
+    gkg="$(working_set "$json" "$GKG_NS" "$GKG_POD" "$GKG_CONTAINER")" || gkg=""
+    if [ -n "$ch" ] && [ "$ch" -gt "${ch_max:-0}" ]; then ch_max="$ch"; fi
+    if [ -n "$gkg" ] && [ "$gkg" -gt "${gkg_max:-0}" ]; then gkg_max="$gkg"; fi
+    printf '%s %s\n' "${ch_max:-unknown}" "${gkg_max:-unknown}" > "$MEM_PEAK.tmp" && mv "$MEM_PEAK.tmp" "$MEM_PEAK"
+    sleep 2
+  done
+}
+# Kubernetes quantity (16Gi, 8G, 512Mi, plain bytes) to bytes; empty if unparseable.
+to_bytes() {
+  awk -v q="$1" 'BEGIN {
+    if (!match(q, /^[0-9.]+/)) exit
+    n = substr(q, 1, RLENGTH); u = substr(q, RLENGTH + 1)
+    split("Ki Mi Gi Ti", b); split("k M G T", d)
+    for (i = 1; i <= 4; i++) { if (u == b[i]) n *= 1024 ^ i; if (u == d[i]) n *= 1000 ^ i }
+    printf "%.0f\n", n
+  }'
+}
+# Same units as the report's Peak mem column: B, else KiB/MiB/GiB/TiB with one decimal.
+fmt_bytes() {
+  awk -v b="$1" 'BEGIN {
+    if (b < 1024) { printf "%d B\n", b; exit }
+    split("KiB MiB GiB TiB", u)
+    for (i = 0; b >= 1024 && i < 4; i++) b /= 1024
+    printf "%.1f %s\n", b, u[i]
+  }'
+}
+# "<peak> of <limit> (<pct>%)", or "unknown" without a sample.
+mem_cell() {
+  local peak="$1" limit
+  if [ -z "$peak" ] || [ "$peak" = unknown ]; then echo unknown; return; fi
+  limit="$(to_bytes "$2")"
+  if [ -n "$limit" ] && [ "$limit" -gt 0 ]; then
+    echo "$(fmt_bytes "$peak") of $(fmt_bytes "$limit") ($(awk -v p="$peak" -v l="$limit" 'BEGIN { printf "%.0f", p * 100 / l }')%)"
+  else
+    echo "$(fmt_bytes "$peak") (no limit set)"
+  fi
+}
+
+LT_OUT="$ROOT/.loadtest_stdout"
+LT_STATUS=0
+rm -f "$MEM_PEAK"
+sample_memory &
+MEM_PID=$!
+xtask loadtest \
+  --endpoint http://127.0.0.1:50054 \
+  --rounds "$ROUNDS" \
+  --concurrency "$CONCURRENCY" \
+  --warmup-rounds "$WARMUP_ROUNDS" \
+  --seed "$SEED" \
+  | tee "$LT_OUT" || LT_STATUS=$?
+kill "$MEM_PID" 2>/dev/null || true
+wait "$MEM_PID" 2>/dev/null || true
+
+CH_PEAK=unknown GKG_PEAK=unknown
+if [ -s "$MEM_PEAK" ]; then read -r CH_PEAK GKG_PEAK < "$MEM_PEAK"; fi
+MEM_LINE="Memory peak during the load test: ClickHouse $(mem_cell "$CH_PEAK" "$CH_LIMIT") · gkg $(mem_cell "$GKG_PEAK" "$GKG_LIMIT")"
+log "     $MEM_LINE"
+
+# Header, the loadtest's Run line, the memory line, then the rest of its report.
 REPORT="$ROOT/loadtest-results.md"
 {
   echo "## Orbit perf: gRPC load test"
@@ -311,15 +401,13 @@ REPORT="$ROOT/loadtest-results.md"
   echo
   echo "Runner: ${RUNNER_INFO}"
   echo
+  head -n 1 "$LT_OUT"
+  echo
+  echo "$MEM_LINE"
+  tail -n +2 "$LT_OUT"
 } > "$REPORT"
-xtask loadtest \
-  --endpoint http://127.0.0.1:50054 \
-  --rounds "$ROUNDS" \
-  --concurrency "$CONCURRENCY" \
-  --warmup-rounds "$WARMUP_ROUNDS" \
-  --seed "$SEED" \
-  --latency-concurrency "$LATENCY_CONCURRENCY" \
-  --latency-requests "$LATENCY_REQUESTS" \
-  | tee -a "$REPORT"
+rm -f "$LT_OUT" "$MEM_PEAK"
 
+# Report the partial results above, then fail like before if the load test did.
+[ "$LT_STATUS" = 0 ] || { echo "xtask loadtest failed (exit $LT_STATUS)" >&2; exit "$LT_STATUS"; }
 log "done. results in loadtest-results.md"

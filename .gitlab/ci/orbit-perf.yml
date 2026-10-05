@@ -19,12 +19,10 @@
     DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
     FF_NETWORK_PER_BUILD: 1
     SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
-    ROUNDS: "5"
+    ROUNDS: "10"
     CONCURRENCY: "20"
     WARMUP_ROUNDS: "1"
     SEED: "42"
-    LATENCY_CONCURRENCY: "1"
-    LATENCY_REQUESTS: "4"
     GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
   script:
     - bash scripts/ci/orbit-perf.sh

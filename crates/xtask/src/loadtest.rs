@@ -10,11 +10,12 @@
 //! service. The bidirectional `ExecuteQuery` stream is driven end to end,
 //! auto-authorizing every resource in the redaction exchange.
 //!
-//! Each round runs every query once in a seeded shuffled order, so slow server
-//! drift spreads across queries instead of landing on whichever ran last;
-//! warm-up rounds are discarded. Every request carries a correlation id that the server
-//! prefixes onto its ClickHouse `query_id`s, so `system.query_log` rows can be
-//! joined back to scenario and phase.
+//! Each round runs every query once in a seeded shuffled order, sending
+//! `concurrency` requests at once, so slow server drift spreads across queries
+//! instead of landing on whichever ran last; warm-up rounds are discarded.
+//! Every request carries a correlation id that the server prefixes onto its
+//! ClickHouse `query_id`s, so `system.query_log` rows can be joined back to
+//! scenario and phase.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -40,7 +41,6 @@ use rand::seq::SliceRandom;
 use serde::Deserialize;
 use tabled::builder::Builder;
 use tabled::settings::Style;
-use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_stream::wrappers::ReceiverStream;
@@ -65,8 +65,6 @@ pub struct Options {
     pub rounds: usize,
     pub warmup_rounds: usize,
     pub seed: u64,
-    pub latency_concurrency: usize,
-    pub latency_requests: usize,
     pub scenarios: PathBuf,
     pub query: Option<String>,
     pub admin: bool,
@@ -96,21 +94,19 @@ struct LoadQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Phase {
     Warmup,
-    Latency,
-    Throughput,
+    Measured,
 }
 
 impl Phase {
     fn code(self) -> &'static str {
         match self {
             Phase::Warmup => "w",
-            Phase::Latency => "l",
-            Phase::Throughput => "t",
+            Phase::Measured => "t",
         }
     }
 
     fn from_code(code: &str) -> Option<Self> {
-        [Phase::Warmup, Phase::Latency, Phase::Throughput]
+        [Phase::Warmup, Phase::Measured]
             .into_iter()
             .find(|p| p.code() == code)
     }
@@ -118,8 +114,7 @@ impl Phase {
     fn title(self) -> &'static str {
         match self {
             Phase::Warmup => "Warm-up",
-            Phase::Latency => "Latency",
-            Phase::Throughput => "Throughput",
+            Phase::Measured => "Measured",
         }
     }
 }
@@ -135,21 +130,17 @@ struct Ctx {
     seq: AtomicU64,
 }
 
-/// One pass: `rounds` rounds of `requests` requests per query, `in_flight` at a time.
+/// One pass: `rounds` rounds of `concurrency` requests per query, all in flight at once.
 #[derive(Clone, Copy)]
 struct PassSpec {
     phase: Phase,
     rounds: usize,
-    requests: usize,
-    in_flight: usize,
+    concurrency: usize,
 }
 
 pub async fn run(opts: Options) -> Result<()> {
     if opts.concurrency == 0 || opts.rounds == 0 {
         bail!("--concurrency and --rounds must both be at least 1");
-    }
-    if opts.latency_concurrency > 0 && opts.latency_requests == 0 {
-        bail!("--latency-requests must be at least 1 when --latency-concurrency is set");
     }
     let run_id = opts
         .run_id
@@ -172,19 +163,13 @@ pub async fn run(opts: Options) -> Result<()> {
         bail!("no runnable scenarios found (need a `query.json` body)");
     }
 
-    let spec = |phase, rounds, requests, in_flight| PassSpec {
+    let spec = |phase, rounds| PassSpec {
         phase,
         rounds,
-        requests,
-        in_flight,
+        concurrency: opts.concurrency,
     };
-    let (conc, rounds) = (opts.concurrency, opts.rounds);
-    let mut passes = vec![spec(Phase::Warmup, opts.warmup_rounds, conc, conc)];
-    if opts.latency_concurrency > 0 {
-        let (requests, in_flight) = (opts.latency_requests, opts.latency_concurrency);
-        passes.push(spec(Phase::Latency, rounds, requests, in_flight));
-    }
-    passes.push(spec(Phase::Throughput, rounds, conc, conc));
+    let warmup = spec(Phase::Warmup, opts.warmup_rounds);
+    let measured = spec(Phase::Measured, opts.rounds);
 
     eprintln!(
         "Load test: endpoint={} run_id={run_id} seed={} queries={}",
@@ -192,14 +177,14 @@ pub async fn run(opts: Options) -> Result<()> {
         opts.seed,
         queries.len()
     );
-    for p in &passes {
+    for p in [warmup, measured] {
         eprintln!(
             "  {}: {} rounds x {} requests/query at concurrency {} => {} requests/query",
             p.phase.title(),
             p.rounds,
-            p.requests,
-            p.in_flight,
-            p.rounds * p.requests
+            p.concurrency,
+            p.concurrency,
+            p.rounds * p.concurrency
         );
     }
     eprintln!(
@@ -226,20 +211,16 @@ pub async fn run(opts: Options) -> Result<()> {
         seq: AtomicU64::new(0),
     };
 
-    let mut passes_out = Vec::new();
-    for spec in passes {
-        let runs = run_pass(&ctx, &queries, spec).await;
-        if spec.phase != Phase::Warmup {
-            let summaries = queries.iter().zip(runs);
-            passes_out.push(PassReport {
-                spec,
-                queries: summaries.map(|(q, r)| summarize(&q.label, r)).collect(),
-            });
-        }
-    }
+    run_pass(&ctx, &queries, warmup).await;
+    let runs = run_pass(&ctx, &queries, measured).await;
+    let summaries = queries.iter().zip(runs);
+    let summaries = summaries.map(|(q, r)| summarize(&q.label, r)).collect();
 
     let (server, server_note) = match &opts.clickhouse {
-        None => (None, None),
+        None => (
+            None,
+            Some("Server-side (ClickHouse) stats not collected: no --clickhouse-url.".to_string()),
+        ),
         Some(ch) => match fetch_server_stats(ch, &run_id).await {
             Ok((stats, note)) => (Some(stats), note),
             Err(e) => (
@@ -257,7 +238,8 @@ pub async fn run(opts: Options) -> Result<()> {
         seed: opts.seed,
         warmup_rounds: opts.warmup_rounds,
         rounds: opts.rounds,
-        passes: passes_out,
+        concurrency: opts.concurrency,
+        queries: summaries,
         server,
         server_note,
     };
@@ -354,14 +336,14 @@ async fn run_pass(ctx: &Ctx, queries: &[LoadQuery], spec: PassSpec) -> Vec<Query
     runs
 }
 
-/// Send `spec.requests` requests for one query, each with its own correlation id.
+/// Send `spec.concurrency` requests for one query at once, each with its own correlation id.
 async fn run_batch(
     ctx: &Ctx,
     idx: usize,
     query: &LoadQuery,
     spec: PassSpec,
 ) -> Vec<Result<f64, String>> {
-    futures::stream::iter(0..spec.requests)
+    futures::stream::iter(0..spec.concurrency)
         .map(|_| {
             let mut client = ctx.client.clone();
             let seq = ctx.seq.fetch_add(1, Ordering::Relaxed);
@@ -374,7 +356,7 @@ async fn run_batch(
                 result.map(|()| ms)
             }
         })
-        .buffer_unordered(spec.in_flight.max(1))
+        .buffer_unordered(spec.concurrency.max(1))
         .collect()
         .await
 }
@@ -463,45 +445,26 @@ struct Report {
     seed: u64,
     warmup_rounds: usize,
     rounds: usize,
-    passes: Vec<PassReport>,
-    /// ClickHouse stats per (phase, scenario index); `None` when not collected.
-    server: Option<BTreeMap<(Phase, usize), ServerStats>>,
-    /// One-line note about the ClickHouse section (unavailable, partial).
+    concurrency: usize,
+    /// One entry per scenario, in scenario-index order.
+    queries: Vec<QuerySummary>,
+    /// ClickHouse stats per scenario index; `None` when not collected.
+    server: Option<BTreeMap<usize, ServerStats>>,
+    /// One-line note about the ClickHouse columns (not collected, unavailable, partial).
     server_note: Option<String>,
 }
 
-struct PassReport {
-    spec: PassSpec,
-    /// One entry per scenario, in scenario-index order.
-    queries: Vec<QuerySummary>,
-}
-
-/// One latency table row; fields are in column order.
-#[derive(Tabled)]
+/// Client-side latency for one scenario over the measured rounds.
 struct QuerySummary {
-    #[tabled(rename = "Query")]
     label: String,
-    #[tabled(rename = "N")]
     n: usize,
-    #[tabled(rename = "Err")]
     err: usize,
-    #[tabled(rename = "Min", display = "fmt_ms")]
-    min: f64,
-    #[tabled(rename = "Mean", display = "fmt_ms")]
-    mean: f64,
     /// Median of the per-round medians.
-    #[tabled(rename = "Med", display = "fmt_ms")]
     med: f64,
-    /// Sorted per-round medians (rounds with no successful request skipped).
-    #[tabled(rename = "Round med range", display("fmt_spread", self.med))]
-    round_medians: Vec<f64>,
-    #[tabled(rename = "p90", display = "fmt_ms")]
     p90: f64,
-    #[tabled(rename = "p99", display = "fmt_ms")]
-    p99: f64,
-    #[tabled(rename = "Max", display = "fmt_ms")]
     max: f64,
-    #[tabled(skip)]
+    /// Sorted per-round medians (rounds with no successful request skipped).
+    round_medians: Vec<f64>,
     errors: BTreeMap<String, usize>,
 }
 
@@ -520,20 +483,12 @@ fn summarize(label: &str, run: QueryRun) -> QuerySummary {
         })
         .collect();
     round_medians.sort_by(f64::total_cmp);
-    let n = pooled.len();
     QuerySummary {
         label: label.to_string(),
-        n,
+        n: pooled.len(),
         err: run.errors.values().sum(),
-        min: pooled.first().copied().unwrap_or(0.0),
-        mean: if n == 0 {
-            0.0
-        } else {
-            pooled.iter().sum::<f64>() / n as f64
-        },
         med: pct(&round_medians, 0.5),
         p90: pct(&pooled, 0.9),
-        p99: pct(&pooled, 0.99),
         max: pooled.last().copied().unwrap_or(0.0),
         round_medians,
         errors: run.errors,
@@ -545,7 +500,7 @@ fn fmt_spread(sorted_meds: &[f64], med: f64) -> String {
     let (Some(lo), Some(hi)) = (sorted_meds.first(), sorted_meds.last()) else {
         return "-".to_string();
     };
-    let range = format!("{}–{}", fmt_ms(lo), fmt_ms(hi));
+    let range = format!("{}–{}", fmt_ms(*lo), fmt_ms(*hi));
     if med > 0.0 {
         format!("{range} (±{:.0}%)", (hi - lo) / 2.0 / med * 100.0)
     } else {
@@ -553,46 +508,37 @@ fn fmt_spread(sorted_meds: &[f64], med: f64) -> String {
     }
 }
 
-/// Markdown report: per pass a latency table, an optional ClickHouse table,
-/// then errors in a text fence so `|` and backticks cannot break rendering.
+/// Markdown report: the run line (kept first; orbit-perf.sh inserts a line after
+/// it), one under-load table, errors in a text fence so `|` and backticks cannot
+/// break rendering, then the ClickHouse note.
 fn render_report(report: &Report) -> String {
-    let queries = report.passes.first().map_or(0, |p| p.queries.len());
+    let c = report.concurrency;
     let mut out = format!(
-        "Run `{}`: {queries} queries, seed {}, {} warm-up round(s) discarded, {} measured round(s), \
+        "Run `{}`: {} queries, seed {}, {} warm-up round(s) discarded, {} measured round(s), \
          each query once per round in seeded shuffled order.\n",
-        report.run_id, report.seed, report.warmup_rounds, report.rounds
+        report.run_id,
+        report.queries.len(),
+        report.seed,
+        report.warmup_rounds,
+        report.rounds
     );
-    for pass in &report.passes {
-        let title = format!(
-            "{} (concurrency {})",
-            pass.spec.phase.title(),
-            pass.spec.in_flight
-        );
-        out.push_str(&format!(
-            "\n### {title}\n\n{} requests per query per round. Latencies in ms, successful \
-             requests only. Med is the median of per-round medians; Round med range is the \
-             min–max of those round medians (± half the range as % of Med). Min, Mean, p90, \
-             p99 and Max are pooled over all rounds.\n\n{}\n",
-            pass.spec.requests,
-            Table::new(&pass.queries).with(Style::markdown())
-        ));
-        if let Some(stats) = &report.server {
-            out.push_str(&format!(
-                "\n#### Server-side (ClickHouse), {title}\n\n{}",
-                render_server_table(pass, stats)
-            ));
+    out.push_str(&format!(
+        "\n### Under load (concurrency {c})\n\n{} requests per query ({} rounds of {c}, {c} in \
+         flight). Client times are end to end, in ms, successful requests only. Med is the \
+         median of per-round medians. CH columns are ClickHouse work per request.\n\n{}\n",
+        report.rounds * c,
+        report.rounds,
+        render_table(report)
+    ));
+    let mut errors = String::new();
+    for q in report.queries.iter().filter(|q| !q.errors.is_empty()) {
+        errors.push_str(&format!("{}:\n", q.label));
+        for (msg, count) in &q.errors {
+            errors.push_str(&format!("  [{count}x] {msg}\n"));
         }
-        let errored = pass.queries.iter().filter(|q| !q.errors.is_empty());
-        let mut errors = String::new();
-        for q in errored {
-            errors.push_str(&format!("{}:\n", q.label));
-            for (msg, count) in &q.errors {
-                errors.push_str(&format!("  [{count}x] {msg}\n"));
-            }
-        }
-        if !errors.is_empty() {
-            out.push_str(&format!("\n#### Errors, {title}\n\n```text\n{errors}```\n"));
-        }
+    }
+    if !errors.is_empty() {
+        out.push_str(&format!("\n#### Errors\n\n```text\n{errors}```\n"));
     }
     if let Some(note) = &report.server_note {
         out.push_str(&format!("\n{note}\n"));
@@ -600,48 +546,62 @@ fn render_report(report: &Report) -> String {
     out
 }
 
-/// Per-scenario ClickHouse work for one pass, summed across a request's stages.
+/// Client and ClickHouse columns side by side; CH cells are `-` without stats.
+fn render_table(report: &Report) -> String {
+    let mut table = Builder::default();
+    table.push_record([
+        "Query",
+        "N",
+        "Err",
+        "Med",
+        "CH med ms",
+        "p90",
+        "CH p90 ms",
+        "Max",
+        "Round med range",
+        "Read rows",
+        "Peak mem",
+    ]);
+    for (i, q) in report.queries.iter().enumerate() {
+        let ch = report.server.as_ref().and_then(|s| s.get(&i));
+        let cell = |f: fn(&ServerStats) -> String| ch.map_or_else(|| "-".to_string(), f);
+        table.push_record([
+            q.label.clone(),
+            q.n.to_string(),
+            q.err.to_string(),
+            fmt_ms(q.med),
+            cell(|s| s.med_ms.to_string()),
+            fmt_ms(q.p90),
+            cell(|s| s.p90_ms.to_string()),
+            fmt_ms(q.max),
+            fmt_spread(&q.round_medians, q.med),
+            cell(|s| fmt_thousands(s.med_read_rows)),
+            cell(|s| fmt_bytes(s.peak_memory.max(0) as f64)),
+        ]);
+    }
+    table.build().with(Style::markdown()).to_string()
+}
+
+/// Per-scenario ClickHouse work, summed across a request's stages.
 #[derive(Debug, PartialEq)]
 struct ServerStats {
-    requests: usize,
     med_read_rows: u64,
-    med_read_bytes: u64,
+    /// Largest stage memory of any request.
     peak_memory: i64,
     med_ms: u64,
     p90_ms: u64,
 }
 
-fn render_server_table(pass: &PassReport, stats: &BTreeMap<(Phase, usize), ServerStats>) -> String {
-    let mut table = Builder::default();
-    table.push_record([
-        "Query",
-        "Reqs",
-        "Med read rows",
-        "Med read bytes",
-        "Peak memory",
-        "Med CH ms",
-        "p90 CH ms",
-    ]);
-    for (i, q) in pass.queries.iter().enumerate() {
-        let cells = match stats.get(&(pass.spec.phase, i)) {
-            Some(s) => [
-                s.requests.to_string(),
-                s.med_read_rows.to_string(),
-                fmt_bytes(s.med_read_bytes as f64),
-                fmt_bytes(s.peak_memory.max(0) as f64),
-                s.med_ms.to_string(),
-                s.p90_ms.to_string(),
-            ],
-            None => ["0", "-", "-", "-", "-", "-"].map(String::from),
-        };
-        table.push_record(std::iter::once(q.label.clone()).chain(cells));
+fn fmt_thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
     }
-    format!(
-        "Per request, read rows, read bytes and duration are summed over its \
-         ClickHouse queries and memory is the largest of them; Peak memory is the \
-         max over requests.\n\n{}\n",
-        table.build().with(Style::markdown())
-    )
+    out
 }
 
 fn fmt_bytes(bytes: f64) -> String {
@@ -664,55 +624,50 @@ fn fmt_bytes(bytes: f64) -> String {
 struct QueryLogRow {
     query_id: String,
     read_rows: u64,
-    read_bytes: u64,
     memory_usage: i64,
     query_duration_ms: u64,
 }
 
-/// Finished queries for this run's measured (non-warm-up) passes, from the
-/// local `system.query_log` rather than `clusterAllReplicas`.
+/// Finished queries for this run's measured pass, from the local
+/// `system.query_log` rather than `clusterAllReplicas`.
 fn server_stats_sql(run_id: &str) -> String {
     format!(
-        "SELECT query_id, toUInt64(read_rows) AS read_rows, toUInt64(read_bytes) AS read_bytes, \
+        "SELECT query_id, toUInt64(read_rows) AS read_rows, \
          toInt64(memory_usage) AS memory_usage, toUInt64(query_duration_ms) AS query_duration_ms \
          FROM system.query_log \
          WHERE type = 'QueryFinish' AND event_date >= yesterday() AND \
-         (startsWith(query_id, 'lt-{run_id}-l-') OR startsWith(query_id, 'lt-{run_id}-t-'))"
+         startsWith(query_id, 'lt-{run_id}-{}-')",
+        Phase::Measured.code()
     )
 }
 
-/// Fold stage rows into requests, then requests into per-(phase, scenario)
-/// stats. Rows whose id does not parse for this run are ignored.
-fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<(Phase, usize), ServerStats> {
+/// Fold stage rows into requests, then requests into per-scenario stats.
+/// Rows that are not this run's measured pass are ignored.
+fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<usize, ServerStats> {
     #[derive(Default)]
     struct Req {
         rows: u64,
-        bytes: u64,
         memory: i64,
         ms: u64,
     }
-    let mut requests: BTreeMap<(Phase, usize, u64), Req> = BTreeMap::new();
+    let mut requests: BTreeMap<(usize, u64), Req> = BTreeMap::new();
     for row in rows {
-        let Some(key) = parse_correlation(run_id, &row.query_id) else {
+        let Some((Phase::Measured, idx, seq)) = parse_correlation(run_id, &row.query_id) else {
             continue;
         };
-        if key.0 == Phase::Warmup {
-            continue;
-        }
-        let req = requests.entry(key).or_default();
+        let req = requests.entry((idx, seq)).or_default();
         req.rows += row.read_rows;
-        req.bytes += row.read_bytes;
         req.memory = req.memory.max(row.memory_usage);
         req.ms += row.query_duration_ms;
     }
 
-    let mut grouped: BTreeMap<(Phase, usize), Vec<Req>> = BTreeMap::new();
-    for ((phase, idx, _), req) in requests {
-        grouped.entry((phase, idx)).or_default().push(req);
+    let mut grouped: BTreeMap<usize, Vec<Req>> = BTreeMap::new();
+    for ((idx, _), req) in requests {
+        grouped.entry(idx).or_default().push(req);
     }
     grouped
         .into_iter()
-        .map(|(key, reqs)| {
+        .map(|(idx, reqs)| {
             let sorted = |f: fn(&Req) -> u64| {
                 let mut v: Vec<u64> = reqs.iter().map(f).collect();
                 v.sort_unstable();
@@ -720,14 +675,12 @@ fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<(Phase, usiz
             };
             let ms = sorted(|r| r.ms);
             let stats = ServerStats {
-                requests: reqs.len(),
                 med_read_rows: pct(&sorted(|r| r.rows), 0.5),
-                med_read_bytes: pct(&sorted(|r| r.bytes), 0.5),
                 peak_memory: reqs.iter().map(|r| r.memory).max().unwrap_or(0),
                 med_ms: pct(&ms, 0.5),
                 p90_ms: pct(&ms, 0.9),
             };
-            (key, stats)
+            (idx, stats)
         })
         .collect()
 }
@@ -737,7 +690,7 @@ fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<(Phase, usiz
 async fn fetch_server_stats(
     opts: &ClickHouseOptions,
     run_id: &str,
-) -> Result<(BTreeMap<(Phase, usize), ServerStats>, Option<String>)> {
+) -> Result<(BTreeMap<usize, ServerStats>, Option<String>)> {
     let mut client = clickhouse::Client::default()
         .with_url(&opts.url)
         .with_user(&opts.user);
@@ -782,7 +735,7 @@ fn pct<T: Copy + Default>(sorted: &[T], p: f64) -> T {
         .unwrap_or_default()
 }
 
-fn fmt_ms(ms: &f64) -> String {
+fn fmt_ms(ms: f64) -> String {
     format!("{ms:.0}")
 }
 
@@ -897,89 +850,155 @@ mod tests {
         }
     }
 
-    fn report_with(passes: Vec<PassReport>, server_note: Option<String>) -> Report {
+    fn report_with(queries: Vec<QuerySummary>, server_note: Option<String>) -> Report {
         Report {
             run_id: "r1".into(),
             seed: 42,
             warmup_rounds: 1,
             rounds: 2,
-            passes,
+            concurrency: 20,
+            queries,
             server: None,
             server_note,
         }
     }
 
-    fn pass(phase: Phase, queries: Vec<QuerySummary>) -> PassReport {
-        PassReport {
-            spec: PassSpec {
-                phase,
-                rounds: 2,
-                requests: 20,
-                in_flight: 20,
-            },
-            queries,
+    fn row<'a>(out: &'a str, label: &str) -> Vec<&'a str> {
+        let line = out
+            .lines()
+            .find(|l| l.starts_with(&format!("| {label} ")))
+            .expect("table row");
+        line.trim_matches('|').split('|').map(str::trim).collect()
+    }
+
+    #[test]
+    fn report_is_one_under_load_table_with_fenced_errors() {
+        let q = summarize("q", run_of(vec![vec![10.0, 20.0]], &[("boom | `x`", 2)]));
+        let out = render_report(&report_with(vec![q], None));
+        assert!(out.starts_with("Run `r1`: 1 queries, seed 42"));
+        assert_eq!(out.lines().next().unwrap().len(), out.find('\n').unwrap());
+        assert!(out.contains(
+            "\n### Under load (concurrency 20)\n\n40 requests per query (2 rounds of 20, 20 in \
+             flight). Client times are end to end, in ms, successful requests only. Med is the \
+             median of per-round medians. CH columns are ClickHouse work per request.\n\n"
+        ));
+        assert_eq!(out.matches("\n### ").count(), 1);
+        assert!(out.contains("|---"));
+        assert!(out.contains("\n#### Errors\n\n```text\nq:\n  [2x] boom | `x`\n```"));
+        for gone in ["Min", "Mean", "p99", "bytes", "Latency", "Throughput"] {
+            assert!(!out.contains(gone), "{gone} should be gone");
         }
     }
 
     #[test]
-    fn report_is_a_markdown_table_with_fenced_errors() {
-        let q = summarize("q", run_of(vec![vec![10.0, 20.0]], &[("boom | `x`", 2)]));
-        let out = render_report(&report_with(vec![pass(Phase::Throughput, vec![q])], None));
-        assert!(out.starts_with("Run `r1`: 1 queries, seed 42"));
-        assert!(out.contains("### Throughput (concurrency 20)"));
-        assert!(out.contains("Med is the median of per-round medians"));
-        assert!(out.contains("| Query |"));
-        assert!(out.contains("| Round med range |"));
-        assert!(out.contains("|---"));
-        assert!(out.contains("```text\nq:\n  [2x] boom | `x`\n```"));
+    fn table_columns_are_in_order_and_ch_cells_dash_without_stats() {
+        let queries = vec![
+            summarize("a", run_of(vec![vec![10.0], vec![30.0]], &[])),
+            summarize("b", run_of(vec![vec![1.0]], &[])),
+        ];
+        let mut report = report_with(queries, None);
+        report.server = Some(BTreeMap::from([(
+            0,
+            ServerStats {
+                med_read_rows: 11_816,
+                peak_memory: 2 * 1024 * 1024,
+                med_ms: 7,
+                p90_ms: 12,
+            },
+        )]));
+        let out = render_report(&report);
+        assert_eq!(
+            row(&out, "Query"),
+            [
+                "Query",
+                "N",
+                "Err",
+                "Med",
+                "CH med ms",
+                "p90",
+                "CH p90 ms",
+                "Max",
+                "Round med range",
+                "Read rows",
+                "Peak mem",
+            ]
+        );
+        assert_eq!(
+            row(&out, "a"),
+            [
+                "a",
+                "2",
+                "0",
+                "30",
+                "7",
+                "30",
+                "12",
+                "30",
+                "10–30 (±33%)",
+                "11,816",
+                "2.0 MiB"
+            ]
+        );
+        assert_eq!(
+            row(&out, "b"),
+            [
+                "b",
+                "1",
+                "0",
+                "1",
+                "-",
+                "1",
+                "-",
+                "1",
+                "1–1 (±0%)",
+                "-",
+                "-"
+            ]
+        );
     }
 
     #[test]
     fn report_without_errors_has_no_errors_section() {
         let q = summarize("q", run_of(vec![vec![5.0]], &[]));
-        let out = render_report(&report_with(
-            vec![
-                pass(
-                    Phase::Latency,
-                    vec![summarize("q", run_of(vec![vec![5.0]], &[]))],
-                ),
-                pass(Phase::Throughput, vec![q]),
-            ],
-            None,
-        ));
+        let out = render_report(&report_with(vec![q], None));
         assert!(!out.contains("Errors"));
-        assert!(!out.contains("Server-side"));
-        let lat = out.find("### Latency (concurrency 20)").unwrap();
-        let thr = out.find("### Throughput (concurrency 20)").unwrap();
-        assert!(lat < thr);
+        assert!(!out.contains("```"));
     }
 
     #[test]
     fn report_notes_unavailable_clickhouse_and_still_renders() {
         let q = summarize("q", run_of(vec![vec![5.0]], &[]));
         let note = "Server-side (ClickHouse) stats unavailable: connection refused".to_string();
-        let out = render_report(&report_with(
-            vec![pass(Phase::Throughput, vec![q])],
-            Some(note),
-        ));
-        assert!(out.contains("| Query |"));
+        let out = render_report(&report_with(vec![q], Some(note)));
+        assert_eq!(row(&out, "q")[4], "-");
+        assert_eq!(row(&out, "q")[9], "-");
         assert!(
             out.ends_with("\nServer-side (ClickHouse) stats unavailable: connection refused\n")
         );
-        assert!(!out.contains("#### Server-side"));
+    }
+
+    #[test]
+    fn read_rows_use_thousands_separators() {
+        assert_eq!(fmt_thousands(0), "0");
+        assert_eq!(fmt_thousands(999), "999");
+        assert_eq!(fmt_thousands(1000), "1,000");
+        assert_eq!(fmt_thousands(11_816), "11,816");
+        assert_eq!(fmt_thousands(1_234_567), "1,234,567");
+        assert_eq!(fmt_bytes(512.0), "512 B");
+        assert_eq!(fmt_bytes(1.5 * 1024.0 * 1024.0 * 1024.0), "1.5 GiB");
     }
 
     #[test]
     fn round_order_is_a_seeded_permutation() {
-        let a = round_order(42, Phase::Throughput, 0, 13);
-        assert_eq!(a, round_order(42, Phase::Throughput, 0, 13));
+        let a = round_order(42, Phase::Measured, 0, 13);
+        assert_eq!(a, round_order(42, Phase::Measured, 0, 13));
         let mut sorted = a.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..13).collect::<Vec<_>>());
-        assert_ne!(a, round_order(42, Phase::Throughput, 1, 13));
-        assert_ne!(a, round_order(42, Phase::Latency, 0, 13));
-        assert_ne!(a, round_order(7, Phase::Throughput, 0, 13));
-        assert!(round_order(42, Phase::Throughput, 0, 0).is_empty());
+        assert_ne!(a, round_order(42, Phase::Measured, 1, 13));
+        assert_ne!(a, round_order(42, Phase::Warmup, 0, 13));
+        assert_ne!(a, round_order(7, Phase::Measured, 0, 13));
+        assert!(round_order(42, Phase::Measured, 0, 0).is_empty());
     }
 
     #[test]
@@ -998,7 +1017,7 @@ mod tests {
         assert_eq!(s.med, 100.0);
         assert_eq!(s.n, 9);
         assert_eq!(s.err, 3);
-        assert_eq!(s.min, 90.0);
+        assert_eq!(s.p90, 1000.0);
         assert_eq!(s.max, 1000.0);
         assert_eq!(fmt_spread(&s.round_medians, s.med), "100–1000 (±450%)");
         assert_eq!(fmt_spread(&[90.0, 100.0, 110.0], 100.0), "90–110 (±10%)");
@@ -1008,28 +1027,28 @@ mod tests {
     fn spread_and_summary_handle_empty_input() {
         let s = summarize("q", run_of(vec![vec![], vec![]], &[("x", 4)]));
         assert!(s.round_medians.is_empty());
-        assert_eq!((s.n, s.med, s.mean), (0, 0.0, 0.0));
+        assert_eq!((s.n, s.med, s.p90, s.max), (0, 0.0, 0.0, 0.0));
         assert_eq!(fmt_spread(&s.round_medians, s.med), "-");
         assert_eq!(fmt_spread(&[0.0, 0.0], 0.0), "0–0");
     }
 
     #[test]
     fn correlation_id_is_server_safe_and_parses_back() {
-        let id = correlation_id("123456", Phase::Throughput, 7, 42);
+        let id = correlation_id("123456", Phase::Measured, 7, 42);
         assert_eq!(id, "lt-123456-t-q07-42");
         assert!(is_id_safe(&id));
         assert_eq!(
             parse_correlation("123456", &id),
-            Some((Phase::Throughput, 7, 42))
+            Some((Phase::Measured, 7, 42))
         );
         // ClickHouse query_ids append the stage after the correlation id.
         assert_eq!(
             parse_correlation("123456", &format!("{id}-base")),
-            Some((Phase::Throughput, 7, 42))
+            Some((Phase::Measured, 7, 42))
         );
         assert_eq!(
             parse_correlation("123456", &format!("{id}-hydration-static-0")),
-            Some((Phase::Throughput, 7, 42))
+            Some((Phase::Measured, 7, 42))
         );
         let warm = correlation_id("123456", Phase::Warmup, 12, 0);
         assert_eq!(
@@ -1037,7 +1056,7 @@ mod tests {
             Some((Phase::Warmup, 12, 0))
         );
         assert_eq!(parse_correlation("other", &id), None);
-        assert_eq!(parse_correlation("123456", "lt-123456-x-q01-1"), None);
+        assert_eq!(parse_correlation("123456", "lt-123456-l-q01-1"), None);
         assert_eq!(parse_correlation("123456", "lt-123456-t-01-1"), None);
     }
 
@@ -1053,92 +1072,56 @@ mod tests {
     }
 
     #[test]
-    fn server_sql_filters_run_and_measured_phases_only() {
+    fn server_sql_filters_run_and_measured_phase_only() {
         let sql = server_stats_sql("987");
         assert!(sql.contains("FROM system.query_log"));
         assert!(!sql.contains("clusterAllReplicas"));
+        assert!(!sql.contains("read_bytes"));
         assert!(sql.contains("type = 'QueryFinish'"));
-        assert!(sql.contains("startsWith(query_id, 'lt-987-l-')"));
-        assert!(sql.contains("startsWith(query_id, 'lt-987-t-')"));
-        assert!(!sql.contains("-w-"));
+        assert!(sql.ends_with("startsWith(query_id, 'lt-987-t-')"));
+        assert!(!sql.contains("-w-") && !sql.contains("-l-"));
         assert!(
             !sql.contains('?'),
             "`?` is a bind placeholder in the clickhouse crate"
         );
     }
 
-    fn log_row(id: &str, rows: u64, bytes: u64, mem: i64, ms: u64) -> QueryLogRow {
+    fn log_row(id: &str, rows: u64, mem: i64, ms: u64) -> QueryLogRow {
         QueryLogRow {
             query_id: id.into(),
             read_rows: rows,
-            read_bytes: bytes,
             memory_usage: mem,
             query_duration_ms: ms,
         }
     }
 
     #[test]
-    fn server_stats_sum_stages_per_request_and_skip_warmup_and_foreign_rows() {
+    fn server_stats_sum_stages_per_request_and_skip_other_phases_and_foreign_rows() {
         let rows = vec![
-            log_row("lt-r1-t-q00-1-base", 10, 100, 500, 5),
-            log_row("lt-r1-t-q00-1-hydration-static", 5, 50, 900, 3),
-            log_row("lt-r1-t-q00-2-base", 30, 300, 700, 20),
-            log_row("lt-r1-t-q00-3-base", 20, 200, 600, 10),
-            log_row("lt-r1-l-q01-4-base", 1, 1, 1, 1),
-            log_row("lt-r1-w-q00-0-base", 9999, 9999, 9999, 9999),
-            log_row("lt-r2-t-q00-1-base", 9999, 9999, 9999, 9999),
-            log_row("01JABCDEF0123456789ABCDEFG-base", 9999, 9999, 9999, 9999),
+            log_row("lt-r1-t-q00-1-base", 10, 500, 5),
+            log_row("lt-r1-t-q00-1-hydration-static", 5, 900, 3),
+            log_row("lt-r1-t-q00-2-base", 30, 700, 20),
+            log_row("lt-r1-t-q00-3-base", 20, 600, 10),
+            log_row("lt-r1-t-q01-4-base", 1, 1, 1),
+            log_row("lt-r1-w-q02-0-base", 9999, 9999, 9999),
+            log_row("lt-r1-l-q02-5-base", 9999, 9999, 9999),
+            log_row("lt-r2-t-q00-1-base", 9999, 9999, 9999),
+            log_row("01JABCDEF0123456789ABCDEFG-base", 9999, 9999, 9999),
         ];
         let stats = aggregate_server("r1", &rows);
         assert_eq!(stats.len(), 2);
-        // Requests: (15 rows, 150 B, 900 mem, 8 ms), (30, 300, 700, 20), (20, 200, 600, 10).
+        // Requests: (15 rows, 900 mem, 8 ms), (30, 700, 20), (20, 600, 10).
         assert_eq!(
-            stats[&(Phase::Throughput, 0)],
+            stats[&0],
             ServerStats {
-                requests: 3,
                 med_read_rows: 20,
-                med_read_bytes: 200,
                 peak_memory: 900,
                 med_ms: 10,
                 p90_ms: 20,
             }
         );
-        assert_eq!(stats[&(Phase::Latency, 1)].requests, 1);
-        assert!(!stats.contains_key(&(Phase::Warmup, 0)));
-    }
-
-    #[test]
-    fn server_table_shows_dashes_for_missing_scenarios() {
-        let queries = vec![
-            summarize("a", run_of(vec![vec![1.0]], &[])),
-            summarize("b", run_of(vec![vec![1.0]], &[])),
-        ];
-        let stats = ServerStats {
-            requests: 100,
-            med_read_rows: 1234,
-            med_read_bytes: 2 * 1024 * 1024,
-            peak_memory: 512,
-            med_ms: 12,
-            p90_ms: 30,
-        };
-        let mut report = report_with(vec![pass(Phase::Throughput, queries)], None);
-        report.server = Some(BTreeMap::from([((Phase::Throughput, 0), stats)]));
-        let out = render_report(&report);
-        assert!(out.contains("#### Server-side (ClickHouse), Throughput (concurrency 20)"));
-        let row_a = out
-            .lines()
-            .find(|l| l.starts_with("| a ") && l.contains("1234"))
-            .unwrap();
-        assert!(row_a.contains("| 100 "));
-        assert!(row_a.contains("2.0 MiB"));
-        assert!(row_a.contains("512 B"));
-        let row_b = out
-            .lines()
-            .filter(|l| l.starts_with("| b "))
-            .nth(1)
-            .expect("server row for b");
-        assert_eq!(row_b.matches("| - ").count(), 5);
-        assert!(row_b.contains("| 0 "));
+        assert_eq!(stats[&1].med_read_rows, 1);
+        assert!(!stats.contains_key(&2));
     }
 
     #[test]

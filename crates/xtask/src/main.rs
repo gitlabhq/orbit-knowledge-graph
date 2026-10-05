@@ -105,30 +105,22 @@ enum Command {
         #[arg(long, env = "ORBIT_ENDPOINT", default_value = "http://127.0.0.1:50054")]
         endpoint: String,
 
-        /// Throughput pass: requests per query per round, all in flight at once.
+        /// Requests per query per round, all in flight at once.
         #[arg(long, default_value_t = 20)]
         concurrency: usize,
 
         /// Measured rounds; each runs every query once in seeded shuffled order.
-        /// Throughput requests per query = concurrency * rounds.
+        /// Requests per query = concurrency * rounds.
         #[arg(long, default_value_t = 5)]
         rounds: usize,
 
-        /// Discarded throughput-shaped rounds before measuring (0 = none).
+        /// Discarded rounds, shaped like measured ones, before measuring (0 = none).
         #[arg(long, default_value_t = 1)]
         warmup_rounds: usize,
 
         /// Seed for the per-round query order.
         #[arg(long, default_value_t = 42)]
         seed: u64,
-
-        /// In-flight requests for a separate latency pass (0 = no latency pass).
-        #[arg(long, default_value_t = 0)]
-        latency_concurrency: usize,
-
-        /// Latency pass: requests per query per round.
-        #[arg(long, default_value_t = 4)]
-        latency_requests: usize,
 
         /// ClickHouse HTTP URL for server-side stats from system.query_log
         /// (unset = skip).
@@ -379,8 +371,6 @@ async fn main() -> Result<()> {
             rounds,
             warmup_rounds,
             seed,
-            latency_concurrency,
-            latency_requests,
             clickhouse_url,
             clickhouse_user,
             clickhouse_password,
@@ -396,8 +386,6 @@ async fn main() -> Result<()> {
                 rounds,
                 warmup_rounds,
                 seed,
-                latency_concurrency,
-                latency_requests,
                 scenarios,
                 query,
                 admin: !no_admin,
