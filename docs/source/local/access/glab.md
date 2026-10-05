@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit and glab orbit setup.
+description: Connect AI agents and MCP clients to GitLab Orbit Local with the GitLab CLI.
 title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -23,138 +23,79 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 
 > [!disclaimer]
 
-The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to
-install, run, and integrate GitLab Orbit with your AI agent. `glab orbit`
-forwards one flat command tree to the managed `orbit` binary. Commands such as
-`index`, `grep`, and `sql` use the local graph, while commands such as `query`
-and `ontology` use the hosted graph.
+Install and run GitLab Orbit Local with the GitLab CLI (`glab`).
 
-> [!note]
-> The flat `glab orbit` command tree requires `glab` 1.117 or later.
+With `glab orbit`, you can index local repositories and connect AI agents
+and MCP clients to the code graph.
 
-`glab orbit setup` provides guided onboarding, installs the GitLab Orbit skill,
-and configures supported AI agents.
+## Differences from the standalone binary
+
+`glab orbit` and the standalone [`orbit` binary](cli.md) support the same commands.
+When you use `glab orbit`:
+
+- Installation and updates to the `orbit` binary are handled automatically.
+- Your GitLab credentials are passed to the binary. You can then run
+  [GitLab Orbit Remote commands](../../remote/access/glab.md) without authenticating again.
+
+For more information about `glab`, see [GitLab CLI](https://docs.gitlab.com/cli/).
 
 ## Prerequisites
 
-- `glab` 1.117 or later is installed.
-- A local Git repository to index.
+- `glab` 1.117.0 or later
 
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) require no GitLab account or network connection once the
-binary is installed. Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`,
-and `graph-status`) require an authenticated GitLab account and network access.
+## Set up GitLab Orbit Local with `glab`
 
-## Install
+Set up GitLab Orbit Local with `glab` to build a graph of your repository and connect your AI
+agents to it.
 
-Install the managed `orbit` binary:
+To set up GitLab Orbit Local:
 
-```shell
-glab orbit --install
-```
+1. Install the managed binary:
 
-`glab` downloads the binary, verifies its checksum, and keeps it up to date.
-Verify the install:
+   ```shell
+   glab orbit --install
+   ```
 
-```shell
-glab orbit version
-```
+1. Verify the installation:
 
-## Set up your AI agent
+   ```shell
+   glab orbit version
+   ```
 
-`glab orbit setup` configures AI coding agents to consult the graph: it writes a
-managed section into each agent's instruction file and installs the GitLab Orbit
-skill.
+1. Index your repository:
 
-```shell
-glab orbit setup
-```
+   ```shell
+   glab orbit index <path/to/repository>
+   ```
 
-Run `glab orbit setup --help` for the full option list, including supported
-agents and project or user scope.
+1. Connect the AI agents on your machine to the graph:
 
-The binary's own [`orbit setup`](cli.md#set-up-your-ai-agent) also detects
-the installed agents, installs the skill, and registers the MCP server with
-`--mcp`. `orbit uninstall` reverts it. To connect an MCP client by hand, see
-[Connect via MCP](mcp.md).
+   ```shell
+   glab orbit setup
+   ```
 
-You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
-with `glab skills install --global orbit`.
+   The command writes instructions into each agent's instruction file and installs
+   the GitLab Orbit skill.
+   Before you run `glab orbit setup`, review [the files it changes](cli.md#what-it-changes).
+   To undo the changes, run `glab orbit uninstall`.
 
-## Index a repository
+1. Optional. To connect an MCP client by hand instead, start the MCP server with
+   `glab orbit mcp serve`.
+   For per-client configuration, see [connect through the MCP](mcp.md).
 
-```shell
-glab orbit index /path/to/your/repo
-```
+## Commands
 
-| Flag | Purpose |
-|------|---------|
-| `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
-| `--stats` | Include detailed statistics in the JSON output. |
-| `--verbose` | Verbose logging to stderr. |
+`glab orbit <command>` behaves the same as `orbit <command>`.
+Local commands run against the graph on your machine.
+Hosted commands call GitLab Orbit Remote.
 
-## Run SQL against the graph
+| Command type | Commands | Requirements |
+|--------------|----------|--------------|
+| Local | `index`, `grep`, `context`, `sql`, `schema`, `list`, `mcp`, `repo-map` | No GitLab account or network connection after installation. |
+| Hosted | `query`, `status`, `ontology`, `dsl`, `tools`, `graph-status` | An authenticated GitLab account and network access. |
 
-```shell
-glab orbit sql 'SELECT count(*) FROM gl_definition'
-echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit sql -
-```
+For help in the binary, run `glab orbit <command> --help`.
 
-Table names resolve to the current checkout: run from inside an indexed
-repository, `gl_definition`, `gl_file`, and the other node tables contain only
-that repository's indexed commit, and `gl_edge` only that commit's edges, so
-queries need no `project_id` or `commit_sha` predicates. Outside an indexed
-checkout the query runs against every indexed commit, with a note on stderr.
+For information about GitLab Orbit commands that `glab` handles itself,
+see the [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/).
 
-| Flag | Purpose |
-|------|---------|
-| `--repo` | Scope the tables to another checkout instead of the current directory. |
-| `--all` | Query every indexed repository and commit. |
-| `-F`, `--format` | Output format: `table` (default), `json`, `ndjson`, or `csv`. |
-| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
-
-## Inspect the schema
-
-`glab orbit schema` lists the graph tables and their columns. The
-per-project search-index tables and the schema fingerprint are hidden; name one
-explicitly to see it:
-
-```shell
-glab orbit schema
-```
-
-Pass table names as positional arguments to scope the output:
-
-```shell
-glab orbit schema gl_definition              # scoped to one table
-glab orbit schema gl_definition gl_edge      # scoped to two tables
-```
-
-| Flag | Purpose |
-|------|---------|
-| `--raw` | Emit JSON instead of the default table view. |
-| `--db` | Override the DuckDB path. Defaults to `~/.gitlab/orbit/graph.duckdb`. |
-
-## Run as an MCP server
-
-Expose the local graph to any MCP-compatible AI agent:
-
-```shell
-glab orbit mcp serve
-```
-
-It serves `run_sql`, `get_graph_schema`, and `index` over the MCP protocol
-against `~/.gitlab/orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
-agent integration guide.
-
-## Exit codes
-
-`glab orbit` returns `0` on success and a non-zero exit code on failure,
-with details on stderr. Scripts and agents can branch on success or failure.
-
-## Billing
-
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) process data locally and do not consume GitLab Credits.
-Hosted verbs require network access, and `query`
-[consumes GitLab Credits](../../remote/access/glab.md#billing).

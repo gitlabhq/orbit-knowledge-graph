@@ -190,7 +190,7 @@ table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 
 Next:
 
-- Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
+- Run a real query: [Run SQL against the local graph](access/cli.md#run-sql-against-the-local-graph).
 - Wire it into your AI agent: run `orbit setup` to configure every detected
   agent, or [connect via MCP](access/mcp.md) by hand. Setup edits your agent's
   instruction file, MCP configuration, skills, and hooks;
