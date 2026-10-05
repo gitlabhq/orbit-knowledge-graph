@@ -624,8 +624,6 @@ impl Default for PipelineConfig {
     }
 }
 
-pub use orbit_utils::fs_walk::{Decision, FileInventory, FileInventoryEntry};
-
 /// Per-file timing captured during pipeline execution.
 ///
 /// `resolve_ms` reflects per-file SSA/edge resolution for generic
@@ -1733,6 +1731,12 @@ impl FamilyPipeline {
 
 #[cfg(test)]
 pub(crate) mod testing {
+    pub struct Input {
+        pub path: String,
+        pub size: u64,
+        pub listed: bool,
+    }
+
     use super::*;
     use orbit_utils::files::{
         File, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag,
@@ -1771,13 +1775,13 @@ pub(crate) mod testing {
 
     pub fn run_with_tracer(
         root: &Path,
-        inventory: Arc<FileInventory>,
+        inventory: Vec<Input>,
         config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
-        struct Inputs<'a>(&'a Path, &'a FileInventory);
+        struct Inputs<'a>(&'a Path, &'a [Input]);
         impl Source for Inputs<'_> {
             fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
                 for file in self.1.iter() {
@@ -1789,23 +1793,25 @@ pub(crate) mod testing {
                 Ok(())
             }
         }
-        struct Listed(Arc<FileInventory>);
+        struct Listed(FxHashSet<String>);
         impl Pass for Listed {
             type Tag = Role;
             fn header(&self, file: &mut File<Role>) {
                 Keep.header(file);
-                if self
-                    .0
-                    .iter()
-                    .any(|entry| entry.path == file.path && entry.decision == Decision::ListOnly)
-                {
+                if self.0.contains(&file.path) {
                     file.decide(FileDecision::List("excluded"));
                 }
             }
         }
         let vfs = Vfs::load(
             Inputs(root, &inventory),
-            Listed(inventory.clone()),
+            Listed(
+                inventory
+                    .iter()
+                    .filter(|file| file.listed)
+                    .map(|file| file.path.clone())
+                    .collect(),
+            ),
             Limits::default(),
             Options::default(),
         )
@@ -1941,12 +1947,11 @@ mod tests {
 
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
@@ -1972,12 +1977,11 @@ mod tests {
 
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "openapi_v3.yaml".into(),
                 size: YAML_PARSER_MAX_FILE_SIZE + 1,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
@@ -2002,12 +2006,11 @@ mod tests {
 
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "main.py".into(),
                 size: source.len() as u64,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
                 per_file_walk_timeout: Some(std::time::Duration::ZERO),
@@ -2043,20 +2046,18 @@ mod tests {
         let calls_cb = calls.clone();
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![
-                FileInventoryEntry {
+            vec![
+                testing::Input {
                     path: "a.py".into(),
                     size: 22,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-                FileInventoryEntry {
+                testing::Input {
                     path: "b.py".into(),
                     size: 22,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-            ])),
+            ],
             PipelineConfig {
                 on_phase_cpu: Some(Arc::new(move |_lang, _cpu| {
                     calls_cb.fetch_add(1, Ordering::Relaxed);
@@ -2084,12 +2085,11 @@ mod tests {
 
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "main.go".into(),
                 size: 27,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
@@ -2121,12 +2121,11 @@ mod tests {
 
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "main.go".into(),
                 size: 27,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
@@ -2151,43 +2150,38 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/main.py"), "def hello(): pass\n").unwrap();
 
-        let inventory = FileInventory::new(vec![
-            FileInventoryEntry {
+        let inventory = vec![
+            testing::Input {
                 path: "src/main.py".into(),
                 size: 17,
-                decision: Decision::Parse,
-                label: Default::default(),
+                listed: false,
             },
-            FileInventoryEntry {
+            testing::Input {
                 path: "README.md".into(),
                 size: 12,
-                decision: Decision::Parse,
-                label: Default::default(),
+                listed: false,
             },
-            FileInventoryEntry {
+            testing::Input {
                 path: "config/app.toml".into(),
                 size: 9,
-                decision: Decision::Parse,
-                label: Default::default(),
+                listed: false,
             },
-            FileInventoryEntry {
+            testing::Input {
                 path: "assets/logo.png".into(),
                 size: 128,
-                decision: Decision::ListOnly,
-                label: Default::default(),
+                listed: true,
             },
-            FileInventoryEntry {
+            testing::Input {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
-                decision: Decision::ListOnly,
-                label: Default::default(),
+                listed: true,
             },
-        ]);
+        ];
 
         let capture = Arc::new(TestCapture::new());
         let result = testing::run_with_tracer(
             root,
-            Arc::new(inventory),
+            inventory,
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2232,12 +2226,11 @@ mod tests {
         let capture = Arc::new(TestCapture::new());
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![FileInventoryEntry {
+            vec![testing::Input {
                 path: "listed.py".into(),
                 size: 19,
-                decision: Decision::Parse,
-                label: Default::default(),
-            }])),
+                listed: false,
+            }],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2404,32 +2397,28 @@ namespace MyApp {
         let capture = Arc::new(TestCapture::new());
         let result = testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(vec![
-                FileInventoryEntry {
+            vec![
+                testing::Input {
                     path: "app.py".into(),
                     size: 0,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-                FileInventoryEntry {
+                testing::Input {
                     path: "Service.java".into(),
                     size: 0,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-                FileInventoryEntry {
+                testing::Input {
                     path: "App.kt".into(),
                     size: 0,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-                FileInventoryEntry {
+                testing::Input {
                     path: "Controller.cs".into(),
                     size: 0,
-                    decision: Decision::Parse,
-                    label: Default::default(),
+                    listed: false,
                 },
-            ])),
+            ],
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -2558,18 +2547,17 @@ namespace MyApp {
         }
         let inventory = sources
             .iter()
-            .map(|(name, content)| FileInventoryEntry {
+            .map(|(name, content)| testing::Input {
                 path: name.to_string(),
                 size: content.len() as u64,
-                decision: Decision::Parse,
-                label: Default::default(),
+                listed: false,
             })
             .collect();
         let progress = Arc::new(RecordingProgress::default());
 
         testing::run_with_tracer(
             root,
-            Arc::new(FileInventory::new(inventory)),
+            inventory,
             PipelineConfig {
                 progress: progress.clone(),
                 ..Default::default()

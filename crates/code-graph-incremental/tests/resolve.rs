@@ -2,11 +2,13 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
-    Canonicalize, Each, Insert, Link, Parse, Prepare, Resolve, Resolved, Rewrite, Sources,
+    Canonicalize, Each, Insert, Link, Parse, Prepare, Resolve, Resolved, Rewrite,
 };
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline, State, inventory};
+use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline, State};
+use orbit_utils::files::sources::Checkout;
+mod common;
 
 const UTILS: &str = "\
 def helper(x):
@@ -38,11 +40,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
-    };
+    let sources = common::repo(Checkout(root));
     let (context, resolved) = Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()

@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use code_graph_incremental::canonical::{Canonical as C, def_type_of, is_canonical};
-use code_graph_incremental::pipeline::{
-    Canonical, Canonicalize, Each, Parse, Prepare, Rewrite, Sources,
-};
+use code_graph_incremental::pipeline::{Canonical, Canonicalize, Each, Parse, Prepare, Rewrite};
 use code_graph_incremental::tree::{Cursor, Tree};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline, inventory};
+use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline};
+use orbit_utils::files::sources::Checkout;
+mod common;
 
 const MAIN: &str = "\
 import os
@@ -22,11 +22,7 @@ def run():
 ";
 
 fn rewrite_repo(env: &Env, root: &Path) -> (Vec<Canonical>, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
-    };
+    let sources = common::repo(Checkout(root));
     let (context, workset) = Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()

@@ -182,7 +182,7 @@ impl fmt::Display for FileFault {
 /// with the inner enum's `Display` via strum, so a new variant is labelled
 /// automatically (`skip_oversize`, `fault_invalid_utf8`, …; empty for `None`).
 /// `Skip`/`Fault` come from the parse phase; `Filter` from the pre-parse file
-/// stream ([`SkipReason`](orbit_utils::fs_walk::SkipReason)), both labelled `skip_`.
+/// stream ([`SkipReason`](crate::v2::config::SkipReason)), both labelled `skip_`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display)]
 pub enum FileReason {
     #[default]
@@ -193,7 +193,7 @@ pub enum FileReason {
     #[strum(to_string = "fault_{0}")]
     Fault(FileFault),
     #[strum(to_string = "skip_{0}")]
-    Filter(orbit_utils::fs_walk::SkipReason),
+    Filter(crate::v2::config::SkipReason),
 }
 
 /// Per-file outcome from a language analyzer. Encodes skip-vs-fault

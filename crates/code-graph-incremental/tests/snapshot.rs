@@ -4,7 +4,9 @@ use std::path::Path;
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, inventory, templates};
+use code_graph_incremental::{Context, Env, State, templates};
+use orbit_utils::files::sources::{Changed, Checkout};
+mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
 const UTILS: &str = "def helper():\n    pass\n";
@@ -21,8 +23,8 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    let inventory = inventory::walk(repo).unwrap().to_vec();
-    templates::index(Context::new(env), repo, inventory)
+    let inventory = common::repo(Checkout(repo));
+    templates::index(Context::new(env), inventory)
         .unwrap()
         .into_value()
         .state
@@ -33,10 +35,13 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         std::fs::remove_file(repo.join(path)).unwrap();
     }
     let changes = Changes {
-        changed: inventory::classify(repo, changed),
+        changed: common::repo(Changed {
+            root: repo,
+            paths: changed,
+        }),
         removed: removed.iter().map(|s| s.to_string()).collect(),
     };
-    templates::reindex(Context::new(env), state, repo, changes)
+    templates::reindex(Context::new(env), state, changes)
         .unwrap()
         .into_value()
         .state
@@ -160,5 +165,32 @@ fn a_snapshot_from_another_format_version_is_refused_by_name() {
     assert_eq!(
         error.to_string(),
         format!("snapshot format v99; this build reads v{SNAPSHOT_VERSION}")
+    );
+}
+
+#[test]
+fn a_changed_file_rejected_on_read_replaces_its_old_definitions() {
+    let repo = tempfile::tempdir().unwrap();
+    write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let state = index(&env, repo.path());
+    std::fs::write(repo.path().join("utils.py"), b"\0binary").unwrap();
+    let updated = reindex(&env, state, repo.path(), vec!["utils.py".into()], &[]);
+    assert!(def_names(&updated, &env).is_empty());
+    assert_eq!(cross_file_edges(&updated), 0);
+    let file = updated
+        .trees
+        .iter()
+        .find(|tree| tree.label == "utils.py")
+        .unwrap();
+    let reason = file.get_tag(0, env.lang.syms.lookup("reason")).unwrap();
+    assert_eq!(env.lang.syms.resolve(reason), "skip_binary");
+    assert_eq!(
+        updated
+            .trees
+            .iter()
+            .filter(|tree| tree.label == "utils.py")
+            .count(),
+        1
     );
 }

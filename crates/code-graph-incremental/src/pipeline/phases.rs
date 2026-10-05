@@ -1,9 +1,10 @@
 //! The phases, in the order they run.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::Path;
 
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use code_graph::v2::config::Role;
+use orbit_utils::files::Decision;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -17,12 +18,12 @@ use super::{
 use crate::env::Env;
 use crate::export::{self, Envelope};
 use crate::file_tree::ProjectTree;
-use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
+use code_graph::v2::error::{AbortPhase, FileFault, FileReason, FileSkip};
 
 pub struct Prepare;
 
@@ -34,25 +35,19 @@ impl Phase<Sources> for Prepare {
     }
 
     fn run(self, context: &mut Context, sources: Sources) -> Result<Self::Output, Error> {
-        let Sources { root, entries } = sources;
         Ok(workset(
             context.env,
             State::new(context.env),
-            root,
-            entries,
+            sources,
             FxHashSet::default(),
         ))
     }
 }
 
-/// Parse entries of this pipeline's languages become the lazy workset, read
-/// from `root` when a worker takes them. Everything else is listed now:
-/// manifests for the resolver, and every file as a `File` row.
 fn workset(
     env: &Env,
     state: State,
-    root: PathBuf,
-    entries: Vec<FileInventoryEntry>,
+    repo: Sources,
     dirty: FxHashSet<usize>,
 ) -> Workset<Lazy<SourceFile>> {
     let manifest_names = &env.resolve.config.parse_files;
@@ -60,40 +55,40 @@ fn workset(
         let name = path.rsplit('/').next().unwrap_or(path);
         manifest_names.iter().any(|pf| pf.name == name)
     };
-    let mut listed = Listed::default();
+    let mut listed = Listed {
+        repo: repo.clone(),
+        manifests: Vec::new(),
+        candidates: FxHashSet::default(),
+        unread_manifests: FxHashSet::default(),
+    };
     let mut candidates = Vec::new();
-    for entry in entries {
-        let FileInventoryEntry {
-            path,
-            size,
-            decision,
-            label,
-        } = entry;
-        let manifest = decision != Decision::ListOnly && is_manifest(&path);
-        let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        if decision == Decision::Parse && in_family && !manifest {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
+    for entry in repo.files() {
+        let path = &entry.path;
+        let manifest = entry.keeps() && is_manifest(path);
+        let in_family = SupportLang::from_path(path).is_some_and(|l| env.in_family(l));
+        if entry.decision() == Decision::Keep(Role::Source) && in_family && !manifest {
+            listed.candidates.insert(path.clone());
+            candidates.push(path.clone());
             continue;
         }
-        let content = manifest
-            .then(|| std::fs::read_to_string(root.join(&path)).ok())
-            .flatten();
-        let reason = match (decision, label.skip) {
-            (Decision::ListOnly, Some(skip)) => FileReason::Filter(skip),
-            _ if manifest && content.is_none() => FileReason::Fault(FileFault::FileRead),
-            _ => FileReason::None,
-        };
-        if let Some(content) = content {
-            listed.manifests.push(SourceFile {
-                path: path.clone(),
-                content,
-            });
+        if manifest {
+            match repo
+                .read(Path::new(path))
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            {
+                Some(content) => listed.manifests.push(SourceFile {
+                    path: path.clone(),
+                    content,
+                }),
+                None => {
+                    listed.unread_manifests.insert(path.clone());
+                }
+            }
         }
-        listed.files.push((path, size, reason));
     }
     let items = candidates.into_iter().filter_map(move |path| {
-        let content = std::fs::read_to_string(root.join(&path)).ok()?;
+        let content = String::from_utf8(repo.read(Path::new(&path)).ok()?.to_vec()).ok()?;
         Some(SourceFile { path, content })
     });
     Workset {
@@ -117,23 +112,19 @@ impl Phase<ReindexInput> for Remap {
     }
 
     fn run(self, context: &mut Context, input: ReindexInput) -> Result<Self::Output, Error> {
-        let ReindexInput {
-            mut state,
-            root,
-            changes,
-        } = input;
+        let ReindexInput { mut state, changes } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
         let dirty_labels: FxHashSet<&str> = changes
             .removed
             .iter()
             .map(String::as_str)
-            .chain(changes.changed.iter().map(|f| f.path.as_str()))
+            .chain(changes.changed.files().map(|f| f.path.as_str()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
             .configs
             .retain(|c| !dirty_labels.contains(c.path.as_str()));
-        Ok(workset(context.env, state, root, changes.changed, dirty))
+        Ok(workset(context.env, state, changes.changed, dirty))
     }
 }
 
@@ -371,42 +362,56 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             }));
         }
         let Listed {
+            repo,
             manifests,
-            files,
-            mut candidates,
+            candidates,
+            unread_manifests,
         } = listed;
         for manifest in manifests {
             state.configs.retain(|c| c.path != manifest.path);
             state.configs.push(manifest);
         }
         let lang = &context.env.lang;
-        for (path, size, reason) in files {
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
-        }
-        for tree in &state.trees {
-            candidates.remove(&tree.label);
-        }
-        for killed in &context.report.skipped {
-            if let Some(size) = candidates.remove(&killed.path) {
-                let reason = crate::inventory::timeout(killed.label);
-                state.trees.push(Tree::unparsed(
-                    lang,
-                    &killed.path,
-                    size,
-                    &reason.to_string(),
-                ));
-            }
-        }
-        for (path, size) in candidates {
-            let reason = FileReason::Fault(FileFault::FileRead);
-            state
-                .trees
-                .push(Tree::unparsed(lang, &path, size, &reason.to_string()));
-        }
+        let parsed: FxHashSet<_> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
+        let skipped: FxHashMap<_, _> = context
+            .report
+            .skipped
+            .iter()
+            .map(|killed| (killed.path.as_str(), killed.label))
+            .collect();
+        let remaining: Vec<_> = repo
+            .files()
+            .filter(|file| !parsed.contains(file.path.as_str()))
+            .map(|file| {
+                let reason = match file.decision() {
+                    Decision::List(reason) | Decision::Drop(reason) => {
+                        FileReason::Skip(FileSkip::Filter(reason))
+                    }
+                    _ if skipped.contains_key(file.path.as_str()) => {
+                        timeout(skipped[file.path.as_str()])
+                    }
+                    _ if candidates.contains(&file.path)
+                        || unread_manifests.contains(&file.path) =>
+                    {
+                        FileReason::Fault(FileFault::FileRead)
+                    }
+                    _ => FileReason::None,
+                };
+                Tree::unparsed(lang, &file.path, file.size, &reason.to_string())
+            })
+            .collect();
+        state.trees.extend(remaining);
         Ok(DirtyGraph { state, dirty })
     }
+}
+
+fn timeout(phase: &str) -> FileReason {
+    FileReason::Skip(FileSkip::Timeout(match phase {
+        "tree-sitter" => AbortPhase::Parse,
+        "rewrite" => AbortPhase::Walk,
+        "link" => AbortPhase::Ssa,
+        _ => AbortPhase::Sentinel,
+    }))
 }
 
 /// Cross-file resolution over the dirty files. A file that overruns its

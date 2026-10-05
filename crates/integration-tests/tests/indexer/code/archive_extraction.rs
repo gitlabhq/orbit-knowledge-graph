@@ -95,7 +95,7 @@ async fn extract_via_archive_endpoint(entries: &[Entry<'_>]) -> Vfs<Role> {
     );
     let handle = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || {
-        let filter = CodeFilter::new(None, None, detect_language_from_path);
+        let filter = CodeFilter::new(detect_language_from_path);
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
         Vfs::load(
             Archive(bridge),

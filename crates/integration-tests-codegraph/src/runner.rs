@@ -56,8 +56,6 @@ pub fn run_yaml_suite(yaml: &str) {
         orbit_utils::files::Vfs::load(
             orbit_utils::files::sources::Checkout(tmp.path()),
             code_graph::v2::config::CodeFilter::new(
-                None,
-                None,
                 code_graph::v2::config::detect_language_from_path,
             ),
             orbit_utils::files::Limits::default(),

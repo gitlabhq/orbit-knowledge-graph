@@ -43,7 +43,7 @@ fn stored_repository_does_not_depend_on_the_original_directory() {
 
     let vfs = Vfs::load(
         Memory(inventory),
-        CodeFilter::new(None, None, detect_language_from_path),
+        CodeFilter::new(detect_language_from_path),
         Default::default(),
         Default::default(),
     )
@@ -66,7 +66,7 @@ fn missing_js_file_still_faults_while_tree_exists() {
     std::fs::write(root.join("absent.js"), "export const y = 2;\n").expect("write fixture");
     let vfs = Vfs::load(
         Checkout(&root),
-        CodeFilter::new(None, None, detect_language_from_path),
+        CodeFilter::new(detect_language_from_path),
         Default::default(),
         Default::default(),
     )
@@ -92,7 +92,7 @@ fn content_rejected_on_first_read_is_a_skip_not_a_fault() {
     }
     let vfs = Vfs::load(
         Checkout(root.path()),
-        CodeFilter::new(None, None, detect_language_from_path),
+        CodeFilter::new(detect_language_from_path),
         Default::default(),
         Default::default(),
     )

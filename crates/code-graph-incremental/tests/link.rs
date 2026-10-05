@@ -2,11 +2,13 @@ use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
-    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite, Sources,
+    Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite,
 };
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State, inventory};
+use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State};
+use orbit_utils::files::sources::Checkout;
+mod common;
 
 const MAIN: &str = "\
 import os
@@ -28,11 +30,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
-    };
+    let sources = common::repo(Checkout(root));
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()
@@ -164,4 +162,50 @@ fn a_killed_file_keeps_a_row_tagged_with_the_timeout() {
         Some("skip_timeout_walk")
     );
     assert!(graph.state.edges.is_empty());
+}
+
+#[test]
+fn late_content_rejections_and_missing_files_keep_distinct_reasons() {
+    let root = tempfile::tempdir().unwrap();
+    write_all(
+        root.path(),
+        &[
+            ("binary.ts", b"\0binary"),
+            ("missing.ts", b"export const x = 1;\n"),
+            ("tsconfig.json", b"{}"),
+        ],
+    );
+    let sources = common::repo(Checkout(root.path()));
+    std::fs::remove_file(root.path().join("missing.ts")).unwrap();
+    std::fs::remove_file(root.path().join("tsconfig.json")).unwrap();
+    let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();
+    let graph = Pipeline::new(Context::new(&env), sources)
+        .then(Prepare)
+        .unwrap()
+        .then(Each(Parse.pipe(Rewrite).pipe(Canonicalize).pipe(Link)))
+        .unwrap()
+        .then(Insert)
+        .unwrap()
+        .into_value();
+    let key = env.lang.syms.lookup("reason");
+    let rows: Vec<_> = graph
+        .state
+        .trees
+        .iter()
+        .map(|tree| {
+            (
+                tree.label.as_str(),
+                tree.get_tag(0, key)
+                    .map(|value| env.lang.syms.resolve(value)),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("binary.ts", Some("skip_binary")),
+            ("missing.ts", Some("fault_file_read")),
+            ("tsconfig.json", Some("fault_file_read")),
+        ]
+    );
 }

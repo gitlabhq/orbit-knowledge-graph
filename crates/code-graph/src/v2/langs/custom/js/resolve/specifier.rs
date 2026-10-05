@@ -56,7 +56,7 @@ impl FileSystem for RepoFileSystem {
             vfs: Arc::new(
                 Vfs::load(
                     Memory(Vec::new()),
-                    CodeFilter::new(None, None, detect_language_from_path),
+                    CodeFilter::new(detect_language_from_path),
                     Limits::default(),
                     Options::default(),
                 )

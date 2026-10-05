@@ -3,8 +3,11 @@ use std::path::Path;
 use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Workset};
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
-use code_graph_incremental::{Context, Env, Limits, Pipeline, inventory};
-use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
+use code_graph_incremental::{Context, Env, Limits, Pipeline};
+use orbit_utils::files::sources::{Changed, Checkout};
+mod common;
+use code_graph::v2::config::Role;
+use orbit_utils::files::Decision;
 
 fn write_all(root: &Path, files: &[(&str, &[u8])]) {
     for (path, content) in files {
@@ -15,11 +18,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let sources = Sources {
-        root: root.to_path_buf(),
-        entries,
-    };
+    let sources = common::repo(Checkout(root));
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()
@@ -45,13 +44,17 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let path = format!("a.{}", entry.extensions()[0]);
         write_all(repo.path(), &[(&path, b"x")]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let classified = inventory::walk(repo.path()).unwrap().into_inner()[0].decision;
+        let classified = common::repo(Checkout(repo.path()))
+            .files()
+            .next()
+            .unwrap()
+            .decision();
 
         let parsed = parse_repo(&env, repo.path());
 
         let labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.as_str()).collect();
         match classified {
-            Decision::Parse => {
+            Decision::Keep(Role::Source) => {
                 assert_eq!(labels, [path.as_str()], "{lang:?}");
                 assert!(
                     parsed.items[0].0.root().descendants().count() > 0,
@@ -117,26 +120,21 @@ fn classify_agrees_with_walk() {
     write_all(repo.path(), &files);
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
-    let walked = inventory::walk(repo.path()).unwrap().into_inner();
-    let paths = walked.iter().map(|e| e.path.clone());
-    let mut classified = inventory::classify(repo.path(), paths);
-    classified.sort_by(|a, b| a.path.cmp(&b.path));
+    let walked = common::repo(Checkout(repo.path()));
+    let paths = walked.files().map(|e| e.path.clone()).collect();
+    let classified = common::repo(Changed {
+        root: repo.path(),
+        paths,
+    });
 
-    assert_eq!(walked.len(), files.len() + 1);
-    assert_eq!(strip(walked), strip(classified));
+    assert_eq!(walked.usage().files, files.len() + 1);
+    assert_eq!(strip(&walked), strip(&classified));
 }
 
-fn strip(entries: Vec<FileInventoryEntry>) -> Vec<(String, u64, String, Option<String>)> {
+fn strip(entries: &Sources) -> Vec<(String, u64, Decision<Role>)> {
     entries
-        .into_iter()
-        .map(|e| {
-            (
-                e.path,
-                e.size,
-                e.decision.to_string(),
-                e.label.skip.map(|s| s.to_string()),
-            )
-        })
+        .files()
+        .map(|e| (e.path.clone(), e.size, e.decision()))
         .collect()
 }
 

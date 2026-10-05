@@ -102,7 +102,7 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let to_cap = |v: u64| if v == 0 { None } else { Some(v) };
-        let filter = CodeFilter::new(None, None, detect_language_from_path);
+        let filter = CodeFilter::new(detect_language_from_path);
         let limits = Limits {
             file_bytes: to_cap(self.max_file_size),
             total_bytes: to_cap(self.max_total_bytes),

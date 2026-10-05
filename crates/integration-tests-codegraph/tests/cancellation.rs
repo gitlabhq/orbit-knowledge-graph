@@ -26,11 +26,7 @@ impl GraphConverter for NoopConverter {
 fn context(root: &Path, cancel: CancellationToken) -> Arc<PipelineContext> {
     let vfs = orbit_utils::files::Vfs::load(
         orbit_utils::files::sources::Checkout(root),
-        code_graph::v2::config::CodeFilter::new(
-            None,
-            None,
-            code_graph::v2::config::detect_language_from_path,
-        ),
+        code_graph::v2::config::CodeFilter::new(code_graph::v2::config::detect_language_from_path),
         Default::default(),
         Default::default(),
     )

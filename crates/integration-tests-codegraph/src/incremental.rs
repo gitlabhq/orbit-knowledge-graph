@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use code_graph_incremental::pipeline::{Changes, Display, Emit, Export, Resolved};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{
-    Context, Env, Envelope, Limits, Pipeline, Scalar, State, inventory, templates,
-};
+use code_graph_incremental::{Context, Env, Envelope, Limits, Pipeline, Scalar, State, templates};
 use ontology::Ontology;
 
 use super::assertions::{TestCase, TestSuite};
@@ -53,11 +51,22 @@ pub fn run_incremental_suite(yaml: &str) {
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
     let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
 
-    let inventory = inventory::walk(repo.path())
-        .expect("walk fixtures")
-        .to_vec();
-    let graph = templates::index(Context::new(&env), repo.path(), inventory)
-        .expect("suite exceeded the total budget");
+    let inventory = Arc::new(
+        orbit_utils::files::Vfs::load(
+            orbit_utils::files::sources::Checkout(repo.path()),
+            code_graph::v2::config::CodeFilter::new(
+                code_graph::v2::config::detect_language_from_path,
+            ),
+            orbit_utils::files::Limits {
+                file_bytes: Some(5 * 1024 * 1024),
+                ..Default::default()
+            },
+            Default::default(),
+        )
+        .expect("walk fixtures"),
+    );
+    let graph =
+        templates::index(Context::new(&env), inventory).expect("suite exceeded the total budget");
     let (mut state, mut failures) = check(graph, &ontology, &suite.tests);
     let mut env = env;
 
@@ -73,12 +82,28 @@ pub fn run_incremental_suite(yaml: &str) {
         }
         let mut changed = write_fixtures(&step.add, repo.path());
         changed.extend(write_fixtures(&step.modify, repo.path()));
-        let changed = changed.into_iter().map(|(path, _)| path);
+        let changed = changed.into_iter().map(|(path, _)| path).collect();
         let changes = Changes {
-            changed: inventory::classify(repo.path(), changed),
+            changed: Arc::new(
+                orbit_utils::files::Vfs::load(
+                    orbit_utils::files::sources::Changed {
+                        root: repo.path(),
+                        paths: changed,
+                    },
+                    code_graph::v2::config::CodeFilter::new(
+                        code_graph::v2::config::detect_language_from_path,
+                    ),
+                    orbit_utils::files::Limits {
+                        file_bytes: Some(5 * 1024 * 1024),
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )
+                .expect("changed fixtures"),
+            ),
             removed: step.remove.clone(),
         };
-        let graph = templates::reindex(Context::new(&env), state, repo.path(), changes)
+        let graph = templates::reindex(Context::new(&env), state, changes)
             .expect("suite exceeded the total budget");
         let (next, step_failures) = check(graph, &ontology, &step.tests);
         state = next;

@@ -232,7 +232,7 @@ Orbit Remote schema versions are unaffected.
 
 The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:
 
-1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from Gitaly archive metadata for the indexed revision before extraction filters run; local CLI indexing reads present, non-ignored files from Gitalisk.
+1. **Repository inventory** comes from the virtual filesystem. Server indexing loads a Gitaly archive; local indexing loads present checkout files with git ignore rules.
 2. **Repository filesystem** supplies content from memory, scratch storage, or linked checkout files. Parsers and resolvers use the same store. No second directory walk runs.
 3. **Extension filtering** runs `parsable_language` over materialized files, then groups parseable files by language.
 4. **Structural graph emission** creates `Directory`, `File`, and containment edges from the repository inventory. Non-parsable files use `language = "unknown"` and do not produce definitions or imports.
@@ -243,6 +243,8 @@ The indexing pipeline uses a repository inventory as the single file list. Pipel
 IO reads and CPU-bound parsing are bounded independently. File reads use a concurrency limit proportional to the worker thread count. Parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
 
 ##### Graph data model
+
+The incremental engine accepts the same virtual filesystem for full indexing and a separate store of changed files for reindexing. Callers load changes with the `Changed` source and supply removed paths explicitly. Content checks run when parser candidates are read. Unparsed rows use the store's final decision, keeping filter skips distinct from missing-file and manifest-read faults. The store retains file sizes for timeout rows without a separate file inventory.
 
 After parsing, the analysis phase groups results by language and builds a graph containing:
 
