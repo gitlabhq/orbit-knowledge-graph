@@ -22,14 +22,9 @@ fn setup_config(ctx: &TestContext, passwords: &Passwords) -> AppConfig {
     let mut config = AppConfig::embedded_defaults();
     config.graph = ClickHouseConfiguration {
         database: GRAPH_DB.to_string(),
-        username: "gkg_writer".to_string(),
-        password: None,
         ..ctx.config.clone()
     };
-    config.datalake = ClickHouseConfiguration {
-        database: DATALAKE_DB.to_string(),
-        ..ctx.config.clone()
-    };
+    config.datalake.database = DATALAKE_DB.to_string();
     config.clickhouse_setup = ClickHouseSetupConfig {
         admin_username: ctx.config.username.clone(),
         admin_password: ctx.config.password.clone(),
@@ -55,6 +50,11 @@ fn client_as(
     .build_client()
 }
 
+async fn assert_fails_with(client: &ArrowClickHouseClient, sql: &str, code: &str) {
+    let error = client.execute(sql).await.expect_err(sql).to_string();
+    assert!(error.contains(code), "{sql}: expected {code}, got {error}");
+}
+
 async fn new_context() -> TestContext {
     let ctx = TestContext::new(&[]).await;
     ctx.execute(&format!("CREATE DATABASE `{DATALAKE_DB}`"))
@@ -69,17 +69,13 @@ async fn new_context() -> TestContext {
 #[tokio::test]
 async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
     let ctx = new_context().await;
+    let passwords = SPECIAL_CHARACTER_PASSWORDS;
 
-    clickhouse_setup::run(&setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS))
+    clickhouse_setup::run(&setup_config(&ctx, &passwords))
         .await
         .expect("setup should apply the contract");
 
-    let writer = client_as(
-        &ctx,
-        GRAPH_DB,
-        "gkg_writer",
-        SPECIAL_CHARACTER_PASSWORDS.writer,
-    );
+    let writer = client_as(&ctx, GRAPH_DB, "gkg_writer", passwords.writer);
     writer
         .execute("CREATE TABLE nodes (id UInt64) ENGINE = MergeTree ORDER BY id")
         .await
@@ -89,52 +85,29 @@ async fn clickhouse_setup_creates_identities_with_the_contract_privileges() {
         .await
         .expect("writer inserts into the graph");
 
-    let reader = client_as(
-        &ctx,
-        GRAPH_DB,
-        "gkg_reader",
-        SPECIAL_CHARACTER_PASSWORDS.reader,
-    );
+    let reader = client_as(&ctx, GRAPH_DB, "gkg_reader", passwords.reader);
     reader
         .execute("SELECT * FROM nodes")
         .await
         .expect("reader reads the graph");
-    assert!(
-        reader
-            .execute("INSERT INTO nodes VALUES (2)")
-            .await
-            .is_err(),
-        "reader must not write the graph"
-    );
+    assert_fails_with(&reader, "INSERT INTO nodes VALUES (2)", "ACCESS_DENIED").await;
 
     let siphon_reader = client_as(
         &ctx,
         DATALAKE_DB,
         "gkg_siphon_reader",
-        SPECIAL_CHARACTER_PASSWORDS.siphon_reader,
+        passwords.siphon_reader,
     );
     siphon_reader
         .execute("SELECT * FROM siphon_users")
         .await
         .expect("siphon reader reads the data lake");
-    assert!(
-        siphon_reader
-            .execute(&format!("SELECT * FROM `{GRAPH_DB}`.nodes"))
-            .await
-            .is_err(),
-        "siphon reader must not read the graph"
-    );
-
-    let admin = client_as(
-        &ctx,
-        "default",
-        &ctx.config.username,
-        ctx.config.password.as_deref().unwrap(),
-    );
-    admin
-        .execute("SELECT 1")
-        .await
-        .expect("no password text runs as SQL");
+    assert_fails_with(
+        &siphon_reader,
+        &format!("SELECT * FROM `{GRAPH_DB}`.nodes"),
+        "ACCESS_DENIED",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -164,8 +137,26 @@ async fn clickhouse_setup_reruns_and_rotates_passwords() {
         "gkg_writer",
         SPECIAL_CHARACTER_PASSWORDS.writer,
     );
-    assert!(
-        old_writer.execute("SELECT 1").await.is_err(),
-        "old password must stop working"
+    assert_fails_with(&old_writer, "SELECT 1", "AUTHENTICATION_FAILED").await;
+}
+
+#[tokio::test]
+async fn clickhouse_setup_on_a_replicated_graph_requires_replicated_user_storage() {
+    let ctx = new_context().await;
+    let mut config = setup_config(&ctx, &SPECIAL_CHARACTER_PASSWORDS);
+    config.graph.replicated = true;
+
+    let error = clickhouse_setup::run(&config)
+        .await
+        .expect_err("a single node keeps users in local storage")
+        .to_string();
+
+    assert!(error.contains("replicated user directory"), "{error}");
+    let writer = client_as(
+        &ctx,
+        "default",
+        "gkg_writer",
+        SPECIAL_CHARACTER_PASSWORDS.writer,
     );
+    assert_fails_with(&writer, "SELECT 1", "AUTHENTICATION_FAILED").await;
 }

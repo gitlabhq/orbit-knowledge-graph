@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Inputs of `--mode clickhouse-setup`. Each password is a secret file under
 /// `/etc/secrets/clickhouse_setup/`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ClickHouseSetupConfig {
     pub admin_username: String,

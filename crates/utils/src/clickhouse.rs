@@ -191,6 +191,13 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn quote_sql_literal_escapes_quotes_and_backslashes() {
+        assert_eq!(quote_sql_literal("hello"), "'hello'");
+        assert_eq!(quote_sql_literal("it's a test"), "'it\\'s a test'");
+        assert_eq!(quote_sql_literal("back\\slash"), "'back\\\\slash'");
+    }
+
+    #[test]
     fn render_literal_string() {
         let p = ParamValue {
             ch_type: ChType::String,
