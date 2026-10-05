@@ -125,5 +125,5 @@ GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript,
 - [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
 - [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
 - [Install GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
-- [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)
+- [Set up AI coding agents with the GitLab Orbit skill](remote/access/ai-coding-agents.md)
 - [Compare GitLab Orbit Remote and Local](compare-local-remote.md)

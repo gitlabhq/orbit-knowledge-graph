@@ -78,7 +78,7 @@ the installed agents, installs the skill, and registers the MCP server with
 `--mcp`. `orbit uninstall` reverts it. To connect an MCP client by hand, see
 [Connect via MCP](mcp.md).
 
-You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the GitLab Orbit skill manually](../../remote/access/ai-coding-agents.md)
 with `glab skills install --global orbit`.
 
 ## Index a repository

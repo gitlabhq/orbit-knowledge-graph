@@ -270,7 +270,7 @@ The GitLab Orbit skill gives AI coding agents structured guidance for graph quer
 You use the same skill for GitLab Orbit Remote and Local, but the guidance differs.
 
 For more information, see
-[set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md).
+[set up AI coding agents with the GitLab Orbit skill](remote/access/ai-coding-agents.md).
 
 | Skill capability | GitLab Orbit Local | GitLab Orbit Remote |
 |------------------|--------------------|---------------------|

@@ -81,7 +81,7 @@ troubleshooting so it writes correct GitLab Orbit queries on the first attempt:
 glab skills install --global orbit
 ```
 
-See [Set up AI coding agents with the GitLab Orbit skill](../ai_coding_agents.md)
+See [Set up AI coding agents with the GitLab Orbit skill](access/ai-coding-agents.md)
 for project-scoped install, update instructions, and what the skill contains.
 
 ### REST API

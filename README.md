@@ -13,7 +13,7 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Getting started](https://docs.gitlab.com/orbit/local/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Getting started](https://docs.gitlab.com/orbit/local/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/remote/access/ai-coding-agents/)
 
 </div>
 
@@ -130,7 +130,7 @@ Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted 
 | User docs | Developer docs |
 |---|---|
 | [Orbit overview](docs/source/_index.md) | [Local development](docs/dev/local-development.md) |
-| [AI coding agents](docs/source/ai_coding_agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
+| [AI coding agents](docs/source/remote/access/ai-coding-agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
 | [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [cookbook](docs/source/remote/cookbook.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
 | [Local: how it works](docs/source/local/how-it-works.md) · [indexing](docs/source/local/indexing.md) · [schema](docs/source/local/schema.md) · [`orbit` CLI](docs/source/local/access/cli.md) | [Adding a language](docs/dev/adding-a-language.md) |
 | [MCP tool reference](docs/source/queries/mcp_tools.md) | [E2E testing](docs/dev/e2e-testing.md) |

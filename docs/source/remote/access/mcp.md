@@ -180,7 +180,7 @@ Antigravity.
 > configures the local server in one step. The hosted endpoint above still
 > needs the manual configuration shown.
 
-You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the GitLab Orbit skill manually](ai-coding-agents.md)
 to give the agent query recipes, DSL guidance, and troubleshooting.
 
 ### Test it
@@ -286,7 +286,7 @@ glab auth login
 ### Query errors after connecting
 
 For query-time errors (validation failures, empty results, rate limits), see the
-[GitLab Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
+[GitLab Orbit skill documentation](ai-coding-agents.md), which includes DSL
 guidance, query recipes, and exit-code diagnostics. Install the skill for
 inline guidance:
 
