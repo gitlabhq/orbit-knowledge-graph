@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
         builder = builder.add_readiness_check(name, check);
     }
     builder = builder.probe_tls(internal_tls.clone());
-    let _guard = builder.init().expect("labkit init");
+    let mut guard = builder.init().expect("labkit init");
 
     if config.metrics.prometheus.port.is_some() {
         warn!("metrics.prometheus.port is deprecated, use probe_server.bind_address");
@@ -121,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     signal_task.abort();
+    guard.shutdown().await;
 
     result
 }
@@ -131,6 +132,12 @@ async fn run_webserver(
     serving: Arc<AtomicBool>,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
+    orbit_billing::enforcement::validate(&config.billing)?;
+    info!(
+        billing_enforced = orbit_billing::enforcement::ENFORCED,
+        "billing enforcement"
+    );
+
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
         config.jwt_clock_skew_secs,
@@ -239,6 +246,7 @@ async fn run_webserver(
         grpc_server = grpc_server.with_quota(Arc::new(quota));
     }
 
+    let mut analytics_tracker = None;
     if config.analytics.enabled {
         if config.analytics.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
@@ -253,15 +261,20 @@ async fn run_webserver(
         );
         let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
             .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
-        grpc_server = grpc_server.with_analytics(Arc::new(tracker));
+        grpc_server = grpc_server.with_analytics(Arc::new(tracker.clone()));
+        analytics_tracker = Some(tracker);
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
     serving.store(true, Ordering::Relaxed);
 
-    tokio::select! {
+    let result = tokio::select! {
         res = http_server.run() => res.map_err(Into::into),
         res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
+    };
+    if let Some(tracker) = analytics_tracker {
+        tracker.shutdown().await;
     }
+    result
 }

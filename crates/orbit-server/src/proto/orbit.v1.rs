@@ -25,7 +25,7 @@ pub mod execute_query_message {
 pub struct ExecuteQueryRequest {
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
-    /// RAW: tabular JSON rows; LLM: GOON text
+    /// RAW: tabular JSON rows; LLM: GOON text; GQL: graph pattern table
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
     #[prost(enumeration = "QueryType", tag = "3")]
@@ -48,7 +48,7 @@ pub mod execute_query_result {
         /// format = RAW: structured JSON
         #[prost(string, tag = "1")]
         ResultJson(::prost::alloc::string::String),
-        /// format = LLM: compact text
+        /// format = LLM or GQL: compact text
         #[prost(string, tag = "2")]
         FormattedText(::prost::alloc::string::String),
     }
@@ -234,7 +234,11 @@ pub mod get_query_dsl_response {
 }
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListSkillsRequest {}
+pub struct ListSkillsRequest {
+    /// Selects the query mode the served skills teach
+    #[prost(enumeration = "QueryLanguage", tag = "1")]
+    pub language: i32,
+}
 /// Response listing every skill embedded in the deployed server.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListSkillsResponse {
@@ -263,6 +267,9 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
+    /// Selects the query mode the served skill teaches
+    #[prost(enumeration = "QueryLanguage", tag = "3")]
+    pub language: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSkillResponse {
@@ -688,11 +695,15 @@ pub struct EntityItemCount {
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 /// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
+/// GQL returns query results as a text table of graph patterns such as
+/// (:User {id: 1})-\[:AUTHORED\]->(:MergeRequest {id: 2}). Only ExecuteQuery
+/// honors it; other RPCs treat it as RAW.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum ResponseFormat {
     Raw = 0,
     Llm = 1,
+    Gql = 2,
 }
 impl ResponseFormat {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -703,6 +714,7 @@ impl ResponseFormat {
         match self {
             Self::Raw => "RESPONSE_FORMAT_RAW",
             Self::Llm => "RESPONSE_FORMAT_LLM",
+            Self::Gql => "RESPONSE_FORMAT_GQL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -710,6 +722,7 @@ impl ResponseFormat {
         match value {
             "RESPONSE_FORMAT_RAW" => Some(Self::Raw),
             "RESPONSE_FORMAT_LLM" => Some(Self::Llm),
+            "RESPONSE_FORMAT_GQL" => Some(Self::Gql),
             _ => None,
         }
     }
@@ -722,6 +735,7 @@ impl ResponseFormat {
 pub enum FormatName {
     Raw = 0,
     Goon = 1,
+    Gql = 2,
 }
 impl FormatName {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -732,6 +746,7 @@ impl FormatName {
         match self {
             Self::Raw => "FORMAT_NAME_RAW",
             Self::Goon => "FORMAT_NAME_GOON",
+            Self::Gql => "FORMAT_NAME_GQL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -739,6 +754,7 @@ impl FormatName {
         match value {
             "FORMAT_NAME_RAW" => Some(Self::Raw),
             "FORMAT_NAME_GOON" => Some(Self::Goon),
+            "FORMAT_NAME_GQL" => Some(Self::Gql),
             _ => None,
         }
     }

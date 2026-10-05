@@ -147,3 +147,7 @@ _Avoid_: enrichment, decoration
 **GOON (Graph Object Output Notation)**:
 A line-oriented text format for representing graph query results compactly. Designed for LLM consumption. Measured at −11% cost, −15% duration, and +4.8pp correctness vs raw JSON on Haiku 4.5 (ADR 012). Used when queries specify `format=llm`.
 _Avoid_: LLM format, text format
+
+**GQL Response Format**:
+A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019). Intended to replace **GOON** once evals confirm it performs at least as well.
+_Avoid_: Cypher output

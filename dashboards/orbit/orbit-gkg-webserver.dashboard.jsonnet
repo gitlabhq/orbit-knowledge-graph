@@ -98,9 +98,17 @@ local volume = [
 ] + o.volumeTiles([
   {
     prom: pipelineQueries.prom_name,
-    title: 'Queries (server)',
-    desc: 'Query pipeline calls on the GKG webserver in the dashboard window. Click the arrow to open the per-status rate in Explore.',
+    title: 'Successful queries',
+    desc: 'Queries that returned status="ok" in the dashboard window. Each one sends one gkg_query_executed analytics event, except GQL schema requests (query_type="unknown").',
+    filter: 'status="ok"',
   },
+  {
+    prom: pipelineQueries.prom_name,
+    title: 'Failed queries',
+    desc: 'Queries that did not return status="ok" in the dashboard window: compile errors, authorization errors, execution errors, timeouts, and content resolution errors. Failed queries send no analytics event.',
+    filter: 'status!="ok"',
+  },
+], DS, SEL, w=12) + o.volumeTiles([
   {
     prom: railsGrpcDur + '_count',
     title: 'gRPC calls (Rails)',
@@ -120,7 +128,7 @@ local volume = [
     title: 'CH row reads',
     desc: 'ClickHouse row-read events in the dashboard window. Bytes read tile sits next to it.',
   },
-], DS, SEL, w=6);
+], DS, SEL, w=8);
 
 // 3. Latency story --------------------------------------------------------
 // The wall-clock journey of a single query, top-to-bottom:

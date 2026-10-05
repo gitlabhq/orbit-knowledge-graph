@@ -57,7 +57,7 @@ pub use constants::{
     internal_column_prefix, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
     path_column, relationship_type_column,
 };
-pub use error::{QueryError, Result};
+pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
     parse_input,
@@ -354,7 +354,10 @@ mod tests {
             err.is_client_safe(),
             "traversal_path scope rejection should be client safe: {err:?}"
         );
-        assert_eq!(crate::metrics::failure_reason(&err), "authorization");
+        assert_eq!(
+            err.rejection_reason(),
+            crate::error::RejectionReason::Authorization
+        );
         assert!(
             after > before,
             "count_err must run on traversal_path authorization rejections (before={before}, after={after})"

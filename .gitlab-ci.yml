@@ -9,6 +9,7 @@ variables:
   WI_POOL_PROVIDER: //iam.googleapis.com/projects/8522242139/locations/global/workloadIdentityPools/gitlab-pool-oidc-$CI_PROJECT_ID/providers/gitlab-jwt-$CI_PROJECT_ID
   RUNNER_LARGE: saas-linux-large-amd64
   RUNNER_LARGE_ARM: saas-linux-large-arm64
+  TRIVY_IMAGE: aquasec/trivy:0.75.0
 
 workflow:
   rules:
@@ -56,6 +57,7 @@ workflow:
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
   - local: .gitlab/ci/orbit-perf.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
@@ -548,6 +550,20 @@ generate-sbom:
     reports:
       cyclonedx: sbom.cdx.json
 
+# FedRAMP hardening (DISA container guide 2.2, NIST AC-6) requires a non-root image user.
+dockerfile-scan:
+  stage: security
+  image:
+    name: ${TRIVY_IMAGE}
+    entrypoint: [""]
+  tags:
+    - saas-linux-small-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - trivy config --exit-code 1 --severity HIGH,CRITICAL Dockerfile
+
 semgrep-sast:
   stage: security
   needs: []
@@ -997,6 +1013,24 @@ docker-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64@$(cat image-digests/amd64)"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64@$(cat image-digests/arm64)"
 
+# Feeds the Vulnerability Report: every main image, and the latest release on
+# the weekly SCHEDULE_ONLY=container_scanning schedule (FedRAMP 30-day rescan).
+container_scanning:
+  stage: publish
+  needs:
+    - job: docker-manifest
+      optional: true
+  variables:
+    CS_DEFAULT_BRANCH_IMAGE: ${CI_REGISTRY_IMAGE}/gkg:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "container_scanning"
+      variables:
+        CS_IMAGE: ${CI_REGISTRY_IMAGE}/gkg:latest
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        CS_IMAGE: ${CI_REGISTRY_IMAGE}/gkg:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}
+
 docker-build-mr:
   stage: build
   image: docker:29
@@ -1011,6 +1045,10 @@ docker-build-mr:
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
   rules:
+    # Automatic when orbit-perf:mr runs automatically, since it tests this image.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID
+      changes: !reference [.orbit-perf-query-path-changes, changes]
+      allow_failure: true
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -1183,6 +1221,31 @@ release-build-arm64:
   variables:
     ARCH: arm64
 
+# Runs before the release tags move, so a root image or a fixable High or
+# Critical CVE never reaches a published version.
+release-image-scan:
+  stage: build
+  image:
+    name: ${TRIVY_IMAGE}
+    entrypoint: [""]
+  tags:
+    - saas-linux-small-amd64
+  needs:
+    - release-build-amd64
+    - release-build-arm64
+  parallel:
+    matrix:
+      - ARCH: [amd64, arm64]
+  variables:
+    TRIVY_USERNAME: ${CI_REGISTRY_USER}
+    TRIVY_PASSWORD: ${CI_REGISTRY_PASSWORD}
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+        --image-config-scanners misconfig --platform "linux/${ARCH}"
+        "${CI_REGISTRY_IMAGE}/gkg@$(cat "image-digests/${ARCH}")"
+
 release-manifest:
   extends: .sign-image
   stage: build
@@ -1192,6 +1255,7 @@ release-manifest:
   needs:
     - release-build-amd64
     - release-build-arm64
+    - release-image-scan
   variables:
     IMAGE_NAME: gkg
   rules:
