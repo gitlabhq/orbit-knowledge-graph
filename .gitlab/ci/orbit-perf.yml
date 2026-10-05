@@ -21,6 +21,11 @@
     SYNTH_CONFIG: crates/xtask/simulator_medium.yaml  # ~12M nodes / ~59M edges
     ROUNDS: "5"
     CONCURRENCY: "20"
+    WARMUP_ROUNDS: "1"
+    SEED: "42"
+    LATENCY_CONCURRENCY: "1"
+    LATENCY_REQUESTS: "4"
+    GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
   script:
     - bash scripts/ci/orbit-perf.sh
   artifacts:
@@ -30,10 +35,13 @@
 
 orbit-perf:
   extends: .orbit-perf-base
+  # No needs on docker-build-amd64: the script waits for this commit's image.
   needs: []
   # Each run is a full cluster and one datapoint: never cancel, never overlap.
   interruptible: false
   resource_group: orbit-perf
+  variables:
+    GKG_IMAGE_TAG: ${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
@@ -84,7 +92,6 @@ orbit-perf:mr:
   resource_group: orbit-perf-mr-$CI_MERGE_REQUEST_IID
   timeout: 45m
   variables:
-    GKG_IMAGE: ${CI_REGISTRY_IMAGE}/gkg
     GKG_IMAGE_TAG: develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64
   rules: !reference [.orbit-perf-mr-rules, rules]
   after_script:
