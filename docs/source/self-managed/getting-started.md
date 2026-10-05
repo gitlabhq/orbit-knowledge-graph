@@ -92,23 +92,6 @@ CREATE DATABASE orbit ON CLUSTER '{cluster}'
 ENGINE = Replicated('/clickhouse/databases/orbit', '{shard}', '{replica}');
 ```
 
-Store users in ClickHouse Keeper, so that the GitLab Orbit users and grants reach every replica. Add a
-replicated user directory to the server configuration on every replica:
-
-```xml
-<user_directories>
-  <users_xml>
-    <path>users.xml</path>
-  </users_xml>
-  <replicated>
-    <zookeeper_path>/clickhouse/access</zookeeper_path>
-  </replicated>
-</user_directories>
-```
-
-With `clickhouse.ha.enabled: true`, the Helm chart setup hook checks both requirements and stops before it
-changes anything if either one is missing.
-
 Then tell each writer that the cluster is replicated:
 
 | Component | Setting |
