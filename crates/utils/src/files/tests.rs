@@ -818,17 +818,23 @@ fn an_unreadable_directory_fails_the_walk() {
 }
 
 #[test]
-fn a_change_set_is_loaded_without_a_walk_and_a_deleted_file_is_skipped() {
+fn a_change_set_is_loaded_without_a_walk_and_only_its_files_count() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(root, "a.rs", b"fn a() {}");
     write(root, "b.png", b"\x89PNG");
     write(root, "untouched.rs", b"fn u() {}");
 
+    write(root, "dir/inner.rs", b"fn inner() {}");
     let vfs = load(
         Changed {
             root,
-            paths: vec!["b.png".into(), "a.rs".into(), "deleted.rs".into()],
+            paths: vec![
+                "b.png".into(),
+                "a.rs".into(),
+                "deleted.rs".into(),
+                "dir".into(),
+            ],
         },
         CodeFilter,
         Limits::default(),
@@ -839,7 +845,8 @@ fn a_change_set_is_loaded_without_a_walk_and_a_deleted_file_is_skipped() {
         [
             ("a.rs".into(), Decision::Keep(Role::Source)),
             ("b.png".into(), Decision::List("excluded_extension")),
-        ]
+        ],
+        "a deleted file and a directory named by the caller are not files"
     );
 }
 

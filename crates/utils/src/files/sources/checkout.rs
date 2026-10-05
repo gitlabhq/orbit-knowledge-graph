@@ -90,6 +90,8 @@ impl Source for Changed<'_> {
 
 /// `on_disk` is the file as the filesystem names it; `path` is its key in
 /// the store, which may be a lossy spelling of a name that is not UTF-8.
+/// Only regular files and symlinks are files of the repository; a
+/// directory, fifo or socket named by a caller is not.
 fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
     let metadata = match on_disk.symlink_metadata() {
         Ok(metadata) => metadata,
@@ -98,7 +100,7 @@ fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), So
             return Ok(());
         }
     };
-    if !metadata.is_symlink() {
+    if metadata.is_file() {
         return into.put(
             path,
             Put::OnDisk {
@@ -106,6 +108,9 @@ fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), So
                 size: metadata.len(),
             },
         );
+    }
+    if !metadata.is_symlink() {
+        return Ok(());
     }
     match std::fs::read_link(&on_disk) {
         Ok(target) => into.put(path, Put::Symlink(target.to_string_lossy().into_owned())),
