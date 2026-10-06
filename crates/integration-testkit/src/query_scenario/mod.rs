@@ -330,7 +330,6 @@ fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], lab
     }
 }
 
-/// Strip the database and the schema-version prefix from a `db.v101_gl_user` description.
 fn unversioned_table(description: &str) -> &str {
     let table = description.rsplit('.').next().unwrap_or(description);
     match table
@@ -342,7 +341,6 @@ fn unversioned_table(description: &str) -> &str {
     }
 }
 
-/// Find the `ReadFromMergeTree` step whose `Description` (`db.table`) names `table`.
 fn read_from_merge_tree<'a>(
     value: &'a serde_json::Value,
     table: &str,

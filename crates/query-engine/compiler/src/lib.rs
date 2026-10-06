@@ -1905,8 +1905,6 @@ mod tests {
         );
     }
 
-    /// DuckDB's `lower` folds Unicode while ClickHouse's folds ASCII only, so
-    /// the local shape is pinned here to keep that split deliberate.
     #[test]
     fn local_string_filters_fold_case_with_lower_on_both_sides() {
         for (operator, function) in [

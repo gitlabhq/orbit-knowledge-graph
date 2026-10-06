@@ -71,7 +71,6 @@ pub struct RedactionConfig {
     pub deny: BTreeMap<String, Vec<i64>>,
 }
 
-/// A skip index that `EXPLAIN indexes = 1` must apply on `table` and that must prune granules.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedIndex {
