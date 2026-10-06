@@ -310,7 +310,6 @@ impl SetupFlags {
         agents: Vec<String>,
         all: bool,
         index: bool,
-        graph_first: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -320,7 +319,6 @@ impl SetupFlags {
             dry_run: self.dry_run,
             verbose: self.verbose,
             index,
-            graph_first,
             components,
         }
     }
@@ -372,13 +370,6 @@ enum Commands {
         #[arg(long)]
         no_index: bool,
 
-        /// Make agents start search with Orbit. Claude Code sometimes skips
-        /// Orbit, so this blocks its first search or file read each session
-        /// and points it to the graph. Later calls get the usual nudge.
-        /// Override at runtime with ORBIT_GRAPH_FIRST=1 or 0.
-        #[arg(long)]
-        graph_first: bool,
-
         #[command(flatten)]
         flags: SetupFlags,
     },
@@ -396,7 +387,7 @@ enum Commands {
         #[arg(value_name = "KIND")]
         kind: commands::hook_guard::Kind,
 
-        #[arg(long)]
+        #[arg(long, hide = true)]
         graph_first: bool,
 
         #[arg(long, hide = true, value_name = "MODE")]
@@ -648,11 +639,10 @@ async fn dispatch(
             mcp,
             skip,
             no_index,
-            graph_first,
             flags,
         } => {
             let components = commands::setup::Component::from_flags(mcp, &skip);
-            let options = flags.to_options(agents, all, !no_index, graph_first, components);
+            let options = flags.to_options(agents, all, !no_index, components);
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::install(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
@@ -666,7 +656,7 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options = flags.to_options(agents, false, false, false, Default::default());
+            let options = flags.to_options(agents, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
@@ -681,10 +671,10 @@ async fn dispatch(
         }
         Commands::HookGuard {
             kind,
-            graph_first,
+            graph_first: _,
             mode: _,
         } => {
-            commands::hook_guard::run(kind, graph_first, tracker.as_ref(), coding_agent.as_deref());
+            commands::hook_guard::run(kind);
             Ok(())
         }
         Commands::Query {
@@ -1043,7 +1033,7 @@ mod tests {
     }
 
     #[test]
-    fn hook_guard_ignores_the_legacy_mode_flag() {
+    fn hook_guard_ignores_the_legacy_mode_and_graph_first_flags() {
         for argv in [
             ["orbit", "hook-guard", "search"].as_slice(),
             &["orbit", "hook-guard", "search", "--mode", "remote"],
