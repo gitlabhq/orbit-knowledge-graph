@@ -254,8 +254,8 @@ fn report_results(
         };
         writeln!(
             out,
-            "  {}:{}  {}  [{}]  {}:{}-{}  {label}{mentions}",
-            node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
+            "  {}  [{}]  {}:{}-{}  {label}{mentions}",
+            range.fqn, range.kind, range.file, range.start, range.end
         )?;
         let numbers = sources
             .get(&range.file)
@@ -305,8 +305,8 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
     let range = context::source_range(node)?;
     writeln!(
         out,
-        "  {}:{}  {}  [{}]  {}:{}-{}",
-        node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
+        "  {}  [{}]  {}:{}-{}",
+        range.fqn, range.kind, range.file, range.start, range.end
     )?;
     Ok(())
 }
@@ -385,7 +385,7 @@ mod tests {
         report_results(&mut buf, &result, &[node], &HashMap::new()).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57  exact-name\n"
+            "  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57  exact-name\n"
         );
     }
 
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             format!(
-                "  Definition:7  Repo::run  [Method]  src/lib.rs:10-20  body-only ×2\n      12| {}\n",
+                "  Repo::run  [Method]  src/lib.rs:10-20  body-only ×2\n      12| {}\n",
                 "x".repeat(100)
             )
         );
@@ -468,7 +468,7 @@ mod tests {
         report_results(&mut buf, &result, &[node(1, 1, 6), node(2, 4, 5)], &sources).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "  Definition:1  m::f1  [Function]  src/a.rs:1-6  body-only ×3\n      :2 port_a();  :4 port_b();  :5 port_c();\n  Definition:2  m::f2  [Function]  src/a.rs:4-5  body-only ×3\n"
+            "  m::f1  [Function]  src/a.rs:1-6  body-only ×3\n      :2 port_a();  :4 port_b();  :5 port_c();\n  m::f2  [Function]  src/a.rs:4-5  body-only ×3\n"
         );
     }
 

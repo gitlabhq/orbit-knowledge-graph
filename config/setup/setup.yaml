@@ -11,13 +11,13 @@ instructions: |
   Prefer `{{orbit}}` commands to bash tools for file/code search and callers/callees. Instructions to use grep refer to `{{orbit}} grep`.
 
   - Unknown code? `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Too broad? Add `--path`/`--kind`.
-  - grep shows IDs, matching lines, and Mentions in config, templates, and docs. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context Definition:123`.
+  - grep shows names, file:lines, matching lines, and Mentions in config, templates, and docs. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
   - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
   - Do not reread unchanged files. Reuse shown source.
 
 nudge_search: |
   Grep means `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Add --path/--kind.
 nudge_read: |
-  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context Definition:123`.
+  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context <name>`.
 template_vars:
   reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS."
