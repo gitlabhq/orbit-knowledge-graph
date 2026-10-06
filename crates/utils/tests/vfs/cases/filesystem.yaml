@@ -1,5 +1,5 @@
 - name: File paths define the repository tree
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: src/main.rs
       content: |-
@@ -46,7 +46,7 @@
         - {op: subtree, path: missing, expect: []}
 
 - name: An empty fixture set creates an empty repository
-  sources: [memory, lazy, checkout, changed]
+  sources: [memory, lazy, directory, changeset]
   fixtures: []
   tests:
     - name: The root exists without files
@@ -57,7 +57,7 @@
         - {op: usage, expect: {files: 0, bytes: 0}}
 
 - name: A path with empty content creates a file and its parents
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: src/nested/file.txt
       content: ""
@@ -72,7 +72,7 @@
         - {op: read, path: src/nested/file.txt, expect: {ok: ""}}
 
 - name: A separate fixture set defines a separate tree
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: src/nested/file.txt
       content: |-
@@ -86,7 +86,7 @@
         - {op: usage, expect: {files: 1}}
 
 - name: Empty files define directories even with zero byte budgets
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: root.txt
       content: ""
@@ -134,7 +134,7 @@
         - {op: read_dir, path: /, expect: {ok: [README, src]}}
 
 - name: Links resolve within the fixture tree
-  sources: [checkout, changed, archive]
+  sources: [directory, changeset, archive]
   fixtures:
     - path: shared/child
       content: content

@@ -1,4 +1,4 @@
-//! Checkout walks with git ignore rules; Changed loads explicit relative paths without walking.
+//! Directory walks with git ignore rules; Changeset loads explicit relative paths without walking.
 //! Metadata and link targets are read through pinned parent descriptors without following links.
 //! Missing files are skipped; other I/O errors fail loading. Real host paths remain separate from
 //! lossy inventory keys. Relative roots are canonicalized once so later reads do not depend on cwd.
@@ -16,14 +16,14 @@ use super::super::disk;
 use super::super::path::is_safe_relative_path;
 use super::{Loading, Put, Source, SourceError, Tag};
 
-pub struct Checkout<'a>(pub &'a Path);
+pub struct Directory<'a>(pub &'a Path);
 
-pub struct Changed<'a> {
+pub struct Changeset<'a> {
     pub root: &'a Path,
     pub paths: Vec<String>,
 }
 
-impl Source for Checkout<'_> {
+impl Source for Directory<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         let root = self.0.canonicalize()?;
         let failed: Mutex<Option<SourceError>> = Mutex::new(None);
@@ -80,13 +80,13 @@ impl Source for Checkout<'_> {
     }
 }
 
-impl Source for Changed<'_> {
+impl Source for Changeset<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         let root = self.root.canonicalize()?;
         self.paths.into_par_iter().try_for_each(|path| {
             if !is_safe_relative_path(Path::new(&path)) || path.is_empty() {
                 return Err(
-                    std::io::Error::new(ErrorKind::InvalidInput, "invalid changed path").into(),
+                    std::io::Error::new(ErrorKind::InvalidInput, "invalid changeset path").into(),
                 );
             }
             put(root.join(&path), &path, into)

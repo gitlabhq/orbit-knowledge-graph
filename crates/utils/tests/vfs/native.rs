@@ -2,7 +2,7 @@
 
 use orbit_utils::vfs::{
     Decision, File, Limits, Loading, Pass, Put, Source, SourceError, Tag, Vfs,
-    sources::{Changed, Checkout},
+    sources::{Changeset, Directory},
 };
 use std::io;
 use std::path::Path;
@@ -80,7 +80,7 @@ fn concurrent_first_reads_run_content_once() {
     std::fs::write(root.path().join("blob"), b"\0binary").unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let vfs = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         Checked(count.clone()),
         Default::default(),
         Default::default(),
@@ -126,7 +126,7 @@ fn loading_decisions_are_not_repeated_by_reads() {
             };
             let vfs = if linked {
                 Vfs::load(
-                    Checkout(root.path()),
+                    Directory(root.path()),
                     CountContent(count.clone()),
                     limits,
                     Default::default(),
@@ -214,7 +214,7 @@ fn composed_passes_observe_previous_decisions_without_changing_file_metadata() {
         let pass = Stage(1).then(Stage(2).then(Stage(3)));
         let vfs = if linked {
             Vfs::load(
-                Checkout(root.path()),
+                Directory(root.path()),
                 pass,
                 Limits::default(),
                 Default::default(),
@@ -263,7 +263,7 @@ fn file_bytes_are_borrowed_only_while_classifying_including_empty_files() {
     std::fs::write(root.path().join("full"), b"content").unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let vfs = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         Inspect(calls.clone()).then(Inspect(calls.clone())),
         Limits::default(),
         Default::default(),
@@ -337,7 +337,7 @@ fn host_links_and_replaced_parents_are_not_followed() {
     ] {
         assert!(
             Vfs::load(
-                Changed {
+                Changeset {
                     root: root.path(),
                     paths: vec![path.into()]
                 },
@@ -349,7 +349,7 @@ fn host_links_and_replaced_parents_are_not_followed() {
         );
     }
     let vfs = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         Checked(Arc::default()),
         Default::default(),
         Default::default(),
@@ -490,7 +490,7 @@ fn non_utf8_names_retain_real_disk_paths() {
         }
     }
     let vfs = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         (),
         Default::default(),
         Default::default(),
@@ -501,7 +501,7 @@ fn non_utf8_names_retain_real_disk_paths() {
 }
 
 #[test]
-fn unreadable_directory_fails_checkout() {
+fn unreadable_directory_fails_loading() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let locked = root.path().join("secret");
@@ -510,7 +510,7 @@ fn unreadable_directory_fails_checkout() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o0)).unwrap();
     let enforced = std::fs::read_dir(&locked).is_err();
     let result = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         (),
         Default::default(),
         Default::default(),
