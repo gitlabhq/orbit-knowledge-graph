@@ -10,6 +10,7 @@ pub mod analytics;
 pub mod app;
 pub mod billing;
 pub mod clickhouse;
+pub mod clickhouse_setup;
 pub mod engine;
 pub mod features;
 pub mod gitlab;
@@ -29,6 +30,7 @@ pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, De
 pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::{BillingAuthMode, BillingConfig, QuotaAuthMode, QuotaConfig, QuotaConfigError};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
+pub use clickhouse_setup::ClickHouseSetupConfig;
 pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     CronSchedule, DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,

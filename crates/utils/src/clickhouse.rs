@@ -4,6 +4,10 @@ use crate::query_types::{ParamValue, SqlType, TimeZone};
 
 pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
 
+pub fn quote_sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 pub fn type_name(data_type: SqlType) -> String {
     match data_type {
         SqlType::String => "String".into(),
@@ -91,6 +95,13 @@ mod tests {
     use super::*;
     use crate::query_types::ScalarType;
     use serde_json::json;
+
+    #[test]
+    fn quote_sql_literal_escapes_quotes_and_backslashes() {
+        assert_eq!(quote_sql_literal("hello"), "'hello'");
+        assert_eq!(quote_sql_literal("it's a test"), "'it\\'s a test'");
+        assert_eq!(quote_sql_literal("back\\slash"), "'back\\\\slash'");
+    }
 
     #[test]
     fn parameters_render_clickhouse_values_and_temporal_types() {

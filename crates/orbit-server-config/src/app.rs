@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::analytics::AnalyticsConfig;
 use crate::billing::BillingConfig;
 use crate::clickhouse::ClickHouseConfiguration;
+use crate::clickhouse_setup::ClickHouseSetupConfig;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
 use crate::features::FeaturesConfig;
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
@@ -41,6 +42,7 @@ pub struct AppConfig {
     pub nats: NatsConfiguration,
     pub datalake: ClickHouseConfiguration,
     pub graph: ClickHouseConfiguration,
+    pub clickhouse_setup: ClickHouseSetupConfig,
     pub engine: EngineConfiguration,
     pub gitlab: GitlabConfig,
     pub schedule: ScheduleConfig,
