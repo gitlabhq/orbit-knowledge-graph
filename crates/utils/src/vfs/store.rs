@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 use super::disk;
-use super::loading::{ContentId, Loading, Node, Slot};
+use super::loading::{Loading, Node, Slot};
 use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
 use super::scratch::{Blob, Scratch};
 use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
@@ -34,7 +34,6 @@ pub struct Vfs<T> {
     pub(super) passes: Arc<dyn Pass<Tag = T>>,
     pub(super) nodes: Vec<Node<T>>,
     pub(super) links: FxHashMap<String, String>,
-    pub(super) blobs: FxHashMap<ContentId, Blob>,
     pub(super) scratch: Scratch,
     pub(super) usage: Usage,
 }
@@ -65,17 +64,16 @@ impl<T: Tag> Vfs<T> {
             return Err(unsupported(&node.file));
         };
         let bytes = match slot {
-            Slot::Stored(id) => self.blob(id)?,
+            Slot::Stored(Blob::Memory(bytes)) => bytes.clone(),
+            Slot::Stored(Blob::Spilled {
+                offset,
+                len,
+                raw_len,
+            }) => self.scratch.read(*offset, *len, *raw_len)?,
             Slot::Linked(on_disk) => disk::read(on_disk, node.file.size)?.into(),
             Slot::Link(_) => return Err(not_found()),
         };
-        if node.checked {
-            return Ok(bytes);
-        }
-        match node
-            .file
-            .decide_once(|file| self.passes.content(file, &bytes))
-        {
+        match node.file.classify(&*self.passes, &bytes) {
             Decision::Keep(_) => Ok(bytes),
             _ => Err(unsupported(&node.file)),
         }
@@ -111,33 +109,25 @@ impl<T: Tag> Vfs<T> {
             .get(&self.resolve_parents(path)?)
             .map(PathBuf::from);
         let key = self.resolve(path)?;
-        let canonical = Path::new("/").join(&key);
-        if let Some(node) = self.node(&key) {
-            return Ok(Stat {
-                path: canonical,
-                kind: Kind::File,
-                len: node.file.size,
-                decision: Some(node.file.decision()),
-                link,
-            });
-        }
-        if !self.is_dir(&key) {
-            return Err(not_found());
-        }
+        let (kind, len, decision) = match self.node(&key) {
+            Some(node) => (Kind::File, node.file.size, Some(node.file.decision())),
+            None if self.is_dir(&key) => (Kind::Dir, 0, None),
+            None => return Err(not_found()),
+        };
         Ok(Stat {
-            path: canonical,
-            kind: Kind::Dir,
-            len: 0,
-            decision: None,
+            path: Path::new("/").join(&key),
+            kind,
+            len,
+            decision,
             link,
         })
     }
 
-    pub fn files(&self) -> impl Iterator<Item = &File<T>> + use<'_, T> {
+    pub fn files(&self) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
         self.nodes.iter().map(|node| &node.file)
     }
 
-    pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<T>> + use<'_, T> {
+    pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
         let key = self.resolve(dir).ok();
         key.into_iter().flat_map(|key| self.subtree_of(&key))
     }
@@ -149,37 +139,27 @@ impl<T: Tag> Vfs<T> {
         }
     }
 
-    fn subtree_of(&self, key: &str) -> impl Iterator<Item = &File<T>> + use<'_, T> {
+    fn subtree_of(&self, key: &str) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
         let prefix = match key.is_empty() {
             true => String::new(),
             false => format!("{key}/"),
         };
-        let start = self.nodes.partition_point(|n| n.file.path < prefix);
+        let start = self
+            .nodes
+            .partition_point(|n| n.file.path.as_ref() < prefix.as_str());
         let end = start + self.nodes[start..].partition_point(|n| n.file.path.starts_with(&prefix));
         self.nodes[start..end].iter().map(|node| &node.file)
     }
 
     fn node(&self, key: &str) -> Option<&Node<T>> {
         self.nodes
-            .binary_search_by(|node| node.file.path.as_str().cmp(key))
+            .binary_search_by(|node| node.file.path.as_ref().cmp(key))
             .ok()
             .map(|i| &self.nodes[i])
     }
 
     fn is_dir(&self, key: &str) -> bool {
         key.is_empty() || self.subtree_of(key).next().is_some()
-    }
-
-    fn blob(&self, id: &ContentId) -> io::Result<Bytes> {
-        match self.blobs.get(id) {
-            Some(Blob::Memory(bytes)) => Ok(bytes.clone()),
-            Some(Blob::Spilled {
-                offset,
-                len,
-                raw_len,
-            }) => self.scratch.read(*offset, *len, *raw_len),
-            None => Err(not_found()),
-        }
     }
 
     fn resolve(&self, path: &Path) -> io::Result<String> {
@@ -216,14 +196,11 @@ impl<T: Tag> Vfs<T> {
 
 impl<T> std::fmt::Debug for Vfs<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Vfs")
-            .field("usage", &self.usage)
-            .field("distinct_contents", &self.blobs.len())
-            .finish()
+        f.debug_struct("Vfs").field("usage", &self.usage).finish()
     }
 }
 
-fn unsupported<T: Tag>(file: &File<T>) -> io::Error {
+fn unsupported<T: Tag>(file: &File<'_, T>) -> io::Error {
     let why = match file.decision() {
         Decision::List(why) | Decision::Drop(why) => why,
         _ => "no bytes",

@@ -82,11 +82,11 @@ impl<'a> ManifestCache<'a> {
             .files()
             .filter(|file| {
                 file.keeps()
-                    && Path::new(&file.path)
+                    && Path::new(file.path.as_ref())
                         .file_name()
                         .is_some_and(|name| name == "Cargo.toml")
             })
-            .map(|file| root_path.join(&file.path))
+            .map(|file| root_path.join(file.path.as_ref()))
             .collect();
 
         Ok(Self {

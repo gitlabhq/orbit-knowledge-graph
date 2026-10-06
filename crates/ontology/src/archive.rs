@@ -181,9 +181,9 @@ impl OntologyArchive {
                 .files()
                 .filter(|file| file.path != MANIFEST_PATH)
                 .all(|file| {
-                    sources.get(&file.path).is_some_and(|source| {
+                    sources.get(file.path.as_ref()).is_some_and(|source| {
                         self.files
-                            .read(Path::new(&file.path))
+                            .read(Path::new(file.path.as_ref()))
                             .is_ok_and(|bytes| bytes.as_ref() == source.as_bytes())
                     })
                 })

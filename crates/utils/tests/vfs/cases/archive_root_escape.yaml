@@ -1,4 +1,0 @@
-sources: [archive]
-entries:
-  - {path: ignored, archive_path: ../escape, data: x}
-load_error: InvalidData

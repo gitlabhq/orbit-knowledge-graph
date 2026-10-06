@@ -1,25 +1,169 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: src/main.rs, data: "fn main() {}"}
-  - {path: src/lib/mod.rs, data: "pub mod a;"}
-  - {path: README.md, data: "# hi"}
-steps:
-  - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
-  - {op: read, path: src/lib/../main.rs, expect: {ok: "fn main() {}"}}
-  - {op: read, path: ../escape, expect: {error: NotFound}}
-  - {op: read, path: src/../../escape, expect: {error: NotFound}}
-  - {op: read, path: src, expect: {error: IsADirectory}}
-  - {op: read_dir, path: README.md, expect: {error: NotADirectory}}
-  - {op: read_dir, path: /, expect: {ok: [README.md, src]}}
-  - {op: read_dir, path: src, expect: {ok: [lib, main.rs]}}
-  - {op: stat, path: src/main.rs, expect: {ok: {path: /src/main.rs, kind: file, len: 12, decision: {kind: keep, value: input}}}}
-  - {op: stat, path: /src, expect: {ok: {path: /src, kind: dir, len: 0}}}
-  - {op: subtree, path: src, expect: [src/lib/mod.rs, src/main.rs]}
-  - {op: subtree, path: ../, expect: []}
-  - {op: subtree, path: missing, expect: []}
-  - op: files
-    expect:
-      - {path: README.md, size: 4, decision: {kind: keep, value: input}}
-      - {path: src/lib/mod.rs, size: 10, decision: {kind: keep, value: input}}
-      - {path: src/main.rs, size: 12, decision: {kind: keep, value: input}}
-  - {op: usage, expect: {files: 3, bytes: 26, kept: 26}}
+- name: File paths define the repository tree
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/main.rs
+      content: |-
+        fn main() {}
+    - path: src/lib/mod.rs
+      content: |-
+        pub mod a;
+    - path: README.md
+      content: |-
+        # hi
+    - path: src/lib/empty.rs
+      content: ""
+  tests:
+    - name: Reads preserve content and normalize paths within the root
+      assert:
+        - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
+        - {op: read, path: src/lib/../main.rs, expect: {ok: "fn main() {}"}}
+        - {op: read, path: ../escape, expect: {error: NotFound}}
+        - {op: read, path: src/../../escape, expect: {error: NotFound}}
+        - {op: read, path: src, expect: {error: IsADirectory}}
+    - name: Directories follow fixture paths without explicit directory entries
+      assert:
+        - {op: read_dir, path: README.md, expect: {error: NotADirectory}}
+        - {op: read_dir, path: /, expect: {ok: [README.md, src]}}
+        - {op: read_dir, path: src, expect: {ok: [lib, main.rs]}}
+        - {op: read_dir, path: src/lib, expect: {ok: [empty.rs, mod.rs]}}
+        - {op: stat, path: /src, expect: {ok: {path: /src, kind: dir, len: 0}}}
+        - {op: stat, path: /src/lib, expect: {ok: {path: /src/lib, kind: dir, len: 0}}}
+    - name: An empty file is readable and remains in the inventory
+      assert:
+        - {op: read, path: src/lib/empty.rs, expect: {ok: ""}}
+        - {op: stat, path: src/lib/empty.rs, expect: {ok: {path: /src/lib/empty.rs, kind: file, len: 0, decision: {kind: keep, value: input}}}}
+        - op: files
+          expect:
+            - {path: README.md, size: 4, decision: {kind: keep, value: input}}
+            - {path: src/lib/empty.rs, size: 0, decision: {kind: keep, value: input}}
+            - {path: src/lib/mod.rs, size: 10, decision: {kind: keep, value: input}}
+            - {path: src/main.rs, size: 12, decision: {kind: keep, value: input}}
+        - {op: usage, expect: {files: 4, bytes: 26, kept: 26}}
+    - name: Subtrees contain sorted descendants only
+      assert:
+        - {op: subtree, path: src, expect: [src/lib/empty.rs, src/lib/mod.rs, src/main.rs]}
+        - {op: subtree, path: ../, expect: []}
+        - {op: subtree, path: missing, expect: []}
+
+- name: An empty fixture set creates an empty repository
+  sources: [memory, lazy, checkout, changed]
+  fixtures: []
+  tests:
+    - name: The root exists without files
+      assert:
+        - {op: read_dir, path: /, expect: {ok: []}}
+        - {op: stat, path: /, expect: {ok: {path: /, kind: dir, len: 0}}}
+        - {op: files, expect: []}
+        - {op: usage, expect: {files: 0, bytes: 0}}
+
+- name: A path with empty content creates a file and its parents
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/nested/file.txt
+      content: ""
+    - path: only-in-this-tree.txt
+      content: first
+  tests:
+    - name: File paths imply both parent directories
+      assert:
+        - {op: read_dir, path: /, expect: {ok: [only-in-this-tree.txt, src]}}
+        - {op: read_dir, path: src, expect: {ok: [nested]}}
+        - {op: read_dir, path: src/nested, expect: {ok: [file.txt]}}
+        - {op: read, path: src/nested/file.txt, expect: {ok: ""}}
+
+- name: A separate fixture set defines a separate tree
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/nested/file.txt
+      content: |-
+        Content belongs to this fixture set.
+  tests:
+    - name: Earlier fixture sets do not contribute files or content
+      assert:
+        - {op: read, path: src/nested/file.txt, expect: {ok: "Content belongs to this fixture set."}}
+        - {op: read, path: only-in-this-tree.txt, expect: {error: NotFound}}
+        - {op: read_dir, path: /, expect: {ok: [src]}}
+        - {op: usage, expect: {files: 1}}
+
+- name: Empty files define directories even with zero byte budgets
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: root.txt
+      content: ""
+    - path: nested/deep/empty.txt
+      content: ""
+    - path: sibling/empty.txt
+      content: ""
+  limits: {file_bytes: 0, total_bytes: 0, resident_bytes: 0, spilled_bytes: 0}
+  tests:
+    - name: Empty content creates readable file nodes
+      assert:
+        - {op: read, path: root.txt, expect: {ok: ""}}
+        - {op: read, path: nested/deep/empty.txt, expect: {ok: ""}}
+        - {op: read, path: sibling/empty.txt, expect: {ok: ""}}
+        - {op: stat, path: nested/deep/empty.txt, expect: {ok: {path: /nested/deep/empty.txt, kind: file, len: 0, decision: {kind: keep, value: input}}}}
+    - name: Paths alone create every parent directory
+      assert:
+        - {op: read_dir, path: /, expect: {ok: [nested, root.txt, sibling]}}
+        - {op: read_dir, path: nested, expect: {ok: [deep]}}
+        - {op: read_dir, path: nested/deep, expect: {ok: [empty.txt]}}
+        - {op: stat, path: nested/deep, expect: {ok: {path: /nested/deep, kind: dir, len: 0}}}
+        - {op: read, path: nested/deep, expect: {error: IsADirectory}}
+        - {op: subtree, path: nested, expect: [nested/deep/empty.txt]}
+    - name: Zero byte usage does not mean zero files
+      assert:
+        - {op: usage, expect: {files: 3, bytes: 0, kept: 0, resident: 0, spilled: 0}}
+        - op: files
+          expect:
+            - {path: nested/deep/empty.txt, size: 0, decision: {kind: keep, value: input}}
+            - {path: root.txt, size: 0, decision: {kind: keep, value: input}}
+            - {path: sibling/empty.txt, size: 0, decision: {kind: keep, value: input}}
+
+- name: Input paths normalize to the same virtual tree
+  sources: [memory, lazy]
+  fixtures:
+    - path: /src/main
+      content: content
+    - path: ./README
+      content: readme
+  tests:
+    - name: Rooted and relative fixture paths are readable by normalized names
+      assert:
+        - {op: read, path: src/main, expect: {ok: content}}
+        - {op: read, path: README, expect: {ok: readme}}
+        - {op: read_dir, path: /, expect: {ok: [README, src]}}
+
+- name: Links resolve within the fixture tree
+  sources: [checkout, changed, archive]
+  fixtures:
+    - path: shared/child
+      content: content
+    - path: alias
+      link: shared
+    - path: nested/chain
+      link: ../alias
+    - path: root
+      link: /
+    - path: escape
+      link: ../../outside
+    - path: dangling
+      link: absent
+    - path: ping
+      link: pong
+    - path: pong
+      link: ping
+  tests:
+    - name: Reads and directory queries follow relative and rooted links
+      assert:
+        - {op: read, path: alias/child, expect: {ok: content}}
+        - {op: read, path: nested/chain/child, expect: {ok: content}}
+        - {op: read, path: root/shared/child, expect: {ok: content}}
+        - {op: read_dir, path: alias, expect: {ok: [child]}}
+        - {op: subtree, path: alias, expect: [shared/child]}
+        - {op: stat, path: nested/chain, expect: {ok: {path: /shared, kind: dir, len: 0, link: ../alias}}}
+    - name: Escapes and dangling links fail and cycles terminate
+      assert:
+        - {op: read, path: escape/secret, expect: {error: NotFound}}
+        - {op: stat, path: dangling, expect: {error: NotFound}}
+        - {op: read, path: ping, expect: {error: Other}}
+        - {op: usage, expect: {files: 8, kept: 7}}

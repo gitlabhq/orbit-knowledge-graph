@@ -1,6 +1,0 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: file, data: x}
-limits: {resident_bytes: 0}
-options: {scratch: missing}
-load_error: NotFound

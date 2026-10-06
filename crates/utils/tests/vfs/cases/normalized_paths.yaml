@@ -1,7 +1,0 @@
-sources: [memory, puts, lazy]
-entries:
-  - {path: /src/main, data: content}
-  - {path: ./README, data: readme}
-steps:
-  - {op: read, path: src/./main, expect: {ok: content}}
-  - {op: read_dir, path: /, expect: {ok: [README, src]}}

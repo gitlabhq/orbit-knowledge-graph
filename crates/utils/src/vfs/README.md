@@ -12,7 +12,7 @@ flowchart LR
         memory[Memory]
     end
     sources --> loading["Loading::put"]
-    loading --> policy["Pass::header / content"]
+    loading --> policy["Pass::metadata / content"]
     policy --> freeze["Sort and freeze"]
     freeze --> store["Vfs: read / read_dir / stat"]
     store --> inventory["files / subtree / usage"]
@@ -72,9 +72,9 @@ Only supplied paths enter the store; a link cannot resolve unless its target is 
 Paths through host symlinked parent directories are refused, including links into the checkout.
 
 Disk files remain linked rather than copied.
-Header `Keep` defers content checks until the first read; header `Pending` reads during loading, then releases those bytes.
+Metadata `Keep` defers content checks until the first read; metadata `Pending` reads during loading, then releases those bytes.
 Therefore, the default `()` pass reads checkout files during loading.
-Set `Keep` in a header pass to defer that read.
+Return `Keep` from a metadata pass to defer that read.
 
 Checkouts are live, not snapshots. Deleted files return read errors; size changes are rejected.
 Same-size edits can change later reads, while the first content decision remains cached.
@@ -123,16 +123,20 @@ enum Role { Source, #[default] Input }
 struct Filter;
 impl Pass for Filter {
     type Tag = Role;
-    fn header(&self, file: &mut File<Role>) {
+    fn metadata(&self, file: &File<'_, Role>) -> Decision<Role> {
         if file.path.ends_with(".png") {
-            file.decide(Decision::List("image"));
+            Decision::List("image")
         } else if file.path.ends_with(".rs") {
-            file.decide(Decision::Keep(Role::Source));
+            Decision::Keep(Role::Source)
+        } else {
+            file.decision()
         }
     }
-    fn content(&self, file: &mut File<Role>, bytes: &[u8]) {
-        if bytes.contains(&0) {
-            file.decide(Decision::List("binary"));
+    fn content(&self, file: &File<'_, Role>) -> Decision<Role> {
+        if file.bytes().is_some_and(|bytes| bytes.contains(&0)) {
+            Decision::List("binary")
+        } else {
+            file.decision()
         }
     }
 }
@@ -145,12 +149,18 @@ impl Pass for Filter {
 | `List(reason)` | Retain a node without readable content |
 | `Drop(reason)` | Omit the node from the frozen inventory |
 
-Passes are trusted, synchronous and infallible. They should change decisions, not paths or sizes.
+Passes are synchronous and infallible. They receive read-only inputs and return a decision.
 They do not count resources or receive symlinks. The store lists links as `List("symlink")`.
 Oversize files become `List("oversize")` before policy runs.
 
 Compose passes with `first.then(second)`. Each stage runs in order; the second sees the first's decision and can override it.
-Header `List` or `Drop` skips content processing and never invokes a lazy reader.
+The metadata chain starts with `Pending`. The content chain starts with the final metadata decision.
+Each pass receives an immutable file. `file.decision()` exposes the preceding pass's result.
+`file.bytes()` is `None` during metadata checks and `Some(bytes)` during content checks, including `Some(&[])` for empty files.
+It returns a borrowed slice and never performs I/O. The store attaches bytes only for the content callback.
+Inventory files own their paths and retain no content slice. Chained passes borrow the path and bytes without copying them.
+The store keeps the metadata decision and caches the final content decision once, without changing the metadata result.
+Metadata `List` or `Drop` skips content processing and never invokes a lazy reader.
 
 Linked files can be rejected after freezing. `decision()` and `stat` report that late decision.
 A late `Drop` keeps its node and reads as `Unsupported`, because the frozen inventory cannot remove it.
@@ -209,14 +219,16 @@ Resident and scratch budgets count unique blobs. They exclude metadata, source b
 Concurrent stores have separate budgets, so callers must account for concurrency when sizing memory.
 
 SHA-256 identifies content before storage. Identical bytes share storage but remain separate file rows.
+File nodes retain shared resident bytes or a spill descriptor. The deduplication map is discarded after loading.
 Scratch is one anonymous temporary file, closed when the store drops. Its configured directory must exist.
 Use a disk-backed volume rather than tmpfs when spilling should reduce RAM use.
 LZ4 compresses each spilled blob independently, only when it shrinks. Reads remain random-access.
 
 `Usage.bytes` counts offered bytes; `Usage.files` counts final nodes.
-`kept` sums current kept-node sizes. `resident` and `spilled` count allocated blob bytes.
+`kept` sums current kept-node sizes. `resident` and `spilled` count bytes allocated during loading.
 `deduped_bytes` counts avoided duplicate writes; `duplicate_paths` counts overwritten entries.
-Replacing a path can leave an unused blob allocated until drop, so these totals are not an accounting identity.
+Unused resident blobs are released after loading. Scratch bytes remain allocated until the store drops.
+Replacing paths can therefore make these totals differ from the content reachable through the final inventory.
 
 `Options.cancelled` accepts a `Send + Sync` predicate, such as `move || token.is_cancelled()`.
 It is polled once per `put`. Cancellation stops at the next offered file, not during blocked reads or decompression.
@@ -248,52 +260,73 @@ Custom sources are trusted to select host paths and enforce their transport or a
 mise exec -- cargo test -p orbit-utils --test vfs
 ```
 
-Each YAML file in `crates/utils/tests/vfs/cases/` becomes a named test.
-The runner builds real sources and calls only public VFS methods.
-Most cases run identical expectations against several sources.
-Native Rust tests cover scheduling, invalid filename bytes, permissions, and host symlink replacement.
+Related scenarios are stacked in six YAML suites in `crates/utils/tests/vfs/cases/`.
+Each file becomes a named test. Each scenario has its own inline fixtures and named assertions.
+Fixture paths define the tree. Parent directories follow from those paths; empty content still creates a file.
+Each scenario loads a fresh VFS for each source. Its named tests run in order against that VFS.
+The runner calls only public VFS methods. Most scenarios run identical assertions against several sources.
+Rust tests cover malformed archives, failing readers, scheduling, invalid filename bytes, permissions, and host symlink replacement.
 
 ```yaml
-sources: [memory, lazy, checkout, changed, archive]
-entries:
-  - {path: src/main.rs, data: "fn main() {}"}
-limits: {file_bytes: 1024}
-steps:
-  - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
-  - {op: read_dir, path: src, expect: {ok: [main.rs]}}
-  - {op: usage, expect: {files: 1, bytes: 12}}
+- name: Paths define a tree even when files are empty
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/lib/empty.rs
+      content: ""
+  tests:
+    - name: Parent directories exist
+      assert:
+        - {op: read_dir, path: /, expect: {ok: [src]}}
+        - {op: read_dir, path: src, expect: {ok: [lib]}}
+    - name: The empty file is readable
+      assert:
+        - {op: read, path: src/lib/empty.rs, expect: {ok: ""}}
+        - {op: usage, expect: {files: 1, bytes: 0}}
+
+- name: Another fixture set has its own content
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/main.rs
+      content: |-
+        fn main() {}
+  tests:
+    - name: Reads use this fixture set
+      assert:
+        - {op: read, path: src/main.rs, expect: {ok: "fn main() {}"}}
+        - {op: read_dir, path: src, expect: {ok: [main.rs]}}
 ```
 
 ### Grammar
 
-Unknown fields and malformed variants fail deserialization. Empty scenarios and empty usage assertions fail validation.
-Source-specific fields are rejected for incompatible sources. Failures report the test name, source, and operation index.
+Unknown fields and malformed variants fail deserialization. Scenarios require a load-error expectation or named tests with assertions.
+Empty fixture sets are valid; an empty scenario list is not. Failures report the scenario name, source, test, and assertion.
 
 | Field | Meaning |
 |---|---|
-| `sources` | Nonempty list: `memory`, `puts`, `lazy`, `checkout`, `changed`, `archive` |
-| `entries` | Ordered inputs; duplicate paths stay ordered |
-| `rules` | Ordered header/content decisions, split across a real `Pass::then` chain |
+| `name` | Description of the scenario's behavior |
+| `sources` | Nonempty list: `memory`, `lazy`, `checkout`, `changed`, `archive` |
+| `fixtures` | Inline files with `path` and `content`; paths imply directories |
+| `rules` | Ordered metadata/content decisions, split across a real `Pass::then` chain |
 | `limits` | The five VFS limits; omitted fields are unlimited |
 | `options` | `compress_spill`, `scratch: default/existing/missing`, `cancel_after` |
-| `load_error` | Exact source error expectation; excludes operation steps |
-| `steps` | Ordered operations and assertions after loading |
+| `load_error` | Exact source error expectation; excludes post-load tests |
+| `tests` | Named tests, each with an ordered `assert` list |
 | `changed` | Explicit path list for the changed source |
-| `truncate_archive` | Truncate compressed input to this many bytes |
 
-Entries require `path`. `data` is text, a byte array, or `{text: x, repeat: 80}`.
-`link` and archive-only `hardlink` describe targets.
-Archive fields include `archive_path` for hostile raw paths, `raw_type` for tar type bytes, and `pax_size`.
-`declared_size` overrides a lazy or archive size; `read_error` injects a lazy I/O failure.
-Host fixture paths are checked before writes, so hostile archive names cannot escape the fixture directory.
+Fixtures contain raw text. Use YAML block strings for multiline files and quoted escapes for bytes such as `"\0"`.
+Use `content: ""` for empty files; omitted content also defaults to empty.
+YAML anchors can share content across files and read assertions.
+Fixtures remain ordered so memory, lazy, and archive scenarios can test duplicate paths.
+A `link` target replaces content for checkout, changed, and archive sources.
+Host fixture paths are checked before writes. Archive corruption and reader faults belong in the Rust source tests.
 
-Rules require `phase: header/content` and `decision`.
+Rules require `phase: metadata/content` and `decision`.
 Optional `suffix` matches names; `contains` matches bytes during content processing only.
 Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list/drop, value: reason}`.
 Policy reasons are `binary`, `excluded`, `log`, or `content`.
 
-Operations are `read`, `read_dir`, `stat`, `files`, `subtree`, `usage`, and `lazy_reads`.
-Checkout scenarios also support `write` and `remove` for post-load changes.
+Operations are `read`, `read_dir`, `stat`, `files`, `subtree`, and `usage`.
+Checkout and changed scenarios also support `write` with inline `content`, and `remove`, for post-load changes.
 Read and stat expectations contain exactly one of `ok` or `error`.
 Inventory assertions compare complete sorted rows: path, size, and decision.
 Usage assertions compare specified fields; `spilled_below` checks compression without depending on exact encoder output.
@@ -303,13 +336,13 @@ I/O errors use Rust names such as `NotFound`. Load errors also accept `empty`, `
 
 | Contract | Scenarios or native tests |
 |---|---|
-| Filesystem verbs, paths and inventory | `filesystem`, `normalized_paths`, `symlinks` |
-| Policy and pass ordering | `policy`, `pass_order`, `pending`, `drop_content`, `late_drop`, `late_decision` |
-| Resource caps | `file_limit`, `byte_limit`, `oversize`, `overflow`, `spill_limit` |
-| Dedup and storage | `dedup`, `duplicates`, `dropped_replacement`, `spill`, `raw_spill`, `tiny_compression`, `resident_after_spill` |
-| Lazy reads and cancellation | `lazy`, `lazy_error`, `lazy_size`, `cancel` |
-| Checkout and changes | `git_listing`, `changed_selection`, `changed_escape`, `mutations` |
-| Archive format and traversal | `archive_*` |
+| Filesystem verbs, empty files, paths, links and inventory | `filesystem.yaml` |
+| Policy, pass ordering and late decisions | `policy.yaml` |
+| Resource caps and cancellation | `limits.yaml`; native overflow test |
+| Dedup, replacement, spill and compression | `storage.yaml` |
+| Git rules, changed paths and live checkout changes | `checkout.yaml` |
+| Archive format and traversal | `archive.yaml`; `tests/vfs/archive.rs` |
+| Lazy-reader invocation and failures | Native tests in `tests/vfs/native.rs` |
 | OS races, concurrent reads/writes, host escape | Native tests in `tests/vfs/native.rs` |
 
 Add new behavior as a scenario first. Extend the typed grammar only when existing operations cannot express the public contract.

@@ -1,4 +1,0 @@
-sources: [lazy]
-entries:
-  - {path: file, data: larger, declared_size: 1}
-load_error: InvalidData

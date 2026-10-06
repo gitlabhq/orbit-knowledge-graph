@@ -439,7 +439,7 @@ mod tests {
         let inventory_paths: Vec<_> = path
             .files
             .files()
-            .map(|entry| entry.path.as_str())
+            .map(|entry| entry.path.as_ref())
             .collect();
         assert!(
             inventory_paths.contains(&"assets/logo.png"),

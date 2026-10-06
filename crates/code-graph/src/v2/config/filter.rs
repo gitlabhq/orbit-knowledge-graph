@@ -45,25 +45,25 @@ pub enum Role {
 impl Pass for CodeFilter {
     type Tag = Role;
 
-    fn header(&self, file: &mut File<Role>) {
-        if is_excluded_from_indexing(Path::new(&file.path)) {
-            file.decide(FileDecision::List(SkipReason::ExcludedExtension.into()));
+    fn metadata(&self, file: &File<'_, Role>) -> FileDecision<Role> {
+        if is_excluded_from_indexing(Path::new(file.path.as_ref())) {
+            FileDecision::List(SkipReason::ExcludedExtension.into())
         } else if (self.detect_language)(&file.path).is_some() {
-            file.decide(FileDecision::Keep(Role::Source));
+            FileDecision::Keep(Role::Source)
+        } else {
+            file.decision()
         }
     }
 
-    fn content(&self, file: &mut File<Role>, content: &[u8]) {
-        if let Some(reason) = content_skip(content) {
-            file.decide(FileDecision::List(reason.into()));
+    fn content(&self, file: &File<'_, Role>) -> FileDecision<Role> {
+        if let Some(reason) = content_skip(file.bytes().expect("content pass receives bytes")) {
+            FileDecision::List(reason.into())
         } else {
-            file.decide(FileDecision::Keep(
-                if (self.detect_language)(&file.path).is_some() {
-                    Role::Source
-                } else {
-                    Role::Input
-                },
-            ));
+            FileDecision::Keep(if (self.detect_language)(&file.path).is_some() {
+                Role::Source
+            } else {
+                Role::Input
+            })
         }
     }
 }

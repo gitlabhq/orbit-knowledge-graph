@@ -1,9 +1,0 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: file, data: drop}
-rules:
-  - {phase: content, decision: {kind: drop, value: content}}
-steps:
-  - {op: files, expect: []}
-  - {op: read_dir, path: /, expect: {ok: []}}
-  - {op: stat, path: file, expect: {error: NotFound}}

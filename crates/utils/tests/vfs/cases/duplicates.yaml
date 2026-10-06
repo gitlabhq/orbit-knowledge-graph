@@ -1,7 +1,0 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: file, data: first}
-  - {path: file, data: second}
-steps:
-  - {op: read, path: file, expect: {ok: second}}
-  - {op: usage, expect: {files: 1, duplicate_paths: 1}}

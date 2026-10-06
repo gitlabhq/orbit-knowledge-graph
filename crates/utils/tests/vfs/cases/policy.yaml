@@ -1,24 +1,109 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: main.rs, data: code}
-  - {path: manifest.toml, data: config}
-  - {path: logo.png, data: image}
-  - {path: blob.rs, data: "a\0b"}
-  - {path: build.log, data: log}
-rules:
-  - {phase: header, suffix: .rs, decision: {kind: keep, value: source}}
-  - {phase: header, suffix: .png, decision: {kind: list, value: excluded}}
-  - {phase: header, suffix: .log, decision: {kind: drop, value: log}}
-  - {phase: content, contains: [0], decision: {kind: list, value: binary}}
-steps:
-  - {op: read, path: blob.rs, expect: {error: Unsupported}}
-  - {op: stat, path: blob.rs, expect: {ok: {path: /blob.rs, kind: file, len: 3, decision: {kind: list, value: binary}}}}
-  - {op: read, path: logo.png, expect: {error: Unsupported}}
-  - {op: stat, path: build.log, expect: {error: NotFound}}
-  - op: files
-    expect:
-      - {path: blob.rs, size: 3, decision: {kind: list, value: binary}}
-      - {path: logo.png, size: 5, decision: {kind: list, value: excluded}}
-      - {path: main.rs, size: 4, decision: {kind: keep, value: source}}
-      - {path: manifest.toml, size: 6, decision: {kind: keep, value: input}}
-  - {op: usage, expect: {files: 4, bytes: 21, kept: 10}}
+- name: File policy controls content access and inventory
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: main.rs
+      content: code
+    - path: manifest.toml
+      content: config
+    - path: logo.png
+      content: image
+    - path: blob.rs
+      content: "a\0b"
+    - path: build.log
+      content: log
+  rules:
+    - {phase: metadata, suffix: .rs, decision: {kind: keep, value: source}}
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .log, decision: {kind: drop, value: log}}
+    - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
+  tests:
+    - name: Listed files refuse reads and dropped files disappear
+      assert:
+        - {op: read, path: blob.rs, expect: {error: Unsupported}}
+        - {op: stat, path: blob.rs, expect: {ok: {path: /blob.rs, kind: file, len: 3, decision: {kind: list, value: binary}}}}
+        - {op: read, path: logo.png, expect: {error: Unsupported}}
+        - {op: stat, path: build.log, expect: {error: NotFound}}
+    - name: Inventory reports the policy result for each retained file
+      assert:
+        - op: files
+          expect:
+            - {path: blob.rs, size: 3, decision: {kind: list, value: binary}}
+            - {path: logo.png, size: 5, decision: {kind: list, value: excluded}}
+            - {path: main.rs, size: 4, decision: {kind: keep, value: source}}
+            - {path: manifest.toml, size: 6, decision: {kind: keep, value: input}}
+        - {op: usage, expect: {files: 4, bytes: 21, kept: 10}}
+
+- name: A later pass can refine an earlier decision
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: a.png
+      content: image
+    - path: b.keep.png
+      content: source
+  rules:
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .keep.png, decision: {kind: keep, value: source}}
+  tests:
+    - name: The later keep decision makes the matching file readable
+      assert:
+        - {op: read, path: b.keep.png, expect: {ok: source}}
+        - {op: read, path: a.png, expect: {error: Unsupported}}
+
+- name: Pending content decisions settle to the default tag
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: file
+      content: data
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, decision: {kind: pending}}
+  tests:
+    - name: Pending is never exposed after content classification
+      assert:
+        - {op: read, path: file, expect: {ok: data}}
+        - {op: files, expect: [{path: file, size: 4, decision: {kind: keep, value: input}}]}
+
+- name: Content policy can remove a file during loading
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: file
+      content: drop
+  rules:
+    - {phase: content, decision: {kind: drop, value: content}}
+  tests:
+    - name: Dropped content leaves no file node
+      assert:
+        - {op: files, expect: []}
+        - {op: read_dir, path: /, expect: {ok: []}}
+        - {op: stat, path: file, expect: {error: NotFound}}
+
+- name: A linked file receives its content decision on first read
+  sources: [checkout, changed]
+  fixtures:
+    - path: blob.rs
+      content: "x\0y"
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
+  tests:
+    - name: Inventory reflects the decision after a refused read
+      assert:
+        - {op: files, expect: [{path: blob.rs, size: 3, decision: {kind: keep, value: source}}]}
+        - {op: read, path: blob.rs, expect: {error: Unsupported}}
+        - {op: files, expect: [{path: blob.rs, size: 3, decision: {kind: list, value: binary}}]}
+        - {op: usage, expect: {resident: 0, kept: 0}}
+
+- name: A late drop refuses reads but retains the frozen tree
+  sources: [checkout, changed]
+  fixtures:
+    - path: file
+      content: drop
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, decision: {kind: drop, value: content}}
+  tests:
+    - name: Rejected content remains listed after loading
+      assert:
+        - {op: read, path: file, expect: {error: Unsupported}}
+        - {op: files, expect: [{path: file, size: 4, decision: {kind: drop, value: content}}]}
+        - {op: read_dir, path: /, expect: {ok: [file]}}
