@@ -173,7 +173,7 @@ fn archive_policy_receives_the_complete_body() {
         type Tag = ();
         fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
             if file.path.ends_with(".png") {
-                Decision::Drop("image")
+                Decision::List("image")
             } else {
                 file.decision()
             }
@@ -204,5 +204,16 @@ fn archive_policy_receives_the_complete_body() {
     )
     .unwrap();
     assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), body);
-    assert_eq!(vfs.read_dir(Path::new("/")).unwrap(), ["big.txt"]);
+    assert_eq!(
+        vfs.read_dir(Path::new("/")).unwrap(),
+        ["big.txt", "logo.png"]
+    );
+    assert_eq!(
+        vfs.stat(Path::new("logo.png")).unwrap().decision,
+        Some(Decision::List("image"))
+    );
+    assert_eq!(
+        vfs.read(Path::new("logo.png")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
 }

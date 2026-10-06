@@ -147,9 +147,11 @@ impl Pass for Filter {
 | `Pending` | Request content; after content, become `Keep(Tag::default())` |
 | `Keep(tag)` | Retain content or link a disk file, with the caller's tag |
 | `List(reason)` | Retain a node without readable content |
-| `Drop(reason)` | Omit the node from the frozen inventory |
 
 Passes are synchronous and infallible. They receive read-only inputs and return a decision.
+Every valid file offered to a successful load remains in the catalog, including empty files and rejected content.
+Policy controls content access, never catalog membership. Duplicate paths retain the last offered entry.
+Sources define which files they offer; ignored paths and skipped archive entry types never reach the catalog.
 They do not count resources or receive symlinks. The store lists links as `List("symlink")`.
 Oversize files become `List("oversize")` before policy runs.
 
@@ -160,10 +162,11 @@ Each pass receives an immutable file. `file.decision()` exposes the preceding pa
 It returns a borrowed slice and never performs I/O. The store attaches bytes only for the content callback.
 Inventory files own their paths and retain no content slice. Chained passes borrow the path and bytes without copying them.
 The store keeps the metadata decision and caches the final content decision once, without changing the metadata result.
-Metadata `List` or `Drop` skips content processing and never invokes a lazy reader.
+Metadata `List` skips content processing and never invokes a lazy reader.
 
 Linked files can be rejected after freezing. `decision()` and `stat` report that late decision.
-A late `Drop` keeps its node and reads as `Unsupported`, because the frozen inventory cannot remove it.
+Rejection at either phase keeps the node and reads as `Unsupported`.
+A disk file that disappears during loading remains listed with reason `missing` once it has been offered.
 Content `Pending` still settles to the default tag.
 
 ## Read and inspect
@@ -198,7 +201,7 @@ No virtual lookup falls back to the host filesystem.
 Disk-backed nodes use separate host paths. Linux uses `openat2(NO_SYMLINKS)`; macOS uses `O_NOFOLLOW_ANY`.
 These refuse symlinks in any host component, including replacements after loading.
 Linux requires kernel and syscall-policy support for `openat2`; there is no weaker fallback.
-Windows code in `disk.rs` cross-compiles, but directory and scratch operations still contain Unix-specific code.
+Windows code in `syscalls.rs` cross-compiles, but directory and scratch operations still contain Unix-specific code.
 
 Non-UTF-8 names use lossy inventory keys while retaining real host paths for I/O.
 Collisions count as duplicate paths. Sequential duplicates are last-wins; concurrent duplicate order depends on scheduling.
@@ -214,7 +217,7 @@ Collisions count as duplicate paths. Sequential duplicates are last-wins; concur
 | `spilled_bytes` | Fail before reserving scratch beyond the cap |
 
 `None` means unlimited. Zero is a real limit; `resident_bytes: Some(0)` spills all nonempty content.
-File count and total bytes include dropped offers and duplicate entries.
+File count and total bytes include rejected content and duplicate entries.
 Resident and scratch budgets count unique blobs. They exclude metadata, source buffers, and returned read buffers.
 Concurrent stores have separate budgets, so callers must account for concurrency when sizing memory.
 
@@ -322,7 +325,7 @@ Host fixture paths are checked before writes. Archive corruption and reader faul
 
 Rules require `phase: metadata/content` and `decision`.
 Optional `suffix` matches names; `contains` matches bytes during content processing only.
-Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list/drop, value: reason}`.
+Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list, value: reason}`.
 Policy reasons are `binary`, `excluded`, `log`, or `content`.
 
 Operations are `read`, `read_dir`, `stat`, `files`, `subtree`, and `usage`.

@@ -176,6 +176,38 @@ fn resident_duplicates_share_content_after_loading() {
 }
 
 #[test]
+fn a_file_removed_after_metadata_classification_remains_cataloged() {
+    struct RemoveDuringMetadata(std::path::PathBuf);
+    impl Pass for RemoveDuringMetadata {
+        type Tag = ();
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+            std::fs::remove_file(self.0.join(file.path.as_ref())).unwrap();
+            Decision::Pending
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), b"content").unwrap();
+    let vfs = Vfs::load(
+        Directory(root.path()),
+        RemoveDuringMetadata(root.path().into()),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(vfs.files().next().unwrap().path, "file");
+    assert_eq!(
+        vfs.stat(Path::new("file")).unwrap().decision,
+        Some(Decision::List("missing"))
+    );
+    assert_eq!(
+        vfs.read(Path::new("file")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert_eq!(vfs.usage().files, 1);
+    assert_eq!(vfs.usage().bytes, 7);
+}
+
+#[test]
 fn composed_passes_observe_previous_decisions_without_changing_file_metadata() {
     struct Stage(u8);
     impl Pass for Stage {
@@ -373,7 +405,7 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
     struct Files<'a>(&'a AtomicUsize);
     impl Source for Files<'_> {
         fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-            for path in ["kept", "listed", "dropped", "oversize"] {
+            for path in ["kept", "listed", "oversize"] {
                 into.put(
                     path,
                     Put::Lazy {
@@ -395,7 +427,6 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
         fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
             match file.path.as_ref() {
                 "listed" => Decision::List("excluded"),
-                "dropped" => Decision::Drop("excluded"),
                 _ => Decision::Keep(()),
             }
         }
@@ -425,8 +456,10 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
         io::ErrorKind::Unsupported
     );
     assert_eq!(
-        vfs.read(Path::new("dropped")).unwrap_err().kind(),
-        io::ErrorKind::NotFound
+        vfs.files()
+            .map(|file| file.path.as_ref())
+            .collect::<Vec<_>>(),
+        ["kept", "listed", "oversize"]
     );
 }
 

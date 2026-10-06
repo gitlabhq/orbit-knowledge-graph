@@ -13,10 +13,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
-use super::disk;
 use super::limits::add_capped;
 use super::path::key;
 use super::scratch::{Blob, Scratch};
+use super::syscalls;
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
 
 pub enum Put<'a> {
@@ -108,15 +108,18 @@ impl<T: Tag> Loading<T> {
             _ => self.passes.metadata(&file),
         };
         match (file.decision(), what) {
-            (Decision::Drop(_) | Decision::List(_), _) => self.add_node(file, None),
+            (Decision::List(_), _) => self.add_node(file, None),
             (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None)?,
             (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None)?,
             (Decision::Keep(_), Put::OnDisk { path, .. }) => {
                 self.add_node(file, Some(Slot::Linked(path)))
             }
-            (Decision::Pending, Put::OnDisk { path, .. }) => match disk::read(&path, size) {
+            (Decision::Pending, Put::OnDisk { path, .. }) => match syscalls::read(&path, size) {
                 Ok(bytes) => self.put_bytes(file, bytes, Some(path))?,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    file.metadata_decision = Decision::List("missing");
+                    self.add_node(file, None);
+                }
                 Err(e) => return Err(e.into()),
             },
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
@@ -191,7 +194,6 @@ impl<T: Tag> Loading<T> {
             true
         });
         let duplicate_paths = offered - nodes.len();
-        nodes.retain(|node| !matches!(node.file.decision(), Decision::Drop(_)));
         let links = nodes
             .iter()
             .filter_map(|node| match &node.slot {

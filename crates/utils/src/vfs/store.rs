@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
-use super::disk;
 use super::loading::{Loading, Node, Slot};
 use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
 use super::scratch::{Blob, Scratch};
+use super::syscalls;
 use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,7 @@ impl<T: Tag> Vfs<T> {
                 len,
                 raw_len,
             }) => self.scratch.read(*offset, *len, *raw_len)?,
-            Slot::Linked(on_disk) => disk::read(on_disk, node.file.size)?.into(),
+            Slot::Linked(on_disk) => syscalls::read(on_disk, node.file.size)?.into(),
             Slot::Link(_) => return Err(not_found()),
         };
         match node.file.classify(&*self.passes, &bytes) {
@@ -202,7 +202,7 @@ impl<T> std::fmt::Debug for Vfs<T> {
 
 fn unsupported<T: Tag>(file: &File<'_, T>) -> io::Error {
     let why = match file.decision() {
-        Decision::List(why) | Decision::Drop(why) => why,
+        Decision::List(why) => why,
         _ => "no bytes",
     };
     io::Error::new(

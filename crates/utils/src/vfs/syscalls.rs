@@ -1,4 +1,4 @@
-//! Linked files are reopened without following host symlinks, including parent components.
+//! OS-specific file access refuses host symlinks, including parent components.
 //! The kernel enforces this in one open: openat2 on Linux, O_NOFOLLOW_ANY on macOS.
 //! Windows opens and pins parents without write/delete sharing, rejecting all reparse points.
 //! Reads are bounded by the recorded size; symlink replacements and size changes fail.

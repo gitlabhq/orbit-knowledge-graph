@@ -12,8 +12,8 @@ use rayon::prelude::*;
 use rustix::fs::{AtFlags, FileType, readlinkat, statat};
 use tracing::warn;
 
-use super::super::disk;
 use super::super::path::is_safe_relative_path;
+use super::super::syscalls;
 use super::{Loading, Put, Source, SourceError, Tag};
 
 pub struct Directory<'a>(pub &'a Path);
@@ -95,7 +95,7 @@ impl Source for Changeset<'_> {
 }
 
 fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
-    let parent = match disk::open_parent(&on_disk) {
+    let parent = match syscalls::open_parent(&on_disk) {
         Ok(parent) => parent,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e.into()),
