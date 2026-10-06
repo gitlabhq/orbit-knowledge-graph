@@ -1,7 +1,7 @@
 mod local;
 mod text;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -78,7 +78,8 @@ pub(crate) fn run(
         return Ok(());
     }
 
-    report_results(&mut out, &outcome, &nodes)?;
+    let sources = body_sources(&backend.git().repo_path, &outcome, &nodes);
+    report_results(&mut out, &outcome, &nodes, &sources)?;
     write!(out, "{}", text::render(&text_hits))?;
     Ok(())
 }
@@ -109,11 +110,128 @@ fn report_outline(
     Ok(())
 }
 
+fn body_sources(
+    repo: &std::path::Path,
+    outcome: &orbit_search::GrepOutcome,
+    nodes: &[NodeValue],
+) -> HashMap<String, Vec<String>> {
+    let mut sources = HashMap::new();
+    for (node, hit) in nodes.iter().zip(&outcome.matches) {
+        if hit.exact_name || hit.name_match {
+            continue;
+        }
+        let Ok(range) = context::source_range(node) else {
+            continue;
+        };
+        if sources.contains_key(&range.file) {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(repo.join(&range.file)) {
+            sources.insert(range.file, content.lines().map(str::to_string).collect());
+        }
+    }
+    sources
+}
+
+fn compact(text: &str) -> String {
+    text.chars()
+        .filter(|c| !(c.is_whitespace() || *c == '_' || *c == '-'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn matching_lines(
+    lines: &[String],
+    start: usize,
+    end: usize,
+    alternatives: &[String],
+) -> Vec<usize> {
+    let terms: Vec<String> = alternatives
+        .iter()
+        .map(|a| compact(a))
+        .filter(|t| !t.is_empty())
+        .collect();
+    (start..=end.min(lines.len()))
+        .filter(|number| {
+            let line = compact(&lines[number - 1]);
+            terms.iter().any(|term| line.contains(term.as_str()))
+        })
+        .collect()
+}
+
+fn snippet_around(text: &str, alternatives: &[String]) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = text.to_lowercase();
+    let hit = alternatives
+        .iter()
+        .filter_map(|a| lower.find(&a.to_lowercase()))
+        .min()
+        .unwrap_or(0);
+    let chars: Vec<char> = text.chars().collect();
+    let at = text[..hit.min(text.len())].chars().count();
+    let from = at.saturating_sub(SNIPPET_BEFORE);
+    let to = (from + SNIPPET_CHARS).min(chars.len());
+    let mut out: String = chars[from..to].iter().collect();
+    if from > 0 {
+        out.insert(0, '…');
+    }
+    if to < chars.len() {
+        out.push('…');
+    }
+    out
+}
+
+fn line_runs(lines: &[usize]) -> String {
+    let mut parts = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let mut end = index;
+        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
+            end += 1;
+        }
+        match end > index {
+            true => parts.push(format!(":{}-{}", lines[index], lines[end])),
+            false => parts.push(format!(":{}", lines[index])),
+        }
+        index = end + 1;
+    }
+    parts.join(" ")
+}
+
+fn packed_matches(lines: &[String], numbers: &[usize], alternatives: &[String]) -> String {
+    let mut out = String::from("      ");
+    let mut shown = 0;
+    for number in numbers {
+        let part = format!(
+            ":{number} {}",
+            snippet_around(&lines[number - 1], alternatives)
+        );
+        if shown > 0 && out.chars().count() + part.chars().count() + 2 > PACKED_LINE_CHARS {
+            break;
+        }
+        if shown > 0 {
+            out.push_str("  ");
+        }
+        out.push_str(&part);
+        shown += 1;
+    }
+    if shown < numbers.len() {
+        out.push_str(&format!(
+            "  +{} {}",
+            numbers.len() - shown,
+            line_runs(&numbers[shown..])
+        ));
+    }
+    out
+}
+
 fn report_results(
     out: &mut impl Write,
     outcome: &orbit_search::GrepOutcome,
     nodes: &[NodeValue],
+    sources: &HashMap<String, Vec<String>>,
 ) -> Result<()> {
+    let mut shown: HashSet<(String, usize)> = HashSet::new();
     for (node, hit) in nodes.iter().zip(&outcome.matches) {
         let range = context::source_range(node)?;
         let label = if hit.exact_name {
@@ -139,8 +257,36 @@ fn report_results(
             "  {}:{}  {}  [{}]  {}:{}-{}  {label}{mentions}",
             node.entity_type, node.id, range.fqn, range.kind, range.file, range.start, range.end
         )?;
-        if let Some((line, text)) = body {
-            writeln!(out, "      {line}| {text}")?;
+        let numbers = sources
+            .get(&range.file)
+            .filter(|_| body.is_some())
+            .map(|lines| {
+                (
+                    lines,
+                    matching_lines(lines, range.start, range.end, &outcome.alternatives),
+                )
+            })
+            .filter(|(_, numbers)| !numbers.is_empty());
+        match (numbers, body) {
+            (Some((lines, numbers)), _) => {
+                let fresh: Vec<usize> = numbers
+                    .into_iter()
+                    .filter(|n| shown.insert((range.file.clone(), *n)))
+                    .collect();
+                if !fresh.is_empty() {
+                    writeln!(
+                        out,
+                        "{}",
+                        packed_matches(lines, &fresh, &outcome.alternatives)
+                    )?;
+                }
+            }
+            (None, Some((line, text))) => {
+                if shown.insert((range.file.clone(), line)) {
+                    writeln!(out, "      {line}| {text}")?;
+                }
+            }
+            (None, None) => {}
         }
     }
     let hidden = outcome.total.saturating_sub(outcome.matches.len());
@@ -167,6 +313,9 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
 
 const BROAD_HIDDEN_HITS: usize = 100;
 const BODY_PREVIEW_CHARS: usize = 100;
+const PACKED_LINE_CHARS: usize = 240;
+const SNIPPET_CHARS: usize = 64;
+const SNIPPET_BEFORE: usize = 20;
 
 fn report_exact_query_note(
     out: &mut impl Write,
@@ -188,16 +337,8 @@ fn report_exact_query_note(
         .copied()
         .filter(|alternative| exact.contains(&alternative.to_lowercase()))
         .collect();
-    let missing: Vec<_> = alternatives
-        .iter()
-        .copied()
-        .filter(|alternative| !exact.contains(&alternative.to_lowercase()))
-        .collect();
     if !matched.is_empty() {
         writeln!(out, "exact: {}", matched.join(" | "))?;
-    }
-    if !missing.is_empty() {
-        writeln!(out, "exact-miss: {}", missing.join(" | "))?;
     }
     Ok(())
 }
@@ -241,7 +382,7 @@ mod tests {
             .unwrap(),
         };
         let mut buf = Vec::new();
-        report_results(&mut buf, &result, &[node]).unwrap();
+        report_results(&mut buf, &result, &[node], &HashMap::new()).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "  Definition:481  Repo::commit_hook  [Method]  crates/repo/src/lib.rs:42-57  exact-name\n"
@@ -274,7 +415,7 @@ mod tests {
             .unwrap(),
         };
         let mut buf = Vec::new();
-        report_results(&mut buf, &result, &[node]).unwrap();
+        report_results(&mut buf, &result, &[node], &HashMap::new()).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             format!(
@@ -285,17 +426,77 @@ mod tests {
     }
 
     #[test]
+    fn body_hits_pack_every_matching_line_and_skip_lines_already_shown() {
+        let mut result = outcome();
+        result.alternatives = vec!["port".to_string()];
+        for id in [1, 2] {
+            result.matches.push(orbit_search::GrepMatch {
+                id,
+                score: 1.0,
+                exact_name: false,
+                name_match: false,
+                body_offset: Some(2),
+                body_text: "port_a();".into(),
+                mentions: 3,
+            });
+        }
+        let node = |id: i64, start: i64, end: i64| NodeValue {
+            entity_type: "Definition".to_string(),
+            id,
+            properties: serde_json::from_value(serde_json::json!({
+                "fqn": format!("m::f{id}"),
+                "definition_type": "Function",
+                "file_path": "src/a.rs",
+                "start_line": start,
+                "end_line": end
+            }))
+            .unwrap(),
+        };
+        let lines: Vec<String> = [
+            "fn f() {",
+            "    port_a();",
+            "    other();",
+            "    port_b();",
+            "    port_c();",
+            "}",
+        ]
+        .iter()
+        .map(|l| l.to_string())
+        .collect();
+        let sources = HashMap::from([("src/a.rs".to_string(), lines)]);
+        let mut buf = Vec::new();
+        report_results(&mut buf, &result, &[node(1, 1, 6), node(2, 4, 5)], &sources).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "  Definition:1  m::f1  [Function]  src/a.rs:1-6  body-only ×3\n      :2 port_a();  :4 port_b();  :5 port_c();\n  Definition:2  m::f2  [Function]  src/a.rs:4-5  body-only ×3\n"
+        );
+    }
+
+    #[test]
+    fn packed_lines_stay_under_the_width_and_count_the_rest() {
+        let lines: Vec<String> = (1..=40)
+            .map(|n| format!("call_port_{n}(argument_number_{n}, other_value)"))
+            .collect();
+        let numbers: Vec<usize> = (1..=40).collect();
+        let packed = packed_matches(&lines, &numbers, &["port".to_string()]);
+        assert!(packed.chars().count() <= PACKED_LINE_CHARS + 20, "{packed}");
+        assert!(packed.contains(" +"), "{packed}");
+        assert!(packed.ends_with("-40"), "{packed}");
+        assert_eq!(line_runs(&[3, 4, 5, 9]), ":3-5 :9");
+    }
+
+    #[test]
     fn truncated_results_report_how_many_were_hidden() {
         let mut o = outcome();
         o.total = 42;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o, &[]).unwrap();
+        report_results(&mut buf, &o, &[], &HashMap::new()).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("42 more; add"), "{text}");
 
         o.total = 0;
         let mut buf = Vec::new();
-        report_results(&mut buf, &o, &[]).unwrap();
+        report_results(&mut buf, &o, &[], &HashMap::new()).unwrap();
         assert!(!String::from_utf8(buf).unwrap().contains(" more"));
     }
 
@@ -310,9 +511,6 @@ mod tests {
         result.exact_alternatives = vec!["present".to_string()];
         let mut buf = Vec::new();
         report_exact_query_note(&mut buf, &result).unwrap();
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            "exact: present\nexact-miss: missing\n"
-        );
+        assert_eq!(String::from_utf8(buf).unwrap(), "exact: present\n");
     }
 }
