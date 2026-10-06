@@ -84,7 +84,66 @@ pub(crate) fn run(
     let sources = body_sources(&backend.git().repo_path, &outcome, &nodes);
     let shown = report_results(&mut out, &outcome, &nodes, &sources)?;
     write!(out, "{}", text::render(&text_hits, &shown))?;
+    if let Some(top) = nodes
+        .iter()
+        .zip(&outcome.matches)
+        .find(|(_, hit)| hit.exact_name)
+        .map(|(node, _)| (node, None))
+        .or_else(|| {
+            nodes
+                .iter()
+                .zip(&outcome.matches)
+                .find(|(_, hit)| assigns(&hit.body_text, &outcome.alternatives))
+                .map(|(node, hit)| (node, hit.body_offset))
+        })
+    {
+        write!(
+            out,
+            "{}",
+            top_source(&backend.git().repo_path, top.0, top.1)?
+        )?;
+    }
     Ok(())
+}
+
+const TOP_SOURCE_LINES: usize = 25;
+
+fn assigns(line: &str, alternatives: &[String]) -> bool {
+    alternatives.iter().any(|term| {
+        regex::Regex::new(&format!(r"(?i)\b{}\s*=[^=]", regex::escape(term.trim())))
+            .is_ok_and(|re| re.is_match(line))
+    })
+}
+
+fn top_source(repo: &std::path::Path, node: &NodeValue, offset: Option<usize>) -> Result<String> {
+    let range = context::source_range(node)?;
+    let Ok(content) = std::fs::read_to_string(repo.join(&range.file)) else {
+        return Ok(String::new());
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.map_or(range.start, |offset| range.start + offset - 1);
+    if start > lines.len() {
+        return Ok(String::new());
+    }
+    let end = range.end.min(lines.len()).min(start + TOP_SOURCE_LINES - 1);
+    let mut out = format!(
+        "\nSource — {}  {}:{start}-{}\n",
+        range.fqn, range.file, range.end
+    );
+    for number in start..=end {
+        out.push_str(&format!("  {number}|{}\n", lines[number - 1]));
+    }
+    if range.end > end {
+        out.push_str(&format!(
+            "  … {} more lines: {} context {}:{}-{}\n",
+            range.end - end,
+            crate::commands::setup::spec::launcher(),
+            range.file,
+            end + 1,
+            range.end
+        ));
+    }
+    Ok(out)
 }
 
 fn report_outline(

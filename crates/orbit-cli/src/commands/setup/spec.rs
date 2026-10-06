@@ -322,11 +322,10 @@ mod tests {
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
             for phrase in [
-                "` commands to bash tools for file/code search and callers/callees",
+                " grep` instead of grep or rg for every search",
                 "FTS.",
                 "Terms AND; `a|b` OR",
-                "Grep means `",
-                "Mentions: every other matching line in code",
+                "Mentions (every other matching line)",
                 "Do not reread unchanged files",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
