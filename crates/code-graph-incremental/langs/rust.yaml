@@ -28,6 +28,8 @@ stages:
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
+      - match: '(_)'
+        replace: '(__binding "_")'
       - match: '(macro_invocation macro: (identifier "/^(panic|unreachable|todo|unimplemented)$/") $$$V)'
         replace: '(__ssa_branch $$$V)'
 
@@ -41,7 +43,7 @@ stages:
 
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
-        replace: '(__ivar @$F)'
+        replace: '(__ivar @$F (__object "self"))'
 
       # Visibility modifier → __visibility (sym carries the text)
       - match: '(visibility_modifier $$$V)'
@@ -51,6 +53,12 @@ stages:
 
   - name: retag-refs
     rules:
+      - match: '(field_initializer field: $N value: $V)'
+        replace: '(__field @$N (__rhs @$V) $V)'
+      - match: '(shorthand_field_initializer $N)'
+        replace: '(__field @$N (__rhs @$N))'
+      - match: '(field_initializer_list $$$F:__field)'
+        replace: '(__obj $$$F)'
       - match: '(field_expression value: $O:__ivar field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
@@ -58,6 +66,10 @@ stages:
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (parenthesized_expression $F:__member) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call_expression function: (parenthesized_expression $F:__ivar) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
@@ -190,20 +202,34 @@ stages:
 
   - name: classify
     rules:
+      - match: '(let_declaration pattern: (struct_pattern $$$P:field_pattern|__binding) value: $V)'
+        replace: '(__destructure (__rhs @$V) $$$P)'
+      - match: '(field_pattern name: $N pattern: $P)'
+        replace: '(__binding @$P (__name @$N))'
+      - match: '(field_pattern name: $N)'
+        replace: '(__binding @$N (__name @$N))'
+      - match: '(let_declaration pattern: (tuple_pattern !(remaining_field_pattern) $$$P:_*_named) value: (tuple_expression $$$V:_*_named))'
+        replace: '(__destructure (__rhs (__positional $$$V=>__rhs)) $$$P=>__binding $$$V:_*_named)'
       # Preserve subtree when RHS contains canonical structure
       - match: '(let_declaration pattern: $N value: $V:__ssa_branch)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:block)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__call)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
+      - match: '(let_declaration pattern: $N value: $V:__member)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(let_declaration pattern: $N)'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N (__declaration))'
       # Reassignment
+      - match: '(assignment_expression left: $N:__ivar right: $R)'
+        replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__member right: $R)'
+        replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(const_item name: $N)'
@@ -320,6 +346,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(arguments $$$V:_*_named)'
+        replace: '(__args $$$V=>__rhs $$$V:_*_named)'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
       - match: '(__ssa_arm $V:identifier)'
@@ -330,6 +358,11 @@ stages:
         replace: '(__ssa_arm (__rhs @$V))'
       - match: '(__ssa_arm (else_clause $V:block))'
         replace: '(__ssa_arm $V)'
+
+  - name: lexical-scopes
+    rules:
+      - match: '(expression_statement (block $$$V))'
+        replace: '(__scope $$$V)'
 
   - name: tag-defs
     rules:

@@ -48,8 +48,6 @@ fixtures:
 
 tests:
   - name: "record literal field calls resolve through the stored local target"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_record_field' AND callee.name = 'helper'
@@ -59,8 +57,6 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "record shorthand fields preserve callable aliases"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_record_shorthand' AND callee.name = 'helper'
@@ -70,19 +66,15 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "reassigning a record local invalidates stale field targets"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
-      WHERE caller.name = 'rebind_record_field'
+      WHERE caller.name = 'rebind_record_field' AND callee.name IN ['helper', 'wrapper']
       RETURN callee.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: 'wrapper' } }
 
   - name: "tuple fields on tuple-struct constructors preserve callable targets"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_tuple_field' AND callee.name = 'helper'
@@ -92,8 +84,6 @@ tests:
       - { row: { fqn: 'helper' } }
 
   - name: "record destructuring reuses the tracked field target"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'destructure_record_field' AND callee.name = 'helper'

@@ -1,0 +1,228 @@
+name: "Rust: precise callable value flow"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_value_flow_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn first() {}
+      pub fn second() {}
+      pub fn unused() {}
+
+      #[derive(Clone, Copy)]
+      pub struct Callbacks {
+          pub selected: fn(),
+          pub other: fn(),
+      }
+
+      pub struct Pair(pub fn(), pub fn());
+
+      pub fn tuple_first() {
+          let (callback, _) = (first, second);
+          callback();
+      }
+
+      pub fn tuple_second() {
+          let (_, callback) = (first, second);
+          callback();
+      }
+
+      pub fn tuple_struct_first() {
+          let pair = Pair(first, second);
+          (pair.0)();
+      }
+
+      pub fn tuple_struct_second() {
+          let pair = Pair(first, second);
+          (pair.1)();
+      }
+
+      pub fn copied_before_replacement() {
+          let mut callbacks = Callbacks { selected: first, other: unused };
+          let saved = callbacks;
+          callbacks = Callbacks { selected: second, other: unused };
+          (saved.selected)();
+      }
+
+      pub fn replacement_after_copy() {
+          let mut callbacks = Callbacks { selected: first, other: unused };
+          let saved = callbacks;
+          callbacks = Callbacks { selected: second, other: unused };
+          (callbacks.selected)();
+      }
+
+      pub fn field_strong_update() {
+          let mut callbacks = Callbacks { selected: first, other: unused };
+          callbacks.selected = second;
+          (callbacks.selected)();
+      }
+
+      pub fn sibling_field_survives() {
+          let mut callbacks = Callbacks { selected: first, other: unused };
+          callbacks.selected = second;
+          (callbacks.other)();
+      }
+
+      pub fn aggregate_branch(flag: bool) {
+          let callbacks = if flag {
+              Callbacks { selected: first, other: unused }
+          } else {
+              Callbacks { selected: second, other: unused }
+          };
+          (callbacks.selected)();
+      }
+
+      pub fn aggregate_match(flag: bool) {
+          let callbacks = match flag {
+              true => Callbacks { selected: first, other: unused },
+              false => Callbacks { selected: second, other: unused },
+          };
+          (callbacks.selected)();
+      }
+
+      pub fn aggregate_loop(again: bool) {
+          let mut callbacks = Callbacks { selected: first, other: unused };
+          while again {
+              (callbacks.selected)();
+              callbacks = Callbacks { selected: second, other: unused };
+          }
+      }
+
+      pub fn opaque_parameter(first: fn()) {
+          first();
+      }
+
+      pub fn opaque_local() {
+          let first = || {};
+          first();
+      }
+
+      pub fn known_local() {
+          let first = second;
+          first();
+      }
+
+      pub fn unshadowed() {
+          first();
+      }
+
+      pub fn nested_shadow_restoration() {
+          let callback: fn() = first;
+          {
+              let callback: fn() = second;
+          }
+          callback();
+      }
+
+tests:
+  - name: "tuple destructuring keeps the first position"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'tuple_first'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: first } }
+
+  - name: "tuple destructuring keeps the second position"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'tuple_second'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: second } }
+
+  - name: "tuple struct fields do not exchange targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['tuple_struct_first', 'tuple_struct_second']
+        AND callee.name IN ['first', 'second', 'unused']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: tuple_struct_first, target: first } }
+      - { row: { caller: tuple_struct_second, target: second } }
+
+  - name: "aggregate copies retain the target from before replacement"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['copied_before_replacement', 'replacement_after_copy']
+        AND callee.name IN ['first', 'second', 'unused']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: copied_before_replacement, target: first } }
+      - { row: { caller: replacement_after_copy, target: second } }
+
+  - name: "field strong updates discard the old target and preserve siblings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['field_strong_update', 'sibling_field_survives']
+        AND callee.name IN ['first', 'second', 'unused']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: field_strong_update, target: second } }
+      - { row: { caller: sibling_field_survives, target: unused } }
+
+  - name: "aggregate branches join only the selected field"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'aggregate_branch' AND callee.name IN ['first', 'second', 'unused']
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: first } }
+      - { row: { target: second } }
+
+  - name: "aggregate match arms join only the selected field"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'aggregate_match' AND callee.name IN ['first', 'second', 'unused']
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: first } }
+      - { row: { target: second } }
+
+  - name: "aggregate loop backedges retain both selected targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'aggregate_loop' AND callee.name IN ['first', 'second', 'unused']
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: first } }
+      - { row: { target: second } }
+
+  - name: "opaque parameters and closures suppress same-name function fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['opaque_parameter', 'opaque_local']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { empty: true }
+
+  - name: "known local shadows resolve while unshadowed functions still resolve"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['known_local', 'unshadowed']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: known_local, target: second } }
+      - { row: { caller: unshadowed, target: first } }
+
+  - name: "leaving a nested block restores the outer callable"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'nested_shadow_restoration'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: first } }

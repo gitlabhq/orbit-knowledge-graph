@@ -205,6 +205,10 @@ pub enum Canonical {
     Destructure,
     #[strum(serialize = "__positional")]
     Positional,
+    #[strum(serialize = "__scope")]
+    Scope,
+    #[strum(serialize = "__declaration")]
+    Declaration,
 }
 
 impl From<Canonical> for u16 {

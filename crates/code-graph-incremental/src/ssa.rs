@@ -24,6 +24,7 @@ pub enum Value {
     Call(u32),
     Alias(u32),
     Opaque,
+    Undefined,
     Marker,
     Phi(PhiId),
 }
@@ -44,8 +45,8 @@ impl Value {
             Value::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
             Value::Type(t) => Some(ParseValue::Type(*t)),
             Value::Call(c) => Some(ParseValue::Call(*c)),
-            Value::Opaque => Some(ParseValue::Opaque),
-            Value::Alias(_) | Value::Marker | Value::Phi(_) => None,
+            Value::Opaque | Value::Alias(_) => Some(ParseValue::Opaque),
+            Value::Marker | Value::Phi(_) | Value::Undefined => None,
         }
     }
 }
@@ -70,8 +71,6 @@ pub struct SsaEngine {
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     read_depth: usize,
-    /// Variables that have ever been written. A read of any other name in a
-    /// fully sealed graph is Opaque without walking the block chain.
     written: FxHashSet<u32>,
     unsealed: usize,
 }
@@ -178,7 +177,7 @@ impl SsaEngine {
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
         let resolved = if let Value::Alias(alias_name) = value {
             let alias_val = self.read_variable_internal(alias_name, block);
-            if alias_val != Value::Opaque {
+            if alias_val != Value::Undefined {
                 alias_val
             } else {
                 Value::Alias(alias_name)
@@ -202,7 +201,7 @@ impl SsaEngine {
                 break;
             }
             let target_value = self.read_variable_internal(*target, block);
-            if matches!(target_value, Value::Opaque | Value::Marker) {
+            if matches!(target_value, Value::Undefined | Value::Marker) {
                 break;
             }
             value = target_value;
@@ -210,7 +209,7 @@ impl SsaEngine {
         self.resolve_value(&value)
     }
 
-    fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
+    pub(crate) fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
@@ -218,7 +217,7 @@ impl SsaEngine {
         }
         // No unsealed block means no phi to create.
         if self.unsealed == 0 && !self.written.contains(&variable) {
-            return Value::Opaque;
+            return Value::Undefined;
         }
         if self.read_depth >= MAX_READ_DEPTH {
             return Value::Opaque;
@@ -243,7 +242,7 @@ impl SsaEngine {
                 .insert(variable, phi_id);
             Value::Phi(phi_id)
         } else if num_preds == 0 {
-            Value::Opaque
+            Value::Undefined
         } else if num_preds == 1 {
             let pred = self.blocks[block.0].predecessors[0];
             self.read_variable_internal(variable, pred)
@@ -482,14 +481,15 @@ impl SsaEngine {
         }
     }
 
-    fn resolve_value(&self, value: &Value) -> Vec<ParseValue> {
+    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<ParseValue> {
         match value {
             Value::LocalDef(_)
             | Value::ImportRef(_)
             | Value::Type(_)
             | Value::Call(_)
-            | Value::Alias(_) => value.to_parse_value().into_iter().collect(),
-            Value::Opaque | Value::Marker => vec![],
+            | Value::Alias(_)
+            | Value::Opaque => value.to_parse_value().into_iter().collect(),
+            Value::Undefined | Value::Marker => vec![],
             Value::Phi(_) => {
                 let mut values = SmallVec::<[Value; 2]>::new();
                 let mut visited = FxHashSet::default();
@@ -521,7 +521,7 @@ impl SsaEngine {
                     });
                 }
             }
-            Value::Opaque | Value::Marker => {}
+            Value::Undefined | Value::Marker => {}
             other => out.push(other.clone()),
         }
     }

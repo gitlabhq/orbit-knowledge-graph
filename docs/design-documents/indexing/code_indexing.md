@@ -228,6 +228,16 @@ Orbit Local rebuilds its shared DuckDB graph when the code-index revision change
 even if repository commits have not changed. Repositories are re-indexed as used;
 Orbit Remote schema versions are unaffected.
 
+The incremental engine distinguishes an undefined name from a local value whose
+target is unknown. Unknown locals block fallback to same-named imports or functions.
+Direct Rust tuple destructuring reads the source bindings before assigning the
+destination bindings, including positions discarded with `_`.
+Record fields and tuple-struct positions use separate SSA bindings within each
+function. Copies retain the current field values; whole-value replacement clears
+old fields. Calls through fields or loop joins retain their reaching values until
+the linker seals the loop back-edges. Nested block declarations restore outer
+bindings when the block ends.
+
 ##### Inventory-driven indexing pipeline
 
 The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:
