@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use super::Component;
 use super::components::{Outcome, Report};
 use super::detect::Machine;
-use super::index_repo::{self, Indexed};
+use super::index_repo::IndexOutcome;
 use super::plan::Plan;
 use super::spec::{self, Agent};
+use crate::commands::index::{example_repository_path, grep_command_line, index_command_line};
 use crate::tui::Choice;
 
 pub(super) fn join_component_labels(components: &BTreeSet<Component>) -> String {
@@ -81,24 +82,28 @@ pub(super) fn format_files_per_component(plan: &Plan) -> String {
     rows.join("\n")
 }
 
-pub(super) fn format_try_it_command(indexed: Option<&Indexed>) -> Option<String> {
-    match indexed {
-        None => Some(index_repo::index_command_line()),
-        Some(indexed) => indexed
-            .suggested_grep
-            .as_deref()
-            .map(crate::commands::index::grep_command_line),
+pub(super) fn format_try_it_command(outcome: &IndexOutcome) -> Option<String> {
+    match outcome {
+        IndexOutcome::OutsideRepository => Some(index_command_line(example_repository_path())),
+        IndexOutcome::NotIndexed => Some(index_command_line(".")),
+        IndexOutcome::Indexed { suggested_grep } => {
+            suggested_grep.as_deref().map(grep_command_line)
+        }
     }
 }
 
-pub(super) fn format_closing_line(indexed: Option<&Indexed>) -> &'static str {
-    match indexed {
-        None => "Done. Run it in a repository, then ask your agent where a function is defined.",
-        Some(Indexed {
+pub(super) fn format_closing_line(outcome: &IndexOutcome) -> &'static str {
+    match outcome {
+        IndexOutcome::OutsideRepository => {
+            "Done. This folder is not a git repository, so nothing was indexed."
+        }
+        IndexOutcome::NotIndexed => {
+            "Done. Run it, then ask your agent where a function is defined."
+        }
+        IndexOutcome::Indexed {
             suggested_grep: None,
-            ..
-        }) => "Done. Ask your agent where a function is defined.",
-        Some(_) => "Done.",
+        } => "Done. Ask your agent where a function is defined.",
+        IndexOutcome::Indexed { .. } => "Done.",
     }
 }
 
