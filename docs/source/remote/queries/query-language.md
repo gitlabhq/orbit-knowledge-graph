@@ -208,7 +208,7 @@ other properties at compile time.
 
 The following properties support `token_match`, `all_tokens`, and `any_tokens`.
 Words are the runs of letters and digits in the property, so `main` matches
-`src/main.rs` and `yaml` matches `.gitlab-ci.yaml`. On these properties
+`src/main.rs` and `yml` matches `.gitlab-ci.yml`. On these properties
 `contains`, `starts_with`, and `ends_with` prune with an ngram skip index and
 the token operators prune with a text skip index. Use `contains` for a word
 prefix (`migrat`) or a phrase with its words in order (`fix flaky`), and a token
