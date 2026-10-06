@@ -98,4 +98,3 @@ For help in the binary, run `glab orbit <command> --help`.
 
 For information about GitLab Orbit commands that `glab` handles itself,
 see the [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/).
-
