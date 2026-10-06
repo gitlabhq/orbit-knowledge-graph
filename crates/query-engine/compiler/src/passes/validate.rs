@@ -775,7 +775,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
     fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
         match filter.op.unwrap_or(FilterOp::Eq) {
             FilterOp::Eq | FilterOp::StartsWith => {
-                let Some(path) = filter.value.as_ref().and_then(|v| v.as_str()) else {
+                let Some(path) = filter.value_str() else {
                     return Err(QueryError::Validation(format!(
                         "{label}: value must be a traversal_path string"
                     )));

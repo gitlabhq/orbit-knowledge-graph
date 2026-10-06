@@ -403,13 +403,22 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
             let Some(ColumnValue::String(cv_str)) = value else {
                 return false;
             };
-            let filter_str = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-            let (value, needle) = (cv_str.to_lowercase(), filter_str.to_lowercase());
+            let filter_str = filter.value_str().unwrap_or("");
+            let folded = || (cv_str.to_ascii_lowercase(), filter_str.to_ascii_lowercase());
             match op {
                 FilterOp::Eq => cv_str == filter_str,
-                FilterOp::Contains => value.contains(&needle),
-                FilterOp::StartsWith => value.starts_with(&needle),
-                FilterOp::EndsWith => value.ends_with(&needle),
+                FilterOp::Contains => {
+                    let (value, needle) = folded();
+                    value.contains(&needle)
+                }
+                FilterOp::StartsWith => {
+                    let (value, needle) = folded();
+                    value.starts_with(&needle)
+                }
+                FilterOp::EndsWith => {
+                    let (value, needle) = folded();
+                    value.ends_with(&needle)
+                }
                 _ => true,
             }
         }

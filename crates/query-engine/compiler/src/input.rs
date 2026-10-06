@@ -254,6 +254,12 @@ pub struct InputFilter {
     pub rhs_column: Option<(String, String)>,
 }
 
+impl InputFilter {
+    pub fn value_str(&self) -> Option<&str> {
+        self.value.as_ref().and_then(Value::as_str)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]

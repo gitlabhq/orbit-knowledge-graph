@@ -59,7 +59,10 @@ pub(crate) fn filter_expression(
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
         FilterOp::StartsWith if prop == TRAVERSAL_PATH_COLUMN => Expr::func(
             Function::StartsWith,
-            vec![col, Expr::param(SqlType::String, text(filter))],
+            vec![
+                col,
+                Expr::param(SqlType::String, filter.value_str().unwrap_or("")),
+            ],
         ),
         op @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens) => {
             Expr::TokenSearch {
@@ -69,7 +72,10 @@ pub(crate) fn filter_expression(
                     _ => TokenMatchMode::Any,
                 },
                 value: Box::new(lower(col)),
-                query: Box::new(lower(Expr::param(SqlType::String, text(filter)))),
+                query: Box::new(lower(Expr::param(
+                    SqlType::String,
+                    filter.value_str().unwrap_or(""),
+                ))),
             }
         }
         FilterOp::Contains => Expr::binary(
@@ -77,7 +83,7 @@ pub(crate) fn filter_expression(
             lower(col),
             lower(Expr::param(
                 SqlType::String,
-                format!("%{}%", escape_like(text(filter))),
+                format!("%{}%", escape_like(filter.value_str().unwrap_or(""))),
             )),
         ),
         op => {
@@ -90,19 +96,14 @@ pub(crate) fn filter_expression(
                 function,
                 vec![
                     lower(col),
-                    lower(Expr::param(SqlType::String, text(filter))),
+                    lower(Expr::param(
+                        SqlType::String,
+                        filter.value_str().unwrap_or(""),
+                    )),
                 ],
             )
         }
     }
-}
-
-fn text(filter: &InputFilter) -> &str {
-    filter
-        .value
-        .as_ref()
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
 }
 
 fn lower(expr: Expr) -> Expr {
