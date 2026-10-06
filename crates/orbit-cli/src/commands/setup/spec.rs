@@ -173,6 +173,7 @@ pub(super) struct AgentSpec {
 pub(super) struct McpEntry {
     pub(super) file: ScopedPath,
     pub(super) format: McpFormat,
+    pub(super) coding_agent: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

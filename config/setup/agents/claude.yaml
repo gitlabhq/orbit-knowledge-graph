@@ -28,6 +28,7 @@ mcp:
     project: .mcp.json
     global: "~/.claude.json"
   format: claude
+  coding_agent: claude-code
 skills:
   dir:
     project: .agents/skills
