@@ -652,12 +652,30 @@ async fn dispatch(
             let components = commands::setup::Component::from_flags(mcp, &skip);
             let options = flags.to_options(agents, all, !no_index, graph_first, components);
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::install(options, flags.target()?, &machine)
+            let run = commands::setup::install(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_CONFIGURED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(agents, false, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::uninstall(options, flags.target()?, &machine)
+            let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_REMOVED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::HookGuard {
             kind,

@@ -5484,6 +5484,7 @@ dependencies = [
  "orbit-versions",
  "parking_lot",
  "prettyplease",
+ "regress",
  "serde",
  "serde_json",
  "syn 2.0.118",

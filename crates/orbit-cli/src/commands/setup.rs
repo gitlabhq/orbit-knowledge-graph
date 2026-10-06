@@ -25,9 +25,57 @@ use spec::ScopedPath;
 
 use crate::tui;
 
-pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<()> {
+#[derive(Debug)]
+pub(crate) struct SetupRun {
+    pub(crate) detected_agents: Vec<String>,
+    pub(crate) selected_agents: Vec<String>,
+    pub(crate) components: BTreeSet<Component>,
+    pub(crate) global: bool,
+    pub(crate) interactive: bool,
+    pub(crate) graph_first: Option<bool>,
+    pub(crate) index: Option<bool>,
+    pub(crate) outcome: Outcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    Applied,
+    DryRun,
+    NoAgentSelected,
+}
+
+impl SetupRun {
+    fn new(
+        detected_agents: &[(spec::Agent, PathBuf)],
+        selection: &Selection,
+        target: &Target,
+        interactive: bool,
+        outcome: Outcome,
+    ) -> SetupRun {
+        SetupRun {
+            detected_agents: detected_agents
+                .iter()
+                .map(|(agent, _)| agent.name.clone())
+                .collect(),
+            selected_agents: selection.selected_agent_names(),
+            components: selection.components.clone(),
+            global: matches!(target, Target::Global),
+            interactive,
+            graph_first: None,
+            index: None,
+            outcome,
+        }
+    }
+}
+
+pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
     let interactive = tui::can_prompt(options.yes)?;
     let detected_agents = machine.installed_agents();
+    let finish = |selection: &Selection, outcome, indexed: bool| SetupRun {
+        graph_first: Some(outcome == Outcome::Applied && selection.graph_first),
+        index: Some(indexed),
+        ..SetupRun::new(&detected_agents, selection, &target, interactive, outcome)
+    };
     let mut selection = Selection::from_setup_options(&options, &detected_agents)?;
     tui::intro(format!(
         "Orbit setup ({})",
@@ -52,12 +100,13 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
             "No agent selected. Name one to configure it: orbit setup <{}>",
             spec::agent_names().join("|")
         ))?;
-        return Ok(());
+        return Ok(finish(&selection, Outcome::NoAgentSelected, false));
     }
 
     let plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
-        return show_dry_run(&plan, "Dry run: nothing written.");
+        show_dry_run(&plan, "Dry run: nothing written.")?;
+        return Ok(finish(&selection, Outcome::DryRun, false));
     }
 
     apply_and_report(&options, |report| {
@@ -74,12 +123,16 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         tui::card("Try it", command)?;
     }
     tui::outro(summary::format_closing_line(&index_outcome))?;
-    Ok(())
+    let indexed = matches!(index_outcome, IndexOutcome::Indexed { .. });
+    Ok(finish(&selection, Outcome::Applied, indexed))
 }
 
-pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<()> {
+pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
     let interactive = tui::can_prompt(options.yes)?;
     let detected_agents = machine.installed_agents();
+    let finish = |selection: &Selection, outcome| {
+        SetupRun::new(&detected_agents, selection, &target, interactive, outcome)
+    };
     let mut selection = Selection::from_uninstall_options(&options, &target, &detected_agents)?;
     tui::intro(format!(
         "Orbit uninstall ({})",
@@ -87,7 +140,7 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
     ))?;
     if selection.agents.is_empty() {
         tui::outro("Orbit is not set up for any agent. Nothing to remove.")?;
-        return Ok(());
+        return Ok(finish(&selection, Outcome::NoAgentSelected));
     }
 
     if interactive {
@@ -103,12 +156,13 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
     }
     if selection.agents.is_empty() {
         tui::outro_cancel("No agent selected.")?;
-        return Ok(());
+        return Ok(finish(&selection, Outcome::NoAgentSelected));
     }
 
     let plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
-        return show_dry_run(&plan, "Dry run: nothing removed.");
+        show_dry_run(&plan, "Dry run: nothing removed.")?;
+        return Ok(finish(&selection, Outcome::DryRun));
     }
 
     let report = apply_and_report(&options, |report| {
@@ -119,7 +173,7 @@ pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> 
         summary::format_removed_files_per_component(&report),
     )?;
     tui::outro("Done. Backups stay only for files you edited after setup.")?;
-    Ok(())
+    Ok(finish(&selection, Outcome::Applied))
 }
 
 fn ask_which_agents(
@@ -325,8 +379,8 @@ mod tests {
         install(options_with_mcp(names), project(dir), &bare_machine()).unwrap();
     }
 
-    fn uninstall_named(names: &[&str], dir: &Path) {
-        uninstall(options_for(names), project(dir), &bare_machine()).unwrap();
+    fn uninstall_named(names: &[&str], dir: &Path) -> SetupRun {
+        uninstall(options_for(names), project(dir), &bare_machine()).unwrap()
     }
 
     fn read_json(path: &Path) -> Value {
@@ -345,8 +399,12 @@ mod tests {
         let machine = Machine::new(home.path().to_path_buf(), env);
 
         let dir = tempfile::tempdir().unwrap();
-        install(options_for(&[]), project(dir.path()), &machine).unwrap();
+        let run = install(options_for(&[]), project(dir.path()), &machine).unwrap();
 
+        assert_eq!(run.detected_agents, ["claude", "codex"]);
+        assert_eq!(run.selected_agents, ["claude", "codex"]);
+        assert_eq!(run.outcome, Outcome::Applied);
+        assert!(!run.global);
         assert!(dir.path().join("CLAUDE.md").is_file());
         assert!(dir.path().join("AGENTS.md").is_file());
         assert!(dir.path().join(".claude/settings.json").is_file());
@@ -356,7 +414,8 @@ mod tests {
     #[test]
     fn setup_with_nothing_detected_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        install(options_for(&[]), project(dir.path()), &bare_machine()).unwrap();
+        let run = install(options_for(&[]), project(dir.path()), &bare_machine()).unwrap();
+        assert_eq!(run.outcome, Outcome::NoAgentSelected);
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 
@@ -365,7 +424,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut dry = options_with_mcp(&["claude", "codex", "opencode"]);
         dry.dry_run = true;
-        install(dry, project(dir.path()), &bare_machine()).unwrap();
+        dry.index = true;
+        dry.graph_first = true;
+        let run = install(dry, project(dir.path()), &bare_machine()).unwrap();
+        assert_eq!(run.outcome, Outcome::DryRun);
+        assert_eq!(run.index, Some(false));
+        assert_eq!(run.graph_first, Some(false));
+        assert!(run.components.contains(&Component::Mcp));
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 
@@ -451,8 +516,11 @@ mod tests {
                 .is_file()
         );
 
-        uninstall_named(&["codex", "opencode"], dir.path());
+        let removed = uninstall_named(&["codex", "opencode"], dir.path());
 
+        assert_eq!(removed.selected_agents, ["codex", "opencode"]);
+        assert_eq!(removed.outcome, Outcome::Applied);
+        assert_eq!(removed.index, None);
         assert_eq!(
             std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap(),
             "# My rules\n"
