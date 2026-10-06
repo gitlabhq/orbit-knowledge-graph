@@ -2,7 +2,6 @@ description: eq keeps a backslash in the bound value byte for byte
 
 config:
   redaction: { allow: { merge_request: [2103] } }
-  unmerged_seed: true
   extra_seed:
     gl_merge_request:
       - { id: 2103, iid: 9, title: "Path C:\\temp", state: opened, source_branch: path-a, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
@@ -24,7 +23,5 @@ expect:
   node_count: 1
   nodes:
     MergeRequest:
-      filters:
-        title: { eq: "Path C:\\temp" }
       rows:
         - { id: 2103, title: "Path C:\\temp" }

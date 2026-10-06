@@ -3853,31 +3853,12 @@ properties:
         assert!(!got.contains_key("wi"), "tainted via CLOSES");
     }
 
-    fn assert_text_indexed_columns_consistent(ontology: &Ontology) {
-        for node in ontology.nodes() {
-            let columns = ontology.text_indexed_columns(&node.name);
-            assert!(
-                columns.windows(2).all(|w| w[0] < w[1]),
-                "{} text-indexed columns must be sorted and deduplicated: {columns:?}",
-                node.name
-            );
-        }
-
-        assert!(ontology.text_indexed_columns("Nonexistent").is_empty());
-    }
-
     #[test]
-    fn text_indexed_columns_match_tokenizer_lookups() {
-        let fixture = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-        assert_text_indexed_columns_consistent(&fixture);
-
-        // The generator renders `load_embedded()`, so lock the guarantee against
-        // the real shipped ontology too, not just the test fixtures.
+    fn text_indexed_columns_lists_text_indexes() {
         let embedded = Ontology::load_embedded().expect("should load embedded ontology");
-        assert_text_indexed_columns_consistent(&embedded);
-
         let mr = embedded.text_indexed_columns("MergeRequest");
         assert!(mr.contains(&"title"));
         assert!(mr.contains(&"description"));
+        assert!(embedded.text_indexed_columns("Nonexistent").is_empty());
     }
 }

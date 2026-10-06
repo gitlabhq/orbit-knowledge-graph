@@ -1,4 +1,4 @@
-description: token_match on a file path matches one segment regardless of case, so main matches crates/orbit/src/main.rs; the former splitByString(['/']) index returned no rows for this query
+description: token_match on a file path matches one segment regardless of case, so main matches crates/orbit/src/main.rs
 
 config:
   unmerged_seed: true

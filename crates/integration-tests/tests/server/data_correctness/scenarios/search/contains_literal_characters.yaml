@@ -1,4 +1,4 @@
-description: contains treats %, _, and backslash as plain characters, and the ngram skip index prunes the base part and the decoy part
+description: contains treats %, _, and backslash as plain characters; the ngram skip index prunes the base part and the decoy part
 
 config:
   redaction: { allow: { merge_request: [2101, 2102] } }
