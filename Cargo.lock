@@ -5585,6 +5585,7 @@ dependencies = [
  "ontology",
  "orbit-utils",
  "orbit-versions",
+ "query-data-model",
  "regex",
  "serde",
  "thiserror 2.0.18",

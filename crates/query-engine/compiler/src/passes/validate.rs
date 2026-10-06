@@ -1409,6 +1409,19 @@ mod tests {
     fn test_ontology() -> Ontology {
         Ontology::new()
             .with_nodes(["User", "Project", "Note"])
+            .with_storage_columns(
+                "User",
+                [
+                    ("username", "String"),
+                    ("created_at", "DateTime64(6, 'UTC')"),
+                    ("user_type", "String"),
+                ],
+            )
+            .with_storage_columns(
+                "Project",
+                [("name", "String"), ("visibility_level", "String")],
+            )
+            .with_storage_columns("Note", [("confidential", "Bool"), ("noteable_id", "Int64")])
             .with_edges(["AUTHORED", "CONTAINS"])
             .with_fields(
                 "User",
@@ -1433,12 +1446,12 @@ mod tests {
                 ],
             )
             .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::Int),
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
+                ("traversal_path", DataType::String, "String"),
+                ("relationship_kind", DataType::String, "String"),
+                ("source_id", DataType::Int, "Int64"),
+                ("source_kind", DataType::String, "String"),
+                ("target_id", DataType::Int, "Int64"),
+                ("target_kind", DataType::String, "String"),
             ])
     }
 
@@ -2129,7 +2142,8 @@ mod tests {
         // Integers are valid for float columns (widening).
         let ontology = Ontology::new()
             .with_nodes(["Metric"])
-            .with_fields("Metric", [("score", DataType::Float)]);
+            .with_fields("Metric", [("score", DataType::Float)])
+            .with_storage_columns("Metric", [("score", "Float64")]);
 
         let input = parse_input(
             r#"{
@@ -2359,20 +2373,16 @@ mod tests {
 
     #[test]
     fn edge_filter_type_comes_from_ontology_not_hardcoded() {
-        // Build an ontology where source_id is String instead of Int.
-        // If types were hardcoded in Rust, this test would FAIL (the hardcoded
-        // type is Int, so integer filters would pass). If types are YAML-driven,
-        // the Validator reads String and correctly rejects the integer.
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
             .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::String), // deliberately wrong: String instead of Int
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
+                ("traversal_path", DataType::String, "String"),
+                ("relationship_kind", DataType::String, "String"),
+                ("source_id", DataType::String, "String"),
+                ("source_kind", DataType::String, "String"),
+                ("target_id", DataType::Int, "Int64"),
+                ("target_kind", DataType::String, "String"),
             ]);
         let validator = validator(&ontology);
 
@@ -2401,12 +2411,12 @@ mod tests {
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
             .with_edge_columns([
-                ("traversal_path", DataType::String),
-                ("relationship_kind", DataType::String),
-                ("source_id", DataType::Int),
-                ("source_kind", DataType::String),
-                ("target_id", DataType::Int),
-                ("target_kind", DataType::String),
+                ("traversal_path", DataType::String, "String"),
+                ("relationship_kind", DataType::String, "String"),
+                ("source_id", DataType::Int, "Int64"),
+                ("source_kind", DataType::String, "String"),
+                ("target_id", DataType::Int, "Int64"),
+                ("target_kind", DataType::String, "String"),
             ]);
         let validator = validator(&ontology);
 
@@ -2726,6 +2736,7 @@ mod tests {
     fn ontology_with_sensitive_field() -> Ontology {
         Ontology::new()
             .with_nodes(["User"])
+            .with_storage_columns("User", [("username", "String"), ("email", "String")])
             .with_edges(["AUTHORED"])
             .with_fields(
                 "User",
@@ -2738,6 +2749,7 @@ mod tests {
     fn ontology_with_unfilterable_field() -> Ontology {
         Ontology::new()
             .with_nodes(["Group"])
+            .with_storage_columns("Group", [("name", "String"), ("private_note", "String")])
             .with_edges(["CONTAINS"])
             .with_fields(
                 "Group",
@@ -2800,6 +2812,10 @@ mod tests {
     fn rejects_like_on_non_text_field() {
         let ont = Ontology::new()
             .with_nodes(["User"])
+            .with_storage_columns(
+                "User",
+                [("created_at", "DateTime64(6, 'UTC')"), ("state", "String")],
+            )
             .with_edges(["AUTHORED"])
             .with_fields(
                 "User",

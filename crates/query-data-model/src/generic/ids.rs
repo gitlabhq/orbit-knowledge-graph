@@ -15,3 +15,5 @@ id!(EntityId);
 id!(PropertyId);
 id!(RelationshipId);
 id!(RelationshipVariantId);
+id!(TableId);
+id!(ColumnId);

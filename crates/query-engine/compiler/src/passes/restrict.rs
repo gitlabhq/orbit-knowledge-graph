@@ -342,6 +342,15 @@ mod tests {
     fn ontology() -> Ontology {
         Ontology::new()
             .with_nodes(["User", "Group"])
+            .with_storage_columns(
+                "User",
+                [
+                    ("username", "String"),
+                    ("is_admin", "Bool"),
+                    ("is_auditor", "Bool"),
+                    ("state", "String"),
+                ],
+            )
             .with_fields(
                 "User",
                 [

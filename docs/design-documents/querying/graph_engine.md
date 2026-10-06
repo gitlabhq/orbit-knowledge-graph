@@ -61,8 +61,17 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 Each active schema snapshot derives one immutable query data model from its loaded ontology.
 The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
 Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
+Both backends expose ordered stored-column declarations through `query-data-model::storage`.
+The storage catalog assigns snapshot-local table IDs and table-local column IDs in deterministic order.
+Name indexes point into these declarations. A stored-column reference carries both IDs to retain table ownership.
+ClickHouse declarations include generated system columns and retain exact storage types, defaults, and codecs.
+DuckDB declarations contain effective local types and literal defaults after column exclusions and wrapper conversion.
+The local DDL renderer consumes those same declarations directly. Remote DDL and the catalog share column derivation, including denormalized tables.
+Stored-row metadata distinguishes current rows from versioned rows and records whether the merge engine applies deletion flags.
 Its authorization catalog resolves GitLab redaction and scope metadata.
-Each stored property realization contains its physical query column. An absent realization means that the backend cannot supply that property.
+Each stored property realization contains a table-and-column reference into the storage catalog.
+Derivation rejects missing stored columns and keeps extraction-source names separate from destination columns.
+An absent realization means that the backend cannot supply that property.
 Foreign-key facts identify the source or target endpoint that holds the key, its property, and the referenced ID property.
 The endpoint remains unambiguous for self-relationships and incoming traversals.
 Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.

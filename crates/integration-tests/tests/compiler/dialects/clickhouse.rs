@@ -547,6 +547,10 @@ fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
     std::sync::Arc::new(
         ontology::Ontology::new()
             .with_nodes(["User", "Project", "File", "Definition"])
+            .with_storage_columns("User", [("username", "String"), ("state", "String")])
+            .with_storage_columns("Project", [("name", "String")])
+            .with_storage_columns("File", [("path", "String")])
+            .with_storage_columns("Definition", [("name", "String")])
             .with_edges(["AUTHORED", "CONTAINS", "DEFINES", "IMPORTS"])
             .with_edge_table("gl_code_edge")
             .with_edge_for_table("DEFINES", "gl_code_edge")
@@ -708,6 +712,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
     let ontology = std::sync::Arc::new(
         ontology::Ontology::new()
             .with_nodes(["File"])
+            .with_storage_columns("File", [("path", "String"), ("project_id", "Int64")])
             .with_edges(["DEFINES"])
             .with_fields("File", [("path", DataType::String)])
             .with_default_columns("File", ["path"])
