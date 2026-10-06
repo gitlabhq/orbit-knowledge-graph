@@ -146,7 +146,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     None
                 };
                 let scan =
-                    PhysicalPlan::node_scan(node, membership, self.facts.node_sort_key(node)?)?;
+                    PhysicalPlan::node_scan(node, membership, &self.facts.node_sort_key(node)?)?;
                 plan.outputs.extend(scan.outputs);
                 plan.source = plan.source.inner_join(
                     scan.source,
@@ -194,7 +194,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         keys.source = PhysicalSource::Latest {
                             aggregate_condition: vec![],
                             alias: alias.clone(),
-                            sort_key: sort_key.to_vec(),
+                            sort_key,
                             input: Box::new(keys.source),
                         };
                         keys
@@ -277,7 +277,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             }
             let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
             return Ok(PhysicalSource::Latest {
-                sort_key: sort_key.to_vec(),
+                sort_key,
                 alias: alias.clone(),
                 aggregate_condition: predicates,
                 input: Box::new(scan(false)),
@@ -292,8 +292,13 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             let narrow_inside = self
                 .facts
                 .model
-                .table_sort_key(&hop.edge_table)
-                .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
+                .table(&hop.edge_table)
+                .is_some_and(|table| {
+                    table
+                        .sort_columns()
+                        .take(4)
+                        .any(|column| column.name == start || column.name == end)
+                });
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
                 input = input.filter(membership).cascade(hop, &alias, cascade);

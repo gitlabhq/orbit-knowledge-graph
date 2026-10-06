@@ -149,7 +149,7 @@ pub enum RowSemantics {
 pub struct TableLayout {
     pub name: String,
     pub columns: Vec<StoredColumn>,
-    pub sort_key: Vec<String>,
+    pub sort_key: Vec<ColumnId>,
     pub entity: Option<crate::EntityId>,
     pub path_columns: Vec<crate::PathColumn>,
     pub path_scopable: bool,
@@ -157,6 +157,57 @@ pub struct TableLayout {
 }
 
 impl TableLayout {
+    pub fn new(
+        name: impl Into<String>,
+        columns: Vec<StoredColumn>,
+        sort_key: &[String],
+        row_semantics: RowSemantics,
+    ) -> Result<Self, DataModelError> {
+        let mut table = Self {
+            name: name.into(),
+            columns,
+            sort_key: vec![],
+            entity: None,
+            path_columns: vec![],
+            path_scopable: false,
+            row_semantics,
+        };
+        table.sort_key = sort_key
+            .iter()
+            .map(|column| table.column_id(column))
+            .collect::<Result<_, _>>()?;
+        Ok(table)
+    }
+
+    pub fn column_id(&self, name: &str) -> Result<ColumnId, DataModelError> {
+        self.columns
+            .iter()
+            .position(|column| column.name.trim_matches('`') == name)
+            .map(ColumnId)
+            .ok_or_else(|| DataModelError::UnknownReference {
+                kind: "stored column",
+                name: format!("{}.{name}", self.name),
+            })
+    }
+
+    pub fn sort_columns(&self) -> impl Iterator<Item = &StoredColumn> {
+        self.sort_key
+            .iter()
+            .map(|column| &self.columns[column.index()])
+    }
+
+    pub fn add_path_column(
+        &mut self,
+        name: &str,
+        entity: Option<crate::EntityId>,
+    ) -> Result<(), DataModelError> {
+        self.path_columns.push(crate::PathColumn {
+            column: self.column_id(name)?,
+            entity,
+        });
+        Ok(())
+    }
+
     pub fn column(&self, name: &str) -> Option<&StoredColumn> {
         self.columns
             .iter()

@@ -101,7 +101,8 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             };
             let membership =
                 name.map(|name| key_membership(&target.alias, &fk.referenced_column, name));
-            let scan = PhysicalPlan::node_scan(target, membership, context.node_sort_key(target)?)?;
+            let scan =
+                PhysicalPlan::node_scan(target, membership, &context.node_sort_key(target)?)?;
             plan.source = plan.source.inner_join(
                 scan.source,
                 (

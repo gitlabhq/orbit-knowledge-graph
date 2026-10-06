@@ -125,13 +125,16 @@ impl DuckDbCatalog {
             .local_edge_table_name()
             .unwrap_or_else(|| ontology.edge_table())
             .to_string();
-        let mut tables: HashMap<_, _> = crate::storage::local_tables(ontology)
+        let mut tables: HashMap<_, _> = crate::storage::local_tables(ontology)?
             .into_iter()
             .map(|table| (table.name.clone(), table))
             .collect();
-        tables
-            .entry(edge_table.clone())
-            .or_insert_with(|| TableLayout::local_edge(&edge_table, ontology.local_edge_columns()));
+        if !tables.contains_key(&edge_table) {
+            tables.insert(
+                edge_table.clone(),
+                TableLayout::local_edge(&edge_table, ontology.local_edge_columns())?,
+            );
+        }
         let mut entities = std::iter::repeat_with(|| None)
             .take(graph.entities().count())
             .collect::<Vec<_>>();
@@ -165,10 +168,13 @@ impl DuckDbCatalog {
             let excluded = ontology
                 .local_entity_excludes(entity_name)
                 .unwrap_or_default();
-            tables
-                .entry(node.destination_table.clone())
-                .or_insert_with(|| TableLayout::local_node(node, excluded))
-                .entity = Some(entity_id);
+            let table = match tables.entry(node.destination_table.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(TableLayout::local_node(node, excluded)?)
+                }
+            };
+            table.entity = Some(entity_id);
             entities[entity_id.index()] = Some(DuckDbEntityLayout {
                 table: node.destination_table.clone(),
                 default_properties: graph.entity(entity_id).properties.clone(),

@@ -42,72 +42,73 @@ impl LocalType {
 }
 
 impl TableLayout {
-    pub fn local_node(node: &NodeEntity, excluded: &[String]) -> Self {
-        Self {
-            name: node.destination_table.clone(),
-            columns: node
-                .storage
-                .columns
-                .iter()
-                .filter(|column| !excluded.contains(&column.name))
-                .map(|column| StoredColumn {
-                    name: column.name.clone(),
-                    data_type: StorageType::DuckDb(LocalType::from_storage(&column.ch_type)),
-                    codec: None,
-                    default: column
-                        .default
-                        .as_ref()
-                        .filter(|value| literal_default(value))
-                        .cloned(),
-                    query_type: node
-                        .fields
-                        .iter()
-                        .find(|field| field.name == column.name && field.column_name().is_some())
-                        .map(|field| field.data_type),
-                })
-                .collect(),
-            sort_key: node
-                .sort_key
-                .iter()
-                .filter(|key| !excluded.contains(key))
-                .cloned()
-                .collect(),
-            entity: None,
-            path_columns: vec![],
-            path_scopable: false,
-            row_semantics: RowSemantics::Current,
-        }
+    pub fn local_node(
+        node: &NodeEntity,
+        excluded: &[String],
+    ) -> Result<Self, crate::DataModelError> {
+        let columns = node
+            .storage
+            .columns
+            .iter()
+            .filter(|column| !excluded.contains(&column.name))
+            .map(|column| StoredColumn {
+                name: column.name.clone(),
+                data_type: StorageType::DuckDb(LocalType::from_storage(&column.ch_type)),
+                codec: None,
+                default: column
+                    .default
+                    .as_ref()
+                    .filter(|value| literal_default(value))
+                    .cloned(),
+                query_type: node
+                    .fields
+                    .iter()
+                    .find(|field| field.name == column.name && field.column_name().is_some())
+                    .map(|field| field.data_type),
+            })
+            .collect();
+        let sort_key = node
+            .sort_key
+            .iter()
+            .filter(|key| !excluded.contains(key))
+            .cloned()
+            .collect::<Vec<_>>();
+        Self::new(
+            &node.destination_table,
+            columns,
+            &sort_key,
+            RowSemantics::Current,
+        )
     }
 
-    pub fn local_edge(name: &str, columns: &[EdgeColumn]) -> Self {
-        Self {
-            name: name.into(),
-            columns: columns
-                .iter()
-                .map(|column| StoredColumn {
-                    name: column.name.clone(),
-                    data_type: StorageType::DuckDb(match column.data_type {
-                        DataType::Int => LocalType::Int64,
-                        DataType::Bool => LocalType::Bool,
-                        DataType::DateTime => LocalType::Timestamp,
-                        DataType::Date => LocalType::Date,
-                        _ => LocalType::String,
-                    }),
-                    codec: None,
-                    default: None,
-                    query_type: Some(column.data_type),
-                })
-                .collect(),
-            sort_key: columns.iter().map(|column| column.name.clone()).collect(),
-            entity: None,
-            path_columns: vec![],
-            path_scopable: false,
-            row_semantics: RowSemantics::Current,
-        }
+    pub fn local_edge(name: &str, columns: &[EdgeColumn]) -> Result<Self, crate::DataModelError> {
+        let sort_key = columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
+        let columns = columns
+            .iter()
+            .map(|column| StoredColumn {
+                name: column.name.clone(),
+                data_type: StorageType::DuckDb(match column.data_type {
+                    DataType::Int => LocalType::Int64,
+                    DataType::Bool => LocalType::Bool,
+                    DataType::DateTime => LocalType::Timestamp,
+                    DataType::Date => LocalType::Date,
+                    _ => LocalType::String,
+                }),
+                codec: None,
+                default: None,
+                query_type: Some(column.data_type),
+            })
+            .collect();
+        Self::new(name, columns, &sort_key, RowSemantics::Current)
     }
 }
 
-pub fn local_tables(ontology: &ontology::Ontology) -> Vec<TableLayout> {
+pub fn local_tables(
+    ontology: &ontology::Ontology,
+) -> Result<Vec<TableLayout>, crate::DataModelError> {
     ontology
         .local_entity_names()
         .into_iter()

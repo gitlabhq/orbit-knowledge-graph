@@ -59,20 +59,32 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
     }
 
-    pub fn node_sort_key(&self, node: &NodePlan) -> Result<&[String]> {
+    pub fn node_sort_key(&self, node: &NodePlan) -> Result<Vec<String>> {
         let table = node
             .table
             .as_ref()
             .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.alias)))?;
         self.model
-            .table_sort_key(table)
+            .table(table)
+            .map(|table| {
+                table
+                    .sort_columns()
+                    .map(|column| column.name.trim_matches('`').to_owned())
+                    .collect()
+            })
             .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))
     }
 
-    pub fn latest_row_key(&self, table: &str) -> Result<&[String]> {
+    pub fn latest_row_key(&self, table: &str) -> Result<Vec<String>> {
         self.model
-            .table_sort_key(table)
-            .filter(|key| !key.is_empty())
+            .table(table)
+            .filter(|table| !table.sort_key.is_empty())
+            .map(|table| {
+                table
+                    .sort_columns()
+                    .map(|column| column.name.trim_matches('`').to_owned())
+                    .collect()
+            })
             .ok_or_else(|| {
                 QueryError::Lowering(format!(
                     "table '{table}' has no sort key for latest-row resolution"

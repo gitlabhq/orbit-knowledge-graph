@@ -26,7 +26,7 @@ fn catalog_schema_matches_created_duckdb_tables() {
     database
         .initialize_schema(include_str!("../../../../../config/graph_local.sql"))
         .unwrap();
-    for table in compiler::generate_local_tables(&ontology) {
+    for table in compiler::generate_local_tables(&ontology).unwrap() {
         let catalog = model.table(&table.name).unwrap();
         assert_eq!(catalog.columns, table.columns);
         let batches = database.query_arrow(&format!("SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position", table.name)).unwrap();

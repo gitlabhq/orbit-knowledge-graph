@@ -529,7 +529,7 @@ mod tests {
             .iter()
             .map(|column| {
                 (
-                    column.name.as_str(),
+                    catalog.columns[column.column.index()].name.as_str(),
                     column
                         .entity
                         .map(|entity| model.graph().entity(entity).name.as_str()),
@@ -567,7 +567,15 @@ mod tests {
                 .find(|table| table.name == catalog.name)
                 .unwrap();
             assert_eq!(catalog.columns, table.columns, "{}", table.name);
-            assert_eq!(catalog.sort_key, table.order_by, "{}", table.name);
+            assert_eq!(
+                catalog
+                    .sort_columns()
+                    .map(|column| column.name.as_str())
+                    .collect::<Vec<_>>(),
+                table.order_by,
+                "{}",
+                table.name
+            );
             assert_eq!(
                 catalog.row_semantics,
                 query_data_model::storage::RowSemantics::Versioned {

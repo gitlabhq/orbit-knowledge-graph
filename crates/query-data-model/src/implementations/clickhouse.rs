@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
-    DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
+    DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PropertyId,
     PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
@@ -208,29 +208,25 @@ impl ClickHouseCatalog {
                 global: node.global,
                 default_properties,
             });
-            tables.insert(
-                node.destination_table.clone(),
-                TableLayout {
-                    name: node.destination_table.clone(),
-                    columns: remote_node_columns(node),
-                    row_semantics: RowSemantics::Versioned {
-                        engine_deletes: !node.storage.version_only_engine,
-                    },
-                    sort_key: node.sort_key.clone(),
-                    entity: Some(entity_id),
-                    path_columns: (!node.global)
-                        .then(|| PathColumn {
-                            name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
-                            entity: Some(entity_id),
-                        })
-                        .into_iter()
-                        .collect(),
-                    path_scopable: node.has_traversal_path
-                        && !node.global
-                        && node.sort_key.first().map(String::as_str)
-                            == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
+            let mut table = TableLayout::new(
+                &node.destination_table,
+                remote_node_columns(node),
+                &node.sort_key,
+                RowSemantics::Versioned {
+                    engine_deletes: !node.storage.version_only_engine,
                 },
-            );
+            )?;
+            table.entity = Some(entity_id);
+            if !node.global {
+                table.add_path_column(ontology::TRAVERSAL_PATH_COLUMN, Some(entity_id))?;
+            }
+            table.path_scopable = node.has_traversal_path
+                && !node.global
+                && table
+                    .sort_columns()
+                    .next()
+                    .is_some_and(|column| column.name == ontology::TRAVERSAL_PATH_COLUMN);
+            tables.insert(node.destination_table.clone(), table);
         }
 
         for table_name in ontology.edge_tables() {
@@ -241,23 +237,16 @@ impl ClickHouseCatalog {
                 }
             })?;
             let columns = remote_edge_columns(config);
-            tables.insert(
-                table_name.to_string(),
-                TableLayout {
-                    name: table_name.to_string(),
-                    columns,
-                    row_semantics: RowSemantics::Versioned {
-                        engine_deletes: true,
-                    },
-                    sort_key: config.sort_key.clone(),
-                    entity: None,
-                    path_columns: vec![PathColumn {
-                        name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
-                        entity: None,
-                    }],
-                    path_scopable: false,
+            let mut table = TableLayout::new(
+                table_name,
+                columns,
+                &config.sort_key,
+                RowSemantics::Versioned {
+                    engine_deletes: true,
                 },
-            );
+            )?;
+            table.add_path_column(ontology::TRAVERSAL_PATH_COLUMN, None)?;
+            tables.insert(table_name.to_string(), table);
         }
 
         let mut relationships = vec![None; graph.relationships().count()];
@@ -342,33 +331,22 @@ impl ClickHouseCatalog {
         }
 
         for join in ontology.denormalized_joins() {
-            let path_columns = join
-                .traversal_path_columns()
-                .map(|(index, name)| PathColumn {
-                    name,
-                    entity: entities.iter().enumerate().find_map(|(entity, layout)| {
-                        (layout.as_ref()?.table == join.tables[index].table)
-                            .then_some(EntityId(entity))
-                    }),
-                })
-                .collect();
             let columns = crate::storage::denormalized_columns(join, |index| {
                 &tables[&join.tables[index].table].columns
             });
-            tables.insert(
-                join.table.clone(),
-                TableLayout {
-                    name: join.table.clone(),
-                    columns,
-                    row_semantics: RowSemantics::Versioned {
-                        engine_deletes: true,
-                    },
-                    sort_key: join.sort_key(),
-                    entity: None,
-                    path_columns,
-                    path_scopable: true,
+            let mut table = TableLayout::new(
+                &join.table,
+                columns,
+                &join.sort_key(),
+                RowSemantics::Versioned {
+                    engine_deletes: true,
                 },
-            );
+            )?;
+            for (index, name) in join.traversal_path_columns() {
+                table.add_path_column(&name, tables[&join.tables[index].table].entity)?;
+            }
+            table.path_scopable = true;
+            tables.insert(join.table.clone(), table);
         }
 
         let storage = crate::storage::StorageCatalog::new(tables.into_values())?;

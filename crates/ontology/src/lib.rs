@@ -112,6 +112,38 @@ pub struct EdgeTableConfig {
     pub storage: EdgeTableStorage,
 }
 
+impl Default for EdgeTableConfig {
+    fn default() -> Self {
+        let columns = [
+            ("traversal_path", "String"),
+            ("relationship_kind", "String"),
+            ("source_id", "Int64"),
+            ("source_kind", "String"),
+            ("target_id", "Int64"),
+            ("target_kind", "String"),
+        ]
+        .into_iter()
+        .map(|(name, ch_type)| StorageColumn {
+            name: name.into(),
+            ch_type: ch_type.into(),
+            default: None,
+            codec: None,
+        })
+        .collect();
+        Self {
+            sort_key: EDGE_RESERVED_COLUMNS
+                .iter()
+                .map(|name| (*name).into())
+                .collect(),
+            columns: vec![],
+            storage: EdgeTableStorage {
+                columns,
+                ..Default::default()
+            },
+        }
+    }
+}
+
 impl EdgeTableConfig {
     #[must_use]
     pub fn has_traversal_path(&self) -> bool {
@@ -179,15 +211,7 @@ impl Default for Ontology {
 impl Ontology {
     #[must_use]
     pub fn new() -> Self {
-        let default_sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        let default_config = EdgeTableConfig {
-            sort_key: default_sort_key,
-            columns: Vec::new(),
-            storage: EdgeTableStorage::default(),
-        };
+        let default_config = EdgeTableConfig::default();
         Self {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
@@ -380,18 +404,8 @@ impl Ontology {
     #[must_use]
     pub fn with_edge_table(mut self, name: impl Into<String>) -> Self {
         let name = name.into();
-        let sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        self.edge_table_configs.insert(
-            name,
-            EdgeTableConfig {
-                sort_key,
-                columns: Vec::new(),
-                storage: EdgeTableStorage::default(),
-            },
-        );
+        self.edge_table_configs
+            .insert(name, EdgeTableConfig::default());
         self
     }
 

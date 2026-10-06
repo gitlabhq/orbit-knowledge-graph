@@ -87,14 +87,65 @@ mod tests {
 
         let ontology = ontology::Ontology::load_embedded().unwrap();
         let node = ontology.get_node("Definition").unwrap();
-        let table = TableLayout::local_node(node, &["branch".into()]);
+        let table = TableLayout::local_node(node, &["branch".into()]).unwrap();
         assert!(table.column("branch").is_none());
-        assert_eq!(table.sort_key, ["traversal_path", "project_id", "id"]);
+        assert_eq!(
+            table
+                .sort_columns()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            ["traversal_path", "project_id", "id"]
+        );
         assert_eq!(
             table.column("id").unwrap().data_type,
             StorageType::DuckDb(LocalType::Int64)
         );
         assert!(table.column("_version").is_none());
+    }
+
+    #[test]
+    fn stored_keys_and_paths_must_reference_declared_columns() {
+        use crate::storage::{RowSemantics, TableLayout, remote_node_columns};
+
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let node = ontology.get_node("Project").unwrap();
+        let invalid = TableLayout::new(
+            "projects",
+            remote_node_columns(node),
+            &["missing".into()],
+            RowSemantics::Current,
+        );
+        assert!(
+            invalid
+                .unwrap_err()
+                .to_string()
+                .contains("projects.missing")
+        );
+        let mut table = TableLayout::new(
+            "projects",
+            remote_node_columns(node),
+            &node.sort_key,
+            RowSemantics::Current,
+        )
+        .unwrap();
+        let project = crate::ClickHouseDataModel::derive(Arc::new(ontology))
+            .unwrap()
+            .graph()
+            .entity_id("Project")
+            .unwrap();
+        table
+            .add_path_column("traversal_path", Some(project))
+            .unwrap();
+        let path = &table.path_columns[0];
+        assert_eq!(table.columns[path.column.index()].name, "traversal_path");
+        assert!(
+            table
+                .add_path_column("missing", None)
+                .unwrap_err()
+                .to_string()
+                .contains("projects.missing")
+        );
+        assert_eq!(table.path_columns.len(), 1);
     }
 
     #[test]
@@ -136,7 +187,13 @@ mod tests {
         let project = model.graph().entity_id("Project").unwrap();
         let table = model.backend().table_for_entity(project).unwrap();
         assert_eq!(table.name, "v123_gl_project");
-        assert_eq!(table.sort_key, ["traversal_path", "id"]);
+        assert_eq!(
+            table
+                .sort_columns()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            ["traversal_path", "id"]
+        );
         assert_eq!(table.path_columns[0].entity, Some(project));
         assert_eq!(
             table.column("_version").unwrap().clickhouse_type(),

@@ -1667,6 +1667,12 @@ mod tests {
         for global in ["User", "Runner"] {
             ontology.nodes.get_mut(global).unwrap().global = true;
         }
+        let edge = ontology.edge_table_configs.get_mut("gl_edge").unwrap();
+        edge.storage
+            .columns
+            .retain(|column| column.name != crate::TRAVERSAL_PATH_COLUMN);
+        edge.sort_key
+            .retain(|column| column != crate::TRAVERSAL_PATH_COLUMN);
         let err =
             resolve_denormalized_join(&ontology, "owns", &[hop("OWNS", "User", "Runner", false)])
                 .unwrap_err();

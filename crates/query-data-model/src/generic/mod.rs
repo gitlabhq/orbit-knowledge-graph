@@ -37,7 +37,7 @@ pub struct TraversalPathLookup {
 
 #[derive(Debug, Clone)]
 pub struct PathColumn {
-    pub name: String,
+    pub column: ColumnId,
     pub entity: Option<EntityId>,
 }
 
@@ -148,9 +148,6 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
         source: EntityId,
         target: EntityId,
     ) -> Option<ForeignKey>;
-    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
-        self.table(table).map(|table| table.sort_key.as_slice())
-    }
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(
         &self,
@@ -270,10 +267,6 @@ pub trait QueryDataModel {
 
     fn table(&self, table: &str) -> Option<&crate::storage::TableLayout> {
         self.query_backend().table(table)
-    }
-
-    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
-        self.query_backend().table_sort_key(table)
     }
 
     fn has_text_index(&self, property: PropertyId) -> bool {

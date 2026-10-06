@@ -108,7 +108,7 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ontology = load_ontology(ontology_path.as_ref())?;
     print!(
         "{}",
-        query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL)
+        query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL)?
     );
     Ok(())
 }
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn local_ddl_contains_create_table_and_manifest() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL);
+        let ddl = query_engine::compiler::generate_local_ddl(&ontology, MANIFEST_DDL).unwrap();
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("_orbit_meta"));

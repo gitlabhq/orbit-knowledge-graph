@@ -97,7 +97,7 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
                 node_ids: node.node_ids.clone(),
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),
-                sort_key: context.latest_row_key(table)?.to_vec(),
+                sort_key: context.latest_row_key(table)?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
