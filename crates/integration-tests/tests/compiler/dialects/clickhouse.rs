@@ -419,7 +419,7 @@ fn filter_operators() {
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
-    assert!(rendered.contains("positionCaseInsensitive"));
+    assert!(rendered.contains(" LIKE lower("));
 }
 
 #[test]

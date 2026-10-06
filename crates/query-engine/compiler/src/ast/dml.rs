@@ -88,7 +88,7 @@ pub enum TokenMatchMode {
 pub enum Function {
     StartsWith,
     EndsWith,
-    ContainsInsensitive,
+    Lower,
     ToString,
     ToJson,
     Object,
@@ -121,7 +121,8 @@ impl Function {
             Self::Array | Self::Tuple => true,
             Self::Object => count.is_multiple_of(2),
             Self::Coalesce | Self::Concat | Self::ArrayConcat => count >= 1,
-            Self::ToString
+            Self::Lower
+            | Self::ToString
             | Self::ToJson
             | Self::ByteLength
             | Self::ArrayReverse

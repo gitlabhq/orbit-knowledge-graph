@@ -404,11 +404,12 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
                 return false;
             };
             let filter_str = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            let (value, needle) = (cv_str.to_lowercase(), filter_str.to_lowercase());
             match op {
                 FilterOp::Eq => cv_str == filter_str,
-                FilterOp::Contains => cv_str.to_lowercase().contains(&filter_str.to_lowercase()),
-                FilterOp::StartsWith => cv_str.starts_with(filter_str),
-                FilterOp::EndsWith => cv_str.ends_with(filter_str),
+                FilterOp::Contains => value.contains(&needle),
+                FilterOp::StartsWith => value.starts_with(&needle),
+                FilterOp::EndsWith => value.ends_with(&needle),
                 _ => true,
             }
         }

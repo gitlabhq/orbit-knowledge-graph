@@ -843,8 +843,8 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             )));
         }
 
-        // ClickHouse rejects positionCaseInsensitive/startsWith on non-string
-        // columns at execution, which would surface as an opaque 500.
+        // ClickHouse rejects lower()/startsWith on non-string columns at
+        // execution, which would surface as an opaque 500.
         if is_like_op
             && !matches!(
                 data_type,

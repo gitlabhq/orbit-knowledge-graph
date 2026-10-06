@@ -441,7 +441,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
     match function {
         Function::StartsWith => "startsWith",
         Function::EndsWith => "endsWith",
-        Function::ContainsInsensitive => "positionCaseInsensitive",
+        Function::Lower => "lower",
         Function::ToString => "toString",
         Function::ToJson => "toJSONString",
         Function::Object => "map",

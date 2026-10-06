@@ -57,6 +57,10 @@ pub(crate) fn filter_expression(
         }
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
+        FilterOp::StartsWith if prop == TRAVERSAL_PATH_COLUMN => Expr::func(
+            Function::StartsWith,
+            vec![col, Expr::param(SqlType::String, text(filter))],
+        ),
         op @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens) => {
             Expr::TokenSearch {
                 mode: match op {
@@ -64,32 +68,51 @@ pub(crate) fn filter_expression(
                     FilterOp::AllTokens => TokenMatchMode::All,
                     _ => TokenMatchMode::Any,
                 },
-                value: Box::new(col),
-                query: Box::new(Expr::param(
-                    SqlType::String,
-                    filter
-                        .value
-                        .as_ref()
-                        .and_then(|value| value.as_str())
-                        .unwrap_or(""),
-                )),
+                value: Box::new(lower(col)),
+                query: Box::new(lower(Expr::param(SqlType::String, text(filter)))),
             }
         }
+        FilterOp::Contains => Expr::binary(
+            Op::Like,
+            lower(col),
+            lower(Expr::param(
+                SqlType::String,
+                format!("%{}%", escape_like(text(filter))),
+            )),
+        ),
         op => {
             let function = match op {
-                FilterOp::Contains => Function::ContainsInsensitive,
                 FilterOp::StartsWith => Function::StartsWith,
                 FilterOp::EndsWith => Function::EndsWith,
                 _ => unreachable!(),
             };
-            let value = filter
-                .value
-                .as_ref()
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            Expr::func(function, vec![col, Expr::param(SqlType::String, value)])
+            Expr::func(
+                function,
+                vec![
+                    lower(col),
+                    lower(Expr::param(SqlType::String, text(filter))),
+                ],
+            )
         }
     }
+}
+
+fn text(filter: &InputFilter) -> &str {
+    filter
+        .value
+        .as_ref()
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+}
+
+fn lower(expr: Expr) -> Expr {
+    Expr::func(Function::Lower, vec![expr])
+}
+
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 pub fn comparison(left: Expr, operator: FilterOp, right: Expr) -> Result<Expr> {

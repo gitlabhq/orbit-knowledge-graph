@@ -1895,12 +1895,12 @@ mod tests {
 
         assert!(
             sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
-                && sql.contains("endsWith(f.path, '.rb')"),
+                && sql.contains("endsWith(lower(f.path), lower('.rb'))"),
             "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
             sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
-                && sql.contains("startsWith(d.name, 'process')"),
+                && sql.contains("startsWith(lower(d.name), lower('process'))"),
             "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
     }

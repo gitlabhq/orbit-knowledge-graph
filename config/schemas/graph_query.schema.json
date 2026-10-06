@@ -462,7 +462,7 @@
     },
     "SearchPattern": {
       "type": "string",
-      "description": "Substring or word-match pattern. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
+      "description": "Substring or word-match pattern; ASCII case is ignored. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
       "maxLength": 1024
     },
     "RelationshipSelector": {
