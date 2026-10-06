@@ -23,5 +23,7 @@ expect:
   node_count: 1
   nodes:
     MergeRequest:
+      filters:
+        title: { eq: "Path C:\\temp" }
       rows:
         - { id: 2103, title: "Path C:\\temp" }
