@@ -8,11 +8,8 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  `{{orbit}} grep` must be used for search instead of bash tools like grep, rg, find, and ls.
-
-  - Need search? `{{orbit}} grep 'words'`. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
-  - Need source of a range? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
-  - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
+  - `{{orbit}} grep` must be used for search instead of bash tools like grep, rg, find, and ls. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
+  - `{{orbit}} context path:120-180` must be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
   - Reuse shown source instead of rereading unchanged files.
 
 nudge_search: |
