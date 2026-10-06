@@ -48,17 +48,17 @@ pub(crate) fn run(
     let (outcome, nodes) = backend.grep(&query, limit, &filter)?;
     report_exact_query_note(&mut out, &outcome)?;
     let text_hits = match filter.is_empty() {
-        true => text::hits(
+        true => text::mentions(
             backend.search().client(),
             backend.git(),
             &outcome.alternatives,
             &paths,
         )
         .unwrap_or_default(),
-        false => Vec::new(),
+        false => text::Mentions::default(),
     };
 
-    if nodes.is_empty() && !text_hits.is_empty() {
+    if nodes.is_empty() && !text_hits.files.is_empty() {
         writeln!(out, "No definitions match.")?;
         write!(out, "{}", text::render(&text_hits))?;
         return Ok(());
