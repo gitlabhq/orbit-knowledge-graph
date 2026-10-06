@@ -14,16 +14,15 @@ Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Quer
 Neighbors Query Includes The Adjacent Issue
     [Documentation]    The project's neighbors must include the issue that is IN_PROJECT it.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
-    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}
+    Wait Until Result Node Ids Contain    MATCH (p:Project {id: ${SHAPE_PROJECT_ID}})--(n) RETURN p, n
+    ...    ${SHAPE_ISSUE_ID}
 
 Path Finding Connects The Issue To The Project
     [Documentation]    The shortest IN_PROJECT path must contain both endpoints.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "path_finding", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}, {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "path": {"type": "shortest", "from": "w", "to": "p", "max_depth": 2, "rel_types": ["IN_PROJECT"]}}
-    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}    ${SHAPE_PROJECT_ID}
+    Wait Until Result Node Ids Contain
+    ...    MATCH path = ANY SHORTEST (w:WorkItem {id: ${SHAPE_ISSUE_ID}})-[:IN_PROJECT*1..2]->(p:Project {id: ${SHAPE_PROJECT_ID}}) RETURN path
+    ...    ${SHAPE_ISSUE_ID}    ${SHAPE_PROJECT_ID}
 
 GOON Format Encodes The Neighbors Result
     [Documentation]    The llm response is GOON text: a header naming the query_type plus the seeded
@@ -32,9 +31,7 @@ GOON Format Encodes The Neighbors Result
     ...                non-empty in production), so the content assertions are skipped there rather
     ...                than failing on an upstream version gap.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
-    ${resp}=    Orbit Query LLM    ${query}
+    ${resp}=    Orbit Query LLM    MATCH (p:Project {id: ${SHAPE_PROJECT_ID}})--(n) RETURN p, n
     IF    not $resp.text
         Log    GOON/llm body empty on the pinned GitLab+Workhorse stack; skipping content check.
         ...    level=WARN
@@ -49,9 +46,8 @@ Truncated Date Group Key Serializes As An ISO Date String
     ...                epoch-day integer ClickHouse's Arrow output uses for Date columns on some
     ...                server versions.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"count": "w", "as": "n"}], "limit": 5}
-    ${resp}=    Orbit Query    ${query}
+    ${resp}=    Orbit Query
+    ...    MATCH (w:WorkItem {id: ${SHAPE_ISSUE_ID}}) RETURN date_trunc('month', w.created_at), count(w) AS n LIMIT 5
     ${month}=    Aggregation Value    ${resp}    w_created_at_month
     ${month}=    Convert To String    ${month}
     Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$

@@ -1,6 +1,6 @@
 *** Settings ***
 Documentation       Smoke the read-only Orbit API surface beyond /query and /status (covered by 01):
-...                 schema, schema/dsl, schema/format, graph_status, tools, and agent commands. Each
+...                 schema, CALL db.schema(), schema/format, graph_status, tools, and agent commands. Each
 ...                 is a thin gRPC pass-through; this guards the Rails wiring and the enabled-namespace
 ...                 gate on graph_status.
 ...
@@ -27,9 +27,10 @@ Schema Lists Domains And Nodes
     Orbit Endpoint Smoke    schema    Project
     Orbit Endpoint Smoke    schema    Vulnerability
 
-Query DSL Is Served
+Schema Call Describes A Node
     [Tags]    api
-    Orbit Endpoint Smoke    schema/dsl    query_type
+    ${resp}=    Orbit Query    CALL db.schema('Vulnerability')
+    Should Contain    ${{json.dumps($resp)}}    Vulnerability
 
 Response Format Guidance Is Served
     [Tags]    api

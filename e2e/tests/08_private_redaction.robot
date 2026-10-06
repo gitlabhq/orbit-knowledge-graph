@@ -56,8 +56,6 @@ Victim Node Count Is
     [Documentation]    Single-node lookup by id run with the victim's PAT; assert the redacted row
     ...                count equals ${expected}.
     [Arguments]    ${entity}    ${node_id}    ${expected}
-    ${node}=    Create Dictionary    id=n    entity=${entity}    node_ids=${{[int($node_id)]}}
-    ${query}=    Create Dictionary    query_type=traversal    nodes=${{[${node}]}}
-    ${resp}=    Orbit Query With Token    ${query}    ${VICTIM_PAT}
+    ${resp}=    Orbit Query With Token    MATCH (n:${entity} {id: ${node_id}}) RETURN n    ${VICTIM_PAT}
     Should Be Equal As Integers    ${resp["row_count"]}    ${expected}
     ...    ${entity} ${node_id}: victim saw ${resp["row_count"]} rows, expected ${expected}

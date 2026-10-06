@@ -91,11 +91,10 @@ Reporter Path Cannot Search Vulnerability Directly
 
 *** Keywords ***
 Build Role Scoped Authz Fixture
-    [Documentation]    Idempotent suite-level seeding: bootstraps the e2e-bot, enables KG flags,
-    ...                creates the role-scoped group/subgroup matrix, plants one Vulnerability per
-    ...                project, mints a victim PAT, and waits for the indexer to surface every row.
+    [Documentation]    Idempotent suite-level seeding: bootstraps the e2e-bot, creates the
+    ...                role-scoped group/subgroup matrix, plants one Vulnerability per project,
+    ...                mints a victim PAT, and waits for the indexer to surface every row.
     Bootstrap E2E Credentials
-    Enable Role Scoped Authz Feature Flags
     ${suffix}=    Random Suffix
     Set Suite Variable    ${ROLE_AUTHZ_SUFFIX}    ${suffix}
     Provision Role Scoped Groups
@@ -103,12 +102,6 @@ Build Role Scoped Authz Fixture
     Provision Role Scoped Victim
     Provision Role Scoped Vulnerabilities
     Wait For Role Scoped Fixture Indexed
-
-Enable Role Scoped Authz Feature Flags
-    Enable Feature Flag    knowledge_graph_infra
-    Enable Feature Flag    knowledge_graph
-    Wait Until Keyword Succeeds    30s    3s    Feature Flag Is Enabled    knowledge_graph_infra
-    Wait Until Keyword Succeeds    30s    3s    Feature Flag Is Enabled    knowledge_graph
 
 Provision Role Scoped Groups
     ${reporter_group}=        Create Group       kg347-${ROLE_AUTHZ_SUFFIX}-reporter
@@ -224,39 +217,47 @@ Query Vulnerability Counts As Victim
     [Documentation]    Aggregation across the suite's seeded projects only. Orbit
     ...                rejects unconstrained traversal/aggregation queries to
     ...                prevent full edge-table scans, so we pin the Project node
-    ...                via node_ids. The role-scoped authz fix is what determines
+    ...                by id. The role-scoped authz fix is what determines
     ...                which of those project rows survive into the response.
-    ${project_ids}=    Evaluate
-    ...    [int($REPORTER_PROJECT_ID), int($SECURITY_PROJECT_ID), int($DEVELOPER_PROJECT_ID), int($MAINTAINER_PROJECT_ID), int($NESTED_REPORTER_PROJECT_ID), int($NESTED_DEVELOPER_PROJECT_ID)]
-    ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": $project_ids}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"count": "v", "as": "vuln_count"}], "group_by": ["p"], "limit": 20}
-    ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
+    ${resp}=    Orbit Query With Token
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id IN [${REPORTER_PROJECT_ID}, ${SECURITY_PROJECT_ID}, ${DEVELOPER_PROJECT_ID}, ${MAINTAINER_PROJECT_ID}, ${NESTED_REPORTER_PROJECT_ID}, ${NESTED_DEVELOPER_PROJECT_ID}] RETURN p{.name}, count(v) AS vuln_count LIMIT 20
+    ...    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
 Query Vulnerability Counts For Project As Victim
-    [Arguments]    ${project_id}    ${vulnerability_filters}=${None}
-    ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [int($project_id)]}, {"id": "v", "entity": "Vulnerability", "filters": $vulnerability_filters or {}}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"count": "v", "as": "vuln_count"}], "group_by": ["p"], "limit": 10}
-    ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
+    [Arguments]    ${project_id}    ${vulnerability_predicate}=${EMPTY}
+    ${where}=    Set Variable If    $vulnerability_predicate    WHERE ${vulnerability_predicate}    ${EMPTY}
+    ${resp}=    Orbit Query With Token
+    ...    MATCH (p:Project {id: ${project_id}})<-[:IN_PROJECT]-(v:Vulnerability) ${where} RETURN p{.name}, count(v) AS vuln_count LIMIT 10
+    ...    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
 Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${REPORTER_VULNERABILITY_CREATED_AT}
-    ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
+    ${filters}=    Vulnerability Oracle Predicates    critical    ${REPORTER_VULNERABILITY_ID}
+    ...    ${REPORTER_VULNERABILITY_TITLE}    <=    ${created_at}
     RETURN    ${filters}
 
 Nested Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${NESTED_REPORTER_VULNERABILITY_CREATED_AT}
-    ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($NESTED_REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($NESTED_REPORTER_VULNERABILITY_ID)}}, {"title": $NESTED_REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
+    ${filters}=    Vulnerability Oracle Predicates    critical    ${NESTED_REPORTER_VULNERABILITY_ID}
+    ...    ${NESTED_REPORTER_VULNERABILITY_TITLE}    <=    ${created_at}
     RETURN    ${filters}
 
 Security Manager Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${SECURITY_VULNERABILITY_CREATED_AT}
-    ${filters}=    Evaluate
-    ...    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"lte": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"gte": $created_at}}]
+    ${filters}=    Vulnerability Oracle Predicates    high    ${SECURITY_VULNERABILITY_ID}
+    ...    ${SECURITY_VULNERABILITY_TITLE}    >=    ${created_at}
     RETURN    ${filters}
+
+Vulnerability Oracle Predicates
+    [Documentation]    The oracle matrix as GQL predicates on v: no filter, enum fields, ID exact
+    ...                and range, title equality, and a timestamp comparison.
+    [Arguments]    ${severity}    ${id}    ${title}    ${created_at_operator}    ${created_at}
+    ${predicates}=    Create List    ${EMPTY}    v.severity = '${severity}'    v.state = 'detected'
+    ...    v.report_type = 'generic'    v.id = ${id}    v.id <= ${id}    v.title = '${title}'
+    ...    v.created_at ${created_at_operator} '${created_at}'
+    RETURN    ${predicates}
 
 Normalize ClickHouse Timestamp
     [Documentation]    GraphQL emits ISO-8601 with `T` and `Z`; ClickHouse DateTime literals
@@ -283,11 +284,8 @@ Direct Vulnerability Search Is Visible
 
 Direct Vulnerability Search
     [Arguments]    ${vulnerability_id}
-    ${id}=    Convert To Integer    ${vulnerability_id}
-    ${filters}=    Create Dictionary    id=${id}
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[{"id": "v", "entity": "Vulnerability", "filters": $filters}]}}
-    ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
+    ${resp}=    Orbit Query With Token    MATCH (v:Vulnerability) WHERE v.id = ${vulnerability_id} RETURN v
+    ...    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
 Response Has Project Count

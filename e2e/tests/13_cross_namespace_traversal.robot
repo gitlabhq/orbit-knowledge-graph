@@ -19,23 +19,14 @@ Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Cros
 *** Test Cases ***
 Project Scoped Traversal Returns Its Own Issue And A Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${rel}=    Create Dictionary    id=rel    entity=WorkItem    columns=${{["id", "title"]}}
-    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${proj}=    Create Dictionary    id=p    entity=Project    filters=${filters}
-    ${wi}=    Create Dictionary    id=wi    entity=WorkItem    columns=${{["id"]}}
-    ${in_project}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
-    ${related}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$proj, $wi, $rel]}}    relationships=${{[$in_project, $related]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_A}    ${XNS_ISSUE_ID_B}
+    Wait Until Result Node Ids Contain
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = ${XNS_PROJECT_ID_A} RETURN p, wi.id, rel.id, rel.title LIMIT 100
+    ...    ${XNS_ISSUE_ID_A}    ${XNS_ISSUE_ID_B}
 
 Project Scoped Neighbors Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${center}=    Create Dictionary    id=wi    entity=WorkItem    node_ids=${{[int($XNS_ISSUE_ID_A)]}}
-    ${dir}=    Create Dictionary    direction=both
-    ${query}=    Create Dictionary    query_type=neighbors    nodes=${{[${center}]}}    neighbors=${dir}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
+    Wait Until Result Node Ids Contain    MATCH (wi:WorkItem {id: ${XNS_ISSUE_ID_A}})--(n) RETURN wi, n LIMIT 100
+    ...    ${XNS_ISSUE_ID_B}
 
 Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     [Documentation]    The neighbors query type is 1-hop by schema, so a 3-hop neighborhood is
@@ -43,117 +34,53 @@ Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     ...                reachable from issue_a only via a 3-hop chain whose last hop crosses into a
     ...                different top-level namespace; the project-A tight prefix must not prune it.
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
-    ${a}=    Create Dictionary    id=a    entity=WorkItem
-    ${b}=    Create Dictionary    id=b    entity=WorkItem    columns=${{["id"]}}
-    ${r1}=    Create Dictionary    type=IN_PROJECT    from=a    to=p
-    ${r2}=    Create Dictionary    type=RELATED_TO    from=a    to=b    hops=${{[1, 3]}}
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$p, $a, $b]}}    relationships=${{[$r1, $r2]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_C}
+    Wait Until Result Node Ids Contain
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(a:WorkItem)-[:RELATED_TO*1..3]->(b:WorkItem) WHERE p.id = ${XNS_PROJECT_ID_A} RETURN p, a, b.id LIMIT 100
+    ...    ${XNS_ISSUE_ID_C}
 
 Project Scoped Multi Hop Traversal Reaches Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
-    ${wi}=    Create Dictionary    id=wi    entity=WorkItem
-    ${rel}=    Create Dictionary    id=rel    entity=WorkItem    columns=${{["id"]}}
-    ${p2}=    Create Dictionary    id=p2    entity=Project    columns=${{["id"]}}
-    ${r1}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
-    ${r2}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${r3}=    Create Dictionary    type=IN_PROJECT    from=rel    to=p2
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$p, $wi, $rel, $p2]}}    relationships=${{[$r1, $r2, $r3]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}    ${XNS_PROJECT_ID_B}
+    Wait Until Result Node Ids Contain
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem)-[:IN_PROJECT]->(p2:Project) WHERE p.id = ${XNS_PROJECT_ID_A} RETURN p, wi, rel.id, p2.id LIMIT 100
+    ...    ${XNS_ISSUE_ID_B}    ${XNS_PROJECT_ID_B}
 
 Project Scoped Multi Hop Aggregation Counts Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
-    ${wi}=    Create Dictionary    id=wi    entity=WorkItem
-    ${rel}=    Create Dictionary    id=rel    entity=WorkItem
-    ${p2}=    Create Dictionary    id=p2    entity=Project
-    ${r1}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
-    ${r2}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${r3}=    Create Dictionary    type=IN_PROJECT    from=rel    to=p2
-    ${agg}=    Create Dictionary    count=p2    as=xns_project_count
-    ${query}=    Create Dictionary    query_type=aggregation
-    ...    nodes=${{[$p, $wi, $rel, $p2]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
-    Wait Until Aggregation At Least    ${query}    xns_project_count    1
+    Wait Until Aggregation At Least
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem)-[:IN_PROJECT]->(p2:Project) WHERE p.id = ${XNS_PROJECT_ID_A} RETURN count(p2) AS xns_project_count
+    ...    xns_project_count    1
 
 Path Finding Within Scoped Project Returns The Path
     [Tags]    cross-namespace
-    ${start}=    Create Dictionary    id=start    entity=WorkItem    node_ids=${{[int($XNS_ISSUE_ID_A)]}}
-    ${end}=    Create Dictionary    id=end    entity=Project    node_ids=${{[int($XNS_PROJECT_ID_A)]}}
-    ${path}=    Create Dictionary    type=shortest    from=start    to=end    max_depth=${2}    rel_types=${{["IN_PROJECT"]}}
-    ${query}=    Create Dictionary    query_type=path_finding    nodes=${{[$start, $end]}}    path=${path}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_A}    ${XNS_PROJECT_ID_A}
+    Wait Until Result Node Ids Contain
+    ...    MATCH path = ANY SHORTEST (start:WorkItem {id: ${XNS_ISSUE_ID_A}})-[:IN_PROJECT*1..2]->(target:Project {id: ${XNS_PROJECT_ID_A}}) RETURN path
+    ...    ${XNS_ISSUE_ID_A}    ${XNS_PROJECT_ID_A}
 
 Group Scoped Multi Hop Traversal Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
-    ${p}=    Create Dictionary    id=p    entity=Project
-    ${wi}=    Create Dictionary    id=wi    entity=WorkItem
-    ${rel}=    Create Dictionary    id=rel    entity=WorkItem    columns=${{["id"]}}
-    ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
-    ${r2}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
-    ${r3}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$g, $p, $wi, $rel]}}    relationships=${{[$r1, $r2, $r3]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
+    Wait Until Result Node Ids Contain
+    ...    MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE g.id = ${XNS_GROUP_ID_A} RETURN g, p, wi, rel.id LIMIT 100
+    ...    ${XNS_ISSUE_ID_B}
 
 Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
-    ${p}=    Create Dictionary    id=p    entity=Project
-    ${wi}=    Create Dictionary    id=wi    entity=WorkItem
-    ${rel}=    Create Dictionary    id=rel    entity=WorkItem
-    ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
-    ${r2}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
-    ${r3}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${agg}=    Create Dictionary    count=rel    as=related_count
-    ${query}=    Create Dictionary    query_type=aggregation
-    ...    nodes=${{[$g, $p, $wi, $rel]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
-    Wait Until Aggregation At Least    ${query}    related_count    1
+    Wait Until Aggregation At Least
+    ...    MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE g.id = ${XNS_GROUP_ID_A} RETURN count(rel) AS related_count
+    ...    related_count    1
 
 Project Scoped Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
-    ${mr}=    Create Dictionary    id=mr    entity=MergeRequest
-    ${issue}=    Create Dictionary    id=issue    entity=WorkItem    columns=${{["id"]}}
-    ${r1}=    Create Dictionary    type=IN_PROJECT    from=mr    to=p
-    ${r2}=    Create Dictionary    type=CLOSES    from=mr    to=issue
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$p, $mr, $issue]}}    relationships=${{[$r1, $r2]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
+    Wait Until Result Node Ids Contain
+    ...    MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:CLOSES]->(issue:WorkItem) WHERE p.id = ${XNS_PROJECT_ID_A} RETURN p, mr, issue.id LIMIT 100
+    ...    ${XNS_ISSUE_ID_B}
 
 Group Scoped Multi Hop Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
-    ${filters}=    Create Dictionary    id=${scope}
-    ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
-    ${p}=    Create Dictionary    id=p    entity=Project
-    ${mr}=    Create Dictionary    id=mr    entity=MergeRequest
-    ${issue}=    Create Dictionary    id=issue    entity=WorkItem    columns=${{["id"]}}
-    ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
-    ${r2}=    Create Dictionary    type=IN_PROJECT    from=mr    to=p
-    ${r3}=    Create Dictionary    type=CLOSES    from=mr    to=issue
-    ${query}=    Create Dictionary    query_type=traversal
-    ...    nodes=${{[$g, $p, $mr, $issue]}}    relationships=${{[$r1, $r2, $r3]}}    limit=${100}
-    Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
-
+    Wait Until Result Node Ids Contain
+    ...    MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:CLOSES]->(issue:WorkItem) WHERE g.id = ${XNS_GROUP_ID_A} RETURN g, p, mr, issue.id LIMIT 100
+    ...    ${XNS_ISSUE_ID_B}
 
 *** Keywords ***
 Seed Cross Namespace Fixture
