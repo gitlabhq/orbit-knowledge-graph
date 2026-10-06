@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use orbit_utils::vfs::{
-    Put, Source, SourceError, Tag, Vfs,
+    Loading, Put, Source, SourceError, Tag,
     sources::{Archive, Changed, Checkout, Memory},
 };
 
@@ -12,11 +12,10 @@ pub(super) struct Input<'a> {
     pub scenario: &'a Scenario,
     pub kind: SourceKind,
     pub root: &'a Path,
-    pub directory: &'a Path,
 }
 
 impl Source for Input<'_> {
-    fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
+    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
         let fixtures = &self.scenario.fixtures;
         match self.kind {
             SourceKind::Memory => Memory(
@@ -61,11 +60,6 @@ impl Source for Input<'_> {
                 }
             }
             SourceKind::Archive => {
-                if let Some(path) = &self.scenario.input_file {
-                    let file = std::fs::File::open(self.directory.join(path))
-                        .expect("open archive input fixture");
-                    return Archive(file).fill(into);
-                }
                 let mut builder = tar::Builder::new(Vec::new());
                 for file in fixtures {
                     let mut header = tar::Header::new_gnu();

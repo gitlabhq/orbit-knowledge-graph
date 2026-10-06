@@ -104,7 +104,6 @@ strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
-indextree = "4.9"
 rayon = "1.11.0"
 lz4_flex = "0.11.6"
 walkdir = "2.5.0"

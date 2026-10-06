@@ -1,10 +1,18 @@
+//! Where bytes live when they are not in memory: one anonymous append-only
+//! file, opened on the first spill, positional writes from any thread,
+//! positional reads, gone when the store is. Each blob is one independent
+//! LZ4 block when compression reduces its size, so reads stay random-access.
+
 use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
 
-use super::{Bytes, Options, SourceError, add_capped};
+use super::limits::add_capped;
+use super::{Bytes, Options, SourceError};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) enum Blob {
     Memory(Bytes),
     Spilled { offset: u64, len: u64, raw_len: u64 },
@@ -14,8 +22,8 @@ pub(super) struct Scratch {
     dir: Option<PathBuf>,
     compress: bool,
     cap: Option<u64>,
-    file: Option<std::fs::File>,
-    end: u64,
+    file: OnceLock<std::fs::File>,
+    pub(super) end: AtomicU64,
 }
 
 impl Scratch {
@@ -24,31 +32,28 @@ impl Scratch {
             dir: options.scratch_dir.clone(),
             compress: options.compress_spill,
             cap,
-            file: None,
-            end: 0,
+            file: OnceLock::new(),
+            end: AtomicU64::new(0),
         }
     }
 
-    pub(super) fn len(&self) -> u64 {
-        self.end
-    }
-
-    pub(super) fn append(&mut self, bytes: &[u8]) -> Result<Blob, SourceError> {
+    pub(super) fn append(&self, bytes: &[u8]) -> Result<Blob, SourceError> {
         let raw_len = bytes.len() as u64;
-        let compressed = self.compress.then(|| lz4_flex::block::compress(bytes));
-        let bytes = compressed
-            .as_deref()
-            .filter(|data| data.len() < bytes.len())
-            .unwrap_or(bytes);
+        let compressed;
+        let bytes = match self.compress {
+            true => {
+                compressed = lz4_flex::block::compress(bytes);
+                if compressed.len() < bytes.len() {
+                    compressed.as_slice()
+                } else {
+                    bytes
+                }
+            }
+            false => bytes,
+        };
         let len = bytes.len() as u64;
-        let offset = add_capped(&mut self.end, "spilled_bytes", len, self.cap)?;
-        if self.file.is_none() {
-            self.file = Some(match &self.dir {
-                Some(dir) => tempfile::tempfile_in(dir)?,
-                None => tempfile::tempfile()?,
-            });
-        }
-        self.file.as_ref().unwrap().write_all_at(bytes, offset)?;
+        let offset = add_capped(&self.end, "spilled_bytes", len, self.cap)?;
+        self.file()?.write_all_at(bytes, offset)?;
         Ok(Blob::Spilled {
             offset,
             len,
@@ -56,24 +61,25 @@ impl Scratch {
         })
     }
 
-    pub(super) fn read(&self, blob: &Blob) -> io::Result<Bytes> {
-        let (offset, len, raw_len) = match blob {
-            Blob::Memory(bytes) => return Ok(bytes.clone()),
-            Blob::Spilled {
-                offset,
-                len,
-                raw_len,
-            } => (*offset, *len, *raw_len),
-        };
-        let mut bytes = vec![0; len as usize];
-        self.file
-            .as_ref()
-            .unwrap()
-            .read_exact_at(&mut bytes, offset)?;
+    pub(super) fn read(&self, offset: u64, len: u64, raw_len: u64) -> io::Result<Bytes> {
+        let mut bytes = vec![0u8; len as usize];
+        self.file()?.read_exact_at(&mut bytes, offset)?;
         if len < raw_len {
             bytes = lz4_flex::block::decompress(&bytes, raw_len as usize)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         }
         Ok(bytes.into())
+    }
+
+    fn file(&self) -> io::Result<&std::fs::File> {
+        if let Some(file) = self.file.get() {
+            return Ok(file);
+        }
+        let file = match &self.dir {
+            Some(dir) => tempfile::tempfile_in(dir)?,
+            None => tempfile::tempfile()?,
+        };
+        let _ = self.file.set(file);
+        Ok(self.file.get().expect("scratch file was just set"))
     }
 }
