@@ -12,7 +12,11 @@ The schema is defined by node and relationship types in the ontology (`config/on
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
 storage metadata also owns table-level MergeTree settings. These are indexes, projections, primary
-keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL.
+keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL. A `text`
+index declares the Orbit text-search pair for one column: a `text(tokenizer = splitByNonAlpha)`
+index and an `ngrambf_v1` index, both over `lower(column)`. The compiler emits every string
+operator on `lower(column)`, so `contains`, `starts_with`, `ends_with`, and the token operators
+are case-insensitive and prune with these indexes.
 
 ## Schema Version Tracking
 

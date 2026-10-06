@@ -103,8 +103,8 @@ fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
 /// Renders the markdown table body (without the surrounding marker comments).
 fn render_table(ontology: &Ontology) -> Result<String> {
     // Node-only by design: the validator's token-op gate keys off
-    // `text_index_tokenizer`, which is itself node-only, and no edge YAML
-    // carries a `text(...)` index. If an edge ever gains one, extend both this
+    // `has_text_index`, which is itself node-only, and no edge YAML
+    // carries a `text` index. If an edge ever gains one, extend both this
     // iteration and the validator lookup together so the docs can't omit it.
     let mut rows: Vec<(&str, Vec<&str>)> = ontology
         .nodes()

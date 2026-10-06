@@ -236,9 +236,8 @@ impl ClickHouseCatalog {
                         PropertyRealization::Virtual(source.clone())
                     }
                 });
-                property_facts[property_id.index()].has_text_index = ontology
-                    .text_index_tokenizer(&node.name, &field.name)
-                    .is_some();
+                property_facts[property_id.index()].has_text_index =
+                    ontology.has_text_index(&node.name, &field.name);
                 if node.default_columns.iter().any(|name| name == &field.name) {
                     default_properties.push(property_id);
                 }

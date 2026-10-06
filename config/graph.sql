@@ -48,8 +48,8 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS gl_container_repository (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_status status TYPE set(4) GRANULARITY 2,
     INDEX idx_created_at created_at TYPE minmax GRANULARITY 1,
     INDEX idx_updated_at updated_at TYPE minmax GRANULARITY 1,
@@ -108,12 +109,12 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_fqn fqn TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_fqn_ngram fqn TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_file_path file_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_file_path_ngram file_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_fqn lower(fqn) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_fqn_ngram lower(fqn) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_file_path lower(file_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_file_path_ngram lower(file_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
@@ -128,7 +129,8 @@ CREATE TABLE IF NOT EXISTS gl_dependency (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.001) GRANULARITY 1,
-    INDEX idx_name name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -157,8 +159,8 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     INDEX idx_status status TYPE set(8) GRANULARITY 2,
     INDEX idx_archived archived TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_ref lower(ref) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_ref_ngram lower(ref) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_environment_id environment_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_user_id user_id TYPE bloom_filter(0.0001) GRANULARITY 1
@@ -178,10 +180,10 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_path lower(path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_path_ngram lower(path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -210,11 +212,11 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     _deleted Bool DEFAULT false,
     INDEX idx_state state TYPE set(4) GRANULARITY 2,
     INDEX idx_tier tier TYPE set(8) GRANULARITY 2,
-    INDEX idx_environment_type environment_type TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_environment_type_ngram environment_type TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_environment_type lower(environment_type) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_environment_type_ngram lower(environment_type) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -237,10 +239,10 @@ CREATE TABLE IF NOT EXISTS gl_file (
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_path lower(path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_path_ngram lower(path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -262,10 +264,10 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     _deleted Bool DEFAULT false,
     INDEX idx_deduplicated deduplicated TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_scan_id scan_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_scanner_id scanner_id TYPE bloom_filter(0.0001) GRANULARITY 1
@@ -285,11 +287,11 @@ CREATE TABLE IF NOT EXISTS gl_group (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_full_path full_path TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -316,10 +318,10 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_identifier_name identifier_name TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_file_path file_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_file_path_ngram file_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_import_path import_path TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_import_path_ngram import_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_file_path lower(file_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_file_path_ngram lower(file_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_import_path lower(import_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_import_path_ngram lower(import_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
@@ -364,10 +366,10 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_finished_at finished_at TYPE minmax GRANULARITY 1,
     INDEX idx_queued_at queued_at TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_ref lower(ref) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_ref_ngram lower(ref) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_user_id user_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_upstream_pipeline_id upstream_pipeline_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -392,10 +394,10 @@ CREATE TABLE IF NOT EXISTS gl_label (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_title_ngram lower(title) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_group_id group_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -458,14 +460,14 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_updated_at updated_at TYPE minmax GRANULARITY 1,
     INDEX idx_merged_at merged_at TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_source_branch source_branch TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_source_branch_ngram source_branch TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_target_branch target_branch TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_target_branch_ngram target_branch TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_title_ngram lower(title) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_source_branch lower(source_branch) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_source_branch_ngram lower(source_branch) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_target_branch lower(target_branch) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_target_branch_ngram lower(target_branch) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_merge_status merge_status TYPE set(8) GRANULARITY 2,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_author_id author_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -531,10 +533,10 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_deleted_file deleted_file TYPE minmax GRANULARITY 1,
     INDEX idx_binary binary TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_new_path new_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_new_path_ngram new_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_old_path old_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
-    INDEX idx_old_path_ngram old_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_new_path lower(new_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_new_path_ngram lower(new_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_old_path lower(old_path) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_old_path_ngram lower(old_path) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_merge_request_diff_id merge_request_diff_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1
@@ -558,11 +560,11 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_title_ngram lower(title) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_state state TYPE set(4) GRANULARITY 2,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_group_id group_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -592,8 +594,8 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_internal internal TYPE minmax GRANULARITY 1,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_note note TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_note_ngram note TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_note lower(note) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_note_ngram lower(note) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_discussion_id discussion_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_noteable_id noteable_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -615,7 +617,8 @@ CREATE TABLE IF NOT EXISTS gl_package (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_package_type package_type TYPE set(16) GRANULARITY 2,
     INDEX idx_status status TYPE set(8) GRANULARITY 2,
     INDEX idx_created_at created_at TYPE minmax GRANULARITY 1,
@@ -638,7 +641,8 @@ CREATE TABLE IF NOT EXISTS gl_package_file (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.001) GRANULARITY 1,
-    INDEX idx_file_name file_name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_file_name lower(file_name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_file_name_ngram lower(file_name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_status status TYPE set(8) GRANULARITY 2,
     INDEX idx_project_id project_id TYPE bloom_filter(0.001) GRANULARITY 1,
     INDEX idx_created_at created_at TYPE minmax GRANULARITY 1,
@@ -681,8 +685,8 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_updated_at updated_at TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_source source TYPE set(20) GRANULARITY 2,
-    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_ref lower(ref) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_ref_ngram lower(ref) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_user_id user_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -710,11 +714,11 @@ CREATE TABLE IF NOT EXISTS gl_project (
     INDEX idx_updated_at updated_at TYPE minmax GRANULARITY 1,
     INDEX idx_last_activity_at last_activity_at TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_full_path full_path TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -735,8 +739,8 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_runner_type runner_type TYPE set(4) GRANULARITY 2,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -776,8 +780,8 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_pipeline_id pipeline_id TYPE bloom_filter(0.0001) GRANULARITY 1
@@ -812,10 +816,10 @@ CREATE TABLE IF NOT EXISTS gl_user (
     INDEX idx_is_admin is_admin TYPE minmax GRANULARITY 1,
     INDEX idx_is_auditor is_auditor TYPE minmax GRANULARITY 1,
     INDEX idx_is_external is_external TYPE minmax GRANULARITY 1,
-    INDEX idx_username username TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_username_ngram username TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
+    INDEX idx_username lower(username) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_username_ngram lower(username) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -851,10 +855,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_detected_at detected_at TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_title_ngram lower(title) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_finding_id finding_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_author_id author_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -878,12 +882,12 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_external_type external_type TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_external_type_ngram external_type TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_external_type lower(external_type) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_external_type_ngram lower(external_type) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_external_id lower(external_id) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_external_id_ngram lower(external_id) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -912,10 +916,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_cve cve TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_scanner_id scanner_id TYPE bloom_filter(0.0001) GRANULARITY 1,
@@ -937,10 +941,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_name lower(name) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name_ngram lower(name) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_external_id lower(external_id) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_external_id_ngram lower(external_id) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
@@ -974,10 +978,10 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_created_at created_at TYPE minmax GRANULARITY 1,
     INDEX idx_due_date due_date TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
-    INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_title lower(title) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_title_ngram lower(title) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
+    INDEX idx_description lower(description) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_description_ngram lower(description) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_author_id author_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_milestone_id milestone_id TYPE bloom_filter(0.0001) GRANULARITY 1,

@@ -1385,32 +1385,17 @@ impl Ontology {
         &self.denormalized_properties
     }
 
-    /// Returns the text index tokenizer for a column on a node entity, if one exists.
-    ///
-    /// Looks up `StorageIndex` entries whose `index_type` starts with `text(`.
-    /// Returns the full tokenizer parameter string (e.g. `"tokenizer = splitByNonAlpha"`).
+    /// Whether a node column carries the Orbit `text` storage index, which the
+    /// compiler's token-operator validation requires.
     #[must_use]
-    pub fn text_index_tokenizer(&self, entity_name: &str, column_name: &str) -> Option<&str> {
-        let node = self.nodes.get(entity_name)?;
-        node.storage
-            .indexes
-            .iter()
-            .find(|idx| idx.column == column_name && idx.index_type.starts_with("text("))
-            .map(|idx| {
-                // Extract the inner params: "text(tokenizer = splitByNonAlpha)" -> "tokenizer = splitByNonAlpha"
-                let s = idx.index_type.as_str();
-                &s[5..s.len() - 1]
-            })
+    pub fn has_text_index(&self, entity_name: &str, column_name: &str) -> bool {
+        self.text_indexed_columns(entity_name)
+            .contains(&column_name)
     }
 
     /// Returns the sorted, deduplicated list of columns on a node entity that
-    /// carry a `text(...)` storage index, and therefore support the
+    /// carry the `text` storage index, and therefore support the
     /// `token_match`, `all_tokens`, and `any_tokens` query operators.
-    ///
-    /// This is the same `text(`-index signal that [`Ontology::text_index_tokenizer`]
-    /// keys off and that the compiler's token-operator validation enforces, so
-    /// the returned set is exactly the set of properties for which token
-    /// operators are accepted.
     #[must_use]
     pub fn text_indexed_columns(&self, entity_name: &str) -> Vec<&str> {
         let Some(node) = self.nodes.get(entity_name) else {
@@ -1420,7 +1405,7 @@ impl Ontology {
             .storage
             .indexes
             .iter()
-            .filter(|idx| idx.index_type.starts_with("text("))
+            .filter(|idx| idx.index_type == constants::TEXT_INDEX_TYPE)
             .map(|idx| idx.column.as_str())
             .collect();
         columns.sort_unstable();
@@ -3882,20 +3867,20 @@ properties:
 
             for column in &columns {
                 assert!(
-                    ontology.text_index_tokenizer(&node.name, column).is_some(),
-                    "{}.{column} is reported text-indexed but has no tokenizer",
+                    ontology.has_text_index(&node.name, column),
+                    "{}.{column} is reported text-indexed but has_text_index disagrees",
                     node.name
                 );
             }
 
-            // Reverse direction: every `text(...)` storage index on the node
+            // Reverse direction: every `text` storage index on the node
             // must surface through the accessor, so the generated doc table can
             // never omit a column for which the validator accepts token ops.
             for idx in &node.storage.indexes {
-                if idx.index_type.starts_with("text(") {
+                if idx.index_type == constants::TEXT_INDEX_TYPE {
                     assert!(
                         columns.contains(&idx.column.as_str()),
-                        "{}.{} carries a text() index but is missing from text_indexed_columns",
+                        "{}.{} carries a text index but is missing from text_indexed_columns",
                         node.name,
                         idx.column
                     );

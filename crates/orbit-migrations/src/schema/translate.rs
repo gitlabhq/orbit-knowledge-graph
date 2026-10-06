@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
+use ontology::constants::{DELETED_COLUMN, TEXT_INDEX_TYPE, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use ontology::{
     AuxiliaryColumn, AuxiliaryTable, DataType, Ontology, StorageColumn, StorageIndex,
     StorageProjection,
@@ -198,7 +198,7 @@ fn table_from_node(node: &ontology::NodeEntity) -> Table {
             .storage
             .indexes
             .iter()
-            .map(index_from_storage)
+            .flat_map(index_from_storage)
             .collect(),
         projections,
         engine,
@@ -230,14 +230,14 @@ fn table_from_edge(name: &str, config: &ontology::EdgeTableConfig) -> Table {
         .storage
         .indexes
         .iter()
-        .map(index_from_storage)
+        .flat_map(index_from_storage)
         .collect();
     indexes.extend(
         config
             .storage
             .denormalized_indexes
             .iter()
-            .map(index_from_storage),
+            .flat_map(index_from_storage),
     );
 
     let projections: Vec<Projection> = config
@@ -354,13 +354,13 @@ fn denormalized_table_from_join(
             source
                 .indexes
                 .iter()
-                .filter(|index| copies(&index.expression))
+                .filter(|index| copies(&index.column))
                 .map(|index| Index {
                     name: match index.name.strip_prefix("idx_") {
                         Some(rest) => format!("idx_{}{rest}", prefix(table_index)),
                         None => format!("{}{}", prefix(table_index), index.name),
                     },
-                    expression: join.column_for(table_index, &index.expression),
+                    column: join.column_for(table_index, &index.column),
                     ..index.clone()
                 }),
         );
@@ -605,13 +605,30 @@ fn system_columns(version_type: Option<&str>) -> Vec<Column> {
     ]
 }
 
-fn index_from_storage(storage_index: &StorageIndex) -> Index {
-    Index {
+fn index_from_storage(storage_index: &StorageIndex) -> Vec<Index> {
+    let index = Index {
         name: storage_index.name.clone(),
-        expression: storage_index.column.clone(),
+        column: storage_index.column.clone(),
+        case_insensitive: false,
         index_type: storage_index.index_type.clone(),
         granularity: storage_index.granularity,
+    };
+    if storage_index.index_type != TEXT_INDEX_TYPE {
+        return vec![index];
     }
+    vec![
+        Index {
+            case_insensitive: true,
+            index_type: "text(tokenizer = splitByNonAlpha)".into(),
+            ..index.clone()
+        },
+        Index {
+            name: format!("{}_ngram", index.name),
+            case_insensitive: true,
+            index_type: "ngrambf_v1(3, 512, 2, 0)".into(),
+            ..index
+        },
+    ]
 }
 
 fn projection_from_storage(storage_projection: &StorageProjection) -> Projection {
