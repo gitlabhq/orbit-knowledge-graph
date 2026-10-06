@@ -366,31 +366,30 @@ async fn insert_json_rows(
             serde_json::Value::Object(object).to_string()
         })
         .collect();
+    let sql = format!(
+        "INSERT INTO {table} ({}) SETTINGS {} FORMAT JSONEachRow\n{}",
+        quoted_columns.join(", "),
+        rendered_settings.join(", "),
+        lines.join("\n")
+    );
+
     // A FORMAT-bearing insert consumes the rest of the request body as data,
     // so it must go over the raw HTTP interface rather than the typed client.
-    // One insert per row keeps every unmerged row in its own part.
     let client = reqwest::Client::new();
     let url = format!("{}/?database={}", ctx.config.url, ctx.config.database);
-    for line in lines {
-        let sql = format!(
-            "INSERT INTO {table} ({}) SETTINGS {} FORMAT JSONEachRow\n{line}",
-            quoted_columns.join(", "),
-            rendered_settings.join(", "),
-        );
-        let response = client
-            .post(&url)
-            .basic_auth(&ctx.config.username, ctx.config.password.as_deref())
-            .body(sql)
-            .send()
-            .await
-            .unwrap_or_else(|e| panic!("{location}: seed insert request failed: {e}"));
-        let status = response.status();
-        assert!(
-            status.is_success(),
-            "{location}: seed insert into '{table}' failed: {status} {}",
-            response.text().await.unwrap_or_default()
-        );
-    }
+    let response = client
+        .post(&url)
+        .basic_auth(&ctx.config.username, ctx.config.password.as_deref())
+        .body(sql)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{location}: seed insert request failed: {e}"));
+    let status = response.status();
+    assert!(
+        status.is_success(),
+        "{location}: seed insert into '{table}' failed: {status} {}",
+        response.text().await.unwrap_or_default()
+    );
 }
 
 fn render_setting_value(value: &serde_json::Value, name: &str, location: &str) -> String {

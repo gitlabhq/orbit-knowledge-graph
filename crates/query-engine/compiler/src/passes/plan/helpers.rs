@@ -32,7 +32,7 @@ pub fn ordered_filters(
                 ),
             };
             let (property_id, data_type) = metadata.unwrap_or_default();
-            let sort_key = table
+            let in_sort_key = table
                 .and_then(|table| model.table_sort_key(table))
                 .is_some_and(|key| key.contains(property));
             filters.iter().map(move |filter| {
@@ -45,7 +45,7 @@ pub fn ordered_filters(
                         selectivity: property_id
                             .map(|property| model.property_selectivity(property))
                             .unwrap_or_default(),
-                        sort_key,
+                        in_sort_key,
                     },
                 )
             })

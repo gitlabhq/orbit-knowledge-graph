@@ -404,20 +404,16 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
                 return false;
             };
             let filter_str = filter.value_str().unwrap_or("");
-            let folded = || (cv_str.to_ascii_lowercase(), filter_str.to_ascii_lowercase());
             match op {
                 FilterOp::Eq => cv_str == filter_str,
-                FilterOp::Contains => {
-                    let (value, needle) = folded();
-                    value.contains(&needle)
-                }
-                FilterOp::StartsWith => {
-                    let (value, needle) = folded();
-                    value.starts_with(&needle)
-                }
-                FilterOp::EndsWith => {
-                    let (value, needle) = folded();
-                    value.ends_with(&needle)
+                FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith => {
+                    let (value, needle) =
+                        (cv_str.to_ascii_lowercase(), filter_str.to_ascii_lowercase());
+                    match op {
+                        FilterOp::Contains => value.contains(&needle),
+                        FilterOp::StartsWith => value.starts_with(&needle),
+                        _ => value.ends_with(&needle),
+                    }
                 }
                 _ => true,
             }

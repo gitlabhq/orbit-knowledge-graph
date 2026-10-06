@@ -25,7 +25,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         prop,
         &bound.filter,
         bound.data_type.as_ref(),
-        bound.sort_key,
+        bound.in_sort_key,
     )
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn filter_expression(
     prop: &str,
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
-    exact: bool,
+    in_sort_key: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
@@ -66,7 +66,7 @@ pub(crate) fn filter_expression(
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
         op => {
             let fold = |expr: Expr| {
-                if exact {
+                if in_sort_key {
                     expr
                 } else {
                     Expr::func(Function::Lower, vec![expr])
@@ -83,7 +83,8 @@ pub(crate) fn filter_expression(
                         mode: match op {
                             FilterOp::TokenMatch => TokenMatchMode::Single,
                             FilterOp::AllTokens => TokenMatchMode::All,
-                            _ => TokenMatchMode::Any,
+                            FilterOp::AnyTokens => TokenMatchMode::Any,
+                            _ => unreachable!(),
                         },
                         value: Box::new(col),
                         query: Box::new(needle),
@@ -91,7 +92,8 @@ pub(crate) fn filter_expression(
                 }
                 FilterOp::Contains => Expr::func(Function::Contains, vec![col, needle]),
                 FilterOp::StartsWith => Expr::func(Function::StartsWith, vec![col, needle]),
-                _ => Expr::func(Function::EndsWith, vec![col, needle]),
+                FilterOp::EndsWith => Expr::func(Function::EndsWith, vec![col, needle]),
+                _ => unreachable!(),
             }
         }
     }

@@ -28,7 +28,7 @@ pub struct BoundFilter {
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
-    pub sort_key: bool,
+    pub in_sort_key: bool,
 }
 
 pub struct Plan<T> {

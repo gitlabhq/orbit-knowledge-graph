@@ -839,7 +839,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+                 string operators (contains/starts_with/ends_with) are not allowed on this field"
             )));
         }
 
@@ -853,7 +853,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) require a text field, got {data_type}"
+                 string operators (contains/starts_with/ends_with) require a text field, got {data_type}"
             )));
         }
 
@@ -2803,7 +2803,7 @@ mod tests {
 
         let err = validator.check_references(&input).unwrap_err();
         assert!(
-            err.to_string().contains("LIKE operators"),
+            err.to_string().contains("string operators"),
             "expected like_allowed rejection, got: {err}"
         );
     }

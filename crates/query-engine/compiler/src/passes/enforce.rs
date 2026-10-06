@@ -8,6 +8,7 @@ use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
+use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
@@ -296,27 +297,11 @@ fn enforce_return_columns(
                 let scan = if node.filters.is_empty() {
                     TableRef::scan_final(table, &node.id)
                 } else {
-                    let mut predicates = Vec::new();
-                    for (property, filters) in &node.filters {
-                        let data_type = model
-                            .property_for_entity_id(entity_id, property)
-                            .map(|property| property.data_type);
-                        for filter in filters {
-                            predicates.push(filter_to_expr(
-                                &node.id,
-                                property,
-                                &crate::passes::plan::BoundFilter {
-                                    filter: filter.clone(),
-                                    property: None,
-                                    data_type,
-                                    selectivity: ontology::FieldSelectivity::High,
-                                    sort_key: model
-                                        .table_sort_key(table)
-                                        .is_some_and(|key| key.contains(property)),
-                                },
-                            ));
-                        }
-                    }
+                    let mut predicates: Vec<Expr> =
+                        ordered_filters(&node.filters, FilterOwner::Entity(entity_id), model)
+                            .iter()
+                            .map(|(property, bound)| filter_to_expr(&node.id, property, bound))
+                            .collect();
                     if !node.node_ids.is_empty() {
                         predicates.push(id_list_predicate(
                             &node.id,
