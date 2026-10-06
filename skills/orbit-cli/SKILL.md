@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.19.0
+version: 0.20.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -22,7 +22,7 @@ metadata:
 # Orbit local CLI skill
 
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
-definitions and lists matching lines in config, templates, and docs. `context` reads their source and relationships. `sql` runs
+definitions and lists every matching line in code, tests, config, and docs. `context` reads their source and relationships. `sql` runs
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
@@ -53,7 +53,7 @@ Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
 single token must also match literally, ignoring case. Results rank exact names,
 then name/path hits, then body mentions. Rows show each definition's name, kind,
 and range; body hits also list their matching lines. A Mentions section lists
-matching lines in config, templates, and docs.
+every other matching line in code, tests, config, and docs.
 
 Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show
