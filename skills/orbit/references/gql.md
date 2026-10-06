@@ -68,7 +68,7 @@ matter. Words are runs of letters and digits, so `token_match(d.file_path,
 'main')` matches `src/main.rs`. Properties without a text index reject the
 token functions.
 
-- `token_match(property, 'token')` matches one whole word.
+- `token_match(property, 'token')` matches one whole word; the value is a single word.
 - `all_tokens(property, 'first second')` requires every word, in any order.
 - `any_tokens(property, 'first second')` requires at least one word.
 

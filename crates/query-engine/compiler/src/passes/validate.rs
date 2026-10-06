@@ -884,6 +884,18 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             }
         }
 
+        if op == FilterOp::TokenMatch
+            && value.as_str().is_some_and(|s| {
+                s.chars()
+                    .any(|c| c.is_ascii() && !c.is_ascii_alphanumeric())
+            })
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 token_match value must be one word of letters and digits; use all_tokens for several words"
+            )));
+        }
+
         match op {
             FilterOp::In => {
                 let Some(arr) = value.as_array() else {
