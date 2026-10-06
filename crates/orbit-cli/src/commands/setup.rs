@@ -70,9 +70,9 @@ impl SetupRun {
 pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
     let interactive = tui::can_prompt(options.yes)?;
     let detected_agents = machine.installed_agents();
-    let finish = |selection: &Selection, outcome| SetupRun {
-        graph_first: Some(selection.graph_first),
-        index: Some(options.index),
+    let finish = |selection: &Selection, outcome, indexed: bool| SetupRun {
+        graph_first: Some(outcome == Outcome::Applied && selection.graph_first),
+        index: Some(indexed),
         ..SetupRun::new(&detected_agents, selection, &target, interactive, outcome)
     };
     let mut selection = Selection::from_setup_options(&options, &detected_agents)?;
@@ -99,13 +99,13 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
             "No agent selected. Name one to configure it: orbit setup <{}>",
             spec::agent_names().join("|")
         ))?;
-        return Ok(finish(&selection, Outcome::NoAgentSelected));
+        return Ok(finish(&selection, Outcome::NoAgentSelected, false));
     }
 
     let plan = plan::for_selection(&selection, &target)?;
     if options.dry_run {
         show_dry_run(&plan, "Dry run: nothing written.")?;
-        return Ok(finish(&selection, Outcome::DryRun));
+        return Ok(finish(&selection, Outcome::DryRun, false));
     }
 
     apply_and_report(&options, |report| {
@@ -121,7 +121,7 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         tui::card("Try it", command)?;
     }
     tui::outro(summary::format_closing_line(indexed.as_ref()))?;
-    Ok(finish(&selection, Outcome::Applied))
+    Ok(finish(&selection, Outcome::Applied, indexed.is_some()))
 }
 
 pub(crate) fn uninstall(options: Options, target: Target, machine: &Machine) -> Result<SetupRun> {
@@ -421,8 +421,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut dry = options_with_mcp(&["claude", "codex", "opencode"]);
         dry.dry_run = true;
+        dry.index = true;
+        dry.graph_first = true;
         let run = install(dry, project(dir.path()), &bare_machine()).unwrap();
         assert_eq!(run.outcome, Outcome::DryRun);
+        assert_eq!(run.index, Some(false));
+        assert_eq!(run.graph_first, Some(false));
         assert!(run.components.contains(&Component::Mcp));
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
