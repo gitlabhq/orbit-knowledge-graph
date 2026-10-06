@@ -13,9 +13,7 @@ ignore = { workspace = true }
 lz4_flex = { workspace = true }
 memchr = { workspace = true }
 regex = { workspace = true }
-rayon = { workspace = true }
 rustc-hash = { workspace = true }
-rustix = { workspace = true, features = ["fs"] }
 serde = { workspace = true }
 serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
@@ -25,9 +23,6 @@ tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = { workspace = true }
 
 [lints]
 workspace = true

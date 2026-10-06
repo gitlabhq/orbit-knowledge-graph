@@ -10,23 +10,24 @@
 //!
 //! Decisions are policy and belong to a [`Pass`]; where bytes live, when they
 //! are read and what a path resolves to is mechanism and belongs to the store.
-//! Virtual paths resolve lexically under `/`. Directory sources keep host paths separate
-//! and reject symlink traversal during disk reads. Custom sources select trusted host paths.
-//! Disk-linked contents are live, not snapshots; callers must provide a stable directory
-//! when they need one revision. Repeated reads can perform I/O again.
+//! Virtual paths resolve lexically under `/`. Sources own transport and host-path validation.
+//! On-demand readers can return live content. Repeated reads can perform I/O again.
 //!
 //! Cancellation is cooperative between files, not an interrupt for blocked source I/O.
 //! Memory limits cover stored content, not node metadata, decompression or caller buffers.
-
-#![doc = include_str!("README.md")]
+//! Every valid offered path is cataloged; duplicate paths use the last offered entry.
+//! Reader failures remain attached to content and are returned by `read`, without a policy change.
+//! Source failures, storage failures, cancellation, and global caps abort loading.
 
 mod limits;
 mod loading;
 mod path;
 mod policy;
 mod scratch;
-pub mod sources;
 mod store;
+
+#[cfg(test)]
+mod tests;
 
 use std::io;
 use std::path::PathBuf;
@@ -35,8 +36,11 @@ use std::sync::Arc;
 pub use limits::{CapExceeded, Limits};
 pub use loading::{Loading, Put};
 pub use policy::{Decision, File, Pass, Tag, Then};
-pub use sources::Source;
 pub use store::{Kind, Stat, Vfs};
+
+pub trait Source {
+    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError>;
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
@@ -44,8 +48,6 @@ pub enum SourceError {
     Cap(#[from] CapExceeded),
     #[error("source error: {0}")]
     Io(#[from] io::Error),
-    #[error("source contained no entries (empty or truncated stream)")]
-    Empty,
     #[error("load cancelled")]
     Cancelled,
 }

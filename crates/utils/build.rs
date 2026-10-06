@@ -1,41 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     emit_build_version();
-    generate_vfs_tests();
-}
-
-fn generate_vfs_tests() {
-    let root = std::path::Path::new("tests/vfs/cases");
-    println!("cargo:rerun-if-changed={}", root.display());
-    let mut paths: Vec<_> = std::fs::read_dir(root)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "yaml")
-        })
-        .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "VFS suite must contain scenarios");
-    let mut code = String::new();
-    for path in paths {
-        let name = path.file_stem().unwrap().to_str().unwrap();
-        assert!(
-            name.starts_with(|c: char| c.is_ascii_alphabetic())
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "invalid scenario name: {name}"
-        );
-        let path = path.canonicalize().unwrap();
-        code.push_str(&format!(
-            "#[test]\nfn {name}() {{ runner::run(include_str!({:?})); }}\n",
-            path
-        ));
-    }
-    std::fs::write(
-        std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("vfs_cases.rs"),
-        code,
-    )
-    .unwrap();
 }
 
 /// Emit `GKG_BUILD_VERSION` so the binary has a meaningful compiled-in
