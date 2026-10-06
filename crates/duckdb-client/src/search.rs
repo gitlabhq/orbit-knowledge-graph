@@ -12,7 +12,9 @@ use serde_json::{Map, Value};
 use crate::{
     DuckDbClient, bool_column, f64_column, i64_column, scalar_i64, sql_lit, string_column,
 };
-use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
+use orbit_search::corpus::{
+    DEFAULT_SOURCE_EXTS, EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts,
+};
 use orbit_search::{GrepMatch, GrepOutcome, RecallFilter, query_alternatives};
 
 pub const FTS_STEMMER: &str = "english";
@@ -281,7 +283,7 @@ WHERE d.def_id = s.def_id"
 
 pub const TEXT_LINE_PREFIX: &str = "gl_doc_line_";
 const TEXT_FILE_MAX_BYTES: u64 = 256 * 1024;
-const TEXT_LINES_MAX: usize = 500_000;
+const TEXT_LINES_MAX: usize = 3_000_000;
 const TEXT_LINE_MAX_CHARS: usize = 400;
 const TEXT_EXTS: &[&str] = &[
     "yml",
@@ -355,9 +357,10 @@ pub fn is_indexed_text_file(path: &str, size: u64) -> bool {
         return false;
     }
     TEXT_NAMES.contains(&name)
-        || name
-            .rsplit_once('.')
-            .is_some_and(|(_, ext)| TEXT_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
+        || name.rsplit_once('.').is_some_and(|(_, ext)| {
+            let ext = ext.to_ascii_lowercase();
+            TEXT_EXTS.contains(&ext.as_str()) || DEFAULT_SOURCE_EXTS.contains(&ext.as_str())
+        })
 }
 
 pub fn populate_text_lines(
@@ -744,6 +747,7 @@ mod text_line_tests {
             "docs/README.md",
             "Dockerfile",
             "go.mod",
+            "src/app.js",
         ] {
             assert!(is_indexed_text_file(path, 100), "{path}");
         }
@@ -753,7 +757,6 @@ mod text_line_tests {
             "vendor/x/config.yml",
             "web/node_modules/a/package.json",
             "dist/app.min.css",
-            "src/app.js",
             "logo.svg",
         ] {
             assert!(!is_indexed_text_file(path, 100), "{path}");
