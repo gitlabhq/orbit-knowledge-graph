@@ -56,13 +56,13 @@ fn group_parseable_inventory(
         }
 
         accepted_files += 1;
-        parsed_file_languages.insert(entry.path.clone(), lang);
+        parsed_file_languages.insert(entry.path.to_string(), lang);
         groups
             .entry(lang.family())
             .or_default()
             .push(FamilyFileInput {
                 language: lang,
-                path: entry.path.clone(),
+                path: entry.path.to_string(),
             });
     }
 
@@ -76,9 +76,9 @@ fn build_file_inventory_graph(
 ) -> CodeGraph {
     let mut graph = CodeGraph::new();
     for entry in inventory.files() {
-        let language = parsed_file_languages.get(&entry.path).copied();
+        let language = parsed_file_languages.get(entry.path.as_ref()).copied();
         let reason = reasons
-            .get(entry.path.as_str())
+            .get(entry.path.as_ref())
             .copied()
             .unwrap_or_default();
         graph.add_unparsed_file(&entry.path, language, entry.size, reason);
@@ -1004,7 +1004,7 @@ impl Pipeline {
             for entry in ctx.vfs.files() {
                 if let FileDecision::List(reason) | FileDecision::Drop(reason) = entry.decision() {
                     reasons.insert(
-                        entry.path.as_str(),
+                        entry.path.as_ref(),
                         FileReason::Skip(FileSkip::Filter(reason)),
                     );
                 }
@@ -1746,14 +1746,12 @@ pub(crate) mod testing {
     pub struct Keep;
     impl Pass for Keep {
         type Tag = Role;
-        fn header(&self, file: &mut File<Role>) {
-            file.decide(FileDecision::Keep(
-                if detect_language_from_path(&file.path).is_some() {
-                    Role::Source
-                } else {
-                    Role::Input
-                },
-            ));
+        fn metadata(&self, file: &File<'_, Role>) -> FileDecision<Role> {
+            FileDecision::Keep(if detect_language_from_path(&file.path).is_some() {
+                Role::Source
+            } else {
+                Role::Input
+            })
         }
     }
 
@@ -1796,10 +1794,11 @@ pub(crate) mod testing {
         struct Listed(FxHashSet<String>);
         impl Pass for Listed {
             type Tag = Role;
-            fn header(&self, file: &mut File<Role>) {
-                Keep.header(file);
-                if self.0.contains(&file.path) {
-                    file.decide(FileDecision::List("excluded"));
+            fn metadata(&self, file: &File<'_, Role>) -> FileDecision<Role> {
+                if self.0.contains(file.path.as_ref()) {
+                    FileDecision::List("excluded")
+                } else {
+                    Keep.metadata(file)
                 }
             }
         }
