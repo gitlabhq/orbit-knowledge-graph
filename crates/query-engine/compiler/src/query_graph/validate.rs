@@ -408,6 +408,15 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 }
                 Ok(ValueType::Scalar(SqlType::Bool))
             }
+            Expression::HasAny(left, right) => {
+                let left = self.expression_type(left, visiting)?;
+                if !matches!(left, ValueType::Array(_))
+                    || left != self.expression_type(right, visiting)?
+                {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ValueType::Scalar(SqlType::Bool))
+            }
             Expression::Equal(left, right)
             | Expression::Greater(left, right)
             | Expression::GreaterEqual(left, right)
@@ -445,7 +454,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         stored.name()
                     ))
                 })?;
-                Ok(ValueType::Scalar(match ty {
+                let value = ValueType::Scalar(match ty {
                     ontology::DataType::Int => SqlType::Int64,
                     ontology::DataType::Bool => SqlType::Bool,
                     ontology::DataType::Float => SqlType::Float64,
@@ -455,7 +464,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         timezone: None,
                     },
                     _ => SqlType::String,
-                }))
+                });
+                Ok(if stored.is_array() {
+                    ValueType::Array(Box::new(value))
+                } else {
+                    value
+                })
             }
             Port::Output(output) => self.output_type(output, visiting),
         }
@@ -588,6 +602,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             | Expression::And(left, right)
             | Expression::Or(left, right)
             | Expression::In(left, right)
+            | Expression::HasAny(left, right)
             | Expression::Greater(left, right)
             | Expression::GreaterEqual(left, right)
             | Expression::LessEqual(left, right)

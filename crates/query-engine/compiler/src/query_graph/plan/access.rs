@@ -179,7 +179,18 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 && !eligible
                 && !input.relationships.is_empty()
                 && !needed
-                && node.filters.is_empty()
+                && node.filters.iter().all(|(property, filters)| {
+                    input.relationships.iter().any(|relationship| {
+                        super::predicates::edge_tag(
+                            self.catalog,
+                            node,
+                            property,
+                            filters,
+                            relationship,
+                        )
+                        .is_some()
+                    })
+                })
                 && node.id_property == "id"
                 && !requires_authorization_scan
             {

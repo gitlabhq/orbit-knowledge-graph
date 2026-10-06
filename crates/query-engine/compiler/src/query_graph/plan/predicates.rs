@@ -1,5 +1,50 @@
 use super::*;
 
+pub(super) fn edge_tag<'a>(
+    model: &'a (impl QueryDataModel + ?Sized),
+    node: &crate::input::InputNode,
+    property: &str,
+    filters: &[crate::input::InputFilter],
+    relationship: &crate::input::InputRelationship,
+) -> Option<(&'a str, Vec<Vec<String>>)> {
+    use query_data_model::{DenormalizedDirection, DenormalizedKey};
+    if relationship.direction == crate::input::Direction::Both
+        || crate::passes::normalize::is_wildcard(&relationship.types)
+    {
+        return None;
+    }
+    let column = if relationship.from == node.id {
+        relationship.direction.edge_columns().0
+    } else if relationship.to == node.id {
+        relationship.direction.edge_columns().1
+    } else {
+        return None;
+    };
+    let property = model.property(node.entity.as_deref()?, property)?;
+    let direction = if column == "source_id" {
+        DenormalizedDirection::Source
+    } else {
+        DenormalizedDirection::Target
+    };
+    let facts = model.denormalized().property(DenormalizedKey {
+        property: property.id,
+        direction,
+    })?;
+    if !relationship.types.iter().all(|kind| {
+        model
+            .graph()
+            .relationship_id(kind)
+            .is_some_and(|id| facts.relationships.contains(&id))
+    }) {
+        return None;
+    }
+    let values = filters
+        .iter()
+        .map(|filter| crate::passes::plan::helpers::denorm_tag_values(&facts.tag_key, filter))
+        .collect::<Option<Vec<_>>>()?;
+    Some((&facts.edge_column, values))
+}
+
 impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
 {

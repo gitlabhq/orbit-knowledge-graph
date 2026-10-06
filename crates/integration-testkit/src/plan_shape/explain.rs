@@ -642,6 +642,23 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
             graph_expression(graph, right)
         ),
         Expression::Count => "COUNT()".into(),
+        Expression::HasAny(value, values) => {
+            let value = graph_expression(graph, value);
+            let Expression::Array(values) = values.as_ref() else {
+                unreachable!()
+            };
+            let values = values
+                .iter()
+                .map(|value| graph_expression(graph, value))
+                .collect::<Vec<_>>();
+            if L::PLANNED {
+                format!("{value} HAS ANY [{}]", values.join(", "))
+            } else if let [element] = values.as_slice() {
+                format!("ArrayContains({value}, {element})")
+            } else {
+                format!("ArrayContainsAny({value}, Array({}))", values.join(", "))
+            }
+        }
         Expression::CountIf(condition) => {
             let parts = graph_conjunction(graph, condition);
             let condition = if L::PLANNED {

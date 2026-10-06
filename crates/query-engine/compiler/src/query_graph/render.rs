@@ -491,6 +491,23 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::HasAny(value, values) => {
+                if let Expression::Array(values) = values.as_ref()
+                    && let [element] = values.as_slice()
+                {
+                    format!(
+                        "has({}, {})",
+                        self.render_expression_with(value, column)?,
+                        self.render_expression_with(element, column)?
+                    )
+                } else {
+                    format!(
+                        "hasAny({}, {})",
+                        self.render_expression_with(value, column)?,
+                        self.render_expression_with(values, column)?
+                    )
+                }
+            }
             Expression::Predicate {
                 operator,
                 value,

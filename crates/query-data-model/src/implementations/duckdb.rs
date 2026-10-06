@@ -167,6 +167,7 @@ impl DuckDbCatalog {
                 .map(|column| StoredColumn {
                     name: column.name.clone(),
                     data_type: Some(column.data_type),
+                    array: false,
                 }),
         );
         let edge_sort_key = ontology

@@ -46,6 +46,7 @@ pub enum Expression<'catalog> {
     Equal(Box<Self>, Box<Self>),
     And(Box<Self>, Box<Self>),
     In(Box<Self>, Box<Self>),
+    HasAny(Box<Self>, Box<Self>),
     Or(Box<Self>, Box<Self>),
     Excerpt {
         value: Box<Self>,
@@ -111,6 +112,7 @@ impl<'catalog> Expression<'catalog> {
             | Self::And(left, right)
             | Self::Or(left, right)
             | Self::In(left, right)
+            | Self::HasAny(left, right)
             | Self::Greater(left, right)
             | Self::GreaterEqual(left, right)
             | Self::LessEqual(left, right)
@@ -190,6 +192,9 @@ impl<'catalog> Expression<'catalog> {
             Self::In(left, right) => {
                 Self::In(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
             }
+            Self::HasAny(left, right) => {
+                Self::HasAny(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
+            }
             Self::And(left, right) => {
                 Self::And(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
             }
@@ -268,6 +273,7 @@ impl<'catalog> Expression<'catalog> {
             | Self::And(left, right)
             | Self::Or(left, right)
             | Self::In(left, right)
+            | Self::HasAny(left, right)
             | Self::Greater(left, right)
             | Self::GreaterEqual(left, right)
             | Self::LessEqual(left, right)
@@ -302,6 +308,7 @@ impl<'catalog> Expression<'catalog> {
             | Self::And(left, right)
             | Self::Or(left, right)
             | Self::In(left, right)
+            | Self::HasAny(left, right)
             | Self::Greater(left, right)
             | Self::GreaterEqual(left, right)
             | Self::LessEqual(left, right)

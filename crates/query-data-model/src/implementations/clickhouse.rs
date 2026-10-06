@@ -280,7 +280,11 @@ impl ClickHouseCatalog {
                                     .iter()
                                     .find(|field| field.name == name)
                                     .map(|field| field.data_type);
-                                StoredColumn { name, data_type }
+                                StoredColumn {
+                                    name,
+                                    data_type,
+                                    array: column.ch_type.starts_with("Array("),
+                                }
                             })
                             .chain(system_columns()),
                     ),
@@ -319,8 +323,20 @@ impl ClickHouseCatalog {
                         .columns
                         .iter()
                         .find(|column| column.name.trim_matches('`') == name)
-                        .map(|column| column.data_type);
-                    StoredColumn { name, data_type }
+                        .map(|column| column.data_type)
+                        .or_else(|| {
+                            config
+                                .storage
+                                .denormalized_columns
+                                .iter()
+                                .any(|column| column.name == name)
+                                .then_some(ontology::DataType::String)
+                        });
+                    StoredColumn {
+                        name,
+                        data_type,
+                        array: column.ch_type.starts_with("Array("),
+                    }
                 });
             tables.insert(
                 table_name.to_string(),
@@ -469,6 +485,7 @@ impl ClickHouseCatalog {
                                     StoredColumn {
                                         name: join.column_for(index, column.name()),
                                         data_type: column.data_type().copied(),
+                                        array: column.is_array(),
                                     }
                                 })
                             })
@@ -511,5 +528,6 @@ fn system_columns() -> impl Iterator<Item = StoredColumn> {
     .map(|(name, data_type)| StoredColumn {
         name: name.into(),
         data_type: Some(data_type),
+        array: false,
     })
 }

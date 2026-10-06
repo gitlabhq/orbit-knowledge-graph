@@ -61,21 +61,22 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             return Ok(None);
         }
         let index = scans.len() - 1;
-        let relationship = &input.relationships[index];
-        let selective = input
-            .nodes
-            .iter()
-            .filter(|node| node.id == relationship.from || node.id == relationship.to)
-            .any(|node| !node.node_ids.is_empty() || node.id_range.is_some());
-        let upstream_selective = input.relationships[..index].iter().any(|relationship| {
+        let selective = scans.iter().any(|scan| {
+            let Some(ScanInput::Relationship(index)) = self
+                .relation(scan.relation)
+                .ok()
+                .and_then(|relation| relation.input.clone())
+            else {
+                return false;
+            };
+            let relationship = &input.relationships[index];
             input
                 .nodes
                 .iter()
                 .filter(|node| node.id == relationship.from || node.id == relationship.to)
                 .any(|node| !node.node_ids.is_empty() || node.id_range.is_some())
         });
-        if !selective && !upstream_selective && scans.iter().all(|scan| scan.memberships.is_empty())
-        {
+        if !selective && scans.iter().all(|scan| scan.memberships.is_empty()) {
             return Ok(None);
         }
         let (block, output) = self.edge_keys(
@@ -103,13 +104,16 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             memberships,
         } = scans.last().ok_or(GraphError::MissingOutput)?;
         let index = scans.len() - 1;
-        let relationship = &input.relationships[index];
+        let Some(ScanInput::Relationship(input_index)) = self.relation(*original)?.input else {
+            return Err(GraphError::MissingOutput);
+        };
+        let relationship = &input.relationships[input_index];
         let Source::Stored(table) = self.relation(*original)?.source else {
             return Err(GraphError::MissingOutput);
         };
         let block = self.select(PhysicalOperation::One);
         let scan = self.scan_stored(block, table, alias)?;
-        self.bind_scan(scan, ScanInput::Relationship(index))?;
+        self.bind_scan(scan, ScanInput::Relationship(input_index))?;
         let mut operation = PhysicalOperation::source(scan);
         for predicate in predicates {
             operation = operation.filter(predicate.rebind(&|column| match column.port {
@@ -128,7 +132,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             )?;
         }
         if index > 0 {
-            let previous = &input.relationships[index - 1];
+            let Some(ScanInput::Relationship(previous_index)) =
+                self.relation(scans[index - 1].relation)?.input
+            else {
+                return Err(GraphError::MissingOutput);
+            };
+            let previous = &input.relationships[previous_index];
             let (previous_start, previous_end) = previous.direction.edge_columns();
             let (start, end) = relationship.direction.edge_columns();
             let link = [

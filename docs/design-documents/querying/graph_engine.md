@@ -161,7 +161,11 @@ Shared filter-only nodes define authoritative current-row keys once. Cascades re
 Node predicates on shared edge scope columns are rebound to the edge occurrence and deduplicated. Reserved endpoint columns retain their identity meaning.
 Leading endpoint sort keys place cascade membership inside the current-row scan boundary; other layouts place it outside.
 Cross-node comparisons use typed column references. FK-star edge outputs retain the holder's stored foreign key when it references the primary key.
-CTE materialization preferences, traversal endpoint elision, joined-node cascade narrowing, denormalized coverage, and execution-result equivalence remain unfinished.
+Edge planning starts from the more selective endpoint. Reordered scans retain original relationship indices for policy and result metadata.
+Catalog coverage and existing tag encoding drive denormalized edge predicates. Fully covered filters can omit the node scan; uncovered filters retain it.
+Shared-node tag predicates are emitted once in their stored edge direction. Array membership uses typed stored columns and bound values.
+Joined-node key queries retain upstream cascades. Elided node identities come from edge endpoints; enforcement restores scans needed for indirect authorization identities.
+CTE materialization preferences, broader endpoint-elision eligibility, and execution-result equivalence remain unfinished.
 
 The graph pipeline reuses parsing, validation, normalization, field restrictions, and scope preparation in their existing order.
 Response policy, result enforcement, scope application, authorization, pagination, and post-checks operate on the graph after lowering.

@@ -23,7 +23,22 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let mut edges = Vec::new();
         let mut filter_keys = HashMap::new();
         let mut key_scans = Vec::new();
-        for (index, relationship) in input.relationships.iter().enumerate() {
+        let mut tagged = HashSet::new();
+        let mut order = (0..input.relationships.len()).collect::<Vec<_>>();
+        let selectivity = |alias: &str| {
+            input
+                .nodes
+                .iter()
+                .find(|node| node.id == alias)
+                .map(crate::passes::plan::edge_chain::Selectivity::from_node)
+        };
+        if let (Some(first), Some(last)) = (input.relationships.first(), input.relationships.last())
+            && selectivity(&last.to) < selectivity(&first.from)
+        {
+            order.reverse();
+        }
+        for (index, input_index) in order.into_iter().enumerate() {
+            let relationship = &input.relationships[input_index];
             if relationship.hops.min != 1
                 || relationship.hops.max != 1
                 || relationship.direction == Direction::Both
@@ -36,7 +51,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .catalog
                 .relationship_table_for_query(&relationship.types);
             let edge = self.scan(root, table, format!("e{index}"))?;
-            self.bind_scan(edge, ScanInput::Relationship(index))?;
+            self.bind_scan(edge, ScanInput::Relationship(input_index))?;
             let (start, end) = relationship.direction.edge_columns();
             let read = if input.relationships.len() == 1 {
                 PhysicalOperation::source(edge)
@@ -102,6 +117,39 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             ];
             let mut pushed = Vec::new();
             for (alias, _) in endpoints {
+                let node = input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == alias)
+                    .ok_or(GraphError::MissingOutput)?;
+                let mut properties = node.filters.iter().collect::<Vec<_>>();
+                properties.sort_by_key(|(name, _)| *name);
+                for (property, filters) in properties {
+                    if let Some((column, values)) = super::predicates::edge_tag(
+                        self.catalog,
+                        node,
+                        property,
+                        filters,
+                        relationship,
+                    ) && tagged.insert((alias, property.as_str()))
+                    {
+                        for values in values {
+                            let predicate = if values.is_empty() {
+                                Expression::Boolean(false)
+                            } else {
+                                Expression::HasAny(
+                                    Box::new(Expression::Column(self.stored_column(edge, column)?)),
+                                    Box::new(Expression::Array(
+                                        values.into_iter().map(Expression::Text).collect(),
+                                    )),
+                                )
+                            };
+                            scan = scan.filter(predicate);
+                        }
+                    }
+                }
+            }
+            for (alias, _) in endpoints {
                 for predicate in &node_predicates[alias] {
                     let mut names = Vec::new();
                     predicate.columns(&mut |column| {
@@ -163,8 +211,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     || input.join_predicates.iter().any(|predicate| {
                         predicate.lhs_node == alias || predicate.rhs_node == alias
                     });
-                let filter_only =
-                    !needs_values && !node.filters.is_empty() && input.relationships.len() >= 2;
+                let filter_only = !needs_values
+                    && !node.filters.is_empty()
+                    && input.relationships.len() >= 2
+                    && relations.contains_key(alias);
                 let selective = !node.node_ids.is_empty()
                     || node.id_range.is_some()
                     || node.filters.keys().any(|property| {

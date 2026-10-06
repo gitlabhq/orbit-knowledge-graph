@@ -16,6 +16,7 @@ pub struct ColumnId {
 pub struct StoredColumn<T = ontology::DataType> {
     pub name: String,
     pub data_type: Option<T>,
+    pub array: bool,
 }
 
 #[derive(Debug)]
@@ -131,5 +132,9 @@ impl<'a, T> StoredColumnRef<'a, T> {
     }
     pub fn ordinal(self) -> usize {
         self.id.slot
+    }
+
+    pub fn is_array(self) -> bool {
+        self.table.0.columns[self.id.slot].array
     }
 }
