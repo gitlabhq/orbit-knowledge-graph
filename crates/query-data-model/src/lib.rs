@@ -1,3 +1,4 @@
+pub mod bindings;
 mod derive;
 mod error;
 pub mod generic;
