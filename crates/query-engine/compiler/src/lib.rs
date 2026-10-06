@@ -287,7 +287,10 @@ mod tests {
             .values()
             .find(|param| param.value == serde_json::json!(2))
             .expect("target_id filter parameter");
-        assert_eq!(filter_param.ch_type, orbit_utils::clickhouse::ChType::Int64);
+        assert_eq!(
+            filter_param.data_type,
+            orbit_utils::query_types::SqlType::Int64
+        );
     }
 
     #[test]

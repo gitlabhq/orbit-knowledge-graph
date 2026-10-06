@@ -13,4 +13,4 @@ physical:
         - (Join ON b.id = e0.target_id (Deduplicate LimitBy ... (_)) (Bind b (_)))
         - (Aggregate COUNT() FILTER ? AS n, ... (_))
     emitted:
-      expect: ["(Aggregate countIf((e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)) AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]
+      expect: ["(Aggregate COUNT() FILTER [(e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)] AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]

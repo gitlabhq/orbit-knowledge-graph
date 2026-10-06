@@ -13,13 +13,41 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
-use crate::error::Result;
+use crate::ast::{Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef};
+use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
+
+fn type_name(data_type: SqlType) -> String {
+    match data_type {
+        SqlType::String => "VARCHAR".into(),
+        SqlType::Int64 => "BIGINT".into(),
+        SqlType::UInt32 => "UINTEGER".into(),
+        SqlType::Float64 => "DOUBLE".into(),
+        SqlType::Bool => "BOOLEAN".into(),
+        SqlType::Date => "DATE".into(),
+        SqlType::Timestamp { timezone, .. } => if timezone.is_some() {
+            "TIMESTAMPTZ"
+        } else {
+            "TIMESTAMP"
+        }
+        .into(),
+        SqlType::Array(element) => format!("{}[]", type_name(element.into())),
+    }
+}
+
+pub(super) fn render_literal(parameter: &ParamValue) -> String {
+    let literal = orbit_utils::clickhouse::render_value(&parameter.value);
+    match parameter.data_type {
+        SqlType::Date | SqlType::Timestamp { .. } => {
+            format!("CAST({literal} AS {})", type_name(parameter.data_type))
+        }
+        _ => literal,
+    }
+}
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
     let mut ctx = Context::new();
@@ -27,6 +55,9 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if let Some(error) = ctx.error {
+        return Err(QueryError::Codegen(error));
+    }
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
@@ -39,6 +70,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 struct Context {
     params: HashMap<String, ParamValue>,
     param_counter: usize,
+    error: Option<String>,
 }
 
 impl Context {
@@ -46,6 +78,7 @@ impl Context {
         Self {
             params: HashMap::new(),
             param_counter: 0,
+            error: None,
         }
     }
 
@@ -68,13 +101,17 @@ impl Context {
     }
 
     fn emit_query(&mut self, q: &Query) -> Result<String> {
+        self.emit_query_with_limit(q, true)
+    }
+
+    fn emit_query_with_limit(&mut self, q: &Query, include_limit: bool) -> Result<String> {
         let mut parts = Vec::new();
 
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
 
-        parts.push(self.emit_query_body(q)?);
+        parts.push(self.emit_query_body_inner(q, include_limit)?);
 
         Ok(parts.join(" "))
     }
@@ -90,26 +127,12 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                if cte.recursive {
-                    // DuckDB: recursive CTE bodies must not have LIMIT/OFFSET.
-                    let inner = self.emit_query_body_without_limit(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
-                } else {
-                    let inner = self.emit_query_body(&cte.query)?;
-                    Ok(format!("{} AS ({})", cte.name, inner))
-                }
+                let inner = self.emit_query_with_limit(&cte.query, !cte.recursive)?;
+                Ok(format!("{} AS ({})", cte.name, inner))
             })
             .collect::<Result<Vec<_>>>()?;
 
         Ok(format!("{} {}", keyword, cte_parts.join(", ")))
-    }
-
-    fn emit_query_body(&mut self, q: &Query) -> Result<String> {
-        self.emit_query_body_inner(q, true)
-    }
-
-    fn emit_query_body_without_limit(&mut self, q: &Query) -> Result<String> {
-        self.emit_query_body_inner(q, false)
     }
 
     fn emit_query_body_inner(&mut self, q: &Query, include_limit: bool) -> Result<String> {
@@ -154,7 +177,12 @@ impl Context {
         }
 
         for union_q in &q.union_all {
-            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
+            let arm = self.emit_query(union_q)?;
+            parts.push(if union_q.ctes.is_empty() {
+                format!("UNION ALL {arm}")
+            } else {
+                format!("UNION ALL ({arm})")
+            });
         }
 
         // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
@@ -186,12 +214,83 @@ impl Context {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
+            Expr::EmptyTupleArray(fields) => {
+                let fields = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| format!("_{} {}", index + 1, type_name(*field)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("CAST([] AS STRUCT({fields})[])")
+            }
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
-            Expr::FuncCall { name, args } => self.emit_func_call(name, args),
+            Expr::FuncCall { name, args } => self.emit_func_call(*name, args),
+            Expr::TokenSearch { .. } => {
+                self.error = Some("token search is not supported by the DuckDB backend".into());
+                String::new()
+            }
+            Expr::TimeBucket { unit, value } => {
+                let value = self.emit_expr(value);
+                let bucket = if *unit == crate::input::TruncateUnit::Week {
+                    format!("(date_trunc('week', {value} + INTERVAL 1 DAY) - INTERVAL 1 DAY)")
+                } else {
+                    format!("date_trunc('{}', {value})", unit.name())
+                };
+                if matches!(
+                    unit,
+                    crate::input::TruncateUnit::Minute | crate::input::TruncateUnit::Hour
+                ) {
+                    bucket
+                } else {
+                    format!("CAST({bucket} AS DATE)")
+                }
+            }
+            Expr::Aggregate {
+                function,
+                argument,
+                distinct,
+                condition,
+            } => {
+                if let Err(error) =
+                    super::validate_aggregate(*function, argument.as_deref(), *distinct)
+                {
+                    self.error = Some(error);
+                    return String::new();
+                }
+                let name = match function {
+                    crate::input::AggFunction::Count => "COUNT",
+                    crate::input::AggFunction::Sum => "SUM",
+                    crate::input::AggFunction::Avg => "AVG",
+                    crate::input::AggFunction::Min => "MIN",
+                    crate::input::AggFunction::Max => "MAX",
+                    crate::input::AggFunction::Collect => "array_agg",
+                };
+                let argument = argument
+                    .as_ref()
+                    .map(|value| self.emit_expr(value))
+                    .unwrap_or_else(|| "*".into());
+                let mut expression = format!(
+                    "{name}({}{argument})",
+                    if *distinct { "DISTINCT " } else { "" }
+                );
+                let condition = condition.as_ref().map(|value| self.emit_expr(value));
+                if *function == crate::input::AggFunction::Collect {
+                    let nonnull = format!("{argument} IS NOT NULL");
+                    let condition = condition.map_or_else(
+                        || nonnull.clone(),
+                        |condition| format!("({condition}) AND {nonnull}"),
+                    );
+                    return format!("coalesce({expression} FILTER (WHERE {condition}), [])");
+                }
+                if let Some(condition) = condition {
+                    expression.push_str(&format!(" FILTER (WHERE {condition})"));
+                }
+                expression
+            }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);
-                format!("{param} -> {body}")
+                format!("lambda {param}: {body}")
             }
             Expr::BinaryOp { op, left, right } => {
                 let l = self.emit_expr(left);
@@ -240,9 +339,23 @@ impl Context {
         }
     }
 
-    fn emit_func_call(&mut self, name: &str, args: &[Expr]) -> String {
+    fn emit_func_call(&mut self, name: Function, args: &[Expr]) -> String {
+        if !name.accepts_arity(args.len()) {
+            self.error = Some(format!("{name} does not accept {} arguments", args.len()));
+            return String::new();
+        }
+        if name == Function::Tuple {
+            return format!(
+                "struct_pack({})",
+                args.iter()
+                    .enumerate()
+                    .map(|(index, value)| format!("_{} := {}", index + 1, self.emit_expr(value)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         // Rewrite `if(cond, then, else)` → `CASE WHEN cond THEN then ELSE else END`
-        if name == "if" && args.len() == 3 {
+        if name == Function::If && args.len() == 3 {
             let cond = self.emit_expr(&args[0]);
             let then = self.emit_expr(&args[1]);
             let else_ = self.emit_expr(&args[2]);
@@ -250,60 +363,81 @@ impl Context {
         }
 
         // toString(x) → CAST(x AS VARCHAR)
-        if name == "toString" && args.len() == 1 {
+        if name == Function::ToString && args.len() == 1 {
             let inner = self.emit_expr(&args[0]);
             return format!("CAST({inner} AS VARCHAR)");
         }
 
         // toJSONString(x) → just emit x (the inner map() is already
         // rewritten to json_object() which returns a JSON string).
-        if name == "toJSONString" && args.len() == 1 {
-            return self.emit_expr(&args[0]);
+        if name == Function::ToJson && args.len() == 1 {
+            return format!("to_json({})", self.emit_expr(&args[0]));
         }
 
-        // ClickHouse `toStartOf<Unit>(x)` → DuckDB `date_trunc('<unit>', x)`.
-        if let Some(unit) = name.strip_prefix("toStartOf")
-            && args.len() == 1
-            && let Some(duckdb_unit) = duckdb_trunc_unit(unit)
-        {
-            let inner = self.emit_expr(&args[0]);
-            return format!("date_trunc('{duckdb_unit}', {inner})");
-        }
-
-        if name == "positionCaseInsensitive" && args.len() == 2 {
+        if name == Function::ContainsInsensitive && args.len() == 2 {
             let col = self.emit_expr(&args[0]);
             let search = self.emit_expr(&args[1]);
             return format!("contains(lower({col}), lower({search}))");
         }
-        if name == "sumIf" && args.len() == 2 {
-            let col = self.emit_expr(&args[0]);
-            let cond = self.emit_expr(&args[1]);
-            return format!("SUM({col}) FILTER (WHERE {cond})");
+
+        if matches!(
+            name,
+            Function::ArrayFilter | Function::ArrayMap | Function::ArrayExists
+        ) && args.len() == 2
+        {
+            let predicate = self.emit_expr(&args[0]);
+            let array = self.emit_expr(&args[1]);
+            return match name {
+                Function::ArrayFilter => format!("list_filter({array}, {predicate})"),
+                Function::ArrayMap => format!("list_transform({array}, {predicate})"),
+                _ => format!("(len(list_filter({array}, {predicate})) > 0)"),
+            };
+        }
+        if name == Function::ByteLength && args.len() == 1 {
+            return format!("octet_length(encode({}))", self.emit_expr(&args[0]));
+        }
+        if name == Function::CountSubstrings && args.len() == 2 {
+            return format!(
+                "(len(string_split({}, {})) - 1)",
+                self.emit_expr(&args[0]),
+                self.emit_expr(&args[1])
+            );
         }
 
         let duckdb_name = match name {
-            "startsWith" => "starts_with",
-            "endsWith" => "ends_with",
-            "substringUTF8" => "substring",
-            "countIf" => "count_if",
-            "has" => "list_contains",
-            "hasAny" => "list_has_any",
-            "hasAll" => "list_has_all",
-            "array" => "list_value",
-            "arrayConcat" => "list_concat",
-            "arrayReverse" => "list_reverse",
-            "arrayResize" => "list_resize",
-            // ClickHouse map(k1,v1,k2,v2) → DuckDB json_object(k1,v1,k2,v2)
-            "map" => "json_object",
-            "tuple" => "row",
-            other => other,
+            Function::StartsWith => "starts_with",
+            Function::EndsWith => "ends_with",
+            Function::Substring => "substring",
+            Function::ArrayContains => "list_contains",
+            Function::ArrayContainsAny => "list_has_any",
+            Function::ArrayContainsAll => "list_has_all",
+            Function::Array => "list_value",
+            Function::ArrayConcat => "list_concat",
+            Function::ArrayReverse => "list_reverse",
+            Function::ArrayResize => "list_resize",
+            Function::Object => "json_object",
+            Function::Tuple => unreachable!("tuple rendered above"),
+            Function::Unnest => "unnest",
+            Function::TupleElement => "struct_extract_at",
+            Function::Coalesce => "coalesce",
+            Function::Concat => "concat",
+            Function::ArgMax | Function::ArgMaxOrNull => "arg_max",
+            Function::If
+            | Function::ToString
+            | Function::ToJson
+            | Function::ContainsInsensitive
+            | Function::ArrayFilter
+            | Function::ArrayMap
+            | Function::ArrayExists
+            | Function::ByteLength
+            | Function::CountSubstrings => unreachable!("function arity checked before rendering"),
         };
 
         let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
         format!("{}({})", duckdb_name, args.join(", "))
     }
 
-    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+    fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
         match v {
             Value::Null => "NULL".into(),
             // DuckDB: no native array bind — always expand element-by-element.
@@ -316,13 +450,13 @@ impl Context {
                         let placeholder = format!("${}", self.param_counter);
                         // TODO: This will be abstracted away with LLQM to generic scalar types
                         let scalar_type = match data_type {
-                            ChType::Array(inner) => ChType::from(inner),
+                            SqlType::Array(inner) => SqlType::from(inner),
                             _ => data_type,
                         };
                         self.params.insert(
                             name,
                             ParamValue {
-                                ch_type: scalar_type,
+                                data_type: scalar_type,
                                 value: item.clone(),
                             },
                         );
@@ -338,11 +472,16 @@ impl Context {
                 self.params.insert(
                     name,
                     ParamValue {
-                        ch_type: data_type,
+                        data_type,
                         value: v.clone(),
                     },
                 );
-                placeholder
+                match data_type {
+                    SqlType::Date | SqlType::Timestamp { .. } => {
+                        format!("CAST({placeholder} AS {})", type_name(data_type))
+                    }
+                    _ => placeholder,
+                }
             }
         }
     }
@@ -353,11 +492,11 @@ impl Context {
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
-                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .map(|item| self.emit_param(SqlType::from_value(item), item))
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
-            _ => self.emit_param(ChType::from_value(v), v),
+            _ => self.emit_param(SqlType::from_value(v), v),
         }
     }
 
@@ -399,19 +538,6 @@ impl Context {
 /// True if the expression is a reference to `_version` or `_deleted`.
 fn is_dedup_column(expr: &Expr) -> bool {
     matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
-}
-
-fn duckdb_trunc_unit(suffix: &str) -> Option<&'static str> {
-    match suffix {
-        "Minute" => Some("minute"),
-        "Hour" => Some("hour"),
-        "Day" => Some("day"),
-        "Week" => Some("week"),
-        "Month" => Some("month"),
-        "Quarter" => Some("quarter"),
-        "Year" => Some("year"),
-        _ => None,
-    }
 }
 
 fn is_deleted_predicate(expr: &Expr) -> bool {
@@ -510,7 +636,7 @@ mod tests {
             select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::func(
-                "startsWith",
+                Function::StartsWith,
                 vec![Expr::col("n", "path"), Expr::lit("src/")],
             )),
             ..Default::default()
@@ -534,7 +660,7 @@ mod tests {
         let type_filter = Expr::col_in(
             "e",
             "kind",
-            ChType::String,
+            SqlType::String,
             vec![Value::from("A"), Value::from("B"), Value::from("C")],
         )
         .unwrap();
@@ -564,7 +690,7 @@ mod tests {
         let q = Query {
             select: vec![SelectExpr::new(
                 Expr::func(
-                    "if",
+                    Function::If,
                     vec![
                         Expr::binary(Op::Gt, Expr::col("n", "age"), Expr::lit(18)),
                         Expr::lit("adult"),

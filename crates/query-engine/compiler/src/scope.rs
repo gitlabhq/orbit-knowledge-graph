@@ -23,7 +23,7 @@ impl QueryScope {
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{ChType, Expr, Op, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -76,10 +76,10 @@ pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
         Some(match proof.depth {
             Some((0, 0)) => Expr::eq(column, path.clone()),
             Some((min, max)) => Expr::and(
-                Expr::func("startsWith", vec![column.clone(), path.clone()]),
+                Expr::func(Function::StartsWith, vec![column.clone(), path.clone()]),
                 depth_between(column, path, min, max),
             ),
-            None => Expr::func("startsWith", vec![column, path.clone()]),
+            None => Expr::func(Function::StartsWith, vec![column, path.clone()]),
         })
     });
     let unresolved = values
@@ -100,7 +100,8 @@ pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
 }
 
 fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
-    let segments = |expr: Expr| Expr::func("countSubstrings", vec![expr, Expr::string("/")]);
+    let segments =
+        |expr: Expr| Expr::func(Function::CountSubstrings, vec![expr, Expr::string("/")]);
     let depth = segments(column);
     let base = segments(path.clone());
     let bound = |hops: u32| Expr::binary(Op::Add, base.clone(), Expr::int(i64::from(hops)));
@@ -219,17 +220,17 @@ fn propagate_scope_proofs(
 fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let (key, from) = match value {
         PathScopeId::Numeric(id) => (
-            Expr::param(ChType::Int64, *id),
+            Expr::param(SqlType::Int64, *id),
             TableRef::scan(source_table, LOOKUP_ALIAS),
         ),
         PathScopeId::Text(text) => (
-            Expr::param(ChType::String, text.clone()),
+            Expr::param(SqlType::String, text.clone()),
             TableRef::scan_final(source_table, LOOKUP_ALIAS),
         ),
     };
     let latest = |column: &str| {
         Expr::func(
-            "argMaxOrNull",
+            Function::ArgMaxOrNull,
             vec![
                 Expr::col(LOOKUP_ALIAS, column),
                 Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
@@ -237,10 +238,10 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
         )
     };
     let path = Expr::func(
-        "coalesce",
+        Function::Coalesce,
         vec![
             Expr::func(
-                "if",
+                Function::If,
                 vec![
                     latest(DELETED_COLUMN),
                     Expr::Literal(serde_json::Value::Null),

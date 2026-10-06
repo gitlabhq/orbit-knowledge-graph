@@ -116,7 +116,7 @@ impl TestContext {
         let mut query = client.query(&pq.sql);
 
         for (name, param) in &pq.params {
-            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.ch_type);
+            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.data_type);
         }
 
         query.fetch_arrow().await.map_err(|e| e.to_string())

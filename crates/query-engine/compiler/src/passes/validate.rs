@@ -1066,7 +1066,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     if !matches!(data_type, DataType::Int | DataType::Float) {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
-                            function.as_sql(),
+                            function.to_string().to_uppercase(),
                             entity,
                             prop
                         )));

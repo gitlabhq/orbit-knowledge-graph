@@ -12,7 +12,7 @@ use circuit_breaker::CircuitBreakableError;
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use orbit_utils::clickhouse::{ChScalar, ChType};
+use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
@@ -322,18 +322,20 @@ impl ArrowClickHouseClient {
 
     /// Bind a named parameter to a query.
     ///
-    /// `ch_type` carries the ClickHouse type from the query placeholder. For
-    /// scalar values the JSON `Value` variant determines the Rust type; for
-    /// arrays `ch_type` determines the element type for binding.
-    pub fn bind_param(query: ArrowQuery, key: &str, value: &Value, ch_type: &ChType) -> ArrowQuery {
+    pub fn bind_param(
+        query: ArrowQuery,
+        key: &str,
+        value: &Value,
+        data_type: &SqlType,
+    ) -> ArrowQuery {
         match value {
             Value::String(s) => {
                 // CH's HTTP-param parser for DateTime64/Date rejects the ISO
                 // 8601 trailing `Z` ("BAD_QUERY_PARAMETER, only 19 of 20 bytes
                 // was parsed"). Column already pins UTC, so dropping it
                 // preserves the value.
-                let normalized = match ch_type {
-                    ChType::DateTime64 => s.strip_suffix('Z').unwrap_or(s),
+                let normalized = match data_type {
+                    SqlType::Timestamp { .. } => s.strip_suffix('Z').unwrap_or(s),
                     _ => s.as_str(),
                 };
                 query.param(key, normalized)
@@ -349,18 +351,18 @@ impl ArrowClickHouseClient {
             }
             Value::Bool(b) => query.param(key, *b),
             Value::Null => query.param(key, Option::<String>::None),
-            Value::Array(arr) => match ch_type {
-                ChType::Array(ChScalar::Int64) => {
+            Value::Array(arr) => match data_type {
+                SqlType::Array(ScalarType::Int64) => {
                     let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_i64()).collect();
                     warn_on_dropped_elements(key, "Int64", arr.len(), ints.len());
                     query.param(key, ints)
                 }
-                ChType::Array(ChScalar::Float64) => {
+                SqlType::Array(ScalarType::Float64) => {
                     let floats: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
                     warn_on_dropped_elements(key, "Float64", arr.len(), floats.len());
                     query.param(key, floats)
                 }
-                ChType::Array(ChScalar::Bool) => {
+                SqlType::Array(ScalarType::Bool) => {
                     let bools: Vec<bool> = arr.iter().filter_map(|v| v.as_bool()).collect();
                     warn_on_dropped_elements(key, "Bool", arr.len(), bools.len());
                     query.param(key, bools)

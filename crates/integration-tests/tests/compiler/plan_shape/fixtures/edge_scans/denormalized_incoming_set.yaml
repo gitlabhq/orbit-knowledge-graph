@@ -12,5 +12,5 @@ physical:
       expect: ["(Filter e0.target_tags HAS ANY ['definition_type:function', 'definition_type:method'], ... (_))"]
       reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
-      expect: ["(Filter hasAny(e0.target_tags, array('definition_type:function', 'definition_type:method')), ... (_))"]
+      expect: ["(Filter ArrayContainsAny(e0.target_tags, Array('definition_type:function', 'definition_type:method')), ... (_))"]
       reject: ["(Scan Table(gl_definition) ...)"]

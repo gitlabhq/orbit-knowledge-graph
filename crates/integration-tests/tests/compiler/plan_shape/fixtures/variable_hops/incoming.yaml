@@ -12,4 +12,4 @@ physical:
       expect: ["(Union ALL AS e0 (_) (_))", "(Join ON (e1.source_id = e2.target_id) AND ... (_) (_))"]
       reject: ["(SemiJoin ... (_) (_))"]
     emitted:
-      expect: ["(Union ALL AS e0 (_) (_))", "(Project array(tuple(e1.source_id, e1.source_kind), tuple(e2.source_id, e2.source_kind)) AS path_nodes, ... (_))"]
+      expect: ["(Union ALL AS e0 (_) (_))", "(Project Array(Tuple(e1.source_id, e1.source_kind), Tuple(e2.source_id, e2.source_kind)) AS path_nodes, ... (_))"]

@@ -27,7 +27,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::{Expr, Function, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -114,7 +114,7 @@ fn starts_with_expr(alias: &str, path: &str) -> Expr {
 
 fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
     Expr::func(
-        "startsWith",
+        Function::StartsWith,
         vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
     )
 }
@@ -236,7 +236,13 @@ mod tests {
     #[test]
     fn single_path_uses_starts_with() {
         let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
-        assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
+        assert!(matches!(
+            expr,
+            Expr::FuncCall {
+                name: Function::StartsWith,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -267,7 +273,7 @@ mod tests {
             "large path sets should use OR chain, not arrayExists: {dbg}"
         );
         assert!(
-            dbg.contains("startsWith"),
+            dbg.contains("StartsWith"),
             "should produce startsWith predicates: {dbg}"
         );
     }
@@ -318,7 +324,7 @@ mod tests {
         let mut paths = Vec::new();
         visit_expressions(expr, &mut |expr| {
             if let Expr::FuncCall { name, args } = expr
-                && name == "startsWith"
+                && *name == Function::StartsWith
                 && let [
                     Expr::Column { table, column },
                     Expr::Param {
@@ -493,7 +499,7 @@ mod tests {
         let filter = build_path_filter("t", &eligible);
         let sql = format!("{filter:?}");
         assert!(
-            sql.contains("startsWith"),
+            sql.contains("StartsWith"),
             "should produce startsWith predicates: {sql}"
         );
     }
