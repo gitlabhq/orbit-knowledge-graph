@@ -493,7 +493,12 @@ async fn main() -> Result<()> {
     let tracker = telemetry::resolve_from_env().build_tracker();
 
     let started = Instant::now();
-    let result = dispatch(cli.command, tracker.clone(), coding_agent.clone()).await;
+    let result = dispatch(cli.command, tracker.clone(), coding_agent.clone())
+        .await
+        .or_else(|err| match is_broken_pipe(&err) {
+            true => Ok(()),
+            false => Err(err),
+        });
     let exit_code = result.as_ref().map_or_else(exit_code_for, |()| 0);
 
     if let Some(tracker) = &tracker {
@@ -518,6 +523,14 @@ async fn main() -> Result<()> {
         return result;
     }
     std::process::exit(exit_code);
+}
+
+fn is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
 }
 
 fn exit_code_for(err: &anyhow::Error) -> i32 {
