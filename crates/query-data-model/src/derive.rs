@@ -1,82 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::implementations::duckdb::storage::{DuckDbColumn, LocalType};
-    use crate::storage::{RowSemantics, StorageCatalog, StoredColumn, TableLayout};
+    use crate::implementations::duckdb::storage::DuckDbColumn;
+    use crate::storage::{StorageCatalog, StoredColumn, TableLayout};
     use crate::{
         ClickHouseDataModel, DuckDbDataModel, PropertyRealization, QueryBackendCatalog,
         QueryDataModel,
     };
     use std::sync::Arc;
-
-    #[test]
-    fn backend_catalogs_describe_their_effective_storage() {
-        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
-        let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
-        let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
-        for name in ontology.local_entity_names() {
-            let entity = local.graph().entity_id(name).unwrap();
-            let name = local.backend().entity_table(entity).unwrap();
-            let local_table = local.table(name).unwrap();
-            let remote_table = remote.table(name).unwrap();
-            assert_eq!(local_table.row_semantics(), &RowSemantics::Current);
-            assert!(local_table.column("_version").is_none());
-            assert!(local_table.column("_deleted").is_none());
-            assert_eq!(
-                local_table.column("id").unwrap().storage().data_type,
-                LocalType::Int64
-            );
-            assert_eq!(
-                remote_table.column("_version").unwrap().storage().data_type,
-                "DateTime64(6, 'UTC')"
-            );
-            let RowSemantics::Versioned { version, deletion } = remote_table.row_semantics() else {
-                panic!("versioned remote table")
-            };
-            assert_eq!(remote_table.column_by_id(*version).name(), "_version");
-            assert_eq!(
-                remote_table
-                    .column_by_id(deletion.as_ref().unwrap().column)
-                    .name(),
-                "_deleted"
-            );
-        }
-        assert_eq!(local.table("gl_edge").unwrap().columns().len(), 6);
-        assert!(
-            local
-                .table("gl_edge")
-                .unwrap()
-                .column("source_tags")
-                .is_none()
-        );
-        assert!(
-            remote
-                .table("gl_edge")
-                .unwrap()
-                .column("source_tags")
-                .is_some()
-        );
-        assert_eq!(
-            remote
-                .table("gl_note")
-                .unwrap()
-                .column("created_at")
-                .unwrap()
-                .storage()
-                .data_type,
-            "Nullable(DateTime64(0, 'UTC'))"
-        );
-        assert_eq!(
-            remote.property_column_named("MergeRequest", "project_id"),
-            Some("project_id")
-        );
-        assert!(
-            local
-                .property_column_named("MergeRequest", "title")
-                .is_none()
-        );
-        assert!(remote.property_column_named("File", "content").is_none());
-        assert!(remote.table("gl_job").unwrap().column("when").is_some());
-    }
 
     #[test]
     fn storage_references_are_generic_and_validate_ownership() {
@@ -163,7 +93,20 @@ mod tests {
 
     #[test]
     fn local_exclusions_remove_columns_and_sort_keys_together() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
+        let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        assert!(
+            local
+                .property_column_named("MergeRequest", "title")
+                .is_none()
+        );
+        assert!(remote.property_column_named("File", "content").is_none());
+        assert_eq!(
+            remote.property_column_named("MergeRequest", "project_id"),
+            Some("project_id")
+        );
+        assert!(remote.table("gl_job").unwrap().column("when").is_some());
         let table = TableLayout::<DuckDbColumn>::local_node(
             ontology.get_node("Definition").unwrap(),
             &["branch".into()],

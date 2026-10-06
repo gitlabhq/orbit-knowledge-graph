@@ -553,6 +553,7 @@ mod tests {
 
     #[test]
     fn query_catalog_matches_generated_remote_storage() {
+        use query_data_model::QueryBackendCatalog;
         let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
         let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
         let schema = super::GraphSchema::from_ontology(&ontology);
@@ -565,7 +566,7 @@ mod tests {
                 table.name
             );
         }
-        for catalog in model.backend().tables() {
+        for catalog in model.backend().storage().tables() {
             let table = schema
                 .tables
                 .iter()

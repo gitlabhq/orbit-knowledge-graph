@@ -5,7 +5,7 @@ pub mod duckdb;
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
 pub use authz::{EntityAuthConfig, GitLabAuthzCatalog, TrustedLocalCatalog};
-pub use clickhouse::{ClickHouseCatalog, EntityLayout};
+pub use clickhouse::ClickHouseCatalog;
 pub use duckdb::DuckDbCatalog;
 
 #[derive(Debug, Clone)]

@@ -1,6 +1,5 @@
 use crate::storage::TableLayout;
 pub mod storage;
-use std::collections::HashMap;
 use storage::DuckDbColumn;
 
 use super::{PropertyBackendFacts, derive_property_backend_facts};
@@ -10,10 +9,10 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct DuckDbEntityLayout {
-    pub table: TableId,
-    pub default_properties: Vec<PropertyId>,
-    pub has_traversal_path: bool,
+struct DuckDbEntityLayout {
+    table: TableId,
+    default_properties: Vec<PropertyId>,
+    has_traversal_path: bool,
 }
 
 #[derive(Debug)]
@@ -91,7 +90,7 @@ impl QueryBackendCatalog for DuckDbCatalog {
     }
 
     fn edge_tables(&self, _relationships: &[RelationshipId]) -> Vec<String> {
-        vec![self.edge_table().to_string()]
+        vec![self.default_edge_table().to_string()]
     }
 
     fn foreign_key(
@@ -118,16 +117,8 @@ impl QueryBackendCatalog for DuckDbCatalog {
 }
 
 impl DuckDbCatalog {
-    pub fn entity(&self, id: EntityId) -> Option<&DuckDbEntityLayout> {
+    fn entity(&self, id: EntityId) -> Option<&DuckDbEntityLayout> {
         self.entities.get(id.index())?.as_ref()
-    }
-
-    pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
-        QueryBackendCatalog::relationship_table(self, id)
-    }
-
-    pub fn edge_table(&self) -> &str {
-        self.storage.table(self.edge_table).name()
     }
 }
 
@@ -138,73 +129,39 @@ impl DuckDbCatalog {
     ) -> Result<Self, DataModelError> {
         let edge_table = ontology
             .local_edge_table_name()
-            .unwrap_or_else(|| ontology.edge_table())
-            .to_string();
-        let mut tables: HashMap<_, _> = storage::local_tables(ontology)?
-            .into_iter()
-            .map(|table| (table.name().to_owned(), table))
-            .collect();
-        if !tables.contains_key(&edge_table) {
-            tables.insert(
-                edge_table.clone(),
-                TableLayout::local_edge(&edge_table, ontology.local_edge_columns())?,
-            );
-        }
-        let local_entities = ontology.local_entity_names();
-        let entity_names: Vec<_> = if local_entities.is_empty() {
-            ontology.node_names().collect()
+            .unwrap_or_else(|| ontology.edge_table());
+        let mut tables = if ontology.local_entity_names().is_empty() {
+            ontology
+                .nodes()
+                .map(|node| TableLayout::local_node(node, &[]))
+                .collect::<Result<Vec<_>, _>>()?
         } else {
-            local_entities
+            storage::local_tables(ontology)?
         };
-        for entity_name in &entity_names {
-            let node =
-                ontology
-                    .get_node(entity_name)
-                    .ok_or_else(|| DataModelError::UnknownReference {
-                        kind: "entity",
-                        name: entity_name.to_string(),
-                    })?;
-            let excluded = ontology
-                .local_entity_excludes(entity_name)
-                .unwrap_or_default();
-            if let std::collections::hash_map::Entry::Vacant(entry) =
-                tables.entry(node.destination_table.clone())
-            {
-                entry.insert(TableLayout::local_node(node, excluded)?);
-            }
+        if !tables.iter().any(|table| table.name() == edge_table) {
+            tables.push(TableLayout::local_edge(
+                edge_table,
+                ontology.local_edge_columns(),
+            )?);
         }
-        let storage = crate::storage::StorageCatalog::new(tables.into_values())?;
+        let storage = crate::storage::StorageCatalog::new(tables)?;
         let entities = graph
             .entities()
             .map(|entity| {
-                if !entity_names.contains(&entity.name.as_str()) {
-                    return Ok(None);
-                }
-                let table = storage.resolve_table(
-                    &ontology
-                        .get_node(&entity.name)
-                        .expect("catalog entity")
-                        .destination_table,
-                )?;
-                Ok(Some(DuckDbEntityLayout {
+                let node = ontology.get_node(&entity.name).expect("catalog entity");
+                let table = storage.table_id(&node.destination_table)?;
+                Some(DuckDbEntityLayout {
                     table,
                     default_properties: entity.properties.clone(),
                     has_traversal_path: ontology
                         .local_entity_fields(&entity.name)
-                        .unwrap_or_else(|| {
-                            ontology
-                                .get_node(&entity.name)
-                                .expect("catalog entity")
-                                .fields
-                                .iter()
-                                .collect()
-                        })
+                        .unwrap_or_else(|| node.fields.iter().collect())
                         .iter()
                         .any(|field| field.name == ontology::TRAVERSAL_PATH_COLUMN),
-                }))
+                })
             })
-            .collect::<Result<_, DataModelError>>()?;
-        let edge_table = storage.resolve_table(&edge_table)?;
+            .collect();
+        let edge_table = storage.resolve_table(edge_table)?;
         let property_facts = derive_property_backend_facts(ontology, graph, &storage, true)?;
         Ok(DuckDbCatalog {
             edge_table,
