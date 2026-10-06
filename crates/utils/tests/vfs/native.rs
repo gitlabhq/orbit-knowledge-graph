@@ -243,33 +243,6 @@ fn on_demand_readers_remain_lazy_repeatable_and_size_checked() {
 }
 
 #[test]
-fn safe_fs_inspects_links_without_following_them_and_reopens_files_safely() {
-    use orbit_utils::safe_fs::{self, Entry};
-    use std::os::unix::fs::symlink;
-
-    let root = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    let path = root.path().canonicalize().unwrap();
-    std::fs::write(path.join("file"), b"inside").unwrap();
-    std::fs::write(outside.path().join("file"), b"secret").unwrap();
-    symlink("file", path.join("alias")).unwrap();
-    symlink(outside.path(), path.join("escape")).unwrap();
-    assert!(
-        matches!(safe_fs::inspect(&path.join("alias")).unwrap(), Some(Entry::Symlink(target)) if target == Path::new("file"))
-    );
-    assert!(safe_fs::inspect(&path.join("escape/file")).is_err());
-    assert!(safe_fs::inspect(&path).unwrap().is_none());
-    let Some(Entry::File(file)) = safe_fs::inspect(&path.join("file")).unwrap() else {
-        panic!("expected a file");
-    };
-    assert_eq!(file.size(), 6);
-    assert_eq!(file.read(6).unwrap(), b"inside");
-    std::fs::remove_file(path.join("file")).unwrap();
-    symlink(outside.path().join("file"), path.join("file")).unwrap();
-    assert!(file.read(6).is_err());
-}
-
-#[test]
 fn a_file_removed_after_metadata_classification_remains_cataloged() {
     struct RemoveDuringMetadata(std::path::PathBuf);
     impl Pass for RemoveDuringMetadata {
@@ -299,48 +272,6 @@ fn a_file_removed_after_metadata_classification_remains_cataloged() {
     );
     assert_eq!(vfs.usage().files, 1);
     assert_eq!(vfs.usage().bytes, 7);
-}
-
-#[test]
-fn safe_fs_read_limits_are_inclusive_and_checked_before_opening() {
-    use orbit_utils::safe_fs::{self, Entry, SizeLimitExceeded};
-
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().canonicalize().unwrap().join("file");
-    std::fs::write(&path, b"data").unwrap();
-    let Some(Entry::File(file)) = safe_fs::inspect(&path).unwrap() else {
-        panic!("expected a regular file");
-    };
-    assert_eq!(file.read(4).unwrap(), b"data");
-    assert_eq!(file.read(5).unwrap(), b"data");
-    std::fs::remove_file(&path).unwrap();
-    let error = file.read(3).unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::FileTooLarge);
-    let limit = error
-        .get_ref()
-        .unwrap()
-        .downcast_ref::<SizeLimitExceeded>()
-        .unwrap();
-    assert_eq!(limit.size, 4);
-    assert_eq!(limit.max_bytes, 3);
-
-    std::fs::write(&path, b"grown").unwrap();
-    assert_eq!(
-        file.read(4).unwrap_err().kind(),
-        io::ErrorKind::FileTooLarge
-    );
-    assert_eq!(file.read(5).unwrap_err().kind(), io::ErrorKind::InvalidData);
-
-    std::fs::write(&path, b"").unwrap();
-    let Some(Entry::File(empty)) = safe_fs::inspect(&path).unwrap() else {
-        panic!("expected an empty regular file");
-    };
-    assert!(empty.read(0).unwrap().is_empty());
-    std::fs::write(&path, b"x").unwrap();
-    assert_eq!(
-        empty.read(0).unwrap_err().kind(),
-        io::ErrorKind::FileTooLarge
-    );
 }
 
 #[test]
@@ -603,14 +534,11 @@ fn file_bytes_are_borrowed_only_while_classifying_including_empty_files() {
 }
 
 #[test]
-fn host_links_and_replaced_parents_are_not_followed() {
+fn sources_keep_host_link_targets_outside_the_virtual_namespace() {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join("dir")).unwrap();
-    for path in ["file", "dir/file"] {
-        std::fs::write(root.path().join(path), b"inside").unwrap();
-    }
+    std::fs::write(root.path().join("file"), b"inside").unwrap();
     std::fs::write(outside.path().join("file"), b"secret").unwrap();
     symlink(outside.path(), root.path().join("escape")).unwrap();
     symlink(outside.path().join("file"), root.path().join("host-file")).unwrap();
@@ -682,13 +610,6 @@ fn host_links_and_replaced_parents_are_not_followed() {
         vfs.read(Path::new("host-file")).unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
-    std::fs::remove_file(root.path().join("file")).unwrap();
-    symlink(outside.path().join("file"), root.path().join("file")).unwrap();
-    std::fs::rename(root.path().join("dir"), root.path().join("old-dir")).unwrap();
-    symlink(outside.path(), root.path().join("dir")).unwrap();
-    for path in ["file", "dir/file"] {
-        assert!(vfs.read(Path::new(path)).is_err());
-    }
 }
 
 #[test]

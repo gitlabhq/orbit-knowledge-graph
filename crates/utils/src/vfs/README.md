@@ -382,6 +382,7 @@ I/O errors use Rust names such as `NotFound`. Load errors also accept `empty`, `
 | Git rules, changed paths and live directory changes | `directory.yaml` |
 | Archive format and traversal | `archive.yaml`; `tests/vfs/archive.rs` |
 | Lazy-reader invocation and failures | Native tests in `tests/vfs/native.rs` |
-| OS races, concurrent reads/writes, host escape | Native tests in `tests/vfs/native.rs` |
+| Concurrent reads/writes and virtual host escape | Native tests in `tests/vfs/native.rs` |
+| Host symlink inspection, replacement, and read limits | `tests/safe_fs/` |
 
 Add new behavior as a scenario first. Extend the typed grammar only when existing operations cannot express the public contract.
