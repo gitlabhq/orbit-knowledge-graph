@@ -142,9 +142,17 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
                 serde_json::json!(0),
             )]);
         }
-        crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-            .await;
-        if !cfg.unmerged_seed {
+        if cfg.unmerged_seed {
+            for (table, rows) in &cfg.extra_seed {
+                for row in rows {
+                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
+                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
+                        .await;
+                }
+            }
+        } else {
+            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+                .await;
             forked.optimize_all().await;
         }
         forked
@@ -255,7 +263,7 @@ async fn run_frontend(
     }
 
     if !expect.indexes_used.is_empty() {
-        let plan = ctx.explain_indexes(&compiled.base).await;
+        let plan = ctx.explain_plan(&compiled.base).await;
         assert_indexes_used(&plan, &expect.indexes_used, label);
     }
 
@@ -308,8 +316,8 @@ fn assert_indexes_used(plan: &serde_json::Value, names: &[String], label: &str) 
     fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
         match value {
             serde_json::Value::Object(map) => {
-                if map.get("Type") == Some(&serde_json::Value::from("Skip"))
-                    && map.get("Name") == Some(&serde_json::Value::from(name))
+                if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
+                    && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
                 {
                     return Some(value);
                 }
