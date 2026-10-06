@@ -361,7 +361,7 @@ stages:
 
   - name: lexical-scopes
     rules:
-      - match: '(expression_statement (block $$$V))'
+      - match: '(block $$$V)'
         replace: '(__scope $$$V)'
 
   - name: tag-defs

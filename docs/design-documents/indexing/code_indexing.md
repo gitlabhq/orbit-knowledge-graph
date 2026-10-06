@@ -235,8 +235,20 @@ destination bindings, including positions discarded with `_`.
 Record fields and tuple-struct positions use separate SSA bindings within each
 function. Copies retain the current field values; whole-value replacement clears
 old fields. Calls through fields or loop joins retain their reaching values until
-the linker seals the loop back-edges. Nested block declarations restore outer
-bindings when the block ends.
+the linker seals the loop back-edges.
+
+Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
+to declaration identities, which also identify SSA variables and field slots.
+Leaving a block removes its name mappings without restoring values. Assignments
+to outer bindings therefore survive block exit.
+
+An empty `__declaration` marker introduces a binding after its initializer.
+A named marker selects a matching scope label. The linker registers these names
+before walking that scope, so reads before assignment cannot fall back to outer
+names. TypeScript rules use block labels for `let` and `const`, and function labels
+for `var`. Python assignment rules use function labels. Rust declarations take
+effect in source order. Scope labels are YAML symbols; the engine does not branch
+on language names.
 
 ##### Inventory-driven indexing pipeline
 

@@ -34,7 +34,9 @@ stages:
 
       # Regular typed parameter → binding with SSA type hint
       - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
+      - match: '(required_parameter pattern: $N)'
+        replace: '(__binding @$N (__declaration))'
 
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
@@ -157,17 +159,24 @@ stages:
 
 
 
+  - name: binding-owners
+    rules:
+      - match: '(lexical_declaration $$$V)'
+        replace: '(variable_owner "block" $$$V)'
+      - match: '(variable_declaration $$$V)'
+        replace: '(variable_owner "function" $$$V)'
+
   - name: classify
     rules:
       # Bindings
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
-        replace: '(__def (__defname @$N) (__function) $V)'
+        replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V:identifier)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V))'
       - match: '(variable_declarator name: $N value: $V)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs $V))'
       - match: '(variable_declarator name: $N)'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")))'
       - match: '(assignment_expression left: $N right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N right: $R)'
@@ -239,6 +248,11 @@ stages:
         replace: '(__def (__defname @$N) (__class) $$$ANN $B)'
         tag: { flavor: abstract }
 
+  - name: lexical-scopes
+    rules:
+      - match: '(statement_block $$$V)'
+        replace: '(__scope "block" $$$V)'
+
   - name: cjs-entries
     rules:
       - match: '(cjs_entry key: $K value: $V)'
@@ -255,7 +269,7 @@ stages:
         replace: '(export_statement (__def (__default_export "default") $$$CHILDREN))'
 
       # export const X = ... → promote binding to Variable def
-      - match: '(export_statement (lexical_declaration $B:__binding))'
+      - match: '(export_statement (variable_owner $B:__binding))'
         replace: '(export_statement (__def (__defname @$B) (__variable)))'
 
   - name: ssa-cleanup
@@ -266,9 +280,9 @@ stages:
   - name: tag-defs
     rules:
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

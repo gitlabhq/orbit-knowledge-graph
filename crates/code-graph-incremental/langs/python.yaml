@@ -114,11 +114,11 @@ stages:
       - match: '(assignment left: $N:__ivar right: $R)'
         replace: '(__binding $N (__rhs @$R))'
       - match: '(assignment left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs $R))'
       - match: '(assignment left: $N right: $R:__ssa_loop)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs @$R))'
       - match: '(assignment left: $N:__ivar)'
         replace: '(__binding $N)'
       - match: '(assignment left: $N)'
@@ -179,9 +179,9 @@ stages:
   - name: tag-defs
     rules:
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

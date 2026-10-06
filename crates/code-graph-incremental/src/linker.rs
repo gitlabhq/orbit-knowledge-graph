@@ -24,7 +24,7 @@ enum Linked {
 enum WorkItem {
     Visit(u32),
     ExitScope(usize),
-    ExitBlock,
+    ExitBlock(usize),
 }
 
 /// Which wildcard imports an unresolved bare name may fall back to.
@@ -62,8 +62,8 @@ struct Fold<'t> {
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32)>,
-    fields: FxHashMap<(u32, u32), Vec<u32>>,
-    scopes: Vec<FxHashMap<u32, Value>>,
+    fields: FxHashMap<u32, Vec<u32>>,
+    scopes: Vec<FxHashMap<u32, u32>>,
 }
 
 impl<'t> Fold<'t> {
@@ -72,6 +72,7 @@ impl<'t> Fold<'t> {
     }
 
     fn exit_scope(&mut self, wildcards: usize) {
+        self.scopes.pop();
         self.wildcards.truncate(wildcards);
         if self.def_stack.len() > 1
             && let Some((_, saved)) = self.def_stack.pop()
@@ -92,10 +93,9 @@ impl<'t> Fold<'t> {
             }
             match item {
                 WorkItem::ExitScope(wildcards) => self.exit_scope(wildcards),
-                WorkItem::ExitBlock => {
-                    for (name, value) in self.scopes.pop().unwrap() {
-                        self.ssa.write_variable(name, self.cur, value);
-                    }
+                WorkItem::ExitBlock(wildcards) => {
+                    self.scopes.pop();
+                    self.wildcards.truncate(wildcards);
                 }
                 WorkItem::Visit(i) => self.dispatch(self.tree.cursor(i), &mut stack),
             }
@@ -153,17 +153,19 @@ impl<'t> Fold<'t> {
                 Self::push_children(c, stack);
             }
         } else if k == C::Scope {
-            self.scopes.push(FxHashMap::default());
-            stack.push(WorkItem::ExitBlock);
+            self.enter_scope(c);
+            stack.push(WorkItem::ExitBlock(self.wildcards.len()));
             Self::push_children(c, stack);
         } else if k == C::Destructure {
             if let Some(source) = c.child_sym(C::Rhs)
                 && c.children_of(C::Binding).any(|slot| slot.has(C::Name))
             {
                 for slot in c.children_of(C::Binding).filter(|slot| slot.has(C::Name)) {
-                    let key = self.field_key(source, slot.child_sym(C::Name).unwrap());
+                    let key =
+                        self.field_key(self.binding(source), slot.child_sym(C::Name).unwrap());
                     let value = self.ssa.read_variable_internal(key, self.cur);
-                    self.ssa.write_variable(slot.sym(), self.cur, value);
+                    let binding = self.declare_binding(slot);
+                    self.ssa.write_variable(binding, self.cur, value);
                 }
                 return;
             }
@@ -173,15 +175,19 @@ impl<'t> Fold<'t> {
                 }
                 let values: Vec<_> = values
                     .children()
-                    .map(
-                        |value| match self.ssa.read_variable_internal(value.sym(), self.cur) {
+                    .map(|value| {
+                        match self
+                            .ssa
+                            .read_variable_internal(self.binding(value.sym()), self.cur)
+                        {
                             Value::Undefined => Value::Opaque,
                             value => value,
-                        },
-                    )
+                        }
+                    })
                     .collect();
                 for (slot, value) in c.children_of(C::Binding).zip(values) {
-                    self.ssa.write_variable(slot.sym(), self.cur, value);
+                    let binding = self.declare_binding(slot);
+                    self.ssa.write_variable(binding, self.cur, value);
                 }
                 return;
             }
@@ -268,14 +274,18 @@ impl<'t> Fold<'t> {
             self.imports.push(n.index());
             self.wildcards
                 .extend((local == self.wildcard).then_some(n.index()));
+            let binding = self.declare_name(local, n.index());
             self.ssa
-                .write_variable(sym, self.cur, Value::ImportRef(import_idx));
+                .write_variable(binding, self.cur, Value::ImportRef(import_idx));
             for kind in [C::Alias, C::SsaHint] {
                 if let Some(alias) = n.child_sym(kind)
                     && alias != sym
                 {
-                    self.ssa
-                        .write_variable(alias, self.cur, Value::ImportRef(import_idx));
+                    self.ssa.write_variable(
+                        self.binding(alias),
+                        self.cur,
+                        Value::ImportRef(import_idx),
+                    );
                 }
             }
         }
@@ -322,8 +332,9 @@ impl<'t> Fold<'t> {
         };
         for (bind_as, node) in &targets {
             let def_idx = self.def_index(*node);
+            let binding = self.declare_name(*bind_as, name.index());
             self.ssa
-                .write_variable(*bind_as, self.cur, Value::LocalDef(def_idx));
+                .write_variable(binding, self.cur, Value::LocalDef(def_idx));
         }
         !targets.is_empty()
     }
@@ -372,6 +383,7 @@ impl<'t> Fold<'t> {
             self.edges.push(Edge::local(idx, dn, EdgeKind::Extends));
         }
         if c.has_tag(self.tags.scoped) {
+            self.enter_scope(c);
             if c.has_tag(self.tags.hoisted) {
                 self.predeclare(c);
             }
@@ -395,8 +407,13 @@ impl<'t> Fold<'t> {
             if sym == name && c.has(C::ImplBlock) && !self.lookup(name).is_empty() {
                 continue;
             }
+            let binding = if c.child_sym(C::Declaration).is_some() {
+                self.binding(sym)
+            } else {
+                self.declare_name(sym, c.index())
+            };
             self.ssa
-                .write_variable(sym, self.cur, Value::LocalDef(def_idx));
+                .write_variable(binding, self.cur, Value::LocalDef(def_idx));
         }
     }
 
@@ -437,7 +454,8 @@ impl<'t> Fold<'t> {
             }
         } else if let Some(sym) = callee.sym_opt() {
             if !c.has_tag(self.tags.implicit_self)
-                && let value @ Value::Phi(_) = self.ssa.read_variable_internal(sym, self.cur)
+                && let value @ Value::Phi(_) =
+                    self.ssa.read_variable_internal(self.binding(sym), self.cur)
             {
                 self.pending_calls.push((value, from, c.index()));
                 return;
@@ -470,12 +488,18 @@ impl<'t> Fold<'t> {
         if let Some(member) = c.child(C::Member).or_else(|| c.child(C::Ivar))
             && let Some(root) = member.child_sym(C::Object)
         {
-            let fields = self.fields.entry((self.enclosing(), root)).or_default();
+            let fields = self.fields.entry(self.binding(root)).or_default();
             if !fields.contains(&member.sym()) {
                 fields.push(member.sym());
             }
         }
-        let lhs = self.field_slot(c).unwrap_or(c.sym());
+        let declaration = c.has(C::Declaration) && c.child_sym(C::Declaration).is_none();
+        let lhs = if declaration {
+            self.syms
+                .intern(&format!("binding\0{}\0{}", c.index(), c.sym()))
+        } else {
+            self.field_slot(c).unwrap_or(self.binding(c.sym()))
+        };
         if lhs == 0 || (c.has(C::Ivar) && self.field_slot(c).is_none()) {
             return false;
         }
@@ -484,8 +508,14 @@ impl<'t> Fold<'t> {
         }
 
         let rhs = c.child(C::Rhs);
+        if rhs.is_none() && c.child_sym(C::Declaration).is_some() {
+            return true;
+        }
         if let Some(branch) = rhs.and_then(|r| r.child(C::SsaBranch)) {
             self.handle_branch(branch, Some(lhs));
+            if declaration {
+                self.declare_binding(c);
+            }
             return true;
         }
         if let Some(rhs) = rhs {
@@ -502,30 +532,74 @@ impl<'t> Fold<'t> {
             (None, Some(rhs)) => self.classify_tail(rhs.tail_expr()),
             (None, None) => Value::Opaque,
         };
-        if c.has(C::Declaration) && !self.scopes.is_empty() {
-            let mut names = vec![lhs];
-            names.extend(
-                self.fields
-                    .get(&(self.enclosing(), lhs))
-                    .into_iter()
-                    .flatten()
-                    .map(|field| self.field_key(lhs, *field)),
-            );
-            for name in names {
-                let value = self.ssa.read_variable_internal(name, self.cur);
-                self.scopes.last_mut().unwrap().entry(name).or_insert(value);
-            }
-        }
+        let val = match val {
+            Value::Alias(name) => match self.ssa.read_variable_internal(name, self.cur) {
+                Value::Undefined => Value::Opaque,
+                value => value,
+            },
+            value => value,
+        };
         self.ssa.write_variable(lhs, self.cur, val);
         if let Some(rhs) = rhs {
             self.bind_fields(lhs, rhs.tail_expr());
+        }
+        if declaration {
+            self.declare_binding(c);
         }
         true
     }
 
     fn field_key(&self, root: u32, field: u32) -> u32 {
-        self.syms
-            .intern(&format!("{}\0{root}\0{field}", self.enclosing()))
+        self.syms.intern(&format!("{root}\0{field}"))
+    }
+
+    fn binding(&self, name: u32) -> u32 {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(&name).copied())
+            .unwrap_or(name)
+    }
+
+    fn declare_name(&mut self, name: u32, node: u32) -> u32 {
+        let binding = self.syms.intern(&format!("binding\0{node}\0{name}"));
+        self.scopes.last_mut().unwrap().insert(name, binding);
+        binding
+    }
+
+    fn declare_binding(&mut self, node: Cursor<'_>) -> u32 {
+        if node.child_sym(C::Declaration).is_some() {
+            self.binding(node.sym())
+        } else {
+            self.declare_name(node.sym(), node.index())
+        }
+    }
+
+    fn enter_scope(&mut self, scope: Cursor<'t>) {
+        self.scopes.push(FxHashMap::default());
+        let label = if scope.is(C::Scope) {
+            scope.sym()
+        } else {
+            scope.tag(self.tags.scoped).unwrap_or(0)
+        };
+        if label == 0 {
+            return;
+        }
+        let scoped = self.tags.scoped;
+        let boundary =
+            move |node: Cursor| (node.is(C::Scope) && node.sym() == label) || node.has_tag(scoped);
+        for declaration in scope
+            .descendants_pruned(boundary)
+            .filter(|node| node.child_sym(C::Declaration) == Some(label))
+        {
+            let name = declaration
+                .child_sym(C::DefName)
+                .unwrap_or(declaration.sym());
+            if !self.scopes.last().unwrap().contains_key(&name) {
+                let binding = self.declare_name(name, declaration.index());
+                self.ssa.write_variable(binding, self.cur, Value::Opaque);
+            }
+        }
     }
 
     fn field_slot(&self, node: Cursor<'_>) -> Option<u32> {
@@ -534,9 +608,9 @@ impl<'t> Fold<'t> {
             .then_some(node)
             .or_else(|| node.child(C::Member))
             .or_else(|| node.child(C::Ivar))?;
-        let root = member.child(C::Object)?.sym();
+        let root = self.binding(member.child(C::Object)?.sym());
         self.fields
-            .get(&(self.enclosing(), root))?
+            .get(&root)?
             .contains(&member.sym())
             .then(|| self.field_key(root, member.sym()))
     }
@@ -562,25 +636,25 @@ impl<'t> Fold<'t> {
             for (index, arg) in args.children_of(C::Rhs).enumerate() {
                 values.insert(
                     self.syms.intern(&index.to_string()),
-                    self.ssa.read_variable_internal(arg.sym(), self.cur),
+                    self.ssa
+                        .read_variable_internal(self.binding(arg.sym()), self.cur),
                 );
             }
         } else {
             for field in self
                 .fields
-                .get(&(self.enclosing(), self.tail_sym(value)))
+                .get(&self.binding(self.tail_sym(value)))
                 .cloned()
                 .unwrap_or_default()
             {
-                let key = self.field_key(self.tail_sym(value), field);
+                let key = self.field_key(self.binding(self.tail_sym(value)), field);
                 values.insert(field, self.ssa.read_variable_internal(key, self.cur));
             }
         }
-        let scope = self.enclosing();
-        if values.is_empty() && !self.fields.contains_key(&(scope, lhs)) {
+        if values.is_empty() && !self.fields.contains_key(&lhs) {
             return;
         }
-        let fields = self.fields.entry((scope, lhs)).or_default();
+        let fields = self.fields.entry(lhs).or_default();
         for field in values.keys() {
             if !fields.contains(field) {
                 fields.push(*field);
@@ -605,7 +679,7 @@ impl<'t> Fold<'t> {
         if self.any_class(&r) {
             Value::Type(sym)
         } else {
-            Value::Alias(sym)
+            Value::Alias(self.binding(sym))
         }
     }
 
@@ -630,7 +704,7 @@ impl<'t> Fold<'t> {
 
     fn lookup(&mut self, sym: u32) -> Vec<Linked> {
         for block in [self.cur, BlockId(0)] {
-            let vals = self.ssa.read_variable(sym, block);
+            let vals = self.ssa.read_variable(self.binding(sym), block);
             let result: Vec<Linked> = vals.iter().filter_map(|pv| self.to_linked(pv)).collect();
             if !result.is_empty() {
                 return result;
@@ -693,7 +767,7 @@ impl<'t> Fold<'t> {
     }
 
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
-        if self.ssa.is_defined(sym, self.cur) {
+        if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
             bound.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
             for r in &bound {
@@ -964,7 +1038,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
         fields: FxHashMap::default(),
-        scopes: Vec::new(),
+        scopes: vec![FxHashMap::default()],
     };
 
     let root = tree.root();
