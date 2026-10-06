@@ -93,6 +93,7 @@ pub fn visit_expressions<'a>(
             }
         }
         Expr::Column { .. }
+        | Expr::Output(_)
         | Expr::EmptyTupleArray(_)
         | Expr::Identifier(_)
         | Expr::Literal(_)
@@ -205,6 +206,7 @@ fn visit_expr_queries(
             Ok(())
         }
         Expr::Column { .. }
+        | Expr::Output(_)
         | Expr::EmptyTupleArray(_)
         | Expr::Identifier(_)
         | Expr::Literal(_)

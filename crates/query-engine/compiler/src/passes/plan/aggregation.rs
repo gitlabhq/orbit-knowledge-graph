@@ -2,7 +2,7 @@ use query_data_model::QueryDataModel;
 
 use super::helpers::requested_columns;
 use crate::input::{
-    AggExpr, AggFunction, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
+    AggExpr, AggFunction, InputGroupByKey, OrderDirection, TruncateUnit, group_by_output_names,
 };
 
 use super::HydrationStrategy;
@@ -19,15 +19,15 @@ pub struct Group {
 pub struct Measure {
     pub function: AggFunction,
     pub argument: Option<Column>,
-    pub name: String,
+    pub name: crate::bindings::Export,
 }
 
 pub struct AggregationPlan {
     pub groups: Vec<Group>,
-    pub group_outputs: Vec<(Group, String)>,
+    pub group_outputs: Vec<(Group, crate::bindings::Export)>,
     pub measures: Vec<Measure>,
     pub condition: Vec<Predicate>,
-    pub order: Option<InputAggSort>,
+    pub order: Option<(crate::bindings::Export, OrderDirection)>,
 }
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
@@ -53,7 +53,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             group_outputs: vec![],
             measures: vec![],
             condition,
-            order: aggregation.sort.clone(),
+            order: None,
         };
         for (group, alias) in aggregation
             .group_by
@@ -71,7 +71,8 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                         column: Column::new(node, property),
                         truncate: *truncate,
                     };
-                    plan.group_outputs.push((group.clone(), alias));
+                    plan.group_outputs
+                        .push((group.clone(), crate::bindings::Export::new(alias)));
                     if !plan.groups.contains(&group) {
                         plan.groups.push(group);
                     }
@@ -114,9 +115,19 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             plan.measures.push(Measure {
                 function: metric.expr.function(),
                 argument,
-                name: metric.output_name(),
+                name: crate::bindings::Export::new(metric.output_name()),
             });
         }
+        plan.order = aggregation.sort.as_ref().map(|sort| {
+            let export = plan
+                .group_outputs
+                .iter()
+                .map(|(_, export)| export)
+                .chain(plan.measures.iter().map(|measure| &measure.name))
+                .find(|export| export.name() == sort.column)
+                .expect("validated aggregate output");
+            (export.clone(), sort.direction)
+        });
         plan
     }
 }

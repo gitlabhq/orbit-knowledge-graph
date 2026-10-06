@@ -154,9 +154,9 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
     let select = plan
         .group_outputs
         .iter()
-        .map(|(value, name)| SelectExpr::new(group(value), name))
+        .map(|(value, name)| SelectExpr::exporting(group(value), name))
         .chain(plan.measures.iter().map(|measure| {
-            SelectExpr::new(
+            SelectExpr::exporting(
                 Expr::Aggregate {
                     function: measure.function,
                     argument: measure
@@ -173,9 +173,9 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
     let order = plan
         .order
         .iter()
-        .map(|order| {
-            let value = Expr::ident(&order.column);
-            if order.direction == OrderDirection::Desc {
+        .map(|(export, direction)| {
+            let value = Expr::Output(export.clone());
+            if *direction == OrderDirection::Desc {
                 OrderExpr::desc(value)
             } else {
                 OrderExpr::asc(value)

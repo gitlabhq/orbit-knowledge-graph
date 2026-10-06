@@ -127,7 +127,7 @@ pub fn apply(
     let nullable = nullable_flags(input, order_by.len());
     let alias_scoped = order_by
         .iter()
-        .any(|o| matches!(o.expr, Expr::Identifier(_)));
+        .any(|o| matches!(o.expr, Expr::Identifier(_) | Expr::Output(_)));
     if !q.group_by.is_empty() {
         place_seek_in_having(q, &order_by, &values, &nullable);
     } else if !q.union_all.is_empty() || alias_scoped {
@@ -140,8 +140,18 @@ pub fn apply(
 
 fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
     for (i, o) in order_by.iter().enumerate() {
+        let expression = match &o.expr {
+            Expr::Output(export) => q
+                .select
+                .iter()
+                .find(|select| select.alias.as_ref() == Some(export))
+                .expect("ordering output belongs to query")
+                .expr
+                .clone(),
+            expression => expression.clone(),
+        };
         let hidden = SelectExpr::new(
-            Expr::func(crate::ast::Function::ToString, vec![o.expr.clone()]),
+            Expr::func(crate::ast::Function::ToString, vec![expression]),
             cursor_column(i),
         );
         for arm in &mut q.union_all {

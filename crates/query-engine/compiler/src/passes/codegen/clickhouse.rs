@@ -229,6 +229,7 @@ impl Context {
     fn emit_expr(&mut self, e: &Expr) -> String {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
+            Expr::Output(export) => export.name().to_owned(),
             Expr::Identifier(name) => name.clone(),
             Expr::EmptyTupleArray(fields) => format!(
                 "CAST([], 'Array(Tuple({}))')",

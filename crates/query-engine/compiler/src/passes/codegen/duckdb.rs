@@ -219,6 +219,7 @@ impl Context {
         }
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
+            Expr::Output(export) => export.name().to_owned(),
             Expr::Identifier(name) => name.clone(),
             Expr::EmptyTupleArray(fields) => {
                 let fields = fields

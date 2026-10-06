@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::{Expr, Node, Query, TableRef};
-use crate::bindings::Definition;
+use crate::bindings::{Definition, Export};
 use crate::error::{QueryError, Result};
 
 pub fn validate_definitions(node: &Node) -> Result<()> {
@@ -36,6 +36,11 @@ fn validate_query(query: &Query, inherited: &HashSet<Definition>) -> Result<()> 
         visible.insert(cte.name.clone());
     }
     validate_table(&query.from, &visible)?;
+    let outputs: HashSet<_> = query
+        .select
+        .iter()
+        .filter_map(|select| select.alias.clone())
+        .collect();
     for expression in query
         .select
         .iter()
@@ -46,7 +51,7 @@ fn validate_query(query: &Query, inherited: &HashSet<Definition>) -> Result<()> 
         .chain(query.order_by.iter().map(|order| &order.expr))
         .chain(query.limit_by.iter().flat_map(|(_, keys)| keys))
     {
-        validate_expression(expression, &visible)?;
+        validate_expression(expression, &visible, &outputs)?;
     }
     for arm in &query.union_all {
         validate_query(arm, &visible)?;
@@ -80,12 +85,16 @@ fn validate_table(table: &TableRef, visible: &HashSet<Definition>) -> Result<()>
         } => {
             validate_table(left, visible)?;
             validate_table(right, visible)?;
-            validate_expression(on, visible)
+            validate_expression(on, visible, &HashSet::new())
         }
     }
 }
 
-fn validate_expression(expression: &Expr, visible: &HashSet<Definition>) -> Result<()> {
+fn validate_expression(
+    expression: &Expr,
+    visible: &HashSet<Definition>,
+    outputs: &HashSet<Export>,
+) -> Result<()> {
     super::visit::visit_expressions(expression, &mut |expression| match expression {
         Expr::InSubquery {
             cte_name, column, ..
@@ -98,6 +107,9 @@ fn validate_expression(expression: &Expr, visible: &HashSet<Definition>) -> Resu
             }
             Ok(())
         }
+        Expr::Output(export) if !outputs.contains(export) => Err(QueryError::Codegen(
+            "output reference is outside its query scope".into(),
+        )),
         Expr::InSelect { query, .. } | Expr::Scalar(query) => validate_query(query, visible),
         _ => Ok(()),
     })

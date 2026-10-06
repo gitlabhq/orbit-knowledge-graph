@@ -228,7 +228,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     result
                         .group_outputs
                         .iter()
-                        .map(|(value, name)| format!("{} AS {name}", group(value))),
+                        .map(|(value, name)| format!("{} AS {}", group(value), name.name())),
                 )
                 .chain(result.measures.iter().map(|measure| {
                     let argument = measure
@@ -239,7 +239,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     format!(
                         "{}({argument}){condition} AS {}",
                         measure.function.to_string().to_uppercase(),
-                        measure.name
+                        measure.name.name()
                     )
                 }))
                 .collect::<Vec<_>>()
@@ -251,11 +251,8 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             );
             let tree = sort(
                 tree,
-                result.order.iter().map(|order| {
-                    (
-                        order.column.clone(),
-                        order.direction == OrderDirection::Desc,
-                    )
+                result.order.iter().map(|(export, direction)| {
+                    (export.name().to_owned(), *direction == OrderDirection::Desc)
                 }),
             );
             definitions(&plan.operation.execution, tree)
@@ -658,6 +655,7 @@ fn expression(value: &Expr) -> String {
             value
         }
         Expr::Column { table, column } => format!("{table}.{column}"),
+        Expr::Output(export) => export.name().to_owned(),
         Expr::Identifier(name) => name.clone(),
         Expr::Literal(value) | Expr::Param { value, .. } => literal(value),
         Expr::FuncCall { name, args } => format!(

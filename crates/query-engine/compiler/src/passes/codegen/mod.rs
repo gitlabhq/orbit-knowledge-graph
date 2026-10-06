@@ -288,6 +288,40 @@ mod tests {
     }
 
     #[test]
+    fn ordering_requires_the_querys_declared_output() {
+        let output = SelectExpr::new(
+            Expr::aggregate(crate::input::AggFunction::Count, None),
+            "count",
+        );
+        for (export, valid) in [
+            (output.alias.clone().unwrap(), true),
+            (crate::bindings::Export::new("count"), false),
+        ] {
+            let ast = Node::Query(Box::new(Query {
+                select: vec![output.clone()],
+                from: TableRef::scan("nodes", "n"),
+                order_by: vec![crate::ast::OrderExpr::desc(Expr::Output(export))],
+                ..Default::default()
+            }));
+            for result in [
+                codegen(&ast, ResultContext::new(), QueryConfig::default()),
+                duckdb::codegen(&ast, ResultContext::new()),
+            ] {
+                if valid {
+                    assert!(result.unwrap().sql.contains("ORDER BY count DESC"));
+                } else {
+                    assert!(
+                        result
+                            .unwrap_err()
+                            .to_string()
+                            .contains("output reference is outside its query scope")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn aggregate_codegen_rejects_missing_arguments_except_row_count() {
         use crate::input::AggFunction;
 

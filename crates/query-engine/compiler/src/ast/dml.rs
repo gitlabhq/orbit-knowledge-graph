@@ -13,6 +13,7 @@ pub use orbit_utils::query_types::{ScalarType, SqlType, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    Output(Export),
     Column {
         table: String,
         column: String,
