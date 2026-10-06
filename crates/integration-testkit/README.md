@@ -305,7 +305,7 @@ Each YAML file contains one `QueryScenario` document.
 | Field | Type | Description |
 |---|---|---|
 | `extra_seed` | `Seed` | Additional rows to insert; triggers a DB fork |
-| `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
+| `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert one row per part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
 
@@ -370,7 +370,7 @@ Each YAML file contains one `QueryScenario` document.
 | `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
-| `indexes_used` | [string] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply and that must prune granules. Seed a non-matching part with `unmerged_seed` so there is more than one granule to prune |
+| `indexes_used` | [string] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
 
 **Pagination:**
