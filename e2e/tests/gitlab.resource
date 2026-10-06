@@ -148,9 +148,10 @@ Create Project
     [Documentation]    Create a project under ${namespace_id} and return its dict. Its
     ...                traversal_path lands asynchronously via Siphon's refresh_on_change
     ...                rule (namespaces -> projects), so callers must wait for indexing.
-    [Arguments]    ${name}    ${namespace_id}    ${visibility}=public
+    [Arguments]    ${name}    ${namespace_id}    ${visibility}=public    ${readme}=${False}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=${visibility}
+    ...    initialize_with_readme=${readme}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects
     ...    headers=${headers}    json=${body}    expected_status=201
     ${project}=    Set Variable    ${resp.json()}
