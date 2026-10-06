@@ -112,7 +112,10 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                         .collect(),
                 ),
             };
-            SelectExpr::new(expression, &value.name)
+            SelectExpr {
+                expr: expression,
+                alias: Some(value.name.clone()),
+            }
         })
         .collect()
 }

@@ -199,11 +199,12 @@ mod tests {
                     )]
                 }
                 "nested_cte" => {
-                    let inner_definition = crate::bindings::Definition::new("inner_cte");
-                    query.ctes.push(Cte::new(
-                        &crate::bindings::Definition::new("outer_cte"),
+                    let inner_cte = Cte::define("inner_cte", inner);
+                    let inner_definition = inner_cte.name.clone();
+                    query.ctes.push(Cte::define(
+                        "outer_cte",
                         Query {
-                            ctes: vec![Cte::new(&inner_definition, inner)],
+                            ctes: vec![inner_cte],
                             from: TableRef::cte(&inner_definition, "nested"),
                             ..Default::default()
                         },
@@ -510,7 +511,7 @@ mod tests {
         let inner = Query {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
-                alias: Some("cnt".into()),
+                alias: Some(crate::bindings::Export::new("cnt")),
             }],
             from: TableRef::scan("gl_project", "p"),
             group_by: vec![Expr::col("p", "namespace_id")],
@@ -543,7 +544,7 @@ mod tests {
         let inner = Query {
             select: vec![SelectExpr {
                 expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("p", "id"))),
-                alias: Some("cnt".into()),
+                alias: Some(crate::bindings::Export::new("cnt")),
             }],
             from: TableRef::scan("gl_project", "p"),
             where_clause: Some(filter),
@@ -639,7 +640,8 @@ mod tests {
     #[test]
     fn rejects_cte_with_sensitive_table_missing_filter() {
         use crate::ast::Cte;
-        let base = crate::bindings::Definition::new("base");
+        let export = crate::bindings::Export::new("node_id");
+        let base = crate::bindings::Definition::new("base", vec![export.clone()]);
 
         let node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
@@ -647,7 +649,7 @@ mod tests {
                 Query {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
-                        alias: Some("node_id".into()),
+                        alias: Some(export),
                     }],
                     from: TableRef::scan("gl_project", "p"),
                     where_clause: None,
@@ -676,7 +678,8 @@ mod tests {
     #[test]
     fn accepts_cte_with_security_filter() {
         use crate::ast::Cte;
-        let base = crate::bindings::Definition::new("base");
+        let export = crate::bindings::Export::new("node_id");
+        let base = crate::bindings::Definition::new("base", vec![export.clone()]);
 
         let filter = Expr::func(
             Function::StartsWith,
@@ -691,7 +694,7 @@ mod tests {
                 Query {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
-                        alias: Some("node_id".into()),
+                        alias: Some(export),
                     }],
                     from: TableRef::scan("gl_project", "p"),
                     where_clause: Some(filter),

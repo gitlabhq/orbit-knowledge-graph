@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 
-use crate::bindings::Definition;
+use crate::bindings::{Definition, Export};
 use regex::Regex;
 use serde_json::Value;
 
@@ -63,7 +63,7 @@ pub enum Expr {
     InSubquery {
         expr: Box<Expr>,
         cte_name: Definition,
-        column: String,
+        column: Export,
     },
     /// Like InSubquery but embeds the query directly instead of referencing
     /// a CTE. Used for narrowing when CTE references would trigger
@@ -200,14 +200,20 @@ pub enum JoinType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectExpr {
     pub expr: Expr,
-    pub alias: Option<String>,
+    pub alias: Option<Export>,
 }
 
 impl SelectExpr {
+    pub fn exporting(expr: Expr, export: &Export) -> Self {
+        Self {
+            expr,
+            alias: Some(export.clone()),
+        }
+    }
     pub fn new(expr: Expr, alias: impl Into<String>) -> Self {
         Self {
             expr,
-            alias: Some(alias.into()),
+            alias: Some(Export::new(alias)),
         }
     }
 
@@ -253,6 +259,17 @@ pub struct Cte {
 }
 
 impl Cte {
+    pub fn define(hint: impl Into<String>, query: Query) -> Self {
+        let definition = Definition::new(
+            hint,
+            query
+                .select
+                .iter()
+                .filter_map(|select| select.alias.clone())
+                .collect(),
+        );
+        Self::new(&definition, query)
+    }
     pub fn new(name: &Definition, query: Query) -> Self {
         Self {
             name: name.clone(),
@@ -289,9 +306,11 @@ pub struct Query {
 
 impl Query {
     pub fn selects_alias(&self, alias: &str) -> bool {
-        self.select
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(alias))
+        self.select.iter().any(|s| {
+            s.alias
+                .as_ref()
+                .is_some_and(|export| export.name() == alias)
+        })
     }
 }
 

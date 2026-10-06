@@ -546,9 +546,10 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             definition,
             key,
         } => vec![format!(
-            "{} IN {}.{key}",
+            "{} IN {}.{}",
             planned_column(column),
-            definition.hint()
+            definition.hint(),
+            key.name()
         )],
     }
 }
@@ -582,7 +583,7 @@ fn planned_projections(values: &[Projection]) -> String {
                         .join(", ")
                 ),
             };
-            format!("{value} AS {}", projection.name)
+            format!("{value} AS {}", projection.name.name())
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -685,7 +686,12 @@ fn expression(value: &Expr) -> String {
             expr,
             cte_name,
             column,
-        } => format!("{} IN {}.{column}", expression(expr), cte_name.hint()),
+        } => format!(
+            "{} IN {}.{}",
+            expression(expr),
+            cte_name.hint(),
+            column.name()
+        ),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
         Expr::Scalar(_) => "scalar(subquery)".into(),
         Expr::Star => "*".into(),
@@ -714,7 +720,7 @@ fn projections(values: &[SelectExpr]) -> String {
         .map(|value| {
             value.alias.as_ref().map_or_else(
                 || expression(&value.expr),
-                |alias| format!("{} AS {alias}", expression(&value.expr)),
+                |alias| format!("{} AS {}", expression(&value.expr), alias.name()),
             )
         })
         .collect::<Vec<_>>()

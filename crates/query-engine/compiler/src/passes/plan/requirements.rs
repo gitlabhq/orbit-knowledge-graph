@@ -57,7 +57,7 @@ pub enum Predicate {
     Membership {
         column: Column,
         definition: crate::bindings::Definition,
-        key: String,
+        key: crate::bindings::Export,
     },
 }
 
@@ -79,14 +79,14 @@ pub enum OutputValue {
 #[derive(Clone)]
 pub struct Projection {
     pub value: OutputValue,
-    pub name: String,
+    pub name: crate::bindings::Export,
 }
 
 impl Projection {
     pub fn new(value: OutputValue, name: impl Into<String>) -> Self {
         Self {
             value,
-            name: name.into(),
+            name: crate::bindings::Export::new(name),
         }
     }
     pub fn col(alias: &str, column: &str) -> Self {

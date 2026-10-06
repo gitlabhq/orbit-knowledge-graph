@@ -39,8 +39,8 @@ pub(super) fn key_membership(
 ) -> Predicate {
     Predicate::Membership {
         column: Column::new(alias, column),
+        key: name.exports()[0].clone(),
         definition: name,
-        key: DEFAULT_PRIMARY_KEY.into(),
     }
 }
 
@@ -123,7 +123,7 @@ impl PhysicalSource {
         {
             if !outputs
                 .iter()
-                .any(|projection: &Projection| projection.name == name)
+                .any(|projection: &Projection| projection.name.name() == name)
             {
                 outputs.push(Projection::col(alias, name));
             }
@@ -220,6 +220,16 @@ impl PhysicalSource {
 }
 
 impl PhysicalPlan {
+    pub fn define(self, hint: impl Into<String>) -> (crate::bindings::Definition, Self) {
+        let definition = crate::bindings::Definition::new(
+            hint,
+            self.outputs
+                .iter()
+                .map(|output| output.name.clone())
+                .collect(),
+        );
+        (definition, self)
+    }
     pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Predicate>) -> Result<Self> {
         Self::keys(node, column, false, extra)
     }

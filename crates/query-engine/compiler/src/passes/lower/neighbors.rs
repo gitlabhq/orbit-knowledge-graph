@@ -285,7 +285,8 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             .select
             .iter()
             .find(|select| {
-                select.alias.as_deref() == Some(redaction_id_column(center_alias).as_str())
+                select.alias.as_ref().map(|export| export.name())
+                    == Some(redaction_id_column(center_alias).as_str())
             })
             .expect("neighbors emits its center identity")
             .expr

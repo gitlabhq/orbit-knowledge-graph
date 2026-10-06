@@ -14,6 +14,16 @@ pub fn validate_definitions(node: &Node) -> Result<()> {
 fn validate_query(query: &Query, inherited: &HashSet<Definition>) -> Result<()> {
     let mut visible = inherited.clone();
     for cte in &query.ctes {
+        if !cte.name.exports().iter().eq(cte
+            .query
+            .select
+            .iter()
+            .filter_map(|select| select.alias.as_ref()))
+        {
+            return Err(QueryError::Codegen(
+                "CTE body does not match its declared exports".into(),
+            ));
+        }
         if visible.contains(&cte.name) {
             return Err(QueryError::Codegen(
                 "CTE handle declared more than once in its scope".into(),
@@ -77,7 +87,17 @@ fn validate_table(table: &TableRef, visible: &HashSet<Definition>) -> Result<()>
 
 fn validate_expression(expression: &Expr, visible: &HashSet<Definition>) -> Result<()> {
     super::visit::visit_expressions(expression, &mut |expression| match expression {
-        Expr::InSubquery { cte_name, .. } => require_visible(cte_name, visible),
+        Expr::InSubquery {
+            cte_name, column, ..
+        } => {
+            require_visible(cte_name, visible)?;
+            if !cte_name.exports().contains(column) {
+                return Err(QueryError::Codegen(
+                    "membership references an export from a different definition".into(),
+                ));
+            }
+            Ok(())
+        }
         Expr::InSelect { query, .. } | Expr::Scalar(query) => validate_query(query, visible),
         _ => Ok(()),
     })

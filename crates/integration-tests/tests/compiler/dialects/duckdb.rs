@@ -279,8 +279,11 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
 #[test]
 fn nested_cte_codegen_executes_with_its_local_definition() {
     use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
-    let seed = compiler::bindings::Definition::new("seed");
-    let result_definition = compiler::bindings::Definition::new("result");
+    let seed_export = compiler::bindings::Export::new("id");
+    let result_export = compiler::bindings::Export::new("id");
+    let seed = compiler::bindings::Definition::new("seed", vec![seed_export.clone()]);
+    let result_definition =
+        compiler::bindings::Definition::new("result", vec![result_export.clone()]);
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -295,12 +298,12 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
                 ctes: vec![Cte::new(
                     &seed,
                     Query {
-                        select: vec![SelectExpr::col("n", "id")],
+                        select: vec![SelectExpr::exporting(Expr::col("n", "id"), &seed_export)],
                         from: TableRef::scan("nodes", "n"),
                         ..Default::default()
                     },
                 )],
-                select: vec![SelectExpr::col("s", "id")],
+                select: vec![SelectExpr::exporting(Expr::col("s", "id"), &result_export)],
                 from: TableRef::cte(&seed, "s"),
                 ..Default::default()
             },

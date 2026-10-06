@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::requirements::{Column, OutputValue, Projection, id_list};
-use crate::bindings::Definition;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
@@ -53,11 +52,9 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         if target.filters.is_empty() && target.node_ids.is_empty() && target.id_range.is_none() {
             continue;
         }
-        let name = Definition::new(format!("_candidate_{}", fk.target_node));
-        plan.definitions.push((
-            name.clone(),
-            PhysicalPlan::candidate_keys(target, &fk.referenced_column, vec![])?,
-        ));
+        let (name, keys) = PhysicalPlan::candidate_keys(target, &fk.referenced_column, vec![])?
+            .define(format!("_candidate_{}", fk.target_node));
+        plan.definitions.push((name.clone(), keys));
         references.insert(fk.target_node.clone(), name);
     }
     let mut center_extra = center_pins.clone();
@@ -67,11 +64,10 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         }
     }
     if !visited.is_empty() && !center_extra.is_empty() {
-        let name = Definition::new(format!("_candidate_{center}"));
-        plan.definitions.push((
-            name.clone(),
-            PhysicalPlan::candidate_keys(center_node, DEFAULT_PRIMARY_KEY, center_extra.clone())?,
-        ));
+        let (name, keys) =
+            PhysicalPlan::candidate_keys(center_node, DEFAULT_PRIMARY_KEY, center_extra.clone())?
+                .define(format!("_candidate_{center}"));
+        plan.definitions.push((name.clone(), keys));
         plan.source = plan
             .source
             .filter(vec![key_membership(center, DEFAULT_PRIMARY_KEY, name)]);
@@ -88,11 +84,10 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
                 && target.id_range.is_none()
                 && center_node.has_selective_filters()
             {
-                let name = Definition::new(format!("_narrow_{}", fk.target_node));
-                plan.definitions.push((
-                    name.clone(),
-                    PhysicalPlan::candidate_keys(center_node, &fk.fk_column, center_extra.clone())?,
-                ));
+                let (name, keys) =
+                    PhysicalPlan::candidate_keys(center_node, &fk.fk_column, center_extra.clone())?
+                        .define(format!("_narrow_{}", fk.target_node));
+                plan.definitions.push((name.clone(), keys));
                 Some(name)
             } else {
                 None
@@ -110,11 +105,9 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             );
             plan.outputs.extend(scan.outputs);
         } else if target.hydration == HydrationStrategy::FilterOnly {
-            let name = Definition::new(format!("_filter_{}", target.alias));
-            plan.definitions.push((
-                name.clone(),
-                PhysicalPlan::filtered_keys(target, &fk.referenced_column)?,
-            ));
+            let (name, keys) = PhysicalPlan::filtered_keys(target, &fk.referenced_column)?
+                .define(format!("_filter_{}", target.alias));
+            plan.definitions.push((name.clone(), keys));
             plan.source =
                 plan.source
                     .filter(vec![key_membership(&fk.fk_node, &fk.fk_column, name)]);

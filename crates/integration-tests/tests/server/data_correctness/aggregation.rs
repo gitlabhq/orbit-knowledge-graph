@@ -13,8 +13,15 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
     {
-        let seed = compiler::bindings::Definition::new("seed");
-        let result_definition = compiler::bindings::Definition::new("result");
+        let value_export = compiler::bindings::Export::new("value");
+        let keep_export = compiler::bindings::Export::new("keep");
+        let result_export = compiler::bindings::Export::new("n");
+        let seed = compiler::bindings::Definition::new(
+            "seed",
+            vec![value_export.clone(), keep_export.clone()],
+        );
+        let result_definition =
+            compiler::bindings::Definition::new("result", vec![result_export.clone()]);
         let ast = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
                 &result_definition,
@@ -22,19 +29,22 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
                     ctes: vec![Cte::new(
                         &seed,
                         Query {
-                            select: vec![SelectExpr::star()],
+                            select: vec![
+                                SelectExpr::exporting(Expr::col("m", "value"), &value_export),
+                                SelectExpr::exporting(Expr::col("m", "keep"), &keep_export),
+                            ],
                             from: TableRef::scan("measurements", "m"),
                             ..Default::default()
                         },
                     )],
-                    select: vec![SelectExpr::new(
+                    select: vec![SelectExpr::exporting(
                         Expr::Aggregate {
                             function: AggFunction::Count,
                             argument: argument.then(|| Box::new(Expr::col("s", "value"))),
                             distinct,
                             condition: Some(Box::new(Expr::col("s", "keep"))),
                         },
-                        "n",
+                        &result_export,
                     )],
                     from: TableRef::cte(&seed, "s"),
                     ..Default::default()

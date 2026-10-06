@@ -370,7 +370,12 @@ fn enforce_return_columns(
             let position = q
                 .select
                 .iter()
-                .position(|select| select.alias.as_ref() == Some(&id_col))
+                .position(|select| {
+                    select
+                        .alias
+                        .as_ref()
+                        .is_some_and(|export| export.name() == id_col)
+                })
                 .map_or(q.select.len(), |index| index + 1);
             q.select
                 .insert(position, SelectExpr::new(Expr::string(entity), type_col));
@@ -389,11 +394,10 @@ fn enforce_return_columns(
         let added = q.select[select_len_before..].to_vec();
         for arm in &mut q.union_all {
             for select in &added {
-                if !arm
-                    .select
-                    .iter()
-                    .any(|existing| existing.alias == select.alias)
-                {
+                if !arm.select.iter().any(|existing| {
+                    existing.alias.as_ref().map(|export| export.name())
+                        == select.alias.as_ref().map(|export| export.name())
+                }) {
                     arm.select.push(select.clone());
                 }
             }

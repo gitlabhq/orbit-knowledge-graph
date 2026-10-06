@@ -155,7 +155,7 @@ impl Context {
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
-                    Some(alias) => format!("{expr} AS {alias}"),
+                    Some(alias) => format!("{expr} AS {}", alias.name()),
                     None => expr,
                 }
             })
@@ -344,7 +344,8 @@ impl Context {
             } => {
                 let e = self.emit_expr(expr);
                 format!(
-                    "{e} IN (SELECT {column} FROM {})",
+                    "{e} IN (SELECT {} FROM {})",
+                    column.name(),
                     self.definitions.name(cte_name)
                 )
             }
@@ -500,11 +501,11 @@ mod tests {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "id"),
-                    alias: Some("node_id".into()),
+                    alias: Some(crate::bindings::Export::new("node_id")),
                 },
                 SelectExpr {
                     expr: Expr::col("n", "label"),
-                    alias: Some("node_type".into()),
+                    alias: Some(crate::bindings::Export::new("node_type")),
                 },
             ],
             from: TableRef::scan("nodes", "n"),
@@ -535,11 +536,11 @@ mod tests {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "id"),
-                    alias: Some("node_id".into()),
+                    alias: Some(crate::bindings::Export::new("node_id")),
                 },
                 SelectExpr {
                     expr: Expr::col("e", "label"),
-                    alias: Some("rel_type".into()),
+                    alias: Some(crate::bindings::Export::new("rel_type")),
                 },
             ],
             from: TableRef::join(
@@ -569,14 +570,14 @@ mod tests {
             select: vec![
                 SelectExpr {
                     expr: Expr::col("n", "label"),
-                    alias: Some("type".into()),
+                    alias: Some(crate::bindings::Export::new("type")),
                 },
                 SelectExpr {
                     expr: Expr::aggregate(
                         crate::input::AggFunction::Count,
                         Some(Expr::col("n", "id")),
                     ),
-                    alias: Some("count".into()),
+                    alias: Some(crate::bindings::Export::new("count")),
                 },
             ],
             from: TableRef::scan("nodes", "n"),
@@ -933,13 +934,14 @@ mod tests {
     #[test]
     fn union_all_in_cte_body() {
         use crate::ast::Cte;
-        let definition = crate::bindings::Definition::new("path_cte");
+        let export = crate::bindings::Export::new("node_id");
+        let definition = crate::bindings::Definition::new("path_cte", vec![export.clone()]);
 
         let q = Query {
             ctes: vec![Cte {
                 name: definition.clone(),
                 query: Box::new(Query {
-                    select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
+                    select: vec![SelectExpr::exporting(Expr::col("p", "id"), &export)],
                     from: TableRef::scan("gl_project", "p"),
                     union_all: vec![Query {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],

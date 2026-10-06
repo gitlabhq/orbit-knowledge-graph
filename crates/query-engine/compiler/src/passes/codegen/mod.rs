@@ -152,16 +152,16 @@ mod tests {
     fn definition_references_require_scope_not_matching_names() {
         use crate::bindings::Definition;
 
-        let declared = Definition::new("items");
-        let foreign = Definition::new("items");
-        let definition = Cte::new(
-            &declared,
+        let foreign = Definition::new("items", vec![]);
+        let definition = Cte::define(
+            "items",
             Query {
                 select: vec![SelectExpr::col("n", "id")],
                 from: TableRef::scan("nodes", "n"),
                 ..Default::default()
             },
         );
+        let declared = &definition.name;
         for reference in [
             TableRef::cte(&foreign, "r"),
             TableRef::subquery(
@@ -183,7 +183,7 @@ mod tests {
                 where_clause: Some(Expr::InSubquery {
                     expr: Box::new(Expr::int(1)),
                     cte_name: declared.clone(),
-                    column: "id".into(),
+                    column: declared.exports()[0].clone(),
                 }),
                 ..Default::default()
             }));
@@ -205,21 +205,21 @@ mod tests {
     fn definition_names_do_not_capture_stored_tables_or_each_other() {
         use crate::bindings::Definition;
 
-        let outer = Definition::new("items");
-        let inner = Definition::new("items");
+        let inner_query = Query {
+            select: vec![SelectExpr::col("n", "id")],
+            from: TableRef::scan("items", "n"),
+            ..Default::default()
+        };
+        let inner_definition = Cte::define("items", inner_query);
+        let inner = inner_definition.name.clone();
+        let outer_select = SelectExpr::col("i", "id");
+        let outer = Definition::new("items", vec![outer_select.alias.clone().unwrap()]);
         let ast = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
                 &outer,
                 Query {
-                    ctes: vec![Cte::new(
-                        &inner,
-                        Query {
-                            select: vec![SelectExpr::col("n", "id")],
-                            from: TableRef::scan("items", "n"),
-                            ..Default::default()
-                        },
-                    )],
-                    select: vec![SelectExpr::col("i", "id")],
+                    ctes: vec![inner_definition],
+                    select: vec![outer_select],
                     from: TableRef::cte(&inner, "i"),
                     ..Default::default()
                 },
@@ -241,6 +241,49 @@ mod tests {
             assert!(sql.contains("FROM items AS n"), "{sql}");
             assert!(sql.contains("FROM items_1 AS i"), "{sql}");
             assert!(sql.contains("FROM items_2 AS r"), "{sql}");
+        }
+    }
+
+    #[test]
+    fn membership_requires_the_definitions_exact_export() {
+        let definition = Cte::define(
+            "keys",
+            Query {
+                select: vec![SelectExpr::col("n", "id")],
+                from: TableRef::scan("nodes", "n"),
+                ..Default::default()
+            },
+        );
+        for (export, valid) in [
+            (definition.name.exports()[0].clone(), true),
+            (crate::bindings::Export::new("id"), false),
+        ] {
+            let ast = Node::Query(Box::new(Query {
+                ctes: vec![definition.clone()],
+                select: vec![SelectExpr::col("n", "id")],
+                from: TableRef::scan("nodes", "n"),
+                where_clause: Some(Expr::InSubquery {
+                    expr: Box::new(Expr::col("n", "id")),
+                    cte_name: definition.name.clone(),
+                    column: export,
+                }),
+                ..Default::default()
+            }));
+            for result in [
+                codegen(&ast, ResultContext::new(), QueryConfig::default()),
+                duckdb::codegen(&ast, ResultContext::new()),
+            ] {
+                if valid {
+                    assert!(result.is_ok(), "{result:?}");
+                } else {
+                    assert!(
+                        result
+                            .unwrap_err()
+                            .to_string()
+                            .contains("different definition")
+                    );
+                }
+            }
         }
     }
 
@@ -404,21 +447,22 @@ mod tests {
     #[test]
     fn nested_cte_definitions_survive_both_renderers() {
         for recursive in [false, true] {
-            let seed_definition = crate::bindings::Definition::new("seed");
-            let result_definition = crate::bindings::Definition::new("result");
             let seed = Query {
                 select: vec![SelectExpr::new(Expr::int(7), "id")],
                 from: TableRef::scan("system.one", "one"),
                 ..Default::default()
             };
+            let seed = Cte::define("seed", seed);
+            let seed_definition = seed.name.clone();
             let body = Query {
-                ctes: vec![Cte::new(&seed_definition, seed)],
+                ctes: vec![seed],
                 select: vec![SelectExpr::col("s", "id")],
                 from: TableRef::cte(&seed_definition, "s"),
                 limit: Some(1),
                 ..Default::default()
             };
-            let mut outer = Cte::new(&result_definition, body);
+            let mut outer = Cte::define("result", body);
+            let result_definition = outer.name.clone();
             outer.recursive = recursive;
             let ast = Node::Query(Box::new(Query {
                 ctes: vec![outer],

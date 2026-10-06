@@ -60,8 +60,8 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
         anchor_denorm_tags: start_denorm,
     };
 
-    let forward_cte = Cte::new(
-        &Definition::new(FORWARD_CTE),
+    let forward_cte = Cte::define(
+        FORWARD_CTE,
         build_frontier(
             start_anchor.edge_filter,
             pf.forward_depth,
@@ -70,8 +70,8 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
         ),
     );
     let backward_cte = if pf.backward_depth > 0 {
-        Some(Cte::new(
-            &Definition::new(BACKWARD_CTE),
+        Some(Cte::define(
+            BACKWARD_CTE,
             build_frontier(
                 end_anchor.edge_filter.clone(),
                 pf.backward_depth,
@@ -272,8 +272,6 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         };
     }
 
-    let cte_name = Definition::new(node_filter_cte(alias));
-
     let mut scan_where = Vec::new();
     for (prop, filter) in &np.filters {
         scan_where.push(filter_to_expr(alias, prop, filter));
@@ -308,13 +306,15 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
         ..Default::default()
     };
-    ctes.push(Cte::new(&cte_name, cte_query));
+    let definition = Cte::define(node_filter_cte(alias), cte_query);
+    let cte_name = definition.name.clone();
+    ctes.push(definition);
 
     Anchor {
         edge_filter: Some(Expr::InSubquery {
             expr: Box::new(Expr::col("e1", edge_col)),
             cte_name: cte_name.clone(),
-            column: DEFAULT_PRIMARY_KEY.into(),
+            column: cte_name.exports()[0].clone(),
         }),
         cte_name: Some(cte_name),
         has_tp,
@@ -335,8 +335,8 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
         group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
         ..Default::default()
     };
-    Some(Cte::new(
-        &Definition::new(PATH_SCOPE_CTE),
+    Some(Cte::define(
+        PATH_SCOPE_CTE,
         Query {
             union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
             ..arm(start_cte, PATH_SCOPE_START_ALIAS)
@@ -364,8 +364,8 @@ fn endpoint_filter(np: &NodePlan, anchor: &Anchor, alias: &str, col: &str) -> Op
             .expect("filtered endpoint has an anchor definition");
         return Some(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, col)),
+            column: cte_name.exports()[0].clone(),
             cte_name,
-            column: DEFAULT_PRIMARY_KEY.into(),
         });
     }
     None
@@ -375,7 +375,7 @@ fn scope_filter(alias: &str, cte_name: &Definition) -> Expr {
     Expr::InSubquery {
         expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
         cte_name: cte_name.clone(),
-        column: TRAVERSAL_PATH_COLUMN.to_string(),
+        column: cte_name.exports()[0].clone(),
     }
 }
 

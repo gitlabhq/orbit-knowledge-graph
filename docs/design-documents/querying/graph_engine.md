@@ -101,6 +101,7 @@ Collection aggregates omit null inputs and return an empty array for empty input
 Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
 CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
 Builders allocate CTE definition handles and reuse them for references. Codegen checks definition visibility and assigns names without capturing stored tables or other definitions.
+Each definition declares ordered export handles. Membership predicates reference those exports directly; validation rejects same-named exports from another definition.
 UNION arms also retain their local CTE definitions. Empty path arrays carry field types instead of relying on dummy values in lowering.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.

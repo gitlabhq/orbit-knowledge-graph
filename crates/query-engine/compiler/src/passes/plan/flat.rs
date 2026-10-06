@@ -140,7 +140,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                             DEFAULT_PRIMARY_KEY,
                         )],
                     };
-                    let name = Definition::new(format!("_narrow_{alias}"));
+                    let (name, keys) = keys.define(format!("_narrow_{alias}"));
                     plan.definitions.push((name.clone(), keys));
                     Some(key_membership(alias, DEFAULT_PRIMARY_KEY, name))
                 } else {
@@ -179,11 +179,6 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     continue;
                 }
                 let first = !self.filtered.contains_key(alias);
-                let name = self
-                    .filtered
-                    .entry(alias.clone())
-                    .or_insert_with(|| Definition::new(format!("_filter_{alias}")))
-                    .clone();
                 if first {
                     let keys = if filter_only {
                         PhysicalPlan::filtered_keys(node, DEFAULT_PRIMARY_KEY)?
@@ -204,10 +199,16 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         };
                         keys
                     };
-                    self.definitions.push((name.clone(), keys));
+                    let (name, keys) = keys.define(format!("_filter_{alias}"));
+                    self.filtered.insert(alias.clone(), name.clone());
+                    self.definitions.push((name, keys));
                 }
                 if first || !filter_only {
-                    predicates.push(key_membership(&format!("e{index}"), column, name));
+                    predicates.push(key_membership(
+                        &format!("e{index}"),
+                        column,
+                        self.filtered[alias].clone(),
+                    ));
                 }
             }
         }
