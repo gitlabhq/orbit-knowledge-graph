@@ -1,0 +1,33 @@
+description: contains matches regardless of case and prunes granules with the ngram skip index
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"contains": "SHIP FEATURE"}}}],
+      "order_by": "mr.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEATURE'
+    RETURN mr.title ORDER BY mr.id LIMIT 10
+
+expect:
+  sql_contains: ["(lower(mr.title) LIKE lower('%SHIP FEATURE%'))"]
+  indexes_used: [idx_title_ngram]
+  skip_requirements: ["filter:title"]
+  node_count: 2
+  nodes:
+    MergeRequest:
+      order: [2004, 2005]
+      rows:
+        - { id: 2004, title: Ship feature E }
+        - { id: 2005, title: Ship feature F }

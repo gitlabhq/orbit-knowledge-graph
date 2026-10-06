@@ -370,6 +370,7 @@ Each YAML file contains one `QueryScenario` document.
 | `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
+| `indexes_used` | [string] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply and that must prune granules. Seed a non-matching part with `unmerged_seed` so there is more than one granule to prune |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
 
 **Pagination:**

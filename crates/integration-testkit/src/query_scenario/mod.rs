@@ -254,6 +254,11 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.indexes_used.is_empty() {
+        let plan = ctx.explain_indexes(&compiled.base).await;
+        assert_indexes_used(&plan, &expect.indexes_used, label);
+    }
+
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
@@ -297,6 +302,51 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+fn assert_indexes_used(plan: &serde_json::Value, names: &[String], label: &str) {
+    let mut chains = Vec::new();
+    collect_skip_index_chains(plan, &mut chains);
+    for name in names {
+        let (entering, entry) = chains
+            .iter()
+            .find_map(|chain| {
+                let entering = chain.first()?["Initial Granules"].as_u64()?;
+                let entry = chain.iter().find(|entry| entry["Name"] == name.as_str())?;
+                Some((entering, entry))
+            })
+            .unwrap_or_else(|| panic!("{label}: skip index {name} not applied\nplan: {plan:#}"));
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(entering);
+        assert!(
+            selected < entering,
+            "{label}: skip index {name} selected {selected} of {entering} granules\nplan: {plan:#}"
+        );
+    }
+}
+
+fn collect_skip_index_chains<'a>(
+    value: &'a serde_json::Value,
+    chains: &mut Vec<Vec<&'a serde_json::Value>>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(indexes) = map.get("Indexes").and_then(|v| v.as_array()) {
+                let chain: Vec<_> = indexes
+                    .iter()
+                    .filter(|entry| entry["Type"] == "Skip")
+                    .collect();
+                if !chain.is_empty() {
+                    chains.push(chain);
+                }
+            }
+            map.values()
+                .for_each(|v| collect_skip_index_chains(v, chains));
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .for_each(|v| collect_skip_index_chains(v, chains)),
+        _ => {}
+    }
 }
 
 fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {

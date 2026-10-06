@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
+use clickhouse_client::{ArrowClickHouseClient, ArrowQuery, ClickHouseConfigurationExt};
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
@@ -112,14 +112,38 @@ impl TestContext {
         &self,
         pq: &ParameterizedQuery,
     ) -> Result<Vec<RecordBatch>, String> {
-        let client = self.create_client();
-        let mut query = client.query(&pq.sql);
+        self.bind(&pq.sql, pq)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())
+    }
 
+    /// `EXPLAIN PLAN indexes = 1` of the query with its parameters bound, as
+    /// the JSON plan tree.
+    pub async fn explain_indexes(&self, pq: &ParameterizedQuery) -> serde_json::Value {
+        let sql = format!("EXPLAIN PLAN json = 1, indexes = 1 {}", pq.sql);
+        let batches = self
+            .bind(&sql, pq)
+            .fetch_arrow()
+            .await
+            .expect("explain failed");
+        let text: Vec<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                let lines = ArrowUtils::get_column_by_name::<StringArray>(batch, "explain")
+                    .expect("explain column");
+                (0..batch.num_rows()).map(|i| lines.value(i).to_string())
+            })
+            .collect();
+        serde_json::from_str(&text.join("\n")).expect("explain output is JSON")
+    }
+
+    fn bind(&self, sql: &str, pq: &ParameterizedQuery) -> ArrowQuery {
+        let mut query = self.create_client().query(sql);
         for (name, param) in &pq.params {
             query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.data_type);
         }
-
-        query.fetch_arrow().await.map_err(|e| e.to_string())
+        query
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
