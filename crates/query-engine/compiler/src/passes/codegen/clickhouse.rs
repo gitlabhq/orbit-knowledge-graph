@@ -3,7 +3,7 @@
 use orbit_server_config::QueryConfig;
 
 use crate::ast::{
-    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TokenMatchMode,
+    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
@@ -235,13 +235,6 @@ impl Context {
                     self.error = Some(format!("{name} does not accept {} arguments", args.len()));
                     return String::new();
                 }
-                if *name == Function::Contains {
-                    return format!(
-                        "multiSearchAny({}, [{}])",
-                        self.emit_expr(&args[0]),
-                        self.emit_expr(&args[1])
-                    );
-                }
                 let name = function_name(*name);
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
@@ -264,17 +257,14 @@ impl Context {
                     format!("toDate32({bucket})")
                 }
             }
-            Expr::TokenSearch { mode, value, query } => {
-                let function = match mode {
-                    TokenMatchMode::Single => "hasToken",
-                    TokenMatchMode::All => "hasAllTokens",
-                    TokenMatchMode::Any => "hasAnyTokens",
-                };
-                format!(
-                    "{function}({}, {})",
-                    self.emit_expr(value),
-                    self.emit_expr(query)
-                )
+            Expr::TextSearch { mode, value, query } => {
+                let (value, query) = (self.emit_expr(value), self.emit_expr(query));
+                match mode {
+                    TextMatch::Substring => format!("multiSearchAny({value}, [{query}])"),
+                    TextMatch::Token => format!("hasToken({value}, {query})"),
+                    TextMatch::AllTokens => format!("hasAllTokens({value}, {query})"),
+                    TextMatch::AnyTokens => format!("hasAnyTokens({value}, {query})"),
+                }
             }
             Expr::Aggregate {
                 function,
@@ -448,7 +438,6 @@ pub(crate) fn function_name(function: Function) -> &'static str {
     match function {
         Function::StartsWith => "startsWith",
         Function::EndsWith => "endsWith",
-        Function::Contains => unreachable!("contains rendered above"),
         Function::Lower => "lower",
         Function::ToString => "toString",
         Function::ToJson => "toJSONString",

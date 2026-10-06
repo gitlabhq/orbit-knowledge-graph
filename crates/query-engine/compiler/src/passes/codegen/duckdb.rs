@@ -13,7 +13,9 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef};
+use crate::ast::{
+    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
+};
 use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -226,7 +228,16 @@ impl Context {
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(*name, args),
-            Expr::TokenSearch { .. } => {
+            Expr::TextSearch {
+                mode: TextMatch::Substring,
+                value,
+                query,
+            } => format!(
+                "contains({}, {})",
+                self.emit_expr(value),
+                self.emit_expr(query)
+            ),
+            Expr::TextSearch { .. } => {
                 self.error = Some("token search is not supported by the DuckDB backend".into());
                 String::new()
             }
@@ -401,7 +412,6 @@ impl Context {
         let duckdb_name = match name {
             Function::StartsWith => "starts_with",
             Function::EndsWith => "ends_with",
-            Function::Contains => "contains",
             Function::Lower => "lower",
             Function::Substring => "substring",
             Function::ArrayContains => "list_contains",

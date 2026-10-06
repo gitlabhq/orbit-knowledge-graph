@@ -39,8 +39,8 @@ pub enum Expr {
         unit: crate::input::TruncateUnit,
         value: Box<Expr>,
     },
-    TokenSearch {
-        mode: TokenMatchMode,
+    TextSearch {
+        mode: TextMatch,
         value: Box<Expr>,
         query: Box<Expr>,
     },
@@ -78,17 +78,17 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
-pub enum TokenMatchMode {
-    Single,
-    All,
-    Any,
+pub enum TextMatch {
+    Substring,
+    Token,
+    AllTokens,
+    AnyTokens,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum Function {
     StartsWith,
     EndsWith,
-    Contains,
     Lower,
     ToString,
     ToJson,

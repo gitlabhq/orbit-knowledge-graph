@@ -647,8 +647,8 @@ fn literal(value: &serde_json::Value) -> String {
 fn expression(value: &Expr) -> String {
     match value {
         Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
-        Expr::TokenSearch { mode, value, query } => format!(
-            "tokens_{}({}, {})",
+        Expr::TextSearch { mode, value, query } => format!(
+            "{}({}, {})",
             mode.to_string().to_lowercase(),
             expression(value),
             expression(query)
