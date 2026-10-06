@@ -469,6 +469,7 @@ fn elide_hops(
                         property: None,
                         data_type: Some(ontology::DataType::Int),
                         selectivity: ontology::FieldSelectivity::High,
+                        sort_key: false,
                     },
                 ));
                 if fk_np.selectivity > Selectivity::Filtered {

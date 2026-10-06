@@ -1,4 +1,4 @@
-description: contains treats %, _, and backslash in the needle literally, and the escaped pattern still prunes with the ngram skip index
+description: contains treats %, _, and backslash as plain characters, and the ngram skip index prunes the base part and the decoy part
 
 config:
   redaction: { allow: { merge_request: [2101, 2102] } }

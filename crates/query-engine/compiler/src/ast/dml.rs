@@ -88,6 +88,7 @@ pub enum TokenMatchMode {
 pub enum Function {
     StartsWith,
     EndsWith,
+    Contains,
     Lower,
     ToString,
     ToJson,

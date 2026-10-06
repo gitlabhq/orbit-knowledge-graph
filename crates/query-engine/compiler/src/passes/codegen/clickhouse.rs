@@ -235,9 +235,11 @@ impl Context {
                     self.error = Some(format!("{name} does not accept {} arguments", args.len()));
                     return String::new();
                 }
-                let name = function_name(*name);
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
-                format!("{}({})", name, args.join(", "))
+                if *name == Function::Contains {
+                    return format!("multiSearchAny({}, [{}])", args[0], args[1]);
+                }
+                format!("{}({})", function_name(*name), args.join(", "))
             }
             Expr::TimeBucket { unit, value } => {
                 use crate::input::TruncateUnit;
@@ -441,6 +443,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
     match function {
         Function::StartsWith => "startsWith",
         Function::EndsWith => "endsWith",
+        Function::Contains => "multiSearchAny",
         Function::Lower => "lower",
         Function::ToString => "toString",
         Function::ToJson => "toJSONString",

@@ -21,7 +21,7 @@ query:
     RETURN mr.title ORDER BY mr.id LIMIT 10
 
 expect:
-  sql_contains: ["(lower(mr.title) LIKE lower('%SHIP FEAT%'))"]
+  sql_contains: ["multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])"]
   indexes_used: [idx_title_ngram]
   skip_requirements: ["filter:title"]
   node_count: 2

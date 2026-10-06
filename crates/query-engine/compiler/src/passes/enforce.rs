@@ -310,6 +310,9 @@ fn enforce_return_columns(
                                     property: None,
                                     data_type,
                                     selectivity: ontology::FieldSelectivity::High,
+                                    sort_key: model
+                                        .table_sort_key(table)
+                                        .is_some_and(|key| key.contains(property)),
                                 },
                             ));
                         }

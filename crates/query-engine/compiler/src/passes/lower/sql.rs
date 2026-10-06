@@ -20,7 +20,13 @@ pub(crate) fn latest_row_dedup(
 }
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
-    filter_expression(alias, prop, &bound.filter, bound.data_type.as_ref())
+    filter_expression(
+        alias,
+        prop,
+        &bound.filter,
+        bound.data_type.as_ref(),
+        bound.sort_key,
+    )
 }
 
 pub(crate) fn filter_expression(
@@ -28,6 +34,7 @@ pub(crate) fn filter_expression(
     prop: &str,
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
+    exact: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
@@ -57,63 +64,37 @@ pub(crate) fn filter_expression(
         }
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
-        FilterOp::StartsWith if prop == TRAVERSAL_PATH_COLUMN => Expr::func(
-            Function::StartsWith,
-            vec![
-                col,
-                Expr::param(SqlType::String, filter.value_str().unwrap_or("")),
-            ],
-        ),
-        op @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens) => {
-            Expr::TokenSearch {
-                mode: match op {
-                    FilterOp::TokenMatch => TokenMatchMode::Single,
-                    FilterOp::AllTokens => TokenMatchMode::All,
-                    _ => TokenMatchMode::Any,
-                },
-                value: Box::new(lower(col)),
-                query: Box::new(lower(Expr::param(
-                    SqlType::String,
-                    filter.value_str().unwrap_or(""),
-                ))),
+        op => {
+            let fold = |expr: Expr| {
+                if exact {
+                    expr
+                } else {
+                    Expr::func(Function::Lower, vec![expr])
+                }
+            };
+            let needle = fold(Expr::param(
+                SqlType::String,
+                filter.value_str().unwrap_or(""),
+            ));
+            let col = fold(col);
+            match op {
+                FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens => {
+                    Expr::TokenSearch {
+                        mode: match op {
+                            FilterOp::TokenMatch => TokenMatchMode::Single,
+                            FilterOp::AllTokens => TokenMatchMode::All,
+                            _ => TokenMatchMode::Any,
+                        },
+                        value: Box::new(col),
+                        query: Box::new(needle),
+                    }
+                }
+                FilterOp::Contains => Expr::func(Function::Contains, vec![col, needle]),
+                FilterOp::StartsWith => Expr::func(Function::StartsWith, vec![col, needle]),
+                _ => Expr::func(Function::EndsWith, vec![col, needle]),
             }
         }
-        FilterOp::Contains => Expr::binary(
-            Op::Like,
-            lower(col),
-            lower(Expr::param(
-                SqlType::String,
-                format!("%{}%", escape_like(filter.value_str().unwrap_or(""))),
-            )),
-        ),
-        op => {
-            let function = match op {
-                FilterOp::StartsWith => Function::StartsWith,
-                FilterOp::EndsWith => Function::EndsWith,
-                _ => unreachable!(),
-            };
-            Expr::func(
-                function,
-                vec![
-                    lower(col),
-                    lower(Expr::param(
-                        SqlType::String,
-                        filter.value_str().unwrap_or(""),
-                    )),
-                ],
-            )
-        }
     }
-}
-
-fn lower(expr: Expr) -> Expr {
-    Expr::func(Function::Lower, vec![expr])
-}
-
-fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
 }
 
 pub fn comparison(left: Expr, operator: FilterOp, right: Expr) -> Result<Expr> {

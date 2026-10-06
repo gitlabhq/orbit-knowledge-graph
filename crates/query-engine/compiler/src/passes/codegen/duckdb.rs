@@ -401,6 +401,7 @@ impl Context {
         let duckdb_name = match name {
             Function::StartsWith => "starts_with",
             Function::EndsWith => "ends_with",
+            Function::Contains => "contains",
             Function::Lower => "lower",
             Function::Substring => "substring",
             Function::ArrayContains => "list_contains",

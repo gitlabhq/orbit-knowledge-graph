@@ -16,7 +16,8 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 index declares the Orbit text-search pair for one column: a `text(tokenizer = splitByNonAlpha)`
 index and an `ngrambf_v1` index, both over `lower(column)`. The compiler emits every string
 operator on `lower(column)`, so `contains`, `starts_with`, `ends_with`, and the token operators
-are case-insensitive and prune with these indexes.
+are case-insensitive and prune with these indexes. Sort-key columns stay exact so the primary
+key keeps pruning.
 
 ## Schema Version Tracking
 
