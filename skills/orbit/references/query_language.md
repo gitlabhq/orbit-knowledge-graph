@@ -196,20 +196,23 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `all_tokens` | Property contains every word in the value, in any order. |
 | `any_tokens` | Property contains at least one word in the value. |
 
-All string operators ignore ASCII case: `contains: "Migration"` and
-`contains: "MIGRATION"` return the same rows. `contains`, `starts_with`, and
-`ends_with` work only on string, enum, and UUID properties. Token operators
-work only on text-indexed properties and reject other properties at compile time.
+`contains`, `starts_with`, `ends_with`, and the token operators ignore ASCII
+case: `contains: "Migration"` and `contains: "MIGRATION"` return the same rows.
+`eq` and `in` compare exact values. `contains`, `starts_with`, and `ends_with`
+work only on string, enum, and UUID properties. Token operators work only on
+text-indexed properties and reject other properties at compile time.
 
 ### Text-indexed properties
 
 The following properties support `token_match`, `all_tokens`, and `any_tokens`.
 Words are the runs of letters and digits in the property, so `main` matches
-`src/main.rs` and `rs` matches its extension. On these properties every string
-operator uses a skip index: use `contains` for a word prefix (`migrat`) or an
-exact phrase (`fix flaky`), and a token operator when word order does not matter.
+`src/main.rs` and `yaml` matches `.gitlab-ci.yaml`. On these properties
+`contains`, `starts_with`, and `ends_with` prune with an ngram skip index and
+the token operators prune with a text skip index. Use `contains` for a word
+prefix (`migrat`) or a phrase with its words in order (`fix flaky`), and a token
+operator when word order does not matter.
 
-<!-- The table below is generated from the ontology's `text(...)` storage indexes. -->
+<!-- The table below is generated from the ontology's `text` storage indexes. -->
 <!-- Do not edit it by hand: run `mise run docs:query-language` and commit. CI fails on drift. -->
 <!-- BEGIN GENERATED: text-indexed-properties -->
 

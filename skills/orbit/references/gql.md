@@ -62,8 +62,8 @@ text into a query.
 ### Text-token search
 
 `CONTAINS` is indexed on text-indexed properties, such as `MergeRequest.title`
-or `Definition.fqn`, so use it for a word prefix (`'migrat'`) or an exact
-phrase (`'fix flaky'`). Use the token functions when word order does not
+or `Definition.fqn`. Use it for a word prefix (`'migrat'`) or a phrase with its
+words in order (`'fix flaky'`). Use the token functions when word order does not
 matter. Words are runs of letters and digits, so `token_match(d.file_path,
 'main')` matches `src/main.rs`. Properties without a text index reject the
 token functions.
