@@ -461,9 +461,11 @@ To repeat an operator on one property, use an array of operator objects:
 ### Text-token search
 
 Use `all_tokens` to find entities whose text-indexed property contains every
-specified token. Tokens are matched against the pre-built text index, so
-only properties listed in the text-indexed properties table in
-[`query_language.md`](query_language.md) support these operators.
+specified word, in any order and in any case. Words are matched against the
+pre-built text index, so only properties listed in the text-indexed properties
+table in [`query_language.md`](query_language.md) support these operators.
+For a word prefix or a phrase with its words in order, use `contains`; on the same properties
+it is indexed too.
 
 ```json orbit-query
 {

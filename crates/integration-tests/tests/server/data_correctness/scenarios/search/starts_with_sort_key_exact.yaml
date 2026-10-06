@@ -1,0 +1,20 @@
+description: starts_with on a sort-key column such as branch compares exact case so the primary key keeps pruning
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
+                 "columns": ["branch"],
+                 "filters": {"branch": {"starts_with": "MAI"}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND d.branch STARTS WITH 'MAI'
+    RETURN d.branch LIMIT 10
+
+expect:
+  sql_contains: ["startsWith(d.branch, 'MAI')"]
+  sql_not_contains: ["lower(d.branch)"]
+  skip_requirements: ["filter:branch"]
+  node_count: 0

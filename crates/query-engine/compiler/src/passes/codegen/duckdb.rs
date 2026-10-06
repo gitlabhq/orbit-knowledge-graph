@@ -374,12 +374,6 @@ impl Context {
             return format!("to_json({})", self.emit_expr(&args[0]));
         }
 
-        if name == Function::ContainsInsensitive && args.len() == 2 {
-            let col = self.emit_expr(&args[0]);
-            let search = self.emit_expr(&args[1]);
-            return format!("contains(lower({col}), lower({search}))");
-        }
-
         if matches!(
             name,
             Function::ArrayFilter | Function::ArrayMap | Function::ArrayExists
@@ -407,6 +401,8 @@ impl Context {
         let duckdb_name = match name {
             Function::StartsWith => "starts_with",
             Function::EndsWith => "ends_with",
+            Function::Contains => "contains",
+            Function::Lower => "lower",
             Function::Substring => "substring",
             Function::ArrayContains => "list_contains",
             Function::ArrayContainsAny => "list_has_any",
@@ -425,7 +421,6 @@ impl Context {
             Function::If
             | Function::ToString
             | Function::ToJson
-            | Function::ContainsInsensitive
             | Function::ArrayFilter
             | Function::ArrayMap
             | Function::ArrayExists

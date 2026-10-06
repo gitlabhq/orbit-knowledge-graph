@@ -235,6 +235,13 @@ impl Context {
                     self.error = Some(format!("{name} does not accept {} arguments", args.len()));
                     return String::new();
                 }
+                if *name == Function::Contains {
+                    return format!(
+                        "multiSearchAny({}, [{}])",
+                        self.emit_expr(&args[0]),
+                        self.emit_expr(&args[1])
+                    );
+                }
                 let name = function_name(*name);
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
@@ -441,7 +448,8 @@ pub(crate) fn function_name(function: Function) -> &'static str {
     match function {
         Function::StartsWith => "startsWith",
         Function::EndsWith => "endsWith",
-        Function::ContainsInsensitive => "positionCaseInsensitive",
+        Function::Contains => unreachable!("contains rendered above"),
+        Function::Lower => "lower",
         Function::ToString => "toString",
         Function::ToJson => "toJSONString",
         Function::Object => "map",

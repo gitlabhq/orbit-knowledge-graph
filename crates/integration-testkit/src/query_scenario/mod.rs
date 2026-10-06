@@ -142,9 +142,17 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
                 serde_json::json!(0),
             )]);
         }
-        crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-            .await;
-        if !cfg.unmerged_seed {
+        if cfg.unmerged_seed {
+            for (table, rows) in &cfg.extra_seed {
+                for row in rows {
+                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
+                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
+                        .await;
+                }
+            }
+        } else {
+            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+                .await;
             forked.optimize_all().await;
         }
         forked
@@ -254,6 +262,11 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.indexes_used.is_empty() {
+        let plan = ctx.explain_plan(&compiled.base).await;
+        assert_indexes_used(&plan, &expect.indexes_used, label);
+    }
+
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
@@ -297,6 +310,33 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+fn assert_indexes_used(plan: &serde_json::Value, names: &[String], label: &str) {
+    fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
+                    && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
+                {
+                    return Some(value);
+                }
+                map.values().find_map(|v| skip_index(v, name))
+            }
+            serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
+            _ => None,
+        }
+    }
+    for name in names {
+        let entry = skip_index(plan, name)
+            .unwrap_or_else(|| panic!("{label}: skip index {name} not applied\nplan: {plan:#}"));
+        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        assert!(
+            selected < initial,
+            "{label}: skip index {name} selected {selected} of {initial} granules\nplan: {plan:#}"
+        );
+    }
 }
 
 fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {

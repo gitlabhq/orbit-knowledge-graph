@@ -39,9 +39,21 @@ pub struct Column {
 #[derive(Debug, Clone)]
 pub struct Index {
     pub name: String,
-    pub expression: String,
+    pub column: String,
+    pub lowercase: bool,
     pub index_type: String,
     pub granularity: u32,
+}
+
+impl Index {
+    pub fn expression(&self) -> String {
+        let column = quote_identifier(&self.column);
+        if self.lowercase {
+            format!("lower({column})")
+        } else {
+            column
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,7 +230,7 @@ impl Table {
             body.push(format!(
                 "    INDEX {} {} TYPE {} GRANULARITY {}",
                 quote_identifier(&index.name),
-                quote_identifier(&index.expression),
+                index.expression(),
                 index.index_type,
                 index.granularity,
             ));

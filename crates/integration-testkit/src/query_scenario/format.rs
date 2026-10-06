@@ -120,6 +120,8 @@ pub struct QueryExpect {
     pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
+    #[serde(default)]
+    pub indexes_used: Vec<String>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,

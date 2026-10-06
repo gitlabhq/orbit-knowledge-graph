@@ -481,14 +481,10 @@ storage:
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_merged_at, column: merged_at, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_source_branch, column: source_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_source_branch_ngram, column: source_branch, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_target_branch, column: target_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_target_branch_ngram, column: target_branch, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_title, column: title, type: text, granularity: 1}
+    - {name: idx_description, column: description, type: text, granularity: 1}
+    - {name: idx_source_branch, column: source_branch, type: text, granularity: 1}
+    - {name: idx_target_branch, column: target_branch, type: text, granularity: 1}
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_author_id, column: author_id, type: "bloom_filter(0.0001)", granularity: 1}

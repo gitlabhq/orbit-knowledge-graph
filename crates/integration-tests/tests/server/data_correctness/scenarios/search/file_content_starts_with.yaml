@@ -1,5 +1,5 @@
 # source: crates/integration-tests/tests/server/data_correctness/search.rs::search_file_content_starts_with
-description: File content starts_with filter matches prefix
+description: File content starts_with filter matches prefix regardless of case
 
 query:
   json: |
@@ -10,12 +10,12 @@ query:
                "columns": ["path", "project_id", "content"],
                "filters": {
                    "project_id": {"eq": 1000},
-                   "content": {"starts_with": "# Demo"}
+                   "content": {"starts_with": "# DEMO"}
                }}],
       "limit": 10
     }
   gql: |
-    MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content STARTS WITH '# Demo' RETURN f.path, f.project_id, f.content LIMIT 10
+    MATCH (f:File) WHERE f.id IN [13000, 13001, 13002, 13003, 13004] AND f.project_id = 1000 AND f.content STARTS WITH '# DEMO' RETURN f.path, f.project_id, f.content LIMIT 10
 
 expect:
   node_count: 1
