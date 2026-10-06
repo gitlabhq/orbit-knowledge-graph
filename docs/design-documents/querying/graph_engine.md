@@ -179,7 +179,10 @@ The result is a `CompiledQueryContext` with SQL, parameters, hydration, paginati
 The graph borrows the catalog during compilation; no graph is stored inside its catalog owner.
 
 Identity-key cursors support page readback, query binding, and seek predicates. Cursors ordered by user properties return an unsupported error.
-Scope-depth constraints and required scope guards also return errors. Pathfinding planning remains unfinished.
+Scope-depth constraints and required scope guards also return errors.
+Pathfinding composes bounded anchor queries, forward/backward frontier CTEs, scope membership, and direct/intersection result arms.
+Frontier depth splits follow the requested bound. Wildcard first-hop predicates use the catalog's endpoint relationship kinds.
+Typed empty arrays, array reversal, and depth addition share the expression infrastructure. CTE membership can appear in join conditions.
 Neighbor planning selects directional table routes and retains center scans for uncovered filters and indirect authorization identities.
 Eligible both-direction queries use one scan, conditional tuple arrays, concatenation, and expansion. Both matching directions retain their own result row.
 Incoming namespace queries narrow edge paths through a derived lookup. Multiple routes and directions compose through positional UNION outputs.

@@ -491,6 +491,33 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::InQuery { value, key } => {
+                let Source::Definition(definition) = self.relation(key.relation)?.source else {
+                    return Err(GraphError::ExpressionType);
+                };
+                let Port::Output(output) = key.port else {
+                    return Err(GraphError::ExpressionType);
+                };
+                format!(
+                    "{} IN (SELECT {} FROM {})",
+                    self.render_expression_with(value, column)?,
+                    output_name(output),
+                    definition_name(definition)
+                )
+            }
+            Expression::Add(left, right) => format!(
+                "({} + {})",
+                self.render_expression_with(left, column)?,
+                self.render_expression_with(right, column)?
+            ),
+            Expression::Reverse(value) => format!(
+                "arrayReverse({})",
+                self.render_expression_with(value, column)?
+            ),
+            Expression::EmptyArray(element) => format!(
+                "CAST([], '{}')",
+                value_type_name(&ValueType::Array(Box::new(element.clone())))
+            ),
             Expression::Strings(values) => format!(
                 "[{}]",
                 values
@@ -740,6 +767,21 @@ impl<'catalog, M: QueryDataModel + ?Sized>
 
 fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+fn value_type_name(ty: &ValueType) -> String {
+    match ty {
+        ValueType::Scalar(ty) => orbit_utils::clickhouse::type_name(*ty),
+        ValueType::Array(element) => format!("Array({})", value_type_name(element)),
+        ValueType::Tuple(fields) => format!(
+            "Tuple({})",
+            fields
+                .iter()
+                .map(value_type_name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 fn extend_columns<'a>(

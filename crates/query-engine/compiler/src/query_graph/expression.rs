@@ -14,6 +14,13 @@ pub enum Expression<'catalog> {
         array: bool,
     },
     Count,
+    InQuery {
+        value: Box<Self>,
+        key: ColumnRef<'catalog>,
+    },
+    Add(Box<Self>, Box<Self>),
+    Reverse(Box<Self>),
+    EmptyArray(ValueType),
     CountIf(Box<Self>),
     LatestPath {
         path: ColumnRef<'catalog>,
@@ -102,6 +109,10 @@ impl<'catalog> Expression<'catalog> {
         bindings: &mut orbit_utils::query_types::ParamBindings,
     ) {
         let literal = match self {
+            Self::InQuery { value, .. } => {
+                value.bind_parameters(bindings);
+                None
+            }
             Self::Strings(values) => Some((SqlType::String.to_array(), serde_json::json!(values))),
             Self::JsonObject(fields) => {
                 for (_, value) in fields {
@@ -147,6 +158,16 @@ impl<'catalog> Expression<'catalog> {
                 right.bind_parameters(bindings);
                 None
             }
+            Self::Add(left, right) => {
+                left.bind_parameters(bindings);
+                right.bind_parameters(bindings);
+                None
+            }
+            Self::Reverse(value) => {
+                value.bind_parameters(bindings);
+                None
+            }
+            Self::EmptyArray(_) => None,
             Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
                 for value in values {
                     value.bind_parameters(bindings);
@@ -274,6 +295,16 @@ impl<'catalog> Expression<'catalog> {
                 Ok(())
             }
             Self::Column(column) => visit(*column),
+            Self::InQuery { value, key } => {
+                value.columns(visit)?;
+                visit(*key)
+            }
+            Self::EmptyArray(_) => Ok(()),
+            Self::Add(left, right) => {
+                left.columns(visit)?;
+                right.columns(visit)
+            }
+            Self::Reverse(value) => value.columns(visit),
             Self::Prefixes { value, paths, .. } => {
                 value.columns(visit)?;
                 paths.columns(visit)
@@ -333,6 +364,9 @@ impl<'catalog> Expression<'catalog> {
 
     pub(super) fn aggregate(&self) -> bool {
         match self {
+            Self::InQuery { value, .. } => value.aggregate(),
+            Self::Add(left, right) => left.aggregate() || right.aggregate(),
+            Self::Reverse(value) => value.aggregate(),
             Self::Prefixes { value, paths, .. } => value.aggregate() || paths.aggregate(),
             Self::JsonObject(fields) => fields.iter().any(|(_, value)| value.aggregate()),
             Self::Predicate {

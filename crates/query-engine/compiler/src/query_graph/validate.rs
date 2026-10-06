@@ -87,9 +87,18 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         used: &mut HashSet<RelationId>,
     ) -> Result<Vec<ColumnRef<'catalog>>> {
         use Relational::*;
-        let check = |expression: &Expression<'catalog>, columns: &[ColumnRef<'catalog>]| {
+        let check = |expression: &Expression<'catalog>,
+                     columns: &[ColumnRef<'catalog>],
+                     used: &mut HashSet<RelationId>| {
             expression.columns(&mut |column| {
+                self.check_column(block, column)?;
                 if columns.contains(&column) {
+                    Ok(())
+                } else if matches!(
+                    self.relation(column.relation)?.source,
+                    crate::query_graph::Source::Definition(_)
+                ) {
+                    used.insert(column.relation);
                     Ok(())
                 } else {
                     Err(GraphError::OperationVisibility)
@@ -126,7 +135,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Filter { input, predicate } => {
                 let columns = self.operation_columns(block, input, used)?;
-                check(predicate, &columns)?;
+                check(predicate, &columns, used)?;
                 Ok(columns)
             }
             Join {
@@ -157,7 +166,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 }
                 let mut all = left.clone();
                 all.extend(right);
-                check(condition, &all)?;
+                check(condition, &all, used)?;
                 Ok(if matches!(kind, JoinKind::Semi | JoinKind::Membership) {
                     left
                 } else {
@@ -232,6 +241,36 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         visiting: &mut HashSet<OutputId>,
     ) -> Result<ValueType> {
         match expression {
+            Expression::EmptyArray(element) => Ok(ValueType::Array(Box::new(element.clone()))),
+            Expression::InQuery { value, key } => {
+                if !matches!(self.relation(key.relation)?.source, Source::Definition(_)) {
+                    return Err(GraphError::ExpressionType);
+                }
+                self.check_column(key.relation.block, *key)?;
+                if self.expression_type(value, visiting)? != self.column_type(*key, visiting)? {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ValueType::Scalar(SqlType::Bool))
+            }
+            Expression::Reverse(value) => {
+                let ty = self.expression_type(value, visiting)?;
+                if !matches!(ty, ValueType::Array(_)) {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ty)
+            }
+            Expression::Add(left, right) => {
+                let ty = self.expression_type(left, visiting)?;
+                if ty != self.expression_type(right, visiting)?
+                    || !matches!(
+                        ty,
+                        ValueType::Scalar(SqlType::Int64 | SqlType::UInt32 | SqlType::Float64)
+                    )
+                {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ty)
+            }
             Expression::Strings(_) => Ok(ValueType::Array(Box::new(ValueType::Scalar(
                 SqlType::String,
             )))),
@@ -571,14 +610,23 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             let Body::Select { relations, .. } = &self.block(block)?.body else {
                 unreachable!()
             };
-            if used.len() != relations.len() {
-                return Err(GraphError::JoinShape);
-            }
             for output in outputs {
                 if operation.groups().contains(&output.value) {
                     continue;
                 }
                 self.check_projection(&output.value, &available, aggregate_input.as_deref())?;
+                output.value.columns(&mut |column| {
+                    if matches!(
+                        self.relation(column.relation)?.source,
+                        Source::Definition(_)
+                    ) {
+                        used.insert(column.relation);
+                    }
+                    Ok(())
+                })?;
+            }
+            if used.len() != relations.len() {
+                return Err(GraphError::JoinShape);
             }
             Ok(())
         })?;
@@ -592,6 +640,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         aggregate_input: Option<&[ColumnRef<'catalog>]>,
     ) -> Result<()> {
         match expression {
+            Expression::InQuery { value, .. } => {
+                self.check_projection(value, available, aggregate_input)
+            }
             Expression::Predicate {
                 value, argument, ..
             } => {

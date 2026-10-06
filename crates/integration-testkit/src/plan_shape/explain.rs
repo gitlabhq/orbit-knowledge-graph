@@ -406,6 +406,127 @@ pub(super) trait GraphPhase: std::fmt::Debug {
     fn version(&self) -> compiler::query_graph::ColumnRef<'_>;
 }
 
+pub(super) fn graph_pathfinding<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::PhysicalOperation<'a>,
+    >,
+    root: compiler::query_graph::BlockId,
+    input: &Input,
+) -> Tree {
+    use compiler::query_graph::{Expression, Relational, Source};
+    let path = input.path.as_ref().unwrap();
+    let start = input
+        .nodes
+        .iter()
+        .find(|node| node.id == path.from)
+        .unwrap();
+    let end = input.nodes.iter().find(|node| node.id == path.to).unwrap();
+    let mut tables = Vec::new();
+    let mut forward = 0;
+    let mut backward = 0;
+    let mut scoped = false;
+    for (definition, body) in graph.definitions(root).unwrap() {
+        let name = graph.definition_hint(definition).unwrap();
+        if !matches!(name, "forward" | "backward") {
+            continue;
+        }
+        let arms = graph
+            .union_arms(body)
+            .unwrap()
+            .unwrap_or(std::slice::from_ref(&body));
+        for arm in arms {
+            for output in graph.outputs(*arm).unwrap() {
+                let projection = graph.projection(output).unwrap();
+                if projection.label == "depth"
+                    && let Expression::Integer(depth) = projection.value
+                {
+                    if name == "forward" {
+                        forward = forward.max(depth);
+                    } else {
+                        backward = backward.max(depth);
+                    }
+                }
+                scoped |= projection.label == "traversal_path";
+            }
+        }
+    }
+    graph
+        .validate(root, |block, _, _| {
+            for relation in graph.relations(block)? {
+                let relation = graph.relation(relation)?;
+                if (relation.hint.starts_with('e') || relation.hint == "_e")
+                    && let Source::Stored(table) = relation.source
+                {
+                    tables.push(table.name().to_owned());
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    tables.sort();
+    tables.dedup();
+    let kinds = |node: &compiler::InputNode, source| {
+        if path.rel_types.is_empty() || path.rel_types.iter().any(|kind| kind == "*") {
+            graph
+                .catalog()
+                .graph()
+                .relationship_names(
+                    if source { node.entity.as_deref() } else { None },
+                    if source { None } else { node.entity.as_deref() },
+                )
+                .join(", ")
+        } else {
+            String::new()
+        }
+    };
+    let nodes = [start, end]
+        .iter()
+        .map(|node| {
+            let mut predicates = Vec::new();
+            for block in graph.blocks() {
+                let Ok(operation) = graph.operation(block) else {
+                    continue;
+                };
+                let mut operation = operation;
+                let mut filters = Vec::new();
+                while let Relational::Filter { input, predicate } = operation {
+                    filters.extend(graph_conjunction(graph, predicate));
+                    operation = input;
+                }
+                if let Relational::Source { relation, .. } = operation
+                    && graph.relation(*relation).unwrap().hint == node.id
+                {
+                    predicates.extend(filters);
+                }
+            }
+            filter(
+                predicates,
+                leaf(
+                    Operator::NodeScan,
+                    format!("{} AS {}", node.entity.as_deref().unwrap(), node.id),
+                ),
+            )
+        })
+        .collect();
+    Tree::node(
+        Operator::PathFinding,
+        format!(
+            "{}->{} depth={} forward={forward} backward={backward} scoped={scoped} tables=[{}] relationships=[{}] forward_kinds=[{}] backward_kinds=[{}]",
+            path.from,
+            path.to,
+            path.max_depth,
+            tables.join(", "),
+            path.rel_types.join(", "),
+            kinds(start, true),
+            kinds(end, false)
+        ),
+        nodes,
+    )
+}
+
 pub(super) fn graph_neighbors<'a, M: query_data_model::QueryDataModel + ?Sized>(
     graph: &compiler::query_graph::QueryGraph<
         'a,
@@ -743,6 +864,16 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
 ) -> String {
     use compiler::query_graph::{Expression, Port};
     match value {
+        Expression::InQuery { value, key } => format!(
+            "{} IN {}",
+            graph_expression(graph, value),
+            graph_expression(graph, &Expression::Column(*key))
+        ),
+        Expression::Add(left, right) => format!(
+            "({} + {})",
+            graph_expression(graph, left),
+            graph_expression(graph, right)
+        ),
         Expression::Strings(values) => format!(
             "[{}]",
             values
@@ -971,7 +1102,7 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
         Expression::And(_, _) => graph_conjunction(graph, value)
             .iter()
             .map(|part| {
-                if part.starts_with("ArrayContains") {
+                if part.starts_with("ArrayContains") || part.contains(" IN ") {
                     part.clone()
                 } else {
                     format!("({part})")

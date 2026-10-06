@@ -371,6 +371,8 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                             explain::graph_hydration(&graph, root)
                         } else if input.query_type == compiler::QueryType::Neighbors {
                             explain::graph_neighbors(&graph, root, input)
+                        } else if input.query_type == compiler::QueryType::PathFinding {
+                            explain::graph_pathfinding(&graph, root, input)
                         } else {
                             explain::query_graph(&graph, root)
                         };
