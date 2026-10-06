@@ -10,13 +10,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
 use super::limits::add_capped;
+use super::loading::Content;
 use super::{Bytes, Options, SourceError};
-
-#[derive(Debug, Clone)]
-pub(super) enum Blob {
-    Memory(Bytes),
-    Spilled { offset: u64, len: u64, raw_len: u64 },
-}
 
 pub(super) struct Scratch {
     dir: Option<PathBuf>,
@@ -37,7 +32,7 @@ impl Scratch {
         }
     }
 
-    pub(super) fn append(&self, bytes: &[u8]) -> Result<Blob, SourceError> {
+    pub(super) fn append(&self, bytes: &[u8]) -> Result<Content, SourceError> {
         let raw_len = bytes.len() as u64;
         let compressed;
         let bytes = match self.compress {
@@ -54,7 +49,7 @@ impl Scratch {
         let len = bytes.len() as u64;
         let offset = add_capped(&self.end, "spilled_bytes", len, self.cap)?;
         self.file()?.write_all_at(bytes, offset)?;
-        Ok(Blob::Spilled {
+        Ok(Content::Spilled {
             offset,
             len,
             raw_len,

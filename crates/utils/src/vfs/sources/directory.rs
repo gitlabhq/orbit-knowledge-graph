@@ -5,16 +5,16 @@
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
 use rayon::prelude::*;
-use rustix::fs::{AtFlags, FileType, readlinkat, statat};
 use tracing::warn;
 
 use super::super::path::is_safe_relative_path;
-use super::super::syscalls;
 use super::{Loading, Put, Source, SourceError, Tag};
+use crate::safe_fs;
 
 pub struct Directory<'a>(pub &'a Path);
 
@@ -95,35 +95,22 @@ impl Source for Changeset<'_> {
 }
 
 fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
-    let parent = match syscalls::open_parent(&on_disk) {
-        Ok(parent) => parent,
+    let entry = match safe_fs::inspect(&on_disk) {
+        Ok(entry) => entry,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e.into()),
     };
-    let name = on_disk
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidInput, "missing filename"))?;
-    let metadata = match statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(metadata) => metadata,
-        Err(rustix::io::Errno::NOENT) => return Ok(()),
-        Err(e) => return Err(std::io::Error::from(e).into()),
-    };
-    let kind = FileType::from_raw_mode(metadata.st_mode);
-    if kind == FileType::RegularFile {
-        return into.put(
+    match entry {
+        Some(safe_fs::Entry::File(file)) => into.put(
             path,
-            Put::OnDisk {
-                path: on_disk,
-                size: metadata.st_size as u64,
+            Put::ReadOnDemand {
+                size: file.size(),
+                read: Arc::new(move |max_bytes| file.read(max_bytes)),
             },
-        );
-    }
-    if kind != FileType::Symlink {
-        return Ok(());
-    }
-    match readlinkat(&parent, name, Vec::new()) {
-        Ok(target) => into.put(path, Put::Symlink(target.to_string_lossy().into_owned())),
-        Err(rustix::io::Errno::NOENT) => Ok(()),
-        Err(e) => Err(std::io::Error::from(e).into()),
+        ),
+        Some(safe_fs::Entry::Symlink(target)) => {
+            into.put(path, Put::Symlink(target.to_string_lossy().into_owned()))
+        }
+        None => Ok(()),
     }
 }

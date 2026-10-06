@@ -29,7 +29,7 @@ impl Source for Input<'_> {
                 for file in fixtures {
                     into.put(
                         &file.path,
-                        Put::Lazy {
+                        Put::ReadAndStore {
                             size: file.content.len() as u64,
                             read: Box::new(|| Ok(file.content.as_bytes().to_vec())),
                         },

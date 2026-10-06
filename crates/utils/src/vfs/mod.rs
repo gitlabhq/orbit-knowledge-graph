@@ -27,7 +27,6 @@ mod policy;
 mod scratch;
 pub mod sources;
 mod store;
-mod syscalls;
 
 use std::io;
 use std::path::PathBuf;
