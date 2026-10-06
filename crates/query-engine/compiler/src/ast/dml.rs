@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-pub use orbit_utils::clickhouse::{ChScalar, ChType};
+pub use orbit_utils::query_types::{ScalarType, SqlType, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -21,12 +21,28 @@ pub enum Expr {
     /// Constant value, type inferred from Value.
     Literal(Value),
     Param {
-        data_type: ChType,
+        data_type: SqlType,
         value: Value,
     },
     FuncCall {
-        name: String,
+        name: Function,
         args: Vec<Expr>,
+    },
+    EmptyTupleArray(Vec<SqlType>),
+    Aggregate {
+        function: crate::input::AggFunction,
+        argument: Option<Box<Expr>>,
+        distinct: bool,
+        condition: Option<Box<Expr>>,
+    },
+    TimeBucket {
+        unit: crate::input::TruncateUnit,
+        value: Box<Expr>,
+    },
+    TokenSearch {
+        mode: TokenMatchMode,
+        value: Box<Expr>,
+        query: Box<Expr>,
     },
     Lambda {
         param: String,
@@ -59,6 +75,63 @@ pub enum Expr {
     /// to a constant before index analysis, so it still drives PK pruning.
     Scalar(Box<Query>),
     Star,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+pub enum TokenMatchMode {
+    Single,
+    All,
+    Any,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
+pub enum Function {
+    StartsWith,
+    EndsWith,
+    Contains,
+    Lower,
+    ToString,
+    ToJson,
+    Object,
+    If,
+    Coalesce,
+    ByteLength,
+    Substring,
+    Concat,
+    CountSubstrings,
+    Array,
+    Tuple,
+    ArrayConcat,
+    ArrayReverse,
+    ArrayResize,
+    ArrayContains,
+    ArrayContainsAny,
+    ArrayContainsAll,
+    ArrayFilter,
+    ArrayMap,
+    ArrayExists,
+    Unnest,
+    TupleElement,
+    ArgMax,
+    ArgMaxOrNull,
+}
+
+impl Function {
+    pub fn accepts_arity(self, count: usize) -> bool {
+        match self {
+            Self::Array | Self::Tuple => true,
+            Self::Object => count.is_multiple_of(2),
+            Self::Coalesce | Self::Concat | Self::ArrayConcat => count >= 1,
+            Self::Lower
+            | Self::ToString
+            | Self::ToJson
+            | Self::ByteLength
+            | Self::ArrayReverse
+            | Self::Unnest => count == 1,
+            Self::If | Self::Substring => count == 3,
+            _ => count == 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -310,7 +383,7 @@ impl Expr {
         Expr::Literal(value.into())
     }
 
-    pub fn param(data_type: ChType, value: impl Into<Value>) -> Self {
+    pub fn param(data_type: SqlType, value: impl Into<Value>) -> Self {
         Expr::Param {
             data_type,
             value: value.into(),
@@ -319,29 +392,35 @@ impl Expr {
 
     pub fn string(value: impl Into<String>) -> Self {
         Expr::Param {
-            data_type: ChType::String,
+            data_type: SqlType::String,
             value: Value::String(value.into()),
         }
     }
 
     pub fn int(value: i64) -> Self {
         Expr::Param {
-            data_type: ChType::Int64,
+            data_type: SqlType::Int64,
             value: Value::Number(value.into()),
         }
     }
 
     pub fn uint32(value: u32) -> Self {
         Expr::Param {
-            data_type: ChType::UInt32,
+            data_type: SqlType::UInt32,
             value: Value::Number(value.into()),
         }
     }
 
-    pub fn func(name: impl Into<String>, args: Vec<Expr>) -> Self {
-        Expr::FuncCall {
-            name: name.into(),
-            args,
+    pub fn func(name: Function, args: Vec<Expr>) -> Self {
+        Expr::FuncCall { name, args }
+    }
+
+    pub fn aggregate(function: crate::input::AggFunction, argument: Option<Expr>) -> Self {
+        Self::Aggregate {
+            function,
+            argument: argument.map(Box::new),
+            distinct: false,
+            condition: None,
         }
     }
 
@@ -396,7 +475,7 @@ impl Expr {
     pub fn col_in(
         table: impl Into<String>,
         column: impl Into<String>,
-        data_type: ChType,
+        data_type: SqlType,
         values: Vec<Value>,
     ) -> Option<Self> {
         match values.len() {

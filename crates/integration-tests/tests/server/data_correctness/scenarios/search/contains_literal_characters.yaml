@@ -1,0 +1,31 @@
+description: contains treats %, _, and backslash as plain characters; the ngram skip index prunes the base part and the decoy part
+
+config:
+  redaction: { allow: { merge_request: [2101, 2102] } }
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2101, iid: 7, title: "Rate 100% done_now C:\\temp fix", state: opened, source_branch: rate-a, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2102, iid: 8, title: "Rate 1000 doneXnow C:temp fix", state: opened, source_branch: rate-b, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"contains": "100% done_now c:\\temp"}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS '100% done_now c:\\temp'
+    RETURN mr.title LIMIT 10
+
+expect:
+  indexes_used: [idx_title_ngram]
+  skip_requirements: ["filter:title"]
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [2101]
+      absent: [2102]

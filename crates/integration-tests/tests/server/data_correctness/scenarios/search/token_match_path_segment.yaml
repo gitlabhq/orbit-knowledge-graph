@@ -1,0 +1,31 @@
+description: token_match on a file path matches one segment regardless of case, so main matches crates/orbit/src/main.rs
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_definition:
+      - { id: 12200, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: abc123, file_path: "crates/other/src/x.rs", fqn: "other::unrelated", name: unrelated, definition_type: Function, start_line: 1, end_line: 2, start_byte: 0, end_byte: 10, start_char: 0, end_char: 9 }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
+                 "columns": ["file_path"],
+                 "filters": {"file_path": {"token_match": "MAIN"}}}],
+      "order_by": "d.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND token_match(d.file_path, 'MAIN')
+    RETURN d.file_path ORDER BY d.id LIMIT 10
+
+expect:
+  indexes_used: [idx_file_path]
+  skip_requirements: ["filter:file_path"]
+  node_count: 2
+  nodes:
+    Definition:
+      order: [12002, 12102]
+      rows:
+        - { id: 12002, file_path: "crates/orbit/src/main.rs" }

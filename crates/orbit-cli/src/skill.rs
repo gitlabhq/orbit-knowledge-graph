@@ -176,11 +176,12 @@ async fn list_skills() -> Result<()> {
             );
             print_local_list()
         }
-        Ok(response) if matches!(response.status, 401 | 403) => {
-            Err(map_http_error(response.status, body_text(&response)).into())
-        }
-        Ok(response) if response.status >= 500 => {
-            Err(map_http_error(response.status, body_text(&response)).into())
+        Ok(response) if degradation(response.status).is_some() => {
+            eprintln!(
+                "warning: {}; using the embedded local skill",
+                degradation_warning(&response)
+            );
+            print_local_list()
         }
         Ok(response) => Err(map_http_error(response.status, body_text(&response)).into()),
         Err(error) => {
@@ -288,18 +289,68 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             );
             Ok(None)
         }
-        401 | 403 => Err(map_http_error(response.status, body_text(&response)).into()),
-        status if status >= 500 => {
-            if let Some(cached) = cached {
+        status => match degradation(status) {
+            Some(Degradation::Unavailable) if cached.is_some() => {
                 eprintln!(
-                    "warning: Orbit skill request returned HTTP {status}; using the last validated tree for {origin}"
+                    "warning: {}; using the last validated tree for {origin}",
+                    degradation_warning(&response)
                 );
-                Ok(Some(cached.tree))
-            } else {
-                Err(map_http_error(status, body_text(&response)).into())
+                Ok(cached.map(|cached| cached.tree))
             }
-        }
-        status => Err(map_http_error(status, body_text(&response)).into()),
+            Some(_) => {
+                eprintln!(
+                    "warning: {}; using the embedded local skill",
+                    degradation_warning(&response)
+                );
+                Ok(None)
+            }
+            None => Err(map_http_error(status, body_text(&response)).into()),
+        },
+    }
+}
+
+const BODY_EXCERPT_CHARS: usize = 200;
+
+enum Degradation {
+    /// The cache is skipped so a rejected token is not hidden behind a validated copy.
+    AuthRejected,
+    Unavailable,
+}
+
+/// The skill is documentation, so auth failures, rate limits and outages degrade to a local copy.
+fn degradation(status: u16) -> Option<Degradation> {
+    match status {
+        401 | 403 => Some(Degradation::AuthRejected),
+        429 | 500.. => Some(Degradation::Unavailable),
+        _ => None,
+    }
+}
+
+fn degradation_warning(response: &SkillHttpResponse) -> String {
+    let status = response.status;
+    let hint = match status {
+        401 => ". Run `glab auth status` to check your token",
+        403 => ". Check that your account has access to Orbit on this instance",
+        _ => "",
+    };
+    let excerpt = body_excerpt(body_text(response));
+    let detail = if excerpt.is_empty() {
+        String::new()
+    } else {
+        format!(" ({excerpt})")
+    };
+    format!("Orbit skill request returned HTTP {status}{detail}{hint}")
+}
+
+fn body_excerpt(body: &str) -> String {
+    let single_line = body
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(char::is_control, "");
+    match single_line.char_indices().nth(BODY_EXCERPT_CHARS) {
+        Some((end, _)) => format!("{}…", &single_line[..end]),
+        None => single_line,
     }
 }
 

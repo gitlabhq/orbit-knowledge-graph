@@ -182,8 +182,10 @@ class Cli(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(repository)
-                with patch.dict(os.environ, {"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA": head}):
-                    self.assertEqual(changed_files(base), ["AGENTS.md"])
+                for source_sha in (head, ""):
+                    with self.subTest(source_sha=source_sha):
+                        with patch.dict(os.environ, {"CI_MERGE_REQUEST_SOURCE_BRANCH_SHA": source_sha}):
+                            self.assertEqual(changed_files(base), ["AGENTS.md"])
             finally:
                 os.chdir(previous)
 

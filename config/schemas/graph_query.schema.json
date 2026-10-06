@@ -462,7 +462,7 @@
     },
     "SearchPattern": {
       "type": "string",
-      "description": "Substring or word-match pattern. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
+      "description": "Substring or word-match pattern; ASCII case is ignored, except on sort-key columns such as branch. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
       "maxLength": 1024
     },
     "RelationshipSelector": {
@@ -611,7 +611,7 @@
     "PathConfig": {
       "type": "object",
       "description": "Configuration for path finding queries",
-      "required": ["type", "from", "to", "max_depth"],
+      "required": ["type", "from", "to", "max_depth", "rel_types"],
       "properties": {
         "type": {
           "$ref": "#/$defs/PathType",
@@ -637,6 +637,7 @@
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
+          "minItems": 1,
           "maxItems": 10
         }
       },
@@ -653,8 +654,8 @@
       "properties": {
         "direction": {
           "$ref": "#/$defs/Direction",
-          "description": "Traversal direction (default: both).",
-          "default": "both"
+          "description": "Traversal direction (default: outgoing).",
+          "default": "outgoing"
         },
         "rel_types": {
           "type": "array",

@@ -1,0 +1,22 @@
+name: Multiple hydration entities share one union with per-table projections and keys
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]},{"id":"d","entity":"Definition","node_ids":[2],"columns":["name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}]}
+  gql: |
+    MATCH (f:File {id: 1})-[:DEFINES]->(d:Definition {id: 2}) RETURN f.path, d.name
+hydration:
+  paths:
+    f: ["1/100/"]
+    d: ["1/100/"]
+logical:
+  expect: ["(Input hydration (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Hydration (_) (_))", "(Project f.path (_))", "(Project d.name (_))"]
+    emitted:
+      expect:
+        - (Union ALL (_) (_))
+        - (Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))
+        - (Project d.id AS id, d._deleted AS _deleted, d.name AS name (_))
+      reject: ["(Deduplicate Final (_))", "(Scan Table(gl_code_edge) ...)"]

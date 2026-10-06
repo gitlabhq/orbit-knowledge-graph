@@ -1,9 +1,12 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use labkit_events::StructuredEvent;
 use orbit_server_config::AnalyticsConfig;
+use tokio::time::{Instant, MissedTickBehavior};
 
 const APP_ID: &str = "gkg-server";
+const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 
 pub trait AnalyticsTracker: Send + Sync {
     fn track(&self, event: StructuredEvent);
@@ -23,7 +26,25 @@ impl SnowplowAnalyticsTracker {
     }
 
     pub fn from_config(config: &AnalyticsConfig) -> Result<Self, labkit_events::Error> {
-        Self::new(&config.collector_url, APP_ID)
+        let tracker = Self::new(&config.collector_url, APP_ID)?;
+        tracker.spawn_periodic_flush();
+        Ok(tracker)
+    }
+
+    fn spawn_periodic_flush(&self) {
+        let tracker = Arc::downgrade(&self.tracker);
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval_at(Instant::now() + FLUSH_INTERVAL, FLUSH_INTERVAL);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                let Some(tracker) = tracker.upgrade() else {
+                    break;
+                };
+                tracker.flush();
+            }
+        });
     }
 
     pub fn flush(&self) {

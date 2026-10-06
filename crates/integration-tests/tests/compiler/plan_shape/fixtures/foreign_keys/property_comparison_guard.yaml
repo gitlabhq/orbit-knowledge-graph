@@ -1,0 +1,15 @@
+name: Cross-node comparisons retain pinned FK endpoints
+missing_frontends:
+  json: The JSON frontend does not expose property-to-property comparisons.
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})
+    WHERE mr.project_id = p.id RETURN mr.title, p.name
+logical:
+  expect: ["(EdgeScan IN_PROJECT mr->p AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Join ON p.id = mr.project_id (_) (_))", "(Scan Table(gl_project) AS p)"]
+    emitted:
+      expect: ["(Scan Table(gl_project) AS p)"]

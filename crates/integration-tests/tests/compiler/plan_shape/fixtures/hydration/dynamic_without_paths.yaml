@@ -1,0 +1,16 @@
+name: Dynamic hydration without paths filters only pinned IDs
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1,2],"columns":["path"]}]}
+  gql: |
+    MATCH (f:File) WHERE f.id IN [1, 2] RETURN f.path
+hydration:
+  dynamic: true
+logical:
+  expect: ["(Input hydration (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]
+    emitted:
+      expect: ["(Filter f.id IN [1, 2] (Scan Table(gl_file) AS f))"]

@@ -1,0 +1,20 @@
+name: Uncovered filters keep the node scan alongside covered edge tags
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function","name":"compile"}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+  gql: |
+    MATCH (a:Definition {definition_type: 'function', name: 'compile'})-[:CALLS]->(b:Definition) RETURN a, b
+logical:
+  expect: ["(Filter a.definition_type = 'function', a.name = 'compile' (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter a.definition_type = 'function', a.name = 'compile', ... (Deduplicate Final (Scan Table(gl_definition) AS a)))
+        - (Filter e0.source_tags HAS ANY ['definition_type:function'], ... (_))
+    emitted:
+      expect:
+        - (Filter a.definition_type = 'function', a.name = 'compile', ... (Deduplicate Final (Scan Table(gl_definition) AS a)))
+        - (Filter ArrayContains(e0.source_tags, 'definition_type:function'), ... (_))
+        - (Join ON a.id = e0.source_id (_) (Bind a (_)))
+      reject: ["(CTE _filter_a (_))"]

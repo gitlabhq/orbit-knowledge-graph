@@ -1,0 +1,17 @@
+name: Depth-one paths from a global endpoint avoid anchor and backward scans
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Group","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":1,"rel_types":["MEMBER_OF"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF*1..1]->(b:Group {id: 2}) RETURN p
+logical:
+  expect: ["(Input path_finding (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding a->b depth=1 forward=1 backward=0 scoped=false ... (_) (_))"]
+    emitted:
+      ctes:
+        exact_order: [forward]
+      expect: ["(Filter e1.source_id = 1, ... (Scan Table(gl_edge) AS e1))"]
+      reject: ["(Scan Table(gl_user) ...)", "(CTE backward (_))"]

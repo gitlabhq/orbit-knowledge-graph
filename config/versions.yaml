@@ -4,11 +4,11 @@
 
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.
-schema: 100
+schema: 101
 
 # Accepted query-DSL shape. Bump when graph_query.schema.json or the
 # compiler's input/validate passes change what queries are accepted.
-query_dsl: 12.1.9
+query_dsl: 12.1.11
 
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 5.0.3
@@ -56,7 +56,7 @@ vendored:
     vendor_script: scripts/vendored/iglu/bump.sh
     check_script: scripts/vendored/iglu/check.sh
     pins:
-      orbit_query: 2-2-0
+      orbit_query: 2-2-1
       orbit_common: 1-0-4
       orbit_cli_command: 1-0-1
       orbit_code_indexing: 2-0-0

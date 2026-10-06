@@ -1,0 +1,18 @@
+name: Low-selectivity joined filters do not add a candidate key CTE
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":"function"},"columns":["name"]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"order_by":"a.name"}
+  gql: |
+    MATCH (a:Definition {definition_type: 'function'})-[:CALLS]->(b:Definition) RETURN a.name, b ORDER BY a.name
+logical:
+  expect: ["(Sort a.name (_))"]
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        absent: true
+      expect: ["(Bind a (Filter a.definition_type = 'function', ... (Deduplicate Final (Scan Table(gl_definition) AS a))))"]
+    emitted:
+      ctes:
+        absent: true
+      expect: ["(Deduplicate Final (Scan Table(gl_definition) AS a))"]

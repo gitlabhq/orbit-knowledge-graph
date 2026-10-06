@@ -1,0 +1,31 @@
+description: token_match matches a word regardless of case and prunes granules with the text skip index
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"token_match": "FIX"}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND token_match(mr.title, 'FIX')
+    RETURN mr.title LIMIT 10
+
+expect:
+  sql_contains: ["hasToken(lower(mr.title), lower('FIX'))"]
+  indexes_used: [idx_title]
+  skip_requirements: ["filter:title"]
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [2001]
+      rows:
+        - { id: 2001, title: Fix bug B }

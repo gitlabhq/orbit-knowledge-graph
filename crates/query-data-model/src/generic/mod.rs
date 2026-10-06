@@ -260,6 +260,11 @@ pub trait QueryDataModel {
         self.query_backend().table_sort_key(table)
     }
 
+    fn in_sort_key(&self, table: &str, column: &str) -> bool {
+        self.table_sort_key(table)
+            .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
+    }
+
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
     }

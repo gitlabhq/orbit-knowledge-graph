@@ -286,7 +286,9 @@ def git(*args: str) -> str:
 
 
 def changed_files(base: str) -> list[str]:
-    head = os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA", "HEAD")
+    # GitLab defines the variable as an empty string outside merged-results
+    # pipelines, so a default on the lookup never applies there.
+    head = os.environ.get("CI_MERGE_REQUEST_SOURCE_BRANCH_SHA") or "HEAD"
     if subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True).returncode:
         subprocess.run(["git", "fetch", "origin", base, "--depth=1"], capture_output=True)
     try:

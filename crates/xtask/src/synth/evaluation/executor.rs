@@ -803,7 +803,10 @@ fn substitute_params_in_sql(
     let mut result = sql.to_string();
 
     for (name, param) in params {
-        let pattern = format!("{{{name}:{}}}", param.ch_type);
+        let pattern = format!(
+            "{{{name}:{}}}",
+            orbit_utils::clickhouse::type_name(param.data_type)
+        );
 
         let replacement = format_param_value(&param.value);
 
@@ -873,21 +876,21 @@ mod tests {
 
     #[test]
     fn test_substitute_params() {
-        use orbit_utils::clickhouse::ChType;
+        use orbit_utils::query_types::SqlType;
 
         let sql = "SELECT * FROM users WHERE name = {p0:String} AND id = {p1:Int64}";
         let mut params = std::collections::HashMap::new();
         params.insert(
             "p0".to_string(),
             ParamValue {
-                ch_type: ChType::String,
+                data_type: SqlType::String,
                 value: serde_json::json!("alice"),
             },
         );
         params.insert(
             "p1".to_string(),
             ParamValue {
-                ch_type: ChType::Int64,
+                data_type: SqlType::Int64,
                 value: serde_json::json!(42),
             },
         );

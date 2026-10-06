@@ -13,68 +13,24 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use crate::passes::plan::HydrationNodePlan;
-use crate::passes::shared::deleted_false;
+use super::sql::{deleted_false, latest_row_dedup};
+use crate::passes::plan::{HydrationNodePlan, hydration::HydrationPathFilter};
 
-use super::helpers::limit_by_scan;
+use orbit_utils::traversal_path::TraversalPath;
 
-use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
-
-const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
-
-#[derive(Clone, Copy)]
-struct HydrationPathFilterContext {
-    array_exists_path_threshold: usize,
-}
-
-impl Default for HydrationPathFilterContext {
-    fn default() -> Self {
-        Self {
-            array_exists_path_threshold: ARRAY_EXISTS_PATH_THRESHOLD,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum HydrationPathFilterShape {
-    OrStartsWith,
-    ArrayExists,
-}
-
-impl HydrationPathFilterContext {
-    fn shape_for(self, is_dynamic: bool, path_count: usize) -> HydrationPathFilterShape {
-        if is_dynamic && path_count > self.array_exists_path_threshold {
-            HydrationPathFilterShape::ArrayExists
-        } else {
-            HydrationPathFilterShape::OrStartsWith
-        }
-    }
-}
-
-pub fn emit_hydration(
-    nodes: &[HydrationNodePlan],
-    limit: u32,
-    is_dynamic: bool,
-    path_segment_budget: Option<usize>,
-) -> Result<Node> {
-    let mut arms = nodes
-        .iter()
-        .map(|n| emit_arm(n, is_dynamic, path_segment_budget));
+pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
+    let mut arms = nodes.iter().map(emit_arm);
     let mut first = arms
         .next()
-        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
+        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
     for arm in arms {
-        first.union_all.push(arm?);
+        first.union_all.push(arm);
     }
     first.limit = Some(limit);
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(
-    node: &HydrationNodePlan,
-    is_dynamic: bool,
-    path_segment_budget: Option<usize>,
-) -> Result<Query> {
+fn emit_arm(node: &HydrationNodePlan) -> Query {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -87,28 +43,31 @@ fn emit_arm(
             .flat_map(|col| {
                 [
                     Expr::string(col),
-                    Expr::func("toString", vec![Expr::col(alias, col)]),
+                    Expr::func(Function::ToString, vec![Expr::col(alias, col)]),
                 ]
             })
             .collect();
-        Expr::func("toJSONString", vec![Expr::func("map", map_args)])
+        Expr::func(
+            Function::ToJson,
+            vec![Expr::func(Function::Object, map_args)],
+        )
     };
 
     let mut scan_where = Vec::new();
 
-    if let Some(tp_filter) = traversal_path_filter(
-        alias,
-        &node.traversal_paths,
-        is_dynamic,
-        path_segment_budget,
-    ) {
+    let path_filter = match &node.path_filter {
+        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
+        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
+        None => None,
+    };
+    if let Some(tp_filter) = path_filter {
         scan_where.push(tp_filter);
     }
 
     if let Some(id_filter) = Expr::col_in(
         alias,
         pk,
-        ChType::Int64,
+        SqlType::Int64,
         node.node_ids
             .iter()
             .map(|id| serde_json::Value::Number((*id).into()))
@@ -126,65 +85,25 @@ fn emit_arm(
             inner_select.push(SelectExpr::col(alias, col));
         }
     }
-    let from = limit_by_scan(&node.table, alias, inner_select, &node.sort_key, scan_where);
-    let deleted = deleted_false(alias);
-
-    Ok(Query {
+    let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
+    let keys = Query {
+        select: inner_select,
+        from: TableRef::scan(&node.table, alias),
+        where_clause: Expr::conjoin(scan_where),
+        order_by,
+        limit_by,
+        ..Default::default()
+    };
+    Query {
         select: vec![
             SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
             SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
             SelectExpr::new(json_expr, format!("{alias}_props")),
         ],
-        from,
-        where_clause: Some(deleted),
+        from: TableRef::subquery(keys, alias),
+        where_clause: Some(deleted_false(alias)),
         ..Default::default()
-    })
-}
-
-/// Build a traversal-path predicate from collected paths.
-///
-/// 1. **Leaf pruning:** drop any path that is a strict prefix of another
-///    in the set. Keeps the most specific (deepest) paths for maximum
-///    granule selectivity. Safe because `id IN (...)` is the correctness
-///    guarantee — TP is purely a scan optimizer.
-/// 2. **Small path sets:** balanced OR of `startsWith` calls. This keeps the
-///    primary-key pruning that makes low-fanout hydration fast.
-/// 3. **Large dynamic path sets:** `arrayExists(path -> startsWith(...))`.
-///    This avoids ClickHouse parser-depth failures when dynamic hydration
-///    discovers hundreds of traversal paths.
-fn traversal_path_filter(
-    alias: &str,
-    paths: &[TraversalPath],
-    is_dynamic: bool,
-    path_segment_budget: Option<usize>,
-) -> Option<Expr> {
-    if paths.is_empty() {
-        return None;
     }
-    let leaves = prune_to_leaves(paths);
-    if leaves.is_empty() {
-        return None;
-    }
-    let leaves = match path_segment_budget {
-        Some(budget) => generalize_to_budget(leaves, budget),
-        None => leaves,
-    };
-    let ctx = HydrationPathFilterContext::default();
-    match ctx.shape_for(is_dynamic, leaves.len()) {
-        HydrationPathFilterShape::OrStartsWith => or_starts_with(alias, &leaves),
-        HydrationPathFilterShape::ArrayExists => Some(array_exists_starts_with(alias, &leaves)),
-    }
-}
-
-fn generalize_to_budget(mut leaves: Vec<TraversalPath>, budget: usize) -> Vec<TraversalPath> {
-    while leaves.iter().map(|p| p.segment_count()).sum::<usize>() > budget {
-        let parents: Vec<TraversalPath> = leaves.iter().map(|p| p.parent()).collect();
-        if parents == leaves {
-            break;
-        }
-        leaves = prune_to_leaves(&parents);
-    }
-    leaves
 }
 
 fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
@@ -193,7 +112,7 @@ fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
 
 fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
     Expr::func(
-        "startsWith",
+        Function::StartsWith,
         vec![
             Expr::col(alias, TRAVERSAL_PATH_COLUMN),
             Expr::string(tp.as_str()),
@@ -204,12 +123,12 @@ fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
 fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
     let lambda_param = "_gkg_path";
     Expr::func(
-        "arrayExists",
+        Function::ArrayExists,
         vec![
             Expr::lambda(
                 lambda_param,
                 Expr::func(
-                    "startsWith",
+                    Function::StartsWith,
                     vec![
                         Expr::col(alias, TRAVERSAL_PATH_COLUMN),
                         Expr::ident(lambda_param),
@@ -217,7 +136,7 @@ fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
                 ),
             ),
             Expr::param(
-                ChType::String.to_array(),
+                SqlType::String.to_array(),
                 serde_json::Value::Array(
                     paths
                         .iter()
@@ -248,9 +167,12 @@ fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::{ColumnSelection, Input, InputNode, QueryType};
     use crate::passes::codegen::codegen;
     use crate::passes::enforce::ResultContext;
+    use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use orbit_server_config::QueryConfig;
+    use std::sync::Arc;
 
     fn render(node: &Node) -> String {
         codegen(node, ResultContext::new(), QueryConfig::default())
@@ -268,140 +190,65 @@ mod tests {
         (q.sql, q.params)
     }
 
-    fn plan(
-        columns: Vec<&str>,
-        node_ids: Vec<i64>,
-        traversal_paths: Vec<&str>,
-    ) -> HydrationNodePlan {
-        HydrationNodePlan {
-            alias: "hydrate".into(),
-            table: "gl_merge_request".into(),
-            entity: "MergeRequest".into(),
-            id_property: "id".into(),
+    fn plan(columns: Vec<&str>, node_ids: Vec<i64>, traversal_paths: Vec<&str>) -> InputNode {
+        InputNode {
+            id: "hydrate".into(),
+            entity: Some("MergeRequest".into()),
             node_ids,
-            columns: columns.into_iter().map(String::from).collect(),
+            columns: Some(ColumnSelection::List(
+                columns.into_iter().map(String::from).collect(),
+            )),
             traversal_paths: traversal_paths
                 .into_iter()
                 .map(TraversalPath::new_unchecked)
                 .collect(),
-            sort_key: vec!["id".to_string()],
+            ..Default::default()
         }
     }
 
-    fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, true, None).unwrap()
+    fn emit_dynamic(plans: &[InputNode], limit: u32) -> Node {
+        emit(plans, limit, true)
     }
 
-    fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
-        emit_hydration(plans, limit, false, None).unwrap()
+    fn emit_static(plans: &[InputNode], limit: u32) -> Node {
+        emit(plans, limit, false)
     }
 
-    #[test]
-    fn dynamic_single_tp_emits_starts_with() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
-        let sql = render(&node);
-        assert!(
-            sql.contains("startsWith"),
-            "dynamic single TP should emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic path set should not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn dynamic_multiple_tps_emit_or_disjunction() {
-        let node = emit_dynamic(
-            &[plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/100/", "1/9970/200/"],
-            )],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 2,
-            "two leaf TPs should produce two startsWith calls: {sql}"
-        );
-        assert!(sql.contains(" OR "), "two TPs should use OR: {sql}");
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic path set should use OR not arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_single_tp_emits_starts_with() {
-        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
-        let sql = render(&node);
-        assert!(
-            sql.contains("startsWith"),
-            "static single TP should emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "static path should not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains("traversal_path"),
-            "should reference traversal_path column: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_multiple_tps_emit_or_chain() {
-        let node = emit_static(
-            &[plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/100/", "1/9970/200/", "1/9970/300/"],
-            )],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 3,
-            "static should emit one startsWith per leaf path: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "static path must not emit arrayExists: {sql}"
-        );
-        assert!(
-            sql.contains(" OR "),
-            "static path should OR multiple startsWith calls: {sql}"
-        );
+    fn emit(nodes: &[InputNode], limit: u32, dynamic: bool) -> Node {
+        let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
+            ontology::Ontology::load_embedded().unwrap(),
+        ))
+        .unwrap();
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: nodes.to_vec(),
+            limit,
+            ..Default::default()
+        };
+        let plan = plan_clickhouse(
+            &input,
+            &model,
+            HydrationCompileOptions {
+                dynamic,
+                path_segment_budget: None,
+            },
+            &Default::default(),
+        )
+        .unwrap();
+        super::super::emit(&plan, &input).unwrap().ast
     }
 
     #[test]
     fn large_dynamic_tp_sets_emit_array_exists() {
-        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+        let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = HydrationNodePlan {
-            alias: "hydrate".into(),
-            table: "gl_merge_request".into(),
-            entity: "MergeRequest".into(),
-            id_property: "id".into(),
-            node_ids: vec![1],
-            columns: vec!["title".into()],
+        let plan = InputNode {
             traversal_paths: paths.clone(),
-            sort_key: vec!["id".to_string()],
+            ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_hydration(&[plan], 10, true, None).unwrap();
+        let node = emit_dynamic(&[plan], 10);
         let (sql, params) = render_with_params(&node);
 
         assert!(
@@ -430,76 +277,22 @@ mod tests {
 
     #[test]
     fn large_static_tp_sets_emit_or() {
-        let paths: Vec<TraversalPath> = (0..=ARRAY_EXISTS_PATH_THRESHOLD)
+        let paths: Vec<TraversalPath> = (0..=256)
             .map(|id| TraversalPath::new_unchecked(format!("1/9970/{id}/")))
             .collect();
-        let plan = HydrationNodePlan {
-            alias: "hydrate".into(),
-            table: "gl_merge_request".into(),
-            entity: "MergeRequest".into(),
-            id_property: "id".into(),
-            node_ids: vec![1],
-            columns: vec!["title".into()],
+        let plan = InputNode {
             traversal_paths: paths,
-            sort_key: vec!["id".to_string()],
+            ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_hydration(&[plan], 10, false, None).unwrap();
+        let node = emit_static(&[plan], 10);
         let sql = render(&node);
 
         assert!(
             !sql.contains("arrayExists"),
             "static TP sets should keep OR startsWith: {sql}"
         );
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            ARRAY_EXISTS_PATH_THRESHOLD + 1
-        );
-    }
-
-    #[test]
-    fn generalize_to_budget_widens_to_ancestors() {
-        let leaves: Vec<TraversalPath> = (0..900)
-            .map(|i| TraversalPath::new_unchecked(format!("1/{i:0>40}/{:0>40}/", i + 10000)))
-            .collect();
-        let widened = generalize_to_budget(leaves.clone(), 2000);
-        assert!(widened.iter().map(|p| p.segment_count()).sum::<usize>() <= 2000);
-        assert!(widened.iter().all(|w| !leaves.contains(w)));
-        for path in &leaves {
-            assert!(
-                widened.iter().any(|w| path.is_descendant_of(w)),
-                "{path} lost its ancestor prefix"
-            );
-        }
-
-        let roots: Vec<TraversalPath> = (0..50)
-            .map(|i| TraversalPath::new_unchecked(format!("{i}/")))
-            .collect();
-        assert_eq!(generalize_to_budget(roots.clone(), 10), roots);
-    }
-
-    #[test]
-    fn dynamic_no_tp_omits_path_filter() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
-        let sql = render(&node);
-        assert!(
-            !sql.contains("startsWith"),
-            "empty TPs should not emit startsWith: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "empty TPs should not emit arrayExists: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_no_tp_omits_path_filter() {
-        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
-        let sql = render(&node);
-        assert!(
-            !sql.contains("startsWith"),
-            "empty TPs should not emit startsWith: {sql}"
-        );
+        assert_eq!(sql.matches("startsWith").count(), 257);
     }
 
     #[test]
@@ -523,38 +316,6 @@ mod tests {
         assert!(
             tp_pos < in_pos,
             "TP filter should precede ID filter for primary key pruning: {sql}"
-        );
-    }
-
-    #[test]
-    fn dynamic_leaf_pruning_drops_broad_prefix() {
-        let node = emit_dynamic(
-            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
-            10,
-        );
-        let sql = render(&node);
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            1,
-            "ancestor should be pruned, only one startsWith for the leaf: {sql}"
-        );
-        assert!(
-            !sql.contains("arrayExists"),
-            "small dynamic leaf set should not emit arrayExists: {sql}"
-        );
-    }
-
-    #[test]
-    fn static_leaf_pruning_drops_broad_prefix() {
-        let node = emit_static(
-            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
-            10,
-        );
-        let sql = render(&node);
-        let starts_with_count = sql.matches("startsWith").count();
-        assert_eq!(
-            starts_with_count, 1,
-            "ancestor should be pruned, only one startsWith for the leaf: {sql}"
         );
     }
 }

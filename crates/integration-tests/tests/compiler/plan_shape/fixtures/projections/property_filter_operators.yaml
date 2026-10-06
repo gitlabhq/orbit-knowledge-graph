@@ -1,0 +1,35 @@
+name: Property filters distinguish requirements from SQL functions
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "filters": {
+        "name": [
+          {"contains": "orbit"},
+          {"starts_with": "git"},
+          {"ends_with": "lab"},
+          {"token_match": "graph"},
+          {"all_tokens": "graph query"},
+          {"any_tokens": "code data"},
+          {"is_not_null": true}
+        ],
+        "description": {"is_null": true}
+      }}]
+    }
+  gql: |
+    MATCH (p:Project)
+    WHERE p.name CONTAINS 'orbit' AND p.name STARTS WITH 'git' AND p.name ENDS WITH 'lab'
+      AND token_match(p.name, 'graph') AND all_tokens(p.name, 'graph query') AND any_tokens(p.name, 'code data')
+      AND p.name IS NOT NULL AND p.description IS NULL
+    RETURN p.name
+logical:
+  expect:
+    - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    emitted:
+      expect:
+        - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), tokens_single(Lower(p.name), Lower('graph')), tokens_all(Lower(p.name), Lower('graph query')), tokens_any(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
