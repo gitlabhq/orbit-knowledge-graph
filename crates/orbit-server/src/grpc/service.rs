@@ -239,10 +239,16 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
+        let schema = inline_catalog
+            .then(|| self.active_schema.snapshot().ok())
+            .flatten();
         let tools = ToolRegistry::tools_with_catalog(
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+            frontend,
             inline_catalog,
+            schema.as_ref().map(|schema| schema.ontology.as_ref()),
         )
         .into_iter()
         .map(proto_tool_definition)
