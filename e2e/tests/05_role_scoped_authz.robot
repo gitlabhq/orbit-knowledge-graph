@@ -128,17 +128,17 @@ Provision Role Scoped Groups
 
 Provision Role Scoped Projects
     ${reporter_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-reporter-project    ${REPORTER_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-reporter-project    ${REPORTER_GROUP["id"]}    readme=${True}
     ${security_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-security-project    ${SECURITY_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-security-project    ${SECURITY_GROUP["id"]}    readme=${True}
     ${developer_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-developer-project    ${DEVELOPER_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-developer-project    ${DEVELOPER_GROUP["id"]}    readme=${True}
     ${maintainer_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-maintainer-project    ${MAINTAINER_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-maintainer-project    ${MAINTAINER_GROUP["id"]}    readme=${True}
     ${nested_reporter_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-reporter-project    ${NESTED_REPORTER_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-reporter-project    ${NESTED_REPORTER_GROUP["id"]}    readme=${True}
     ${nested_developer_project}=    Create Project
-    ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-developer-project    ${NESTED_DEVELOPER_GROUP["id"]}
+    ...    kg347-${ROLE_AUTHZ_SUFFIX}-nested-developer-project    ${NESTED_DEVELOPER_GROUP["id"]}    readme=${True}
     Set Suite Variable    ${REPORTER_PROJECT_ID}             ${reporter_project["id"]}
     Set Suite Variable    ${SECURITY_PROJECT_ID}             ${security_project["id"]}
     Set Suite Variable    ${DEVELOPER_PROJECT_ID}            ${developer_project["id"]}
