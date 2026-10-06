@@ -54,7 +54,7 @@ pub fn run_yaml_suite(yaml: &str) {
 
     let vfs = Arc::new(
         orbit_utils::vfs::Vfs::load(
-            orbit_utils::vfs::sources::Checkout(tmp.path()),
+            orbit_utils::vfs::sources::Directory(tmp.path()),
             code_graph::v2::config::CodeFilter::new(
                 None,
                 None,

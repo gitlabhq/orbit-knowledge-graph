@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use orbit_utils::vfs::{
     Loading, Put, Source, SourceError, Tag,
-    sources::{Archive, Changed, Checkout, Memory},
+    sources::{Archive, Changeset, Directory, Memory},
 };
 
 use super::schema::{Scenario, SourceKind};
@@ -37,7 +37,7 @@ impl Source for Input<'_> {
                 }
                 Ok(())
             }
-            SourceKind::Checkout | SourceKind::Changed => {
+            SourceKind::Directory | SourceKind::Changeset => {
                 for file in fixtures {
                     if let Some(target) = &file.link {
                         let path = disk_path(self.root, &file.path);
@@ -47,12 +47,12 @@ impl Source for Input<'_> {
                         write(self.root, &file.path, file.content.as_bytes());
                     }
                 }
-                if self.kind == SourceKind::Checkout {
-                    Checkout(self.root).fill(into)
+                if self.kind == SourceKind::Directory {
+                    Directory(self.root).fill(into)
                 } else {
-                    Changed {
+                    Changeset {
                         root: self.root,
-                        paths: self.scenario.changed.clone().unwrap_or_else(|| {
+                        paths: self.scenario.changeset.clone().unwrap_or_else(|| {
                             fixtures.iter().map(|file| file.path.clone()).collect()
                         }),
                     }

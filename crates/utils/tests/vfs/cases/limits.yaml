@@ -1,5 +1,5 @@
 - name: The byte limit includes files dropped by policy
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: a.log
       content: a
@@ -11,7 +11,7 @@
   load_error: cap:total_bytes
 
 - name: The file limit includes empty files dropped by policy
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: a.log
       content: ""
@@ -23,7 +23,7 @@
   load_error: cap:files
 
 - name: Oversize files remain in the tree without readable content
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: big
       content: large

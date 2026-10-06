@@ -1,5 +1,5 @@
-- name: Checkout applies Git ignore rules to the fixture tree
-  sources: [checkout]
+- name: Directory applies Git ignore rules to the fixture tree
+  sources: [directory]
   fixtures:
     - path: .git/config
       content: |
@@ -29,8 +29,8 @@
         - {op: stat, path: tmp/x, expect: {error: NotFound}}
         - {op: stat, path: build/x, expect: {error: NotFound}}
 
-- name: Changed paths select files from the fixture tree
-  sources: [changed]
+- name: A changeset selects files from the fixture tree
+  sources: [changeset]
   fixtures:
     - path: a
       content: a
@@ -38,7 +38,7 @@
       content: x
     - path: dir/child
       content: x
-  changed: [a, dir, missing]
+  changeset: [a, dir, missing]
   tests:
     - name: Only selected regular files enter the VFS
       assert:
@@ -48,14 +48,14 @@
         - {op: stat, path: dir/child, expect: {error: NotFound}}
         - {op: usage, expect: {files: 1}}
 
-- name: Changed paths cannot escape the checkout
-  sources: [changed]
+- name: Changeset paths cannot escape the source directory
+  sources: [changeset]
   fixtures: []
-  changed: [../outside]
+  changeset: [../outside]
   load_error: InvalidInput
 
 - name: Linked files reflect host changes after loading
-  sources: [checkout, changed]
+  sources: [directory, changeset]
   fixtures:
     - path: deleted.rs
       content: original
