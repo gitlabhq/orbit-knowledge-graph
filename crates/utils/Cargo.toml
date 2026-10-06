@@ -10,6 +10,7 @@ chrono = { workspace = true }
 enum-as-inner = { workspace = true }
 flate2 = { workspace = true }
 ignore = { workspace = true }
+indextree = { workspace = true }
 lz4_flex = { workspace = true }
 memchr = { workspace = true }
 regex = { workspace = true }

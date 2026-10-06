@@ -27,8 +27,7 @@ fn generate_vfs_tests() {
         );
         let path = path.canonicalize().unwrap();
         code.push_str(&format!(
-            "#[test]\nfn {name}() {{ runner::run(include_str!({:?})); }}\n",
-            path
+            "#[test]\nfn {name}() {{ runner::run(include_str!({path:?}), std::path::Path::new({path:?})); }}\n"
         ));
     }
     std::fs::write(

@@ -87,22 +87,28 @@ fn check<T: std::fmt::Debug + PartialEq>(actual: io::Result<T>, expected: Outcom
     }
 }
 
-pub fn run(yaml: &str) {
+pub fn run(yaml: &str, suite_path: &Path) {
     let suite: Suite = orbit_utils::yaml::from_str(yaml).expect("invalid VFS suite");
+    let directory = suite_path.parent().unwrap();
     match suite {
-        Suite::Scenario(scenario) => run_scenario(&scenario),
+        Suite::Scenario(scenario) => run_scenario(&scenario, directory),
         Suite::Scenarios(scenarios) => {
             assert!(!scenarios.is_empty(), "suite has no scenarios");
             for scenario in scenarios {
-                run_scenario(&scenario);
+                run_scenario(&scenario, directory);
             }
         }
     }
 }
 
-fn run_scenario(scenario: &Scenario) {
+fn run_scenario(scenario: &Scenario, directory: &Path) {
     assert!(!scenario.name.trim().is_empty(), "scenario has no name");
     assert!(!scenario.sources.is_empty(), "scenario has no sources");
+    assert!(
+        scenario.input_file.is_none()
+            || (scenario.fixtures.is_empty() && scenario.sources == [SourceKind::Archive]),
+        "input_file requires the archive source and replaces inline fixtures"
+    );
     for (index, source) in scenario.sources.iter().enumerate() {
         assert!(
             !scenario.sources[..index].contains(source),
@@ -148,8 +154,9 @@ fn run_scenario(scenario: &Scenario) {
                 "links require a filesystem source and cannot have content"
             );
         }
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_source(scenario, *kind)));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_source(scenario, *kind, directory)
+        }));
         if let Err(error) = result {
             eprintln!("VFS scenario: {}, source: {kind:?}", scenario.name);
             std::panic::resume_unwind(error);
@@ -157,7 +164,7 @@ fn run_scenario(scenario: &Scenario) {
     }
 }
 
-fn run_source(scenario: &Scenario, kind: SourceKind) {
+fn run_source(scenario: &Scenario, kind: SourceKind, directory: &Path) {
     let root = tempfile::tempdir().unwrap();
     let scratch = tempfile::tempdir().unwrap();
     let puts = AtomicUsize::new(0);
@@ -181,6 +188,7 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
             scenario,
             kind,
             root: root.path(),
+            directory,
         },
         policy,
         scenario.limits.store(),
@@ -209,7 +217,13 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
                     Outcome::Ok(value) => check(
                         vfs.read(Path::new(&path)).map(|b| b.to_vec()),
                         Outcome::Ok(Success {
-                            ok: value.ok.into_bytes(),
+                            ok: match value.ok {
+                                Content::Inline(text) => text.into_bytes(),
+                                Content::File(file) => {
+                                    std::fs::read(directory.join(file.input_file))
+                                        .expect("read expected content fixture")
+                                }
+                            },
                         }),
                     ),
                     Outcome::Err(error) => check(

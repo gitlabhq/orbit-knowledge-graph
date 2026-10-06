@@ -1,7 +1,7 @@
 //! Tests requiring native filenames, permissions, or concurrent scheduling.
 
 use orbit_utils::vfs::{
-    Decision, File, Limits, Loading, Pass, Put, Source, SourceError, Tag, Vfs,
+    Decision, File, Limits, Pass, Put, Source, SourceError, Tag, Vfs,
     sources::{Changed, Checkout},
 };
 use std::io;
@@ -26,25 +26,21 @@ impl Pass for Checked {
 }
 
 #[test]
-fn concurrent_puts_deduplicate_and_spill_without_losing_files() {
+fn shared_readers_read_deduplicated_and_spilled_files() {
     struct Workers;
     impl Source for Workers {
-        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-            std::thread::scope(|scope| {
-                for worker in 0..8 {
-                    scope.spawn(move || {
-                        into.put(&format!("shared/{worker}"), Put::Bytes(vec![b'x'; 80]))
-                            .unwrap();
-                        for file in 0..200 {
-                            into.put(
-                                &format!("{worker}/{file}"),
-                                Put::Bytes(format!("{worker}:{file}").into_bytes()),
-                            )
-                            .unwrap();
-                        }
-                    });
+        fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
+            for worker in 0..8 {
+                into.put(&format!("shared/{worker}"), Put::Bytes(vec![b'x'; 80]))
+                    .unwrap();
+                for file in 0..200 {
+                    into.put(
+                        &format!("{worker}/{file}"),
+                        Put::Bytes(format!("{worker}:{file}").into_bytes()),
+                    )
+                    .unwrap();
                 }
-            });
+            }
             Ok(())
         }
     }
@@ -61,14 +57,19 @@ fn concurrent_puts_deduplicate_and_spill_without_losing_files() {
     assert_eq!(vfs.usage().files, 1608);
     assert_eq!(vfs.usage().deduped_bytes, 560);
     assert!(vfs.usage().spilled > 0);
-    for worker in 0..8 {
-        for file in 0..200 {
-            assert_eq!(
-                &*vfs.read(Path::new(&format!("{worker}/{file}"))).unwrap(),
-                format!("{worker}:{file}").as_bytes()
-            );
+    std::thread::scope(|scope| {
+        for worker in 0..8 {
+            let vfs = &vfs;
+            scope.spawn(move || {
+                for file in 0..200 {
+                    assert_eq!(
+                        &*vfs.read(Path::new(&format!("{worker}/{file}"))).unwrap(),
+                        format!("{worker}:{file}").as_bytes()
+                    );
+                }
+            });
         }
-    }
+    });
 }
 
 #[test]
@@ -103,6 +104,78 @@ fn concurrent_first_reads_run_content_once() {
 }
 
 #[test]
+fn exclusive_updates_keep_reads_and_inventory_consistent() {
+    let mut vfs = Vfs::load(
+        orbit_utils::vfs::sources::Memory(vec![("z".into(), b"last".to_vec())]),
+        (),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    vfs.put("a/file", Put::Bytes(b"first".to_vec())).unwrap();
+    vfs.put("z", Put::Bytes(b"replacement".to_vec())).unwrap();
+    assert_eq!(&*vfs.read(Path::new("a/file")).unwrap(), b"first");
+    assert_eq!(&*vfs.read(Path::new("z")).unwrap(), b"replacement");
+    assert_eq!(
+        vfs.files()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["a/file", "z"]
+    );
+    assert_eq!(vfs.usage().files, 2);
+}
+
+#[test]
+fn checkout_and_changed_classify_files_in_parallel_before_insertion() {
+    struct ParallelContent(Barrier);
+    impl Pass for ParallelContent {
+        type Tag = ();
+        fn content(&self, file: &mut File<()>, bytes: &[u8]) {
+            assert_eq!(bytes, b"content");
+            self.0.wait();
+            file.decide(Decision::Keep(()));
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    for path in ["a", "b"] {
+        std::fs::write(root.path().join(path), b"content").unwrap();
+    }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        for vfs in [
+            Vfs::load(
+                Checkout(root.path()),
+                ParallelContent(Barrier::new(2)),
+                Limits::default(),
+                Default::default(),
+            )
+            .unwrap(),
+            Vfs::load(
+                Changed {
+                    root: root.path(),
+                    paths: vec!["a".into(), "b".into()],
+                },
+                ParallelContent(Barrier::new(2)),
+                Limits::default(),
+                Default::default(),
+            )
+            .unwrap(),
+        ] {
+            assert_eq!(
+                vfs.files()
+                    .map(|file| file.path.as_str())
+                    .collect::<Vec<_>>(),
+                ["a", "b"]
+            );
+            assert_eq!(vfs.usage().kept, 14);
+        }
+    });
+}
+
+#[test]
 fn host_links_and_replaced_parents_are_not_followed() {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();
@@ -119,6 +192,14 @@ fn host_links_and_replaced_parents_are_not_followed() {
         ("root/escape", outside.path().to_str().unwrap()),
         ("root/chain", "escape"),
         ("root/dangling", "absent"),
+        ("root/a", "."),
+        ("root/b", "a/.."),
+        ("root/c", "b/.."),
+        ("root/d", "c/.."),
+        ("root/e", "d/.."),
+        ("root/f", "e/.."),
+        ("root/g", "f/.."),
+        ("root/lib", "g/tmp"),
     ] {
         let mut header = tar::Header::new_gnu();
         header.set_entry_type(tar::EntryType::Symlink);
@@ -130,29 +211,46 @@ fn host_links_and_replaced_parents_are_not_followed() {
     header.set_size(7);
     header.set_mode(0o644);
     builder
+        .append_data(&mut header, "root/ordinary", &b"payload"[..])
+        .unwrap();
+    builder
         .append_data(&mut header, "root/chain/new/file", &b"payload"[..])
+        .unwrap();
+    builder
+        .append_data(
+            &mut header,
+            "root/lib/vfs-regression-332/file",
+            &b"payload"[..],
+        )
         .unwrap();
     let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
     std::io::Write::write_all(&mut gzip, &builder.into_inner().unwrap()).unwrap();
     let bytes = gzip.finish().unwrap();
-    let archive = Vfs::load(
-        orbit_utils::vfs::sources::Archive(bytes.as_slice()),
-        (),
-        Default::default(),
-        Default::default(),
-    )
-    .unwrap();
-    for path in ["escape/file", "chain/new/file", "dangling"] {
+    for compress_spill in [false, true] {
+        let scratch = tempfile::tempdir().unwrap();
+        let result = Vfs::load(
+            orbit_utils::vfs::sources::Archive(bytes.as_slice()),
+            (),
+            Limits {
+                resident_bytes: Some(0),
+                ..Limits::default()
+            },
+            orbit_utils::vfs::Options {
+                scratch_dir: Some(scratch.path().into()),
+                compress_spill,
+                ..Default::default()
+            },
+        );
+        assert!(
+            matches!(result, Err(SourceError::Io(error)) if error.kind() == io::ErrorKind::NotADirectory)
+        );
+        assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(), 0);
+        assert!(!outside.path().join("new").exists());
         assert_eq!(
-            archive.read(Path::new(path)).unwrap_err().kind(),
-            io::ErrorKind::NotFound
+            std::fs::read(outside.path().join("file")).unwrap(),
+            b"secret"
         );
     }
-    assert!(!outside.path().join("new").exists());
-    assert_eq!(
-        std::fs::read(outside.path().join("file")).unwrap(),
-        b"secret"
-    );
     for path in [
         outside.path().join("file").to_str().unwrap(),
         "../file",
@@ -195,7 +293,7 @@ fn host_links_and_replaced_parents_are_not_followed() {
 fn lazy_readers_run_once_and_only_for_readable_files() {
     struct Files<'a>(&'a AtomicUsize);
     impl Source for Files<'_> {
-        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+        fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
             for path in ["kept", "listed", "dropped", "oversize"] {
                 into.put(
                     path,
@@ -257,7 +355,7 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
 fn lazy_errors_size_mismatches_and_overflow_fail_loading() {
     struct Input(u64, bool);
     impl Source for Input {
-        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+        fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
             into.put(
                 "file",
                 Put::Lazy {

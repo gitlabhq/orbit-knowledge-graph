@@ -11,10 +11,10 @@ flowchart LR
         archive[Archive]
         memory[Memory]
     end
-    sources --> loading["Loading::put"]
+    sources --> loading["Vfs::put"]
     loading --> policy["Pass::header / content"]
-    policy --> freeze["Sort and freeze"]
-    freeze --> store["Vfs: read / read_dir / stat"]
+    policy --> tree["indextree::Arena"]
+    tree --> store["Vfs: read / read_dir / stat"]
     store --> inventory["files / subtree / usage"]
 ```
 
@@ -35,7 +35,10 @@ assert_eq!(repo.read_dir(Path::new("/"))?, vec!["src"]);
 
 `()` keeps every regular file, with `()` as its tag.
 Wrap the resulting store in `Arc` to share it among readers.
-Loading is concurrent; freezing produces a sorted node vector used for lookups and directory ranges.
+Checkout workers discover and classify files in parallel. Admission and tree insertion use one short-held lock.
+Directories keep sorted child IDs without separate copies of names. Lookups follow those children.
+After loading, file records are sorted once for contiguous inventory reads; arena IDs retain the tree relationships.
+Dropped files are removed immediately, together with any empty parent directories.
 
 ## Choose a source
 
@@ -62,7 +65,12 @@ let changes = Vfs::load(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Checkout uses a parallel walker. It includes dotfiles and honors `.gitignore` and `.git/info/exclude`.
+Checkout uses the parallel ignore walker. It includes dotfiles and honors `.gitignore` and `.git/info/exclude`.
+The walker limits active preparation to its worker count. Disk reads and classification run outside the tree lock.
+Changed paths prepare batches of 1,024 entries with at most eight classification chunks.
+Admission checks limits before content reads. Workers release classification buffers before insertion.
+Memory inputs classify and hash batches of 4,096 owned files in parallel, then store and insert in source order.
+Archive entries remain sequential; their lazy readers borrow the tar stream.
 It ignores ripgrep `.ignore` rules, ancestor ignore files, and global Git ignore rules.
 It excludes `.git` and does not walk through directory symlinks.
 
@@ -143,7 +151,7 @@ impl Pass for Filter {
 | `Pending` | Request content; after content, become `Keep(Tag::default())` |
 | `Keep(tag)` | Retain content or link a disk file, with the caller's tag |
 | `List(reason)` | Retain a node without readable content |
-| `Drop(reason)` | Omit the node from the frozen inventory |
+| `Drop(reason)` | Omit the file from the readable tree and inventory |
 
 Passes are trusted, synchronous and infallible. They should change decisions, not paths or sizes.
 They do not count resources or receive symlinks. The store lists links as `List("symlink")`.
@@ -152,8 +160,8 @@ Oversize files become `List("oversize")` before policy runs.
 Compose passes with `first.then(second)`. Each stage runs in order; the second sees the first's decision and can override it.
 Header `List` or `Drop` skips content processing and never invokes a lazy reader.
 
-Linked files can be rejected after freezing. `decision()` and `stat` report that late decision.
-A late `Drop` keeps its node and reads as `Unsupported`, because the frozen inventory cannot remove it.
+Linked files can be rejected after loading. `decision()` and `stat` report that late decision.
+A late `Drop` keeps its node and reads as `Unsupported`; shared reads do not mutate the tree structure.
 Content `Pending` still settles to the default tag.
 
 ## Read and inspect
@@ -163,8 +171,8 @@ Content `Pending` still settles to the default tag.
 | `read(path)` | `Arc<[u8]>`; resident content is shared |
 | `read_dir(path)` | Sorted, distinct direct child names |
 | `stat(path)` | Canonical virtual path, kind, length, decision and optional link target |
-| `files()` | Sorted borrowed file rows, including listed nodes |
-| `subtree(dir)` | Borrowed descendants; invalid or missing paths yield no rows |
+| `files()` | Sorted borrowed file rows, including listed nodes; no per-call allocation |
+| `subtree(dir)` | Sorted borrowed descendants; no result-vector allocation; invalid or missing paths yield no rows |
 | `usage()` | File/content accounting |
 
 `stat` follows links and reports the reached file's decision. Directories have no decision.
@@ -191,7 +199,7 @@ Linux requires kernel and syscall-policy support for `openat2`; there is no weak
 Windows code in `disk.rs` cross-compiles, but checkout and scratch still contain Unix-specific operations.
 
 Non-UTF-8 names use lossy inventory keys while retaining real host paths for I/O.
-Collisions count as duplicate paths. Sequential duplicates are last-wins; concurrent duplicate order depends on scheduling.
+Collisions count as duplicate paths. Duplicate paths are last-wins in source order.
 
 ## Limits and options
 
@@ -215,7 +223,8 @@ LZ4 compresses each spilled blob independently, only when it shrinks. Reads rema
 
 `Usage.bytes` counts offered bytes; `Usage.files` counts final nodes.
 `kept` sums current kept-node sizes. `resident` and `spilled` count allocated blob bytes.
-`deduped_bytes` counts avoided duplicate writes; `duplicate_paths` counts overwritten entries.
+`deduped_bytes` counts avoided duplicate writes; `duplicate_paths` counts replacements of existing file entries.
+A dropped file leaves no path history, so adding that path later creates a new entry.
 Replacing a path can leave an unused blob allocated until drop, so these totals are not an accounting identity.
 
 `Options.cancelled` accepts a `Send + Sync` predicate, such as `move || token.is_cancelled()`.
@@ -224,11 +233,11 @@ It is polled once per `put`. Cancellation stops at the next offered file, not du
 ## Implement a source
 
 ```rust
-use orbit_utils::vfs::{Loading, Put, Source, SourceError, Tag};
+use orbit_utils::vfs::{Vfs, Put, Source, SourceError, Tag};
 
 struct Generated;
 impl Source for Generated {
-    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+    fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
         into.put("generated.txt", Put::Lazy {
             size: 5,
             read: Box::new(|| Ok(b"hello".to_vec())),
@@ -238,9 +247,11 @@ impl Source for Generated {
 ```
 
 `Put` accepts owned bytes, a synchronous one-shot reader, a disk path with its size, or a virtual link target.
-A source can call `put` concurrently. It must propagate worker failures and wait for workers before returning.
+A source calls `put` sequentially with exclusive access. Load errors must propagate to the caller.
 The store verifies produced content length against the declared size.
 Custom sources are trusted to select host paths and enforce their transport or archive contracts.
+Entries cannot use a file or symlink as a parent, or replace a directory with a file.
+These structural conflicts fail loading rather than creating unreachable entries.
 
 ## YAML contract suite
 
@@ -253,7 +264,7 @@ Each file becomes a named test. Each scenario has its own inline fixtures and na
 Fixture paths define the tree. Parent directories follow from those paths; empty content still creates a file.
 Each scenario loads a fresh VFS for each source. Its named tests run in order against that VFS.
 The runner calls only public VFS methods. Most scenarios run identical assertions against several sources.
-Rust tests cover malformed archives, failing readers, scheduling, invalid filename bytes, permissions, and host symlink replacement.
+Rust tests cover failing readers, scheduling, invalid filename bytes, permissions, and host symlink replacement.
 
 ```yaml
 - name: Paths define a tree even when files are empty
@@ -294,6 +305,7 @@ Empty fixture sets are valid; an empty scenario list is not. Failures report the
 | `name` | Description of the scenario's behavior |
 | `sources` | Nonempty list: `memory`, `lazy`, `checkout`, `changed`, `archive` |
 | `fixtures` | Inline files with `path` and `content`; paths imply directories |
+| `input_file` | Raw archive file, relative to the YAML file; replaces inline fixtures |
 | `rules` | Ordered header/content decisions, split across a real `Pass::then` chain |
 | `limits` | The five VFS limits; omitted fields are unlimited |
 | `options` | `compress_spill`, `scratch: default/existing/missing`, `cancel_after` |
@@ -306,7 +318,28 @@ Use `content: ""` for empty files; omitted content also defaults to empty.
 YAML anchors can share content across files and read assertions.
 Fixtures remain ordered so memory, lazy, and archive scenarios can test duplicate paths.
 A `link` target replaces content for checkout, changed, and archive sources.
-Host fixture paths are checked before writes. Archive corruption and reader faults belong in the Rust source tests.
+Host fixture paths are checked before writes. Reader faults belong in the Rust source tests.
+
+Archive scenarios can supply exact bytes through `input_file`, including malformed headers and truncated streams.
+This option requires `sources: [archive]` and an empty or omitted `fixtures` list.
+Missing input files fail the test setup rather than satisfying an expected VFS error.
+Read assertions also accept `ok: {input_file: inputs/expected.txt}` to compare the complete returned bytes with a file.
+Both paths resolve relative to the YAML file.
+
+```yaml
+- name: Archive traversal fails loading
+  sources: [archive]
+  input_file: inputs/traversal.tar.gz
+  load_error: InvalidData
+```
+
+The checked-in files under `cases/inputs/` hold the archive edge cases.
+Their generator records the exact headers and bodies, including deliberate format errors.
+Tests read these files directly; Python is only needed to regenerate them:
+
+```shell
+mise exec -- python3 crates/utils/tests/vfs/cases/inputs/generate.py
+```
 
 Rules require `phase: header/content` and `decision`.
 Optional `suffix` matches names; `contains` matches bytes during content processing only.
@@ -329,8 +362,8 @@ I/O errors use Rust names such as `NotFound`. Load errors also accept `empty`, `
 | Resource caps and cancellation | `limits.yaml`; native overflow test |
 | Dedup, replacement, spill and compression | `storage.yaml` |
 | Git rules, changed paths and live checkout changes | `checkout.yaml` |
-| Archive format and traversal | `archive.yaml`; `tests/vfs/archive.rs` |
+| Archive format and traversal | `archive.yaml` and raw files in `cases/inputs/` |
 | Lazy-reader invocation and failures | Native tests in `tests/vfs/native.rs` |
-| OS races, concurrent reads/writes, host escape | Native tests in `tests/vfs/native.rs` |
+| OS races, concurrent reads, host escape | Native tests in `tests/vfs/native.rs` |
 
 Add new behavior as a scenario first. Extend the typed grammar only when existing operations cannot express the public contract.

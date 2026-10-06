@@ -12,7 +12,9 @@ pub enum Suite {
 pub struct Scenario {
     pub name: String,
     pub sources: Vec<SourceKind>,
+    #[serde(default)]
     pub fixtures: Vec<Fixture>,
+    pub input_file: Option<String>,
     #[serde(default)]
     pub rules: Vec<Rule>,
     #[serde(default)]
@@ -133,7 +135,7 @@ pub enum Scratch {
 pub enum Step {
     Read {
         path: String,
-        expect: Outcome<String>,
+        expect: Outcome<Content>,
     },
     ReadDir {
         path: String,
@@ -160,6 +162,19 @@ pub enum Step {
     Remove {
         path: String,
     },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Content {
+    Inline(String),
+    File(InputFile),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputFile {
+    pub input_file: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1,7 +1,7 @@
 //! Passes classify files by path, size and content. They do not enforce limits or see symlinks.
 //! Header `Pending` requests content during loading; after content it becomes `Keep(Default)`.
 //! Linked files kept by the header run content passes on first read. A late `Drop` remains
-//! in the inventory with its reason because nodes are frozen; reading it returns `Unsupported`.
+//! in the inventory with its reason; reading it returns `Unsupported`.
 //! Passes are trusted policy code and should only change the decision.
 
 use std::sync::OnceLock;
@@ -49,7 +49,7 @@ impl<T: Tag> File<T> {
         matches!(self.decision(), Decision::Keep(_))
     }
 
-    pub(super) fn decide_once(&self, content: impl FnOnce(&mut Self)) -> Decision<T> {
+    pub(super) fn classify(&self, content: impl FnOnce(&mut Self)) -> Decision<T> {
         *self.content_decision.get_or_init(|| {
             let mut copy = Self::new(self.path.clone(), self.size);
             copy.decided = self.decided;
@@ -57,6 +57,12 @@ impl<T: Tag> File<T> {
             copy.keep_if_pending();
             copy.decided
         })
+    }
+
+    pub(super) fn classify_loaded(&mut self, content: impl FnOnce(&mut Self)) {
+        content(self);
+        self.keep_if_pending();
+        let _ = self.content_decision.set(self.decided);
     }
 
     pub(super) fn keep_if_pending(&mut self) {

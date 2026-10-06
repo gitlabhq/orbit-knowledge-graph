@@ -121,3 +121,32 @@
   limits: {resident_bytes: 0}
   options: {scratch: missing}
   load_error: NotFound
+
+- name: A dropped file can be replaced by readable content
+  sources: [memory, lazy, archive]
+  fixtures:
+    - {path: nested/file, content: drop}
+    - {path: nested/file, content: keep}
+  rules:
+    - {phase: content, contains: drop, decision: {kind: drop, value: content}}
+  tests:
+    - name: The replacement restores the file and its directory
+      assert:
+        - {op: read, path: nested/file, expect: {ok: keep}}
+        - {op: read_dir, path: /, expect: {ok: [nested]}}
+        - {op: usage, expect: {files: 1, duplicate_paths: 0}}
+
+- name: Dropping the only child hides its parent directories
+  sources: [memory, lazy, archive]
+  fixtures:
+    - {path: nested/deep/file, content: keep}
+    - {path: nested/deep/file, content: drop}
+  rules:
+    - {phase: content, contains: drop, decision: {kind: drop, value: content}}
+  tests:
+    - name: Empty implicit directories disappear with the file
+      assert:
+        - {op: read_dir, path: /, expect: {ok: []}}
+        - {op: stat, path: nested, expect: {error: NotFound}}
+        - {op: subtree, path: nested, expect: []}
+        - {op: usage, expect: {files: 0, duplicate_paths: 1}}

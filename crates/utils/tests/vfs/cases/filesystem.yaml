@@ -167,3 +167,45 @@
         - {op: stat, path: dangling, expect: {error: NotFound}}
         - {op: read, path: ping, expect: {error: Other}}
         - {op: usage, expect: {files: 8, kept: 7}}
+
+- name: A regular file cannot have children
+  sources: [memory, lazy, archive]
+  fixtures:
+    - {path: parent, content: file}
+    - {path: parent/child, content: child}
+  load_error: NotADirectory
+
+- name: Directory traversal preserves full-path lexical ordering
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - {path: foo/z, content: nested}
+    - {path: foo.bar, content: sibling}
+    - {path: foo/a, content: nested}
+    - {path: foo0, content: sibling}
+  tests:
+    - name: Directory names sort before extensions but descendant paths sort after them
+      assert:
+        - {op: read_dir, path: /, expect: {ok: [foo, foo.bar, foo0]}}
+        - {op: subtree, path: /, expect: [foo.bar, foo/a, foo/z, foo0]}
+        - {op: read_dir, path: foo, expect: {ok: [a, z]}}
+        - op: files
+          expect:
+            - {path: foo.bar, size: 7, decision: {kind: keep, value: input}}
+            - {path: foo/a, size: 6, decision: {kind: keep, value: input}}
+            - {path: foo/z, size: 6, decision: {kind: keep, value: input}}
+            - {path: foo0, size: 7, decision: {kind: keep, value: input}}
+
+- name: A link cannot receive archive entries beneath it
+  sources: [archive]
+  fixtures:
+    - {path: target/file, content: original}
+    - {path: alias, link: target}
+    - {path: alias/injected, content: payload}
+  load_error: NotADirectory
+
+- name: A file cannot replace a populated directory
+  sources: [memory, lazy, archive]
+  fixtures:
+    - {path: directory/child, content: child}
+    - {path: directory, content: replacement}
+  load_error: InvalidInput
