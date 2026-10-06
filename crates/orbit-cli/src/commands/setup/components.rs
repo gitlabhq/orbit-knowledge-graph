@@ -41,7 +41,7 @@ fn file_mentions(path: &Path, marker: &str) -> bool {
 pub(super) fn installer_for(component: Component) -> &'static dyn Installer {
     match component {
         Component::Instructions => &instructions::Instructions,
-        Component::Hooks => &hooks::Hooks { graph_first: false },
+        Component::Hooks => &hooks::Hooks,
         Component::Skill => &skill::Skill,
         Component::Mcp => &mcp::McpServer,
     }
@@ -76,12 +76,7 @@ impl Report {
 pub(super) fn install(selection: &Selection, target: &Target, report: &mut Report) -> Result<()> {
     for component in &selection.components {
         report.start_group(component.label());
-        let installer: &dyn Installer = match component {
-            Component::Hooks => &hooks::Hooks {
-                graph_first: selection.graph_first,
-            },
-            other => installer_for(*other),
-        };
+        let installer = installer_for(*component);
         installer.install(&selection.agents, target, report)?;
     }
     if spec::launcher() == spec::GLAB_LAUNCHER {
