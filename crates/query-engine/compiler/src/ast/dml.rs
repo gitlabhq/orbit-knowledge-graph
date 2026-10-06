@@ -150,8 +150,6 @@ pub enum Op {
     Ge,
     #[strum(serialize = "IN")]
     In,
-    #[strum(serialize = "LIKE")]
-    Like,
     #[strum(serialize = "AND")]
     And,
     #[strum(serialize = "OR")]
