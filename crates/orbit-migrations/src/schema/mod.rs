@@ -28,13 +28,7 @@ pub struct Table {
     pub ttl: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Column {
-    pub name: String,
-    pub column_type: String,
-    pub default: Option<String>,
-    pub codec: Option<Vec<String>>,
-}
+pub use query_data_model::storage::StoredColumn as Column;
 
 #[derive(Debug, Clone)]
 pub struct Index {
@@ -208,11 +202,7 @@ impl Table {
         let prefixed_name = format!("{table_name_prefix}{}", self.name);
         let mut clauses = Vec::new();
 
-        let mut body: Vec<String> = self
-            .columns
-            .iter()
-            .map(|column| column.to_definition_sql())
-            .collect();
+        let mut body: Vec<String> = self.columns.iter().map(column_definition).collect();
 
         for index in &self.indexes {
             body.push(format!(
@@ -276,21 +266,19 @@ impl Table {
     }
 }
 
-impl Column {
-    pub(crate) fn to_definition_sql(&self) -> String {
-        let mut fragments = vec![format!(
-            "    {} {}",
-            quote_identifier(&self.name),
-            self.column_type,
-        )];
-        if let Some(default) = &self.default {
-            fragments.push(format!("DEFAULT {default}"));
-        }
-        if let Some(codecs) = &self.codec {
-            fragments.push(format!("CODEC({})", codecs.join(", ")));
-        }
-        fragments.join(" ")
+fn column_definition(column: &Column) -> String {
+    let mut fragments = vec![format!(
+        "    {} {}",
+        quote_identifier(&column.name),
+        column.clickhouse_type(),
+    )];
+    if let Some(default) = &column.default {
+        fragments.push(format!("DEFAULT {default}"));
     }
+    if let Some(codecs) = &column.codec {
+        fragments.push(format!("CODEC({})", codecs.join(", ")));
+    }
+    fragments.join(" ")
 }
 
 impl Projection {
@@ -384,7 +372,7 @@ impl Dictionary {
             .attributes
             .iter()
             .find(|attribute| attribute.name == self.key)
-            .map(|attribute| attribute.column_type.as_str())
+            .map(Column::clickhouse_type)
             .unwrap_or("Int64");
 
         let mut column_definitions: Vec<String> =
@@ -396,7 +384,7 @@ impl Dictionary {
             column_definitions.push(format!(
                 "    {} {}",
                 quote_identifier(&attribute.name),
-                attribute.column_type,
+                attribute.clickhouse_type(),
             ));
         }
 
@@ -501,6 +489,98 @@ fn quote_sql_literal(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn denormalized_catalog_preserves_source_types_and_path_owners() {
+        use query_data_model::QueryDataModel;
+
+        let ontology = std::sync::Arc::new(
+            ontology::Ontology::load_embedded()
+                .unwrap()
+                .with_denormalized_join(
+                    "reviewer_project",
+                    &[
+                        ("REVIEWER", "User", "MergeRequest", false),
+                        ("IN_PROJECT", "MergeRequest", "Project", true),
+                    ],
+                ),
+        );
+        let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        let schema = super::GraphSchema::from_ontology(&ontology);
+        let name = "gl_denorm_reviewer_project";
+        let catalog = model.table(name).unwrap();
+        let generated = schema
+            .tables
+            .iter()
+            .find(|table| table.name == name)
+            .unwrap();
+        assert_eq!(catalog.columns, generated.columns);
+        assert_eq!(catalog.columns[0].name, "traversal_path");
+        assert_eq!(
+            catalog.column("t2_created_at").unwrap().clickhouse_type(),
+            model
+                .table("gl_merge_request")
+                .unwrap()
+                .column("created_at")
+                .unwrap()
+                .clickhouse_type()
+        );
+        let owners: Vec<_> = catalog
+            .path_columns
+            .iter()
+            .map(|column| {
+                (
+                    column.name.as_str(),
+                    column
+                        .entity
+                        .map(|entity| model.graph().entity(entity).name.as_str()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            owners,
+            [
+                ("traversal_path", None),
+                ("t2_traversal_path", Some("MergeRequest")),
+                ("t3_traversal_path", Some("Project"))
+            ]
+        );
+    }
+
+    #[test]
+    fn query_catalog_matches_generated_remote_storage() {
+        let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        let schema = super::GraphSchema::from_ontology(&ontology);
+        let committed = include_str!("../../../../config/graph.sql");
+        for table in &schema.tables {
+            let sql = table.to_create_sql("");
+            assert!(
+                committed.contains(&sql),
+                "{} differs from committed DDL:\n{sql}",
+                table.name
+            );
+        }
+        for catalog in model.backend().tables() {
+            let table = schema
+                .tables
+                .iter()
+                .find(|table| table.name == catalog.name)
+                .unwrap();
+            assert_eq!(catalog.columns, table.columns, "{}", table.name);
+            assert_eq!(catalog.sort_key, table.order_by, "{}", table.name);
+            assert_eq!(
+                catalog.row_semantics,
+                query_data_model::storage::RowSemantics::Versioned {
+                    engine_deletes: table
+                        .engine
+                        .args
+                        .iter()
+                        .any(|argument| argument == "_deleted"),
+                }
+            );
+        }
+    }
+
     use super::*;
 
     fn merge_tree_engines(schema: &GraphSchema) -> Vec<String> {

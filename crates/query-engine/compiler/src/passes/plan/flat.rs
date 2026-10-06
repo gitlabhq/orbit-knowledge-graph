@@ -261,11 +261,21 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
         if !multi_hop && !dedup && self.facts.aggregate() {
-            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
             let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
             predicates.extend(membership);
+            if self
+                .facts
+                .model
+                .table(&hop.edge_table)
+                .is_some_and(|table| {
+                    table.row_semantics == query_data_model::storage::RowSemantics::Current
+                })
+            {
+                return Ok(scan(false).filter(predicates));
+            }
+            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
             return Ok(PhysicalSource::Latest {
                 sort_key: sort_key.to_vec(),
                 alias: alias.clone(),

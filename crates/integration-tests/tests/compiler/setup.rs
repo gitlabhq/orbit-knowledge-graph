@@ -19,6 +19,23 @@ pub fn test_ontology() -> Arc<Ontology> {
     Arc::new(
         Ontology::new()
             .with_nodes(["User", "Project", "Note", "Group"])
+            .with_storage_columns(
+                "User",
+                [
+                    ("username", "String"),
+                    ("state", "String"),
+                    ("created_at", "DateTime64(6, 'UTC')"),
+                ],
+            )
+            .with_storage_columns("Project", [("name", "String")])
+            .with_storage_columns("Group", [("name", "String")])
+            .with_storage_columns(
+                "Note",
+                [
+                    ("confidential", "Bool"),
+                    ("created_at", "DateTime64(6, 'UTC')"),
+                ],
+            )
             .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
             .with_fields(
                 "User",

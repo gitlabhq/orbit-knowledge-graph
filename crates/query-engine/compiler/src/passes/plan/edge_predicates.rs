@@ -57,12 +57,12 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         if !skip_deleted {
             predicates.push(live(alias));
         }
-        if let Some(columns) = self.model.table_columns(&hop.edge_table) {
+        if let Some(table) = self.model.table(&hop.edge_table) {
             let mut seen = HashSet::new();
             for node_alias in [&hop.from_node, &hop.to_node] {
                 if let Some(node) = self.nodes.get(node_alias) {
                     for (property, filter) in &node.filters {
-                        if columns.contains(property)
+                        if table.column(property).is_some()
                             && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                             && seen.insert(property)
                         {

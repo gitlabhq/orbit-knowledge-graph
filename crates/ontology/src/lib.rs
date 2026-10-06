@@ -240,6 +240,23 @@ impl Ontology {
                     name: name.clone(),
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
                     sort_key: self.default_entity_sort_key.clone(),
+                    storage: NodeStorage {
+                        columns: vec![
+                            StorageColumn {
+                                name: DEFAULT_PRIMARY_KEY.into(),
+                                ch_type: "Int64".into(),
+                                default: None,
+                                codec: None,
+                            },
+                            StorageColumn {
+                                name: TRAVERSAL_PATH_COLUMN.into(),
+                                ch_type: "String".into(),
+                                default: None,
+                                codec: None,
+                            },
+                        ],
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
             );
@@ -260,23 +277,48 @@ impl Ontology {
 
     #[must_use]
     pub fn with_path_scopable_nodes(
-        mut self,
+        self,
         names: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        let leads_with_tp =
-            self.default_entity_sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN);
+        let names: Vec<String> = names.into_iter().map(Into::into).collect();
+        let mut ontology = self.with_nodes(names.iter().cloned());
+        let leads_with_tp = ontology.default_entity_sort_key.first().map(String::as_str)
+            == Some(TRAVERSAL_PATH_COLUMN);
         for name in names {
+            ontology
+                .nodes
+                .get_mut(&name)
+                .expect("declared node")
+                .has_traversal_path = leads_with_tp;
+        }
+        ontology
+    }
+
+    #[must_use]
+    pub fn with_storage_columns(
+        mut self,
+        node: &str,
+        columns: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        let node = self.nodes.get_mut(node).expect("declared node");
+        for (name, ch_type) in columns {
             let name = name.into();
-            self.nodes.insert(
-                name.clone(),
-                NodeEntity {
-                    name: name.clone(),
-                    destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
-                    sort_key: self.default_entity_sort_key.clone(),
-                    has_traversal_path: leads_with_tp,
-                    ..Default::default()
-                },
-            );
+            let column = StorageColumn {
+                name: name.clone(),
+                ch_type: ch_type.into(),
+                default: None,
+                codec: None,
+            };
+            if let Some(existing) = node
+                .storage
+                .columns
+                .iter_mut()
+                .find(|column| column.name == name)
+            {
+                *existing = column;
+            } else {
+                node.storage.columns.push(column);
+            }
         }
         self
     }
@@ -308,17 +350,29 @@ impl Ontology {
     #[must_use]
     pub fn with_edge_columns(
         mut self,
-        columns: impl IntoIterator<Item = (impl Into<String>, DataType)>,
+        columns: impl IntoIterator<Item = (impl Into<String>, DataType, &'static str)>,
     ) -> Self {
-        let cols: Vec<EdgeColumn> = columns
-            .into_iter()
-            .map(|(name, data_type)| EdgeColumn {
-                name: name.into(),
-                data_type,
-            })
-            .collect();
         if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
-            config.columns = cols;
+            let (properties, storage) = columns
+                .into_iter()
+                .map(|(name, data_type, ch_type)| {
+                    let name = name.into();
+                    (
+                        EdgeColumn {
+                            name: name.clone(),
+                            data_type,
+                        },
+                        StorageColumn {
+                            name,
+                            ch_type: ch_type.into(),
+                            default: None,
+                            codec: None,
+                        },
+                    )
+                })
+                .unzip();
+            config.columns = properties;
+            config.storage.columns = storage;
         }
         self
     }

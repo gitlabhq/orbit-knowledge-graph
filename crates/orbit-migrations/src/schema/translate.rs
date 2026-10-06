@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use ontology::{
-    AuxiliaryColumn, AuxiliaryTable, DataType, Ontology, StorageColumn, StorageIndex,
-    StorageProjection,
+    AuxiliaryColumn, AuxiliaryTable, DataType, Ontology, StorageIndex, StorageProjection,
 };
 
 use super::{
@@ -59,25 +58,23 @@ pub fn build_dictionaries(ontology: &Ontology) -> Vec<Dictionary> {
         .auxiliary_dictionaries()
         .iter()
         .map(|dictionary_definition| {
-            let key_column = Column {
+            let key_column = Column::auxiliary(&AuxiliaryColumn {
                 name: dictionary_definition.key.clone(),
-                column_type: clickhouse_type_for_data_type(
-                    dictionary_definition
-                        .key_type
-                        .as_ref()
-                        .unwrap_or(&DataType::Int),
-                    false,
-                ),
+                data_type: *dictionary_definition
+                    .key_type
+                    .as_ref()
+                    .unwrap_or(&DataType::Int),
+                nullable: false,
                 default: None,
                 codec: None,
-            };
+            });
 
             let mut attributes: Vec<Column> = vec![key_column];
             attributes.extend(
                 dictionary_definition
                     .attributes
                     .iter()
-                    .map(column_from_auxiliary),
+                    .map(Column::auxiliary),
             );
 
             Dictionary {
@@ -169,13 +166,7 @@ pub fn collect_all_table_names(ontology: &Ontology) -> Vec<String> {
 }
 
 fn table_from_node(node: &ontology::NodeEntity) -> Table {
-    let mut columns: Vec<Column> = node
-        .storage
-        .columns
-        .iter()
-        .map(column_from_storage)
-        .collect();
-    columns.extend(system_columns(None));
+    let columns = query_data_model::storage::remote_node_columns(node);
 
     let engine = if node.storage.version_only_engine {
         Engine::replacing_merge_tree_version_only()
@@ -211,20 +202,7 @@ fn table_from_node(node: &ontology::NodeEntity) -> Table {
 }
 
 fn table_from_edge(name: &str, config: &ontology::EdgeTableConfig) -> Table {
-    let mut columns: Vec<Column> = config
-        .storage
-        .columns
-        .iter()
-        .map(column_from_storage)
-        .collect();
-    columns.extend(
-        config
-            .storage
-            .denormalized_columns
-            .iter()
-            .map(column_from_storage),
-    );
-    columns.extend(system_columns(None));
+    let columns = query_data_model::storage::remote_edge_columns(config);
 
     let mut indexes: Vec<Index> = config
         .storage
@@ -270,10 +248,12 @@ fn table_from_auxiliary(auxiliary_table: &AuxiliaryTable) -> Table {
     let mut columns: Vec<Column> = auxiliary_table
         .columns
         .iter()
-        .map(column_from_auxiliary)
+        .map(Column::auxiliary)
         .collect();
     if auxiliary_table.include_system_columns {
-        columns.extend(system_columns(auxiliary_table.version_type.as_deref()));
+        columns.extend(query_data_model::storage::system_columns(
+            auxiliary_table.version_type.as_deref(),
+        ));
     }
 
     let engine = if let Some(engine_name) = &auxiliary_table.engine {
@@ -322,34 +302,14 @@ fn denormalized_table_from_join(
             .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
     };
 
-    let anchor = join.anchor_table();
-    let mut columns: Vec<Column> = find_source(anchor)
-        .columns
-        .iter()
-        .filter(|column| column.name == TRAVERSAL_PATH_COLUMN)
-        .cloned()
-        .collect();
+    let columns =
+        query_data_model::storage::denormalized_columns(join, |index| &find_source(index).columns);
 
     let mut indexes = Vec::new();
     let mut explicit_settings: BTreeMap<String, String> = BTreeMap::new();
 
     for table_index in 0..join.tables.len() {
         let source = find_source(table_index);
-        let is_anchor = table_index == anchor;
-
-        columns.extend(
-            source
-                .columns
-                .iter()
-                .filter(|column| {
-                    copies(&column.name) && !(is_anchor && column.name == TRAVERSAL_PATH_COLUMN)
-                })
-                .map(|column| Column {
-                    name: join.column_for(table_index, &column.name),
-                    ..column.clone()
-                }),
-        );
-
         indexes.extend(
             source
                 .indexes
@@ -378,8 +338,6 @@ fn denormalized_table_from_join(
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
     }
-
-    columns.extend(system_columns(None));
 
     Table {
         name: join.table.clone(),
@@ -557,54 +515,6 @@ fn denormalized_from_clause(
     sql
 }
 
-fn column_from_storage(storage_column: &StorageColumn) -> Column {
-    Column {
-        name: storage_column.name.clone(),
-        column_type: storage_column.ch_type.clone(),
-        default: storage_column.default.clone(),
-        codec: storage_column.codec.clone(),
-    }
-}
-
-fn column_from_auxiliary(auxiliary_column: &AuxiliaryColumn) -> Column {
-    Column {
-        name: auxiliary_column.name.clone(),
-        column_type: clickhouse_type_for_data_type(
-            &auxiliary_column.data_type,
-            auxiliary_column.nullable,
-        ),
-        default: auxiliary_column.default.clone(),
-        codec: auxiliary_column.codec.clone(),
-    }
-}
-
-fn system_columns(version_type: Option<&str>) -> Vec<Column> {
-    let version = match version_type {
-        Some("uint64") => Column {
-            name: VERSION_COLUMN.into(),
-            column_type: "UInt64".into(),
-            default: None,
-            codec: None,
-        },
-        _ => Column {
-            name: VERSION_COLUMN.into(),
-            column_type: "DateTime64(6, 'UTC')".into(),
-            default: Some("now64(6)".into()),
-            codec: Some(vec!["Delta(8)".into(), "ZSTD(1)".into()]),
-        },
-    };
-
-    vec![
-        version,
-        Column {
-            name: DELETED_COLUMN.into(),
-            column_type: "Bool".into(),
-            default: Some("false".into()),
-            codec: None,
-        },
-    ]
-}
-
 fn index_from_storage(storage_index: &StorageIndex) -> Index {
     Index {
         name: storage_index.name.clone(),
@@ -633,22 +543,6 @@ fn projection_from_storage(storage_projection: &StorageProjection) -> Projection
             select: select.clone(),
             group_by: group_by.clone(),
         },
-    }
-}
-
-fn clickhouse_type_for_data_type(data_type: &DataType, nullable: bool) -> String {
-    let base = match data_type {
-        DataType::String | DataType::Uuid => "String",
-        DataType::Int => "Int64",
-        DataType::Bool => "Bool",
-        DataType::DateTime => "DateTime64(6, 'UTC')",
-        DataType::Date => "Date32",
-        _ => "String",
-    };
-    if nullable {
-        format!("Nullable({base})")
-    } else {
-        base.to_string()
     }
 }
 

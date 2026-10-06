@@ -13,6 +13,53 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 }
 
 #[test]
+fn catalog_schema_matches_created_duckdb_tables() {
+    use query_data_model::storage::{LocalType, StorageType};
+    use query_data_model::{DuckDbDataModel, QueryDataModel};
+    use std::sync::Arc;
+
+    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let model = DuckDbDataModel::derive(ontology.clone()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("schema.duckdb")).unwrap();
+    database
+        .initialize_schema(include_str!("../../../../../config/graph_local.sql"))
+        .unwrap();
+    for table in compiler::generate_local_tables(&ontology) {
+        let catalog = model.table(&table.name).unwrap();
+        assert_eq!(catalog.columns, table.columns);
+        let batches = database.query_arrow(&format!("SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position", table.name)).unwrap();
+        let actual: Vec<_> = batches
+            .iter()
+            .flat_map(|batch| {
+                (0..batch.num_rows()).map(|row| {
+                    (0..3)
+                        .map(|column| {
+                            arrow::util::display::array_value_to_string(batch.column(column), row)
+                                .unwrap()
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let expected: Vec<_> = catalog
+            .columns
+            .iter()
+            .map(|column| {
+                let data_type = match &column.data_type {
+                    StorageType::DuckDb(LocalType::Int64) => "BIGINT",
+                    StorageType::DuckDb(LocalType::String) => "VARCHAR",
+                    other => panic!("unexpected embedded local type: {other:?}"),
+                };
+                vec![column.name.clone(), data_type.into(), "NO".into()]
+            })
+            .collect();
+        assert_eq!(actual, expected, "{}", table.name);
+    }
+}
+
+#[test]
 fn fused_neighbors_execute_both_directions_including_self_loops() {
     let directory = tempfile::tempdir().unwrap();
     let database =

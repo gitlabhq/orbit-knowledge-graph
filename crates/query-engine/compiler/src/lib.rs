@@ -19,7 +19,8 @@
 //!     Ontology::new()
 //!         .with_nodes(["User", "Project"])
 //!         .with_edges(["MEMBER_OF"])
-//!         .with_fields("User", [("username", DataType::String)]),
+//!         .with_fields("User", [("username", DataType::String)])
+//!         .with_storage_columns("User", [("username", "String")]),
 //! );
 //!
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
@@ -49,7 +50,6 @@ pub mod types;
 pub mod config;
 pub mod passes;
 
-pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,

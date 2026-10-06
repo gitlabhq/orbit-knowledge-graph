@@ -1,17 +1,19 @@
 mod catalog;
 mod ids;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
-pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
+pub use ids::{ColumnId, EntityId, PropertyId, RelationshipId, RelationshipVariantId, TableId};
 
 use crate::DataModelError;
 
 #[derive(Debug, Clone)]
 pub enum PropertyRealization {
-    Stored { column: String },
+    Stored {
+        column: crate::storage::StoredColumnRef,
+    },
     Virtual(ontology::VirtualSource),
 }
 
@@ -30,8 +32,7 @@ pub struct ForeignKey {
 
 #[derive(Debug, Clone)]
 pub struct TraversalPathLookup {
-    pub table: String,
-    pub property: PropertyId,
+    pub key: crate::storage::StoredColumnRef,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +107,10 @@ impl DenormalizedCatalog {
 }
 
 pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
+    fn storage(&self) -> &crate::storage::StorageCatalog;
+    fn table(&self, name: &str) -> Option<&crate::storage::TableLayout> {
+        Some(self.storage().table(self.storage().table_id(name)?))
+    }
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError>;
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
@@ -113,16 +118,26 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         match self.property_realization(property)? {
-            PropertyRealization::Stored { column } => Some(column),
+            PropertyRealization::Stored { column } => {
+                Some(self.storage().column(*column).name.trim_matches('`'))
+            }
             PropertyRealization::Virtual(_) => None,
         }
     }
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization>;
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
-    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        let storage = self.storage();
+        let column = storage.column_ref(storage.table_id(table)?, column)?;
+        storage.column(column).query_type
+    }
     fn has_text_index(&self, property: PropertyId) -> bool;
-    fn table_path_scopable(&self, table: &str) -> bool;
-    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
+    fn table_path_scopable(&self, table: &str) -> bool {
+        self.table(table).is_some_and(|table| table.path_scopable)
+    }
+    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
+        self.table(table).map(|table| table.path_columns.as_slice())
+    }
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
@@ -133,8 +148,9 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
         source: EntityId,
         target: EntityId,
     ) -> Option<ForeignKey>;
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
-    fn table_sort_key(&self, table: &str) -> Option<&[String]>;
+    fn table_sort_key(&self, table: &str) -> Option<&[String]> {
+        self.table(table).map(|table| table.sort_key.as_slice())
+    }
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(
         &self,
@@ -252,8 +268,8 @@ pub trait QueryDataModel {
         self.query_backend().table_column_type(table, column)
     }
 
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
-        self.query_backend().table_columns(table)
+    fn table(&self, table: &str) -> Option<&crate::storage::TableLayout> {
+        self.query_backend().table(table)
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
@@ -297,7 +313,21 @@ pub trait QueryDataModel {
     }
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
-        self.query_authorization().redaction_id_column(entity)
+        let column = self.redaction_column(entity)?;
+        Some(
+            self.query_backend()
+                .storage()
+                .column(column)
+                .name
+                .trim_matches('`'),
+        )
+    }
+
+    fn redaction_column(&self, entity: EntityId) -> Option<crate::storage::StoredColumnRef> {
+        let table = self.query_backend().entity_table(entity)?;
+        let name = self.query_authorization().redaction_id_column(entity)?;
+        let storage = self.query_backend().storage();
+        storage.column_ref(storage.table_id(table)?, name)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {
@@ -403,8 +433,11 @@ pub trait QueryDataModel {
     ) -> Option<(&str, &str)> {
         let entity = self.graph().entity_id(entity)?;
         let lookup = self.query_backend().traversal_path_lookup(entity, kind)?;
-        let column = self.query_backend().property_column(lookup.property)?;
-        Some((&lookup.table, column))
+        let storage = self.query_backend().storage();
+        Some((
+            &storage.table(lookup.key.table).name,
+            storage.column(lookup.key).name.trim_matches('`'),
+        ))
     }
 }
 
@@ -420,6 +453,13 @@ impl<B: QueryBackendCatalog, A: QueryAuthorizationCatalog> DataModel<B, A> {
         let graph = GraphCatalog::derive(&ontology)?;
         let backend = B::derive(&ontology, &graph)?;
         let authorization = A::derive(&ontology, &graph)?;
+        for entity in graph.entities() {
+            if let Some(column) = authorization.redaction_id_column(entity.id)
+                && let Some(table) = backend.entity_table(entity.id)
+            {
+                backend.storage().resolve_column(table, column)?;
+            }
+        }
 
         Ok(Self {
             ontology,

@@ -46,7 +46,7 @@ mod tests {
         let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
         for table in &schema.tables {
             for column in &table.columns {
-                let arrow_type = clickhouse_type_string_to_arrow(&column.column_type);
+                let arrow_type = clickhouse_type_string_to_arrow(column.clickhouse_type());
                 assert!(
                     orbit_utils::arrow::has_logical_byte_size(&arrow_type),
                     "table '{}' column '{}' has type '{}' (arrow {arrow_type:?}) with no \
@@ -54,7 +54,7 @@ mod tests {
                      crates/utils/src/arrow_logical_bytes.rs",
                     table.name,
                     column.name,
-                    column.column_type,
+                    column.clickhouse_type(),
                 );
             }
         }
