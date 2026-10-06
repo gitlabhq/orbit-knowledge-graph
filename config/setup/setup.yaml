@@ -8,16 +8,16 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Use `{{orbit}} grep` instead of grep or rg for every search. It covers code, tests, config, and docs, and shows the top match's source.
+  `{{orbit}} grep` must be used for search instead of bash tools like grep, rg, find, and ls.
 
-  - Unknown code? `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Too broad? Add `--path`/`--kind`.
-  - Output: matching definitions, Mentions (every other matching line), then the top match's source. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
+  - Need search? `{{orbit}} grep 'words'`. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
+  - Need source of a range? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
   - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
-  - Do not reread unchanged files. Reuse shown source.
+  - Reuse shown source instead of rereading unchanged files.
 
 nudge_search: |
-  Grep means `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Add --path/--kind.
+  Grep means `{{orbit}} grep 'words'`. Every matching line, one row per file. `a|b` OR. Add --path/--kind.
 nudge_read: |
   Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context <name>`.
 template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. FTS."
+  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. Every matching line, one row per file."

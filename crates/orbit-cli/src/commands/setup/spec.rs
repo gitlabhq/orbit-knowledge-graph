@@ -322,17 +322,16 @@ mod tests {
             assert!(rendered.contains(expected), "{launcher}: {rendered}");
             assert!(!rendered.contains("{{orbit}}"), "{launcher}");
             for phrase in [
-                " grep` instead of grep or rg for every search",
-                "FTS.",
-                "Terms AND; `a|b` OR",
-                "Mentions (every other matching line)",
-                "Do not reread unchanged files",
+                " grep` must be used for search",
+                "Ignores case, `_`, `-`",
+                "`a|b` OR",
+                "Reuse shown source",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
             }
             assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
-        assert!(search_nudge_text().contains("FTS."));
+        assert!(search_nudge_text().contains("one row per file"));
         assert!(read_nudge_text().contains("Do not reread unchanged files"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");

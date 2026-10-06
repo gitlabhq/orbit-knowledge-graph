@@ -1,174 +1,256 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::Result;
-use duckdb_client::search::{path_scope, text_line_table};
-use duckdb_client::{DuckDbClient, i64_column, string_column};
+use duckdb_client::search::{NodeHydrator, path_scope, text_line_table};
+use duckdb_client::{DuckDbClient, i64_column, sql_lit, string_column};
 
 use crate::workspace::GitInfo;
 
-const MAX_FILES: usize = 12;
-const SNIPPETS_PER_FILE: usize = 3;
-const SNIPPETS_FETCHED: usize = 12;
-const SNIPPET_CHARS: usize = 50;
-const LINE_CHARS: usize = 170;
-const FILE_LIMIT: usize = 400;
 const VARIANT_MIN: usize = 3;
 const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", "default"];
+const TOP_SOURCE_LINES: usize = 25;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FileHits {
-    pub(super) file: String,
-    pub(super) lines: Vec<usize>,
-    pub(super) snippets: Vec<(usize, String)>,
+pub(super) struct Def {
+    pub(super) name: String,
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct Mentions {
-    pub(super) total_lines: usize,
-    pub(super) total_files: usize,
-    pub(super) files: Vec<FileHits>,
-    pub(super) unmatched: Vec<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Hit {
+    pub(super) file: String,
+    pub(super) line: usize,
+    pub(super) text: String,
+    pub(super) def: Option<Def>,
 }
 
 fn normalized(expr: &str) -> String {
     format!("lower(regexp_replace({expr}, '[_\\-\\s]', '', 'g'))")
 }
 
-pub(super) fn mentions(
+fn compact(text: &str) -> String {
+    text.chars()
+        .filter(|c| !(c.is_whitespace() || *c == '_' || *c == '-'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+pub(super) fn hits(
     client: &DuckDbClient,
     git: &GitInfo,
     alternatives: &[String],
     paths: &[String],
-) -> Result<Mentions> {
+    kinds: &[String],
+) -> Result<Vec<Hit>> {
     let table = text_line_table(git.project_id);
-    let present = i64_column(
-        &client.query_arrow_json(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_tables() WHERE table_name = ?1",
-            &[table.clone().into()],
-        )?,
-        "n",
-    );
-    if present.first().copied().unwrap_or(0) == 0 || alternatives.is_empty() {
-        return Ok(Mentions::default());
+    let present = client.query_arrow_json(
+        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_tables() WHERE table_name = ?1",
+        &[table.clone().into()],
+    )?;
+    if i64_column(&present, "n").first().copied().unwrap_or(0) == 0 || alternatives.is_empty() {
+        return Ok(Vec::new());
     }
+    let def = NodeHydrator::embedded("Definition")?;
     let filter = (0..alternatives.len())
         .map(|i| {
             format!(
                 "contains({}, {})",
-                normalized("text"),
+                normalized("h.text"),
                 normalized(&format!("?{}", i + 2))
             )
         })
         .collect::<Vec<_>>()
         .join(" OR ");
-    let params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
+    let project = alternatives.len() + 2;
+    let kind_filter = match kinds.is_empty() {
+        true => String::new(),
+        false => format!(
+            "WHERE lower(kind) IN ({})",
+            kinds
+                .iter()
+                .map(|k| sql_lit(&k.to_lowercase()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    let mut params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
         .chain(alternatives.iter().map(|a| a.clone().into()))
         .collect();
-    let scope = path_scope("file_path", paths, true);
-    let matched = format!(
-        "SELECT file_path, line_no, text FROM {table} WHERE commit_sha = ?1 AND ({filter})\n{scope}"
-    );
-    let totals = client.query_arrow_json(
-        &format!(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS lines, CAST(COUNT(DISTINCT file_path) AS BIGINT) AS files{per_term} FROM ({matched})",
-            per_term = (0..alternatives.len())
-                .map(|i| format!(
-                    ", CAST(COUNT(*) FILTER (WHERE contains({}, {})) AS BIGINT) AS t{i}",
-                    normalized("text"),
-                    normalized(&format!("?{}", i + 2))
-                ))
-                .collect::<String>()
-        ),
-        &params,
-    )?;
+    params.push(git.project_id.into());
     let batches = client.query_arrow_json(
         &format!(
-            "SELECT file_path, CAST(COUNT(*) AS BIGINT) AS n,
-       list(line_no ORDER BY line_no) AS lines,
-       list_slice(list(text ORDER BY line_no), 1, {SNIPPETS_FETCHED}) AS texts
-FROM ({matched})
-GROUP BY file_path
-ORDER BY n DESC, file_path
-LIMIT {FILE_LIMIT}"
+            "SELECT * FROM (
+  SELECT h.file_path, h.line_no, h.text, d.{name} AS def, d.{kind} AS kind,
+         CAST(d.{start} AS BIGINT) AS def_start, CAST(d.{end} AS BIGINT) AS def_end
+  FROM {table} h
+  LEFT JOIN {dtable} d ON d.{project_col} = ?{project} AND d.{commit} = ?1
+    AND d.{file} = h.file_path AND h.line_no BETWEEN d.{start} AND d.{end}
+    AND d.{fqn} NOT LIKE '%@%'
+  WHERE h.commit_sha = ?1 AND ({filter})
+  {scope}QUALIFY row_number() OVER (
+    PARTITION BY h.file_path, h.line_no
+    ORDER BY (d.{start} = h.line_no AND ({named})) DESC, d.{end} > d.{start} DESC,
+             d.{end} - d.{start} NULLS LAST, d.{id}
+  ) = 1
+) {kind_filter}
+ORDER BY file_path, line_no",
+            name = def.column("name")?,
+            kind = def.column("definition_type")?,
+            start = def.column("start_line")?,
+            end = def.column("end_line")?,
+            dtable = def.table(),
+            project_col = def.column("project_id")?,
+            commit = def.column("commit_sha")?,
+            file = def.column("file_path")?,
+            fqn = def.column("fqn")?,
+            id = def.column("id")?,
+            scope = path_scope("h.file_path", paths, true),
+            named = (0..alternatives.len())
+                .map(|i| format!(
+                    "{} = {}",
+                    normalized(&format!("d.{}", def.column("name").unwrap_or("name"))),
+                    normalized(&format!("?{}", i + 2))
+                ))
+                .collect::<Vec<_>>()
+                .join(" OR "),
         ),
         &params,
     )?;
     let files = string_column(&batches, "file_path");
-    let lines = list_i64_column(&batches, "lines");
-    let texts = list_string_column(&batches, "texts");
-    Ok(Mentions {
-        total_lines: i64_column(&totals, "lines").first().copied().unwrap_or(0) as usize,
-        total_files: i64_column(&totals, "files").first().copied().unwrap_or(0) as usize,
-        unmatched: alternatives
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| i64_column(&totals, &format!("t{i}")).first() == Some(&0))
-            .map(|(_, alternative)| alternative.clone())
-            .collect(),
-        files: (0..files.len())
-            .map(|i| {
-                let numbers: Vec<usize> = lines[i].iter().map(|n| *n as usize).collect();
-                FileHits {
-                    file: files[i].clone(),
-                    snippets: numbers
-                        .iter()
-                        .copied()
-                        .zip(texts[i].iter().map(|t| t.trim().to_string()))
-                        .collect(),
-                    lines: numbers,
-                }
-            })
-            .collect(),
+    let lines = i64_column(&batches, "line_no");
+    let texts = string_column(&batches, "text");
+    let names = optional_strings(&batches, "def");
+    let starts = optional_i64s(&batches, "def_start");
+    let ends = optional_i64s(&batches, "def_end");
+    Ok((0..files.len())
+        .map(|i| Hit {
+            file: files[i].clone(),
+            line: lines[i] as usize,
+            text: texts[i].trim().to_string(),
+            def: match (&names[i], starts[i], ends[i]) {
+                (Some(name), Some(start), Some(end)) => Some(Def {
+                    name: name.clone(),
+                    start: start as usize,
+                    end: end as usize,
+                }),
+                _ => None,
+            },
+        })
+        .collect())
+}
+
+fn optional_strings(
+    batches: &[arrow::record_batch::RecordBatch],
+    name: &str,
+) -> Vec<Option<String>> {
+    use arrow::array::{Array, StringArray};
+    batches
+        .iter()
+        .filter_map(|b| b.column_by_name(name))
+        .flat_map(|column| {
+            let values = column.as_any().downcast_ref::<StringArray>();
+            (0..column.len())
+                .map(|i| {
+                    values
+                        .filter(|v| !v.is_null(i))
+                        .map(|v| v.value(i).to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn optional_i64s(batches: &[arrow::record_batch::RecordBatch], name: &str) -> Vec<Option<i64>> {
+    use arrow::array::{Array, Int64Array};
+    batches
+        .iter()
+        .filter_map(|b| b.column_by_name(name))
+        .flat_map(|column| {
+            let values = column.as_any().downcast_ref::<Int64Array>();
+            (0..column.len())
+                .map(|i| values.filter(|v| !v.is_null(i)).map(|v| v.value(i)))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn is_code(path: &str) -> bool {
+    path.rsplit_once('.').is_some_and(|(_, ext)| {
+        orbit_search::corpus::DEFAULT_SOURCE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
     })
 }
 
-fn list_i64_column(batches: &[arrow::record_batch::RecordBatch], name: &str) -> Vec<Vec<i64>> {
-    use arrow::array::{Array, Int64Array, ListArray};
-    let mut out = Vec::new();
-    for batch in batches {
-        let Some(column) = batch.column_by_name(name) else {
-            continue;
-        };
-        let Some(lists) = column.as_any().downcast_ref::<ListArray>() else {
-            continue;
-        };
-        for i in 0..lists.len() {
-            let values = lists.value(i);
-            let values = values.as_any().downcast_ref::<Int64Array>();
-            out.push(values.map_or_else(Vec::new, |v| v.iter().flatten().collect()));
-        }
-    }
-    out
+fn is_test(path: &str) -> bool {
+    static TEST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.|\.test\.|\.spec\.|-test\.",
+        )
+        .expect("valid test path regex")
+    });
+    TEST.is_match(path)
 }
 
-fn list_string_column(
-    batches: &[arrow::record_batch::RecordBatch],
-    name: &str,
-) -> Vec<Vec<String>> {
-    use arrow::array::{Array, ListArray, StringArray};
-    let mut out = Vec::new();
-    for batch in batches {
-        let Some(column) = batch.column_by_name(name) else {
-            continue;
-        };
-        let Some(lists) = column.as_any().downcast_ref::<ListArray>() else {
-            continue;
-        };
-        for i in 0..lists.len() {
-            let values = lists.value(i);
-            let values = values.as_any().downcast_ref::<StringArray>();
-            out.push(
-                values.map_or_else(Vec::new, |v| v.iter().flatten().map(String::from).collect()),
-            );
-        }
-    }
-    out
+fn names(hit: &Hit, alternatives: &[String]) -> bool {
+    hit.def.as_ref().is_some_and(|def| {
+        def.start == hit.line
+            && alternatives
+                .iter()
+                .any(|a| compact(&def.name) == compact(a))
+    })
 }
 
-fn collapse_variants(files: Vec<FileHits>) -> (Vec<(String, FileHits)>, usize, usize) {
+fn assigns(hit: &Hit, alternatives: &[String]) -> bool {
+    alternatives.iter().any(|term| {
+        regex::Regex::new(&format!(
+            r"(?i)^\s*(?:(?:const|let|var)\s+)?(?:[\w$]+\.)*{}\s*=[^=]",
+            regex::escape(term.trim())
+        ))
+        .is_ok_and(|re| re.is_match(&hit.text))
+    })
+}
+
+fn defining_rank(hit: &Hit, alternatives: &[String]) -> u8 {
+    match (names(hit, alternatives), assigns(hit, alternatives)) {
+        (true, _) => 0,
+        (false, true) => 1,
+        (false, false) => 2,
+    }
+}
+
+fn located(lines: &[&Hit]) -> String {
+    lines
+        .iter()
+        .map(|h| format!(":{} {}", h.line, h.text))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+fn code_row(hits: &[&Hit]) -> String {
+    let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
+    for hit in hits {
+        match groups.last_mut() {
+            Some((def, list)) if *def == hit.def.as_ref() => list.push(hit),
+            _ => groups.push((hit.def.as_ref(), vec![hit])),
+        }
+    }
+    groups
+        .iter()
+        .map(|(def, list)| {
+            let label = def.map(|d| match d.end > d.start {
+                true => format!("{}:{}-{} ", d.name, d.start, d.end),
+                false => format!("{} ", d.name),
+            });
+            format!("{}{}", label.unwrap_or_default(), located(list))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>)>, usize, usize) {
     let mut templates: HashMap<String, Vec<usize>> = HashMap::new();
-    for (index, hits) in files.iter().enumerate() {
-        let parts: Vec<&str> = hits.file.split('/').collect();
+    for (index, (file, _)) in files.iter().enumerate() {
+        let parts: Vec<&str> = file.split('/').collect();
         for slot in 0..parts.len().saturating_sub(1) {
             let mut key = parts.clone();
             key[slot] = "*";
@@ -182,13 +264,12 @@ fn collapse_variants(files: Vec<FileHits>) -> (Vec<(String, FileHits)>, usize, u
     groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
     let mut taken = vec![false; files.len()];
     let mut labels: HashMap<usize, String> = HashMap::new();
-    let mut merged = 0;
-    let mut merged_lines = 0;
+    let (mut merged_files, mut merged_lines) = (0, 0);
     for (template, members) in groups {
         let mut by_shape: HashMap<Vec<usize>, Vec<usize>> = HashMap::new();
         for index in members.into_iter().filter(|i| !taken[*i]) {
             by_shape
-                .entry(files[index].lines.clone())
+                .entry(files[index].1.iter().map(|h| h.line).collect())
                 .or_default()
                 .push(index);
         }
@@ -202,29 +283,22 @@ fn collapse_variants(files: Vec<FileHits>) -> (Vec<(String, FileHits)>, usize, u
             .split('/')
             .position(|part| part == "*")
             .unwrap_or(0);
-        let variant = |index: usize| {
-            files[index]
-                .file
-                .split('/')
-                .nth(slot)
-                .unwrap_or("")
-                .to_string()
-        };
+        let variant = |i: usize| files[i].0.split('/').nth(slot).unwrap_or("").to_string();
         let pick = same
             .iter()
             .copied()
-            .min_by_key(|index| {
+            .min_by_key(|i| {
                 PREFERRED_VARIANTS
                     .iter()
-                    .position(|preferred| *preferred == variant(*index))
+                    .position(|p| *p == variant(*i))
                     .unwrap_or(usize::MAX)
             })
             .unwrap_or(same[0]);
         for index in &same {
             taken[*index] = true;
         }
-        merged += same.len() - 1;
-        merged_lines += (same.len() - 1) * files[pick].lines.len();
+        merged_files += same.len() - 1;
+        merged_lines += (same.len() - 1) * files[pick].1.len();
         labels.insert(
             pick,
             template.replacen(
@@ -237,83 +311,92 @@ fn collapse_variants(files: Vec<FileHits>) -> (Vec<(String, FileHits)>, usize, u
     let rows = files
         .into_iter()
         .enumerate()
-        .filter_map(|(index, hits)| match labels.remove(&index) {
-            Some(label) => Some((label, hits)),
+        .filter_map(|(index, (file, list))| match labels.remove(&index) {
+            Some(label) => Some((label, list)),
             None if taken[index] => None,
-            None => Some((hits.file.clone(), hits)),
+            None => Some((file, list)),
         })
         .collect();
-    (rows, merged, merged_lines)
+    (rows, merged_files, merged_lines)
 }
 
-fn snippet(text: &str) -> String {
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    match text.chars().count() > SNIPPET_CHARS {
-        true => format!("{}…", text.chars().take(SNIPPET_CHARS).collect::<String>()),
-        false => text,
-    }
-}
-
-fn clip(line: String) -> String {
-    match line.chars().count() > LINE_CHARS {
-        true => format!("{}…", line.chars().take(LINE_CHARS).collect::<String>()),
-        false => line,
-    }
-}
-
-pub(super) fn render(mentions: &Mentions, shown: &HashSet<(String, usize)>) -> String {
-    let mut fresh = Vec::new();
-    let (mut skipped_lines, mut skipped_files) = (0, 0);
-    for hits in &mentions.files {
-        let lines: Vec<usize> = hits
-            .lines
-            .iter()
-            .copied()
-            .filter(|line| !shown.contains(&(hits.file.clone(), *line)))
-            .collect();
-        skipped_lines += hits.lines.len() - lines.len();
-        if lines.is_empty() {
-            skipped_files += 1;
-            continue;
+pub(super) fn render(hits: &[Hit], alternatives: &[String]) -> String {
+    let mut files: Vec<(String, Vec<&Hit>)> = Vec::new();
+    for hit in hits {
+        match files.last_mut() {
+            Some((file, list)) if *file == hit.file => list.push(hit),
+            _ => files.push((hit.file.clone(), vec![hit])),
         }
-        let snippets = hits
-            .snippets
-            .iter()
-            .filter(|(line, _)| lines.contains(line))
-            .take(SNIPPETS_PER_FILE)
-            .cloned()
-            .collect();
-        fresh.push(FileHits {
-            file: hits.file.clone(),
-            lines,
-            snippets,
-        });
     }
-    if fresh.is_empty() {
-        return String::new();
+    let (code, text): (Vec<_>, Vec<_>) = files.into_iter().partition(|(file, _)| is_code(file));
+    let (text, _, merged_lines) = collapse_variants(text);
+    let mut rows: Vec<(u8, usize, String)> = code
+        .iter()
+        .map(|(file, list)| {
+            let best = list
+                .iter()
+                .map(|h| defining_rank(h, alternatives))
+                .min()
+                .unwrap_or(2);
+            let class = if is_test(file) { 3 } else { best };
+            (class, list.len(), format!("  {file}   {}", code_row(list)))
+        })
+        .chain(
+            text.iter()
+                .map(|(file, list)| (4, list.len(), format!("  {file}   {}", located(list)))),
+        )
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    let mut out = String::new();
+    let missing: Vec<&str> = alternatives
+        .iter()
+        .filter(|a| !hits.iter().any(|h| compact(&h.text).contains(&compact(a))))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        out.push_str(&format!("No matches: {}\n", missing.join(" | ")));
     }
-    let (rows, merged, merged_lines) = collapse_variants(fresh);
-    let files = mentions.total_files.saturating_sub(merged + skipped_files);
-    let lines = mentions
-        .total_lines
-        .saturating_sub(merged_lines + skipped_lines);
-    let mut out = format!("\nMentions — {lines} lines in {files} files:\n");
-    for (label, hits) in rows.iter().take(MAX_FILES) {
-        let mut parts: Vec<String> = hits
-            .snippets
-            .iter()
-            .map(|(line, text)| format!(":{line} {}", snippet(text)))
-            .collect();
-        if hits.lines.len() > hits.snippets.len() {
-            parts.push(format!("+{}", hits.lines.len() - hits.snippets.len()));
-        }
-        out.push_str(&clip(format!("  {label}   {}", parts.join("  "))));
+    out.push_str(&format!(
+        "{} lines in {} files\n",
+        hits.len() - merged_lines,
+        rows.len()
+    ));
+    for (_, _, row) in rows {
+        out.push_str(&row);
         out.push('\n');
     }
-    if files > MAX_FILES.min(rows.len()) {
+    out
+}
+
+pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[String]) -> String {
+    let Some(hit) = hits
+        .iter()
+        .filter(|h| is_code(&h.file) && !is_test(&h.file) && defining_rank(h, alternatives) < 2)
+        .min_by_key(|h| defining_rank(h, alternatives))
+    else {
+        return String::new();
+    };
+    let Ok(content) = std::fs::read_to_string(repo.join(&hit.file)) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = hit
+        .def
+        .as_ref()
+        .filter(|d| d.start == hit.line)
+        .map_or(hit.line, |d| d.start);
+    let def_end = hit.def.as_ref().map_or(start, |d| d.end.max(start));
+    let end = def_end.min(lines.len()).min(start + TOP_SOURCE_LINES - 1);
+    let mut out = format!("\nSource — {}:{start}-{def_end}\n", hit.file);
+    for number in start..=end {
+        out.push_str(&format!("  {number}|{}\n", lines[number - 1]));
+    }
+    if def_end > end {
         out.push_str(&format!(
-            "  … {} more files. Narrow with --path.\n",
-            files - MAX_FILES.min(rows.len())
+            "  rest: {} context {}:{}-{def_end}\n",
+            crate::commands::setup::spec::launcher(),
+            hit.file,
+            end + 1
         ));
     }
     out
@@ -323,88 +406,102 @@ pub(super) fn render(mentions: &Mentions, shown: &HashSet<(String, usize)>) -> S
 mod tests {
     use super::*;
 
-    fn file(path: &str, lines: &[usize], text: &str) -> FileHits {
-        FileHits {
-            file: path.into(),
-            lines: lines.to_vec(),
-            snippets: lines
-                .iter()
-                .take(SNIPPETS_PER_FILE)
-                .map(|line| (*line, text.to_string()))
-                .collect(),
+    fn hit(file: &str, line: usize, text: &str, def: Option<(&str, usize, usize)>) -> Hit {
+        Hit {
+            file: file.into(),
+            line,
+            text: text.into(),
+            def: def.map(|(name, start, end)| Def {
+                name: name.into(),
+                start,
+                end,
+            }),
         }
     }
 
     #[test]
-    fn header_reports_exact_totals_and_extra_lines_are_counted() {
-        let mentions = Mentions {
-            total_lines: 7,
-            total_files: 2,
-            unmatched: Vec::new(),
-            files: vec![
-                file("docs/a.md", &[1, 2, 3, 4, 5], "x"),
-                file(
-                    "install/data/defaults.json",
-                    &[130, 131],
-                    "\"maintenanceMode\": 0,",
-                ),
-            ],
-        };
-        assert_eq!(
-            render(&mentions, &HashSet::new()),
-            "\nMentions — 7 lines in 2 files:\n  \
-             docs/a.md   :1 x  :2 x  :3 x  +2\n  \
-             install/data/defaults.json   :130 \"maintenanceMode\": 0,  :131 \"maintenanceMode\": 0,\n"
+    fn every_hit_is_listed_with_definitions_first_and_no_counts_hidden() {
+        let terms = vec!["maintenanceMode".to_string(), "nosuchxyz".to_string()];
+        let mut hits = vec![
+            hit(
+                "install/data/defaults.json",
+                130,
+                "\"maintenanceMode\": 0,",
+                None,
+            ),
+            hit(
+                "src/middleware/maintenance.js",
+                10,
+                "middleware.maintenanceMode = helpers.try(",
+                Some(("default", 9, 41)),
+            ),
+            hit(
+                "src/middleware/maintenance.js",
+                11,
+                "if (!meta.config.maintenanceMode) {",
+                Some(("default", 9, 41)),
+            ),
+            hit(
+                "test/controllers.js",
+                1203,
+                "meta.config.maintenanceMode = 1;",
+                Some(("describe", 1201, 1230)),
+            ),
+        ];
+        for line in 26..=37 {
+            hits.push(hit(
+                "src/routes/feeds.js",
+                line,
+                "app.get('/x', middleware.maintenanceMode, y);",
+                Some(("default", 25, 38)),
+            ));
+        }
+        hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+        let out = render(&hits, &terms);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "No matches: nosuchxyz");
+        assert_eq!(lines[1], "16 lines in 4 files");
+        assert!(
+            lines[2].starts_with("  src/middleware/maintenance.js   default:9-41 :10 "),
+            "{out}"
+        );
+        assert!(
+            lines[2].ends_with(":11 if (!meta.config.maintenanceMode) {"),
+            "{out}"
+        );
+        assert!(
+            lines[3].starts_with("  src/routes/feeds.js   default:25-38 :26 "),
+            "{out}"
+        );
+        assert!(
+            lines[3].contains(":37 app.get('/x', middleware.maintenanceMode, y);"),
+            "{out}"
+        );
+        assert!(lines[4].starts_with("  test/controllers.js"), "{out}");
+        assert!(
+            lines[5].starts_with("  install/data/defaults.json   :130 "),
+            "{out}"
         );
     }
 
     #[test]
-    fn locale_copies_collapse_preferring_english_but_distinct_files_do_not() {
-        let mut files: Vec<FileHits> = ["ar", "de", "en-GB", "fr"]
+    fn locale_copies_collapse_into_one_row() {
+        let hits: Vec<Hit> = ["ar", "de", "en-GB", "fr"]
             .iter()
-            .map(|locale| {
-                file(
-                    &format!("public/language/{locale}/advanced.json"),
-                    &[2],
-                    "x",
+            .map(|l| {
+                hit(
+                    &format!("public/language/{l}/advanced.json"),
+                    2,
+                    "\"maintenance-mode\": \"x\"",
+                    None,
                 )
             })
             .collect();
-        files.push(file("src/api/users.yaml", &[3], "x"));
-        files.push(file("src/privileges/users.yaml", &[9], "x"));
-        files.push(file("src/write/users.yaml", &[14], "x"));
-        let (rows, merged, merged_lines) = collapse_variants(files);
-        let names: Vec<&str> = rows.iter().map(|(label, _)| label.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "public/language/{en-GB,+3}/advanced.json",
-                "src/api/users.yaml",
-                "src/privileges/users.yaml",
-                "src/write/users.yaml",
-            ]
-        );
-        assert_eq!((merged, merged_lines), (3, 3));
-    }
-
-    #[test]
-    fn more_files_than_shown_says_how_many() {
-        let mentions = Mentions {
-            total_lines: 30,
-            total_files: 30,
-            unmatched: Vec::new(),
-            files: (0..30)
-                .map(|n| file(&format!("docs/f{n}.md"), &[n + 1], "x"))
-                .collect(),
-        };
+        let out = render(&hits, &["maintenanceMode".to_string()]);
         assert!(
-            render(&mentions, &HashSet::new())
-                .ends_with("  … 18 more files. Narrow with --path.\n")
+            out.contains("public/language/{en-GB,+3}/advanced.json"),
+            "{out}"
         );
-    }
-
-    #[test]
-    fn nothing_to_report_renders_nothing() {
-        assert_eq!(render(&Mentions::default(), &HashSet::new()), "");
+        assert!(out.starts_with("1 lines in 1 files\n"), "{out}");
     }
 }

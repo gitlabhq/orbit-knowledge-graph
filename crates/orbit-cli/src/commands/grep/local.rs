@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use duckdb_client::search::DuckDbSearch;
-use orbit_search::{GrepOutcome, RecallFilter};
 
 use crate::workspace;
 
@@ -37,20 +36,12 @@ impl LocalBackend {
     pub(super) fn search(&self) -> &DuckDbSearch {
         &self.search
     }
-
-    pub(super) fn grep(
-        &self,
-        query: &str,
-        limit: usize,
-        filter: &RecallFilter,
-    ) -> Result<(GrepOutcome, Vec<duckdb_client::search::NodeValue>)> {
-        self.search.grep(query, limit, filter)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orbit_search::RecallFilter;
 
     struct TestGraph {
         client: duckdb_client::DuckDbClient,
