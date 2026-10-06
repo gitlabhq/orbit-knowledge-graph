@@ -21,6 +21,10 @@ impl Column {
 
 #[derive(Clone)]
 pub enum Predicate {
+    PathPrefixes {
+        column: Column,
+        paths: PrefixPaths,
+    },
     Property {
         column: Column,
         filter: InputFilter,
@@ -58,7 +62,14 @@ pub enum Predicate {
 }
 
 #[derive(Clone)]
+pub enum PrefixPaths {
+    Union(Vec<orbit_utils::traversal_path::TraversalPath>),
+    Set(Vec<orbit_utils::traversal_path::TraversalPath>),
+}
+
+#[derive(Clone)]
 pub enum OutputValue {
+    Properties(Vec<Column>),
     Column(Column),
     Text(String),
     Depth(u32),

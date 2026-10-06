@@ -17,11 +17,13 @@ physical:
       expect:
         - |
           (Hydration
-            (Project f.path
+            (Project properties(f.path) AS f_props, ...
               (Filter f._deleted = false
-                (Deduplicate LimitBy ...
-                  (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
-                    (Scan Table(gl_file) AS f))))))
+                (Bind f
+                  (Project f.id AS id, f._deleted AS _deleted, f.path AS path
+                    (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id
+                      (Filter f.traversal_path PREFIX UNION ['1/100/', '1/200/'], f.id IN [1, 2]
+                        (Scan Table(gl_file) AS f))))))))
     emitted:
       expect:
         - (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))

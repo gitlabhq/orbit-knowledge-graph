@@ -336,62 +336,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         QueryPlan::Hydration(plan) => Tree::node(
             Operator::Hydration,
             "",
-            plan.operation
-                .nodes
-                .iter()
-                .map(|node| {
-                    use compiler::passes::plan::hydration::HydrationPathFilter;
-                    let mut predicates = Vec::new();
-                    if !node.node_ids.is_empty() {
-                        predicates.push(format!(
-                            "{}.{} IN {:?}",
-                            node.alias, node.id_property, node.node_ids
-                        ));
-                    }
-                    if let Some(paths) = &node.path_filter {
-                        let (mode, paths) = match paths {
-                            HydrationPathFilter::PrefixUnion(paths) => ("PREFIX UNION", paths),
-                            HydrationPathFilter::PrefixSet(paths) => ("PREFIX SET", paths),
-                        };
-                        predicates.insert(
-                            0,
-                            format!(
-                                "{}.traversal_path {mode} [{}]",
-                                node.alias,
-                                paths
-                                    .iter()
-                                    .map(|path| text_literal(path.as_str()))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        );
-                    }
-                    let read = Tree::node(
-                        Operator::Deduplicate,
-                        format!(
-                            "LimitBy {}",
-                            node.sort_key
-                                .iter()
-                                .map(|key| format!("{}.{key}", node.alias))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                        vec![filter(predicates, scan(&node.table, &node.alias, false))],
-                    );
-                    Tree::node(
-                        Operator::Project,
-                        node.columns
-                            .iter()
-                            .map(|column| format!("{}.{column}", node.alias))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        vec![filter(
-                            vec![format!("{}._deleted = false", node.alias)],
-                            read,
-                        )],
-                    )
-                })
-                .collect(),
+            plan.operation.nodes.iter().map(physical_tree).collect(),
         ),
     };
     let emitted = match ast {
@@ -478,7 +423,12 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             vec![physical_source(input), physical_tree(keys)],
         ),
         PhysicalSource::Scope { alias, input } => {
-            Tree::node(Operator::Bind, alias, vec![physical_source(input)])
+            let tree = if input.outputs.is_empty() {
+                physical_source(&input.source)
+            } else {
+                physical_tree(input)
+            };
+            Tree::node(Operator::Bind, alias, vec![tree])
         }
         PhysicalSource::Latest {
             alias,
@@ -543,6 +493,22 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         }
     };
     match value {
+        Predicate::PathPrefixes { column, paths } => {
+            use compiler::passes::plan::requirements::PrefixPaths;
+            let (mode, paths) = match paths {
+                PrefixPaths::Union(paths) => ("UNION", paths),
+                PrefixPaths::Set(paths) => ("SET", paths),
+            };
+            vec![format!(
+                "{} PREFIX {mode} [{}]",
+                planned_column(column),
+                paths
+                    .iter()
+                    .map(|path| text_literal(path.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )]
+        }
         Predicate::Property { column, filter, .. } => {
             vec![property_filter(&column.source, &column.name, filter)]
         }
@@ -586,6 +552,14 @@ fn planned_projections(values: &[Projection]) -> String {
         .iter()
         .map(|projection| {
             let value = match &projection.value {
+                OutputValue::Properties(columns) => format!(
+                    "properties({})",
+                    columns
+                        .iter()
+                        .map(planned_column)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
                 OutputValue::Column(value) => planned_column(value),
                 OutputValue::Text(value) => text_literal(value),
                 OutputValue::Depth(value) => value.to_string(),

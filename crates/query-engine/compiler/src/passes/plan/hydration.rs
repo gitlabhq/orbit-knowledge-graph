@@ -3,6 +3,8 @@ use crate::input::*;
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
+use super::physical::{PhysicalPlan, PhysicalSource};
+use super::requirements::{Column, OutputValue, Predicate, PrefixPaths, Projection, id_list};
 use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
 
@@ -14,26 +16,7 @@ pub struct HydrationCompileOptions {
     pub path_segment_budget: Option<usize>,
 }
 
-pub struct HydrationNodePlan {
-    pub alias: String,
-    pub table: String,
-    pub entity: String,
-    pub id_property: String,
-    pub node_ids: Vec<i64>,
-    pub columns: Vec<String>,
-    pub path_filter: Option<HydrationPathFilter>,
-    pub sort_key: Vec<String>,
-}
-
-pub enum HydrationPathFilter {
-    PrefixUnion(Vec<TraversalPath>),
-    PrefixSet(Vec<TraversalPath>),
-}
-
-fn path_filter(
-    paths: &[TraversalPath],
-    options: HydrationCompileOptions,
-) -> Option<HydrationPathFilter> {
+fn path_filter(paths: &[TraversalPath], options: HydrationCompileOptions) -> Option<PrefixPaths> {
     let mut leaves = prune_to_leaves(paths);
     if leaves.is_empty() {
         return None;
@@ -54,9 +37,9 @@ fn path_filter(
     }
     Some(
         if options.dynamic && leaves.len() > PREFIX_SET_PATH_THRESHOLD {
-            HydrationPathFilter::PrefixSet(leaves)
+            PrefixPaths::Set(leaves)
         } else {
-            HydrationPathFilter::PrefixUnion(leaves)
+            PrefixPaths::Union(leaves)
         },
     )
 }
@@ -89,15 +72,43 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
             };
-            Ok(HydrationNodePlan {
-                alias: node.id.clone(),
-                table: table.to_string(),
-                entity: entity.clone(),
-                id_property: node.id_property.clone(),
-                node_ids: node.node_ids.clone(),
-                columns,
-                path_filter: path_filter(&node.traversal_paths, options),
-                sort_key: context.latest_row_key(table)?,
+            let alias = &node.id;
+            let mut predicates = Vec::new();
+            if let Some(paths) = path_filter(&node.traversal_paths, options) {
+                predicates.push(Predicate::PathPrefixes {
+                    column: Column::new(alias, ontology::TRAVERSAL_PATH_COLUMN),
+                    paths,
+                });
+            }
+            if !node.node_ids.is_empty() {
+                predicates.push(id_list(alias, &node.id_property, &node.node_ids));
+            }
+            let properties = columns
+                .iter()
+                .map(|name| Column::new(alias, name))
+                .collect();
+            let projected_columns = std::iter::once(node.id_property.clone())
+                .chain(columns)
+                .collect::<Vec<_>>();
+            let table = model.table(table).ok_or_else(|| {
+                QueryError::Lowering(format!("unknown hydration table '{table}'"))
+            })?;
+            Ok(PhysicalPlan {
+                source: PhysicalSource::current_rows(table, alias, &projected_columns, predicates)?,
+                outputs: vec![
+                    Projection::new(
+                        OutputValue::Column(Column::new(alias, &node.id_property)),
+                        format!("{alias}_{}", node.id_property),
+                    ),
+                    Projection::new(
+                        OutputValue::Text(entity.clone()),
+                        format!("{alias}_entity_type"),
+                    ),
+                    Projection::new(
+                        OutputValue::Properties(properties),
+                        format!("{alias}_props"),
+                    ),
+                ],
             })
         })
         .collect::<Result<Vec<_>>>()?;

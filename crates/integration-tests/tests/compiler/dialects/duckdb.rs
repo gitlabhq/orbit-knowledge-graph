@@ -60,6 +60,44 @@ fn catalog_schema_matches_created_duckdb_tables() {
 }
 
 #[test]
+fn hydration_reads_current_local_rows_without_version_columns() {
+    use compiler::input::{ColumnSelection, Input, InputNode, QueryType};
+    use compiler::passes::{lower, plan};
+    use std::sync::Arc;
+
+    let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let model = query_data_model::DuckDbDataModel::derive(ontology).unwrap();
+    let input = Input {
+        query_type: QueryType::Hydration,
+        nodes: vec![InputNode {
+            id: "f".into(),
+            entity: Some("File".into()),
+            node_ids: vec![1],
+            columns: Some(ColumnSelection::List(vec!["path".into()])),
+            ..Default::default()
+        }],
+        limit: 10,
+        ..Default::default()
+    };
+    let planned =
+        plan::plan_duckdb(&input, &model, Default::default(), &Default::default()).unwrap();
+    let lowered = lower::emit(&planned, &input).unwrap();
+    let query =
+        compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default()).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("hydration.duckdb")).unwrap();
+    database.initialize_schema("CREATE TABLE gl_file(id BIGINT, path VARCHAR); INSERT INTO gl_file VALUES (1, 'src/main.rs'), (2, 'other.rs');").unwrap();
+    let rows = database.query_arrow(&query.render()).unwrap();
+    assert_eq!(rows.iter().map(|batch| batch.num_rows()).sum::<usize>(), 1);
+    let properties = arrow::util::display::array_value_to_string(rows[0].column(2), 0).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&properties).unwrap(),
+        serde_json::json!({"path": "src/main.rs"})
+    );
+}
+
+#[test]
 fn fused_neighbors_execute_both_directions_including_self_loops() {
     let directory = tempfile::tempdir().unwrap();
     let database =

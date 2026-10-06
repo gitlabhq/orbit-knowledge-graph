@@ -10,7 +10,14 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
+      expect: ["(Hydration (Project properties(f.path) AS f_props, ... (Filter f._deleted = false (Bind f (Project f.id AS id, f._deleted AS _deleted, f.path AS path (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))))"]
     emitted:
       expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
       reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]
+  duckdb:
+    planned:
+      expect: ["(Hydration (Project properties(f.path) AS f_props, ... (Filter f.id = 1 (Scan Table(gl_file) AS f))))"]
+      reject: ["(Deduplicate ... (_))", "(Filter f._deleted = false, ... (_))"]
+    emitted:
+      expect: ["(Project f.id AS f_id, ... (Filter f.id = 1 (Scan Table(gl_file) AS f)))"]
+      reject: ["(Deduplicate ... (_))", "(Filter f._deleted = false, ... (_))", "(Project f._deleted AS _deleted, ... (_))"]

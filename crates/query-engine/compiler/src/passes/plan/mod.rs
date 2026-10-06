@@ -18,7 +18,7 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
-pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
+pub use hydration::HydrationCompileOptions;
 use query_data_model::QueryDataModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
@@ -104,7 +104,7 @@ pub struct Neighbors {
 }
 
 pub struct Hydration {
-    pub nodes: Vec<HydrationNodePlan>,
+    pub nodes: Vec<physical::PhysicalPlan>,
 }
 
 pub struct PathFinding {

@@ -70,7 +70,7 @@ pub enum PhysicalSource {
     },
     Scope {
         alias: String,
-        input: Box<Self>,
+        input: Box<PhysicalPlan>,
     },
     Join {
         endpoints: (Column, Column),
@@ -87,6 +87,70 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
+    pub fn current_rows(
+        table: &query_data_model::storage::TableLayout,
+        alias: &str,
+        columns: &[String],
+        predicates: Vec<Predicate>,
+    ) -> Result<Self> {
+        let scan = Self::Scan {
+            table: table.name.clone(),
+            alias: alias.into(),
+            final_: false,
+            relationship: None,
+        }
+        .filter(predicates);
+        if table.row_semantics == query_data_model::storage::RowSemantics::Current {
+            return Ok(scan);
+        }
+        if table.sort_key.is_empty() {
+            return Err(QueryError::Lowering(format!(
+                "table '{}' has no latest-row key",
+                table.name
+            )));
+        }
+        let mut outputs = Vec::new();
+        for name in columns
+            .first()
+            .map(String::as_str)
+            .into_iter()
+            .chain([ontology::DELETED_COLUMN])
+            .chain(columns.iter().skip(1).map(String::as_str))
+        {
+            if !outputs
+                .iter()
+                .any(|projection: &Projection| projection.name == name)
+            {
+                outputs.push(Projection::col(alias, name));
+            }
+        }
+        Ok(Self::Scope {
+            alias: alias.into(),
+            input: Box::new(PhysicalPlan {
+                source: Self::Latest {
+                    sort_key: table
+                        .sort_columns()
+                        .map(|column| column.name.clone())
+                        .collect(),
+                    alias: alias.into(),
+                    aggregate_condition: vec![],
+                    input: Box::new(scan),
+                },
+                outputs,
+            }),
+        }
+        .filter(vec![super::requirements::live(alias)]))
+    }
+
+    pub fn scoped(self, alias: &str) -> Self {
+        Self::Scope {
+            alias: alias.into(),
+            input: Box::new(PhysicalPlan {
+                source: self,
+                outputs: vec![],
+            }),
+        }
+    }
     pub(super) fn inner_join(self, right: Self, endpoints: (Column, Column)) -> Self {
         Self::Join {
             endpoints,
@@ -214,10 +278,7 @@ impl PhysicalPlan {
             };
         }
         Ok(Self {
-            source: PhysicalSource::Scope {
-                alias: node.alias.clone(),
-                input: Box::new(source.filter(node_predicates(node))),
-            },
+            source: source.filter(node_predicates(node)).scoped(&node.alias),
             outputs: node_outputs(node),
         })
     }

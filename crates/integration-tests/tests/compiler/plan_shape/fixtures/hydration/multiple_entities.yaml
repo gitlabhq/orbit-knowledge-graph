@@ -13,7 +13,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Hydration (_) (_))", "(Project f.path (_))", "(Project d.name (_))"]
+      expect: ["(Hydration (_) (_))", "(Project properties(f.path) AS f_props, ... (_))", "(Project properties(d.name) AS d_props, ... (_))"]
     emitted:
       expect:
         - (Union ALL (_) (_))

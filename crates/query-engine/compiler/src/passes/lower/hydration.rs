@@ -1,25 +1,9 @@
-//! Hydration emit: fetch node properties for a set of IDs.
-//!
-//! Produces a UNION ALL of per-entity latest-row scans. Each arm dedups with
-//! `LIMIT 1 BY <sort_key>` over a plain scan (not `FINAL`), keeping column
-//! pruning and projections, then filters `_deleted = false`.
-//!
-//! When the base query provided traversal paths, each arm injects a
-//! `startsWith(traversal_path, tp)` predicate so ClickHouse can prune
-//! granules via the primary key (sort key starts with `traversal_path`).
-
-use ontology::constants::*;
-
 use crate::ast::*;
 use crate::error::{QueryError, Result};
+use crate::passes::plan::physical::PhysicalPlan;
 
-use super::sql::{deleted_false, latest_row_dedup};
-use crate::passes::plan::{HydrationNodePlan, hydration::HydrationPathFilter};
-
-use orbit_utils::traversal_path::TraversalPath;
-
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
-    let mut arms = nodes.iter().map(emit_arm);
+pub fn emit_hydration(nodes: &[PhysicalPlan], limit: u32) -> Result<Node> {
+    let mut arms = nodes.iter().map(super::physical::query);
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
@@ -30,140 +14,6 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(node: &HydrationNodePlan) -> Query {
-    let alias = &node.alias;
-    let pk = &node.id_property;
-
-    let json_expr = if node.columns.is_empty() {
-        Expr::string("{}")
-    } else {
-        let map_args: Vec<Expr> = node
-            .columns
-            .iter()
-            .flat_map(|col| {
-                [
-                    Expr::string(col),
-                    Expr::func(Function::ToString, vec![Expr::col(alias, col)]),
-                ]
-            })
-            .collect();
-        Expr::func(
-            Function::ToJson,
-            vec![Expr::func(Function::Object, map_args)],
-        )
-    };
-
-    let mut scan_where = Vec::new();
-
-    let path_filter = match &node.path_filter {
-        Some(HydrationPathFilter::PrefixUnion(paths)) => or_starts_with(alias, paths),
-        Some(HydrationPathFilter::PrefixSet(paths)) => Some(array_exists_starts_with(alias, paths)),
-        None => None,
-    };
-    if let Some(tp_filter) = path_filter {
-        scan_where.push(tp_filter);
-    }
-
-    if let Some(id_filter) = Expr::col_in(
-        alias,
-        pk,
-        SqlType::Int64,
-        node.node_ids
-            .iter()
-            .map(|id| serde_json::Value::Number((*id).into()))
-            .collect(),
-    ) {
-        scan_where.push(id_filter);
-    }
-
-    let mut inner_select = vec![
-        SelectExpr::col(alias, pk),
-        SelectExpr::col(alias, DELETED_COLUMN),
-    ];
-    for col in &node.columns {
-        if col != pk && col != DELETED_COLUMN {
-            inner_select.push(SelectExpr::col(alias, col));
-        }
-    }
-    let (order_by, limit_by) = latest_row_dedup(alias, &node.sort_key);
-    let keys = Query {
-        select: inner_select,
-        from: TableRef::scan(&node.table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by,
-        limit_by,
-        ..Default::default()
-    };
-    Query {
-        select: vec![
-            SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
-            SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
-            SelectExpr::new(json_expr, format!("{alias}_props")),
-        ],
-        from: TableRef::subquery(keys, alias),
-        where_clause: Some(deleted_false(alias)),
-        ..Default::default()
-    }
-}
-
-fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
-    or_balanced(paths.iter().map(|tp| starts_with_path(alias, tp)).collect())
-}
-
-fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
-    Expr::func(
-        Function::StartsWith,
-        vec![
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            Expr::string(tp.as_str()),
-        ],
-    )
-}
-
-fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let lambda_param = "_gkg_path";
-    Expr::func(
-        Function::ArrayExists,
-        vec![
-            Expr::lambda(
-                lambda_param,
-                Expr::func(
-                    Function::StartsWith,
-                    vec![
-                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                        Expr::ident(lambda_param),
-                    ],
-                ),
-            ),
-            Expr::param(
-                SqlType::String.to_array(),
-                serde_json::Value::Array(
-                    paths
-                        .iter()
-                        .map(|p| serde_json::Value::String(p.as_str().to_string()))
-                        .collect(),
-                ),
-            ),
-        ],
-    )
-}
-
-fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
-    match exprs.len() {
-        0 => None,
-        1 => exprs.pop(),
-        _ => {
-            let right = exprs.split_off(exprs.len() / 2);
-            let left = exprs;
-            Some(Expr::binary(
-                Op::Or,
-                or_balanced(left)?,
-                or_balanced(right)?,
-            ))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +22,7 @@ mod tests {
     use crate::passes::enforce::ResultContext;
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
     use orbit_server_config::QueryConfig;
+    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::Arc;
 
     fn render(node: &Node) -> String {

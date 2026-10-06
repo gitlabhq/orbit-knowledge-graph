@@ -306,10 +306,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             } else {
                 membership
             };
-            let scoped = PhysicalSource::Scope {
-                alias: alias.clone(),
-                input: Box::new(input.filter(vec![live(&alias)])),
-            };
+            let scoped = input.filter(vec![live(&alias)]).scoped(&alias);
             if narrow_inside {
                 scoped
             } else {

@@ -13,6 +13,6 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter f.traversal_path PREFIX UNION ['1/100/'], f.id IN [1] (_))"]
+      expect: ["(Filter f.traversal_path PREFIX UNION ['1/100/'], f.id = 1 (_))"]
     emitted:
       expect: ["(Filter StartsWith(f.traversal_path, '1/100/'), f.id = 1 (Scan Table(gl_file) AS f))"]

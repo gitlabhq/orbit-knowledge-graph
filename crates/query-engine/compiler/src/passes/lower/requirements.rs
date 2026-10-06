@@ -2,7 +2,7 @@ use super::sql;
 use crate::ast::*;
 use crate::input::OrderDirection;
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
-use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use crate::passes::plan::requirements::{Column, OutputValue, Predicate, PrefixPaths, Projection};
 
 pub(super) fn column(value: &Column) -> Expr {
     Expr::col(&value.source, &value.name)
@@ -10,6 +10,33 @@ pub(super) fn column(value: &Column) -> Expr {
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
+        Predicate::PathPrefixes {
+            column: value,
+            paths,
+        } => match paths {
+            PrefixPaths::Union(paths) => prefix_union(&column(value), paths),
+            PrefixPaths::Set(paths) => Expr::func(
+                Function::ArrayExists,
+                vec![
+                    Expr::lambda(
+                        "_gkg_path",
+                        Expr::func(
+                            Function::StartsWith,
+                            vec![column(value), Expr::ident("_gkg_path")],
+                        ),
+                    ),
+                    Expr::param(
+                        SqlType::String.to_array(),
+                        serde_json::Value::Array(
+                            paths
+                                .iter()
+                                .map(|path| serde_json::Value::String(path.as_str().into()))
+                                .collect(),
+                        ),
+                    ),
+                ],
+            ),
+        },
         Predicate::Property {
             column: value,
             filter,
@@ -56,6 +83,22 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
         .iter()
         .map(|value| {
             let expression = match &value.value {
+                OutputValue::Properties(columns) if columns.is_empty() => Expr::string("{}"),
+                OutputValue::Properties(columns) => Expr::func(
+                    Function::ToJson,
+                    vec![Expr::func(
+                        Function::Object,
+                        columns
+                            .iter()
+                            .flat_map(|value| {
+                                [
+                                    Expr::string(&value.name),
+                                    Expr::func(Function::ToString, vec![column(value)]),
+                                ]
+                            })
+                            .collect(),
+                    )],
+                ),
                 OutputValue::Column(value) => column(value),
                 OutputValue::Text(value) => Expr::string(value),
                 OutputValue::Depth(value) => Expr::int(i64::from(*value)),
@@ -72,6 +115,24 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
             SelectExpr::new(expression, &value.name)
         })
         .collect()
+}
+
+fn prefix_union(column: &Expr, paths: &[orbit_utils::traversal_path::TraversalPath]) -> Expr {
+    match paths {
+        [] => Expr::lit(false),
+        [path] => Expr::func(
+            Function::StartsWith,
+            vec![column.clone(), Expr::string(path.as_str())],
+        ),
+        paths => {
+            let (left, right) = paths.split_at(paths.len() / 2);
+            Expr::binary(
+                Op::Or,
+                prefix_union(column, left),
+                prefix_union(column, right),
+            )
+        }
+    }
 }
 
 fn group(value: &Group) -> Expr {

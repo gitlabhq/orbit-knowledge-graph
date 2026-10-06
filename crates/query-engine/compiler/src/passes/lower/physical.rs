@@ -54,7 +54,11 @@ pub(super) fn query(plan: &PhysicalPlan) -> Query {
     let mut output = emit_source(source);
     output.predicates.extend(condition.iter().map(predicate));
     Query {
-        select: projections(&plan.outputs),
+        select: if plan.outputs.is_empty() {
+            vec![SelectExpr::star()]
+        } else {
+            projections(&plan.outputs)
+        },
         from: output.from,
         where_clause: Expr::conjoin(output.predicates),
         order_by,
@@ -108,21 +112,21 @@ fn emit_source(plan: &PhysicalSource) -> SourceOutput {
             });
             output
         }
-        PhysicalSource::Scope { alias, input } | PhysicalSource::Latest { alias, input, .. } => {
+        PhysicalSource::Scope { alias, input } => SourceOutput {
+            from: TableRef::subquery(query(input), alias),
+            predicates: vec![],
+        },
+        PhysicalSource::Latest {
+            alias,
+            input,
+            sort_key,
+            aggregate_condition,
+        } => {
             let mut output = emit_source(input);
-            let (order_by, limit_by) = match plan {
-                PhysicalSource::Latest {
-                    sort_key,
-                    aggregate_condition,
-                    ..
-                } => {
-                    output
-                        .predicates
-                        .extend(aggregate_condition.iter().map(predicate));
-                    latest_row_dedup(alias, sort_key)
-                }
-                _ => (vec![], None),
-            };
+            output
+                .predicates
+                .extend(aggregate_condition.iter().map(predicate));
+            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
             output.from = TableRef::subquery(
                 Query {
                     select: vec![SelectExpr::star()],

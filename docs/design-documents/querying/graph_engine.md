@@ -77,6 +77,7 @@ ClickHouse declarations include generated system columns and retain exact storag
 DuckDB declarations contain effective local types and literal defaults after column exclusions and wrapper conversion.
 The local DDL renderer consumes those same declarations directly. Remote DDL and the catalog share column derivation, including denormalized tables.
 Stored-row metadata distinguishes current rows from versioned rows and binds version and deletion columns. It records whether merges apply deletion flags.
+Hydration uses the shared physical source planner and lowerer. Current-row tables need a direct scan; versioned tables need latest-row selection and a deletion check.
 Its authorization catalog resolves GitLab redaction and scope metadata.
 Each stored property realization contains a table-and-column reference into the storage catalog.
 Derivation rejects missing stored columns and keeps extraction-source names separate from destination columns.

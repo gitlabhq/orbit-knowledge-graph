@@ -41,9 +41,10 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     ..
                 } => break aggregate_condition.clone(),
                 PhysicalSource::Join { left, .. } => source = left,
-                PhysicalSource::Filter { input, .. }
-                | PhysicalSource::Scope { input, .. }
-                | PhysicalSource::KeyFilter { input, .. } => source = input,
+                PhysicalSource::Scope { input, .. } => source = &input.source,
+                PhysicalSource::Filter { input, .. } | PhysicalSource::KeyFilter { input, .. } => {
+                    source = input
+                }
                 PhysicalSource::Scan { .. } | PhysicalSource::Union { .. } => break vec![],
             }
         };

@@ -9,7 +9,7 @@ use crate::error::{QueryError, Result};
 use crate::input::Direction;
 
 use super::context::PlanningContext;
-use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
+use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, key_membership};
 use super::{Hop, HydrationStrategy, NodePlan};
 
 pub(super) fn star<M: QueryDataModel + ?Sized>(
@@ -75,10 +75,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             .source
             .filter(vec![key_membership(center, DEFAULT_PRIMARY_KEY, name)]);
     }
-    plan.source = PhysicalSource::Scope {
-        alias: center.into(),
-        input: Box::new(plan.source.filter(center_pins)),
-    };
+    plan.source = plan.source.filter(center_pins).scoped(center);
 
     for (_, fk, target) in &hops {
         if target.fk_needs_join {

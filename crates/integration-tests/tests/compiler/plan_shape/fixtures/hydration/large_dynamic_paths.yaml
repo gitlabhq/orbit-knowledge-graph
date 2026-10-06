@@ -40,7 +40,7 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter f.traversal_path PREFIX SET ?, f.id IN [1] (_))"]
+      expect: ["(Filter f.traversal_path PREFIX SET ?, f.id = 1 (_))"]
       reject: ["(Filter f.traversal_path PREFIX UNION ?, ... (_))"]
     emitted:
       expect: ["(Filter ArrayExists(_gkg_path -> StartsWith(f.traversal_path, _gkg_path), ?), f.id = 1 (_))"]
