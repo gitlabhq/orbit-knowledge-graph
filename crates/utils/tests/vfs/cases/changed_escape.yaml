@@ -1,5 +1,0 @@
-name: Changed paths cannot escape the checkout
-sources: [changed]
-fixtures: []
-changed: [../outside]
-load_error: InvalidInput

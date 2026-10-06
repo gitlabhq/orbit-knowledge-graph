@@ -248,8 +248,8 @@ Custom sources are trusted to select host paths and enforce their transport or a
 mise exec -- cargo test -p orbit-utils --test vfs
 ```
 
-Each YAML file in `crates/utils/tests/vfs/cases/` becomes a named test.
-A file contains one scenario or a list of scenarios, each with its own inline fixtures and named tests.
+Related scenarios are stacked in six YAML suites in `crates/utils/tests/vfs/cases/`.
+Each file becomes a named test. Each scenario has its own inline fixtures and named assertions.
 Fixture paths define the tree. Parent directories follow from those paths; empty content still creates a file.
 Each scenario loads a fresh VFS for each source. Its named tests run in order against that VFS.
 The runner calls only public VFS methods. Most scenarios run identical assertions against several sources.
@@ -324,13 +324,13 @@ I/O errors use Rust names such as `NotFound`. Load errors also accept `empty`, `
 
 | Contract | Scenarios or native tests |
 |---|---|
-| Filesystem verbs, paths and inventory | `filesystem`, `tree_shapes`, `empty_files`, `normalized_paths`, `symlinks` |
-| Policy and pass ordering | `policy`, `pass_order`, `pending`, `drop_content`, `late_drop`, `late_decision` |
-| Resource caps | `file_limit`, `byte_limit`, `oversize`, `spill_limit`; native overflow test |
-| Dedup and storage | `dedup`, `duplicates`, `dropped_replacement`, `spill`, `raw_spill`, `tiny_compression`, `resident_after_spill` |
-| Lazy reads and cancellation | Native lazy-reader tests; `cancel` |
-| Checkout and changes | `git_listing`, `changed_selection`, `changed_escape`, `mutations` |
-| Archive format and traversal | `archive_empty`, `archive_long_names`; `tests/vfs/archive.rs` |
+| Filesystem verbs, empty files, paths, links and inventory | `filesystem.yaml` |
+| Policy, pass ordering and late decisions | `policy.yaml` |
+| Resource caps and cancellation | `limits.yaml`; native overflow test |
+| Dedup, replacement, spill and compression | `storage.yaml` |
+| Git rules, changed paths and live checkout changes | `checkout.yaml` |
+| Archive format and traversal | `archive.yaml`; `tests/vfs/archive.rs` |
+| Lazy-reader invocation and failures | Native tests in `tests/vfs/native.rs` |
 | OS races, concurrent reads/writes, host escape | Native tests in `tests/vfs/native.rs` |
 
 Add new behavior as a scenario first. Extend the typed grammar only when existing operations cannot express the public contract.
