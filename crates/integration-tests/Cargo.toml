@@ -9,7 +9,6 @@ publish = false
 # Shared helpers live in tests/common/ (subdirectory, ignored by auto-discovery).
 
 [dev-dependencies]
-thiserror = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics" }
@@ -67,6 +66,3 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }
 sqlparser.workspace = true
 uuid = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-libc = { workspace = true }

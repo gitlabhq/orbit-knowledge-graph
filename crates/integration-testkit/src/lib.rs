@@ -6,7 +6,6 @@ pub mod query_scenario;
 pub mod scenario;
 mod seed;
 pub mod seeded_resolver;
-pub mod vfs;
 pub mod visitor;
 
 pub use assertions::{
