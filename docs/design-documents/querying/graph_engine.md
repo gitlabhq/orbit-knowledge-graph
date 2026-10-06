@@ -64,10 +64,12 @@ Its backend catalog resolves tables, columns, edge routes, foreign keys, sort ke
 Both backends expose ordered stored-column declarations through the generic `StorageCatalog<T>` in `query-data-model::storage`.
 The backend catalog supplies its column storage type through an associated type. Shared storage contains no dialect types, codecs, or graph authorization policy.
 Table and column declarations are immutable after checked construction. Each table owns its column name index.
-`query-data-model::bindings::QueryBindings` owns per-compilation scopes, relations, definitions, and exports while borrowing the storage catalog.
+`query-data-model::bindings::QueryBindings` owns per-compilation scopes, relations, definitions, and exports. Scan construction borrows the storage catalog to allocate stored exports.
 Scans expose stored columns; derived sources and CTE references expose declared outputs. UNION arms bind outputs by position and must have equal widths.
 Publishing a scope seals its output list. Definitions are visible in their declaration scope and descendants; relation references stay within their query block.
-Handles from another binding owner are rejected. Compiler expressions and SQL naming remain outside this API; compiler adoption is tracked in !2706.
+Handles from another binding owner are rejected. Compiler expressions and SQL naming remain outside this API.
+Physical planning allocates scan relations in this owner and retains it in `Plan<T>`. Latest-row keys reference those scans through shared column handles.
+Lowering reads table and key names from the catalog. CTE exports, query-block scopes, and other compiler column references still use compiler-owned bindings.
 The storage catalog assigns snapshot-local table IDs and table-local column IDs in deterministic order.
 Entity layouts and relationship routes reference those table IDs rather than copying physical table names.
 Name indexes point into these declarations. A stored-column reference carries both IDs to retain table ownership.

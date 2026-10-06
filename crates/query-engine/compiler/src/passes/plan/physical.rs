@@ -4,6 +4,8 @@ use super::requirements::{
 };
 use crate::error::{QueryError, Result};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
+use query_data_model::bindings::{ColumnRef, QueryBindings, RelationId, RelationSource};
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 use super::{Hop, NodePlan};
 
@@ -63,7 +65,7 @@ pub enum PhysicalSource {
         relationship: usize,
     },
     Scan {
-        table: String,
+        relation: RelationId,
         alias: String,
         final_: bool,
         relationship: Option<usize>,
@@ -83,7 +85,7 @@ pub enum PhysicalSource {
         right: Box<Self>,
     },
     Latest {
-        sort_key: Vec<String>,
+        sort_key: Vec<ColumnRef>,
         alias: String,
         aggregate_condition: Vec<Predicate>,
         input: Box<Self>,
@@ -91,27 +93,41 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
-    pub fn current_rows<T>(
-        table: &query_data_model::storage::TableLayout<T>,
+    pub fn scan(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        table: &str,
+        alias: &str,
+        final_: bool,
+        relationship: Option<usize>,
+    ) -> Result<Self> {
+        let storage = model.query_backend().storage();
+        let table = storage
+            .resolve_table(table)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let relation = bindings
+            .scan(storage, bindings.root(), table)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        Ok(Self::Scan {
+            relation,
+            alias: alias.into(),
+            final_,
+            relationship,
+        })
+    }
+
+    pub fn current_rows(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        table: &str,
         alias: &str,
         columns: &[String],
         predicates: Vec<Predicate>,
     ) -> Result<Self> {
-        let scan = Self::Scan {
-            table: table.name().to_owned(),
-            alias: alias.into(),
-            final_: false,
-            relationship: None,
-        }
-        .filter(predicates);
+        let scan = Self::scan(bindings, model, table, alias, false, None)?;
+        let table = model.table(table).expect("bound scan table");
         if *table.row_semantics() == query_data_model::storage::RowSemantics::Current {
-            return Ok(scan);
-        }
-        if table.sort_key().is_empty() {
-            return Err(QueryError::Lowering(format!(
-                "table '{}' has no latest-row key",
-                table.name()
-            )));
+            return Ok(scan.filter(predicates));
         }
         let mut outputs = Vec::new();
         for name in columns
@@ -131,19 +147,75 @@ impl PhysicalSource {
         Ok(Self::Scope {
             alias: alias.into(),
             input: Box::new(PhysicalPlan {
-                source: Self::Latest {
-                    sort_key: table
-                        .sort_columns()
-                        .map(|column| column.name().to_owned())
-                        .collect(),
-                    alias: alias.into(),
-                    aggregate_condition: vec![],
-                    input: Box::new(scan),
-                },
+                source: scan.latest(bindings, model, predicates, vec![])?,
                 outputs,
             }),
         }
         .filter(vec![super::requirements::live(alias)]))
+    }
+
+    pub(super) fn latest(
+        self,
+        bindings: &QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        predicates: Vec<Predicate>,
+        aggregate_condition: Vec<Predicate>,
+    ) -> Result<Self> {
+        if let Self::Filter {
+            predicates: mut existing,
+            input,
+        } = self
+        {
+            existing.extend(predicates);
+            return input.latest(bindings, model, existing, aggregate_condition);
+        }
+        let Self::Scan {
+            relation,
+            ref alias,
+            ..
+        } = self
+        else {
+            return Err(QueryError::Lowering(
+                "latest-row selection requires a stored scan".into(),
+            ));
+        };
+        let RelationSource::Scan(table) = bindings
+            .source(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?
+        else {
+            return Err(QueryError::Lowering(
+                "latest-row source is not a stored table".into(),
+            ));
+        };
+        let layout = model.query_backend().storage().table(*table);
+        if layout.sort_key().is_empty() {
+            return Err(QueryError::Lowering(format!(
+                "table '{}' has no latest-row key",
+                layout.name()
+            )));
+        }
+        let sort_key = layout
+            .sort_key()
+            .iter()
+            .map(|column| {
+                bindings
+                    .stored_column(
+                        bindings.root(),
+                        relation,
+                        query_data_model::storage::StoredColumnRef {
+                            table: *table,
+                            column: *column,
+                        },
+                    )
+                    .map_err(|error| QueryError::Lowering(error.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::Latest {
+            sort_key,
+            alias: alias.clone(),
+            aggregate_condition,
+            input: Box::new(self.filter(predicates)),
+        })
     }
 
     pub fn scoped(self, alias: &str) -> Self {
@@ -164,15 +236,22 @@ impl PhysicalSource {
         }
     }
 
-    fn node(node: &NodePlan, final_: bool) -> Result<Self> {
-        Ok(Self::Scan {
-            table: node.table.clone().ok_or_else(|| {
+    fn node(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        node: &NodePlan,
+        final_: bool,
+    ) -> Result<Self> {
+        Self::scan(
+            bindings,
+            model,
+            node.table.as_deref().ok_or_else(|| {
                 QueryError::Lowering(format!("node '{}' has no table", node.alias))
             })?,
-            alias: node.alias.clone(),
+            &node.alias,
             final_,
-            relationship: None,
-        })
+            None,
+        )
     }
 
     pub(crate) fn filter(self, predicates: Vec<Predicate>) -> Self {
@@ -201,21 +280,25 @@ impl PhysicalSource {
     }
 
     pub(super) fn edge_keys(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
         hop: &Hop,
         alias: &str,
         predicates: Vec<Predicate>,
         upstream: Option<&PhysicalPlan>,
-    ) -> Self {
+    ) -> Result<Self> {
         let source = Self::Filter {
             predicates,
-            input: Box::new(Self::Scan {
-                table: hop.edge_table.clone(),
-                alias: alias.into(),
-                final_: false,
-                relationship: Some(hop.input_index),
-            }),
+            input: Box::new(Self::scan(
+                bindings,
+                model,
+                &hop.edge_table,
+                alias,
+                false,
+                Some(hop.input_index),
+            )?),
         };
-        source.cascade(hop, alias, upstream)
+        Ok(source.cascade(hop, alias, upstream))
     }
 }
 
@@ -230,19 +313,37 @@ impl PhysicalPlan {
         );
         (definition, self)
     }
-    pub fn candidate_keys(node: &NodePlan, column: &str, extra: Vec<Predicate>) -> Result<Self> {
-        Self::keys(node, column, false, extra)
+    pub fn candidate_keys(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        node: &NodePlan,
+        column: &str,
+        extra: Vec<Predicate>,
+    ) -> Result<Self> {
+        Self::keys(bindings, model, node, column, false, extra)
     }
 
-    pub fn filtered_keys(node: &NodePlan, column: &str) -> Result<Self> {
-        Self::keys(node, column, true, vec![])
+    pub fn filtered_keys(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        node: &NodePlan,
+        column: &str,
+    ) -> Result<Self> {
+        Self::keys(bindings, model, node, column, true, vec![])
     }
 
-    fn keys(node: &NodePlan, column: &str, final_: bool, extra: Vec<Predicate>) -> Result<Self> {
+    fn keys(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        node: &NodePlan,
+        column: &str,
+        final_: bool,
+        extra: Vec<Predicate>,
+    ) -> Result<Self> {
         let mut predicates = node_predicates(node);
         predicates.extend(extra);
         Ok(Self {
-            source: PhysicalSource::node(node, final_)?.filter(predicates),
+            source: PhysicalSource::node(bindings, model, node, final_)?.filter(predicates),
             outputs: vec![Projection::new(
                 OutputValue::Column(Column::new(&node.alias, column)),
                 DEFAULT_PRIMARY_KEY,
@@ -251,28 +352,32 @@ impl PhysicalPlan {
     }
 
     pub fn node_scan(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
         node: &NodePlan,
         narrowing: Option<Predicate>,
-        sort_key: &[String],
     ) -> Result<Self> {
-        let mut source = PhysicalSource::node(node, narrowing.is_none())?;
+        let mut source = PhysicalSource::node(bindings, model, node, narrowing.is_none())?;
         if let Some(narrowing) = narrowing {
-            if sort_key.is_empty() {
-                return Err(QueryError::Lowering(format!(
-                    "node '{}' has no latest-row key",
-                    node.alias
-                )));
-            }
+            let table = model
+                .table(node.table.as_deref().expect("bound node table"))
+                .expect("bound node table");
             let mut predicates = vec![narrowing];
             predicates.extend(
                 node.filters
                     .iter()
                     .filter(|(column, filter)| {
-                        sort_key.contains(column) && filter.filter.rhs_column.is_none()
+                        table
+                            .column_id(column)
+                            .is_ok_and(|column| table.sort_key().contains(&column))
+                            && filter.filter.rhs_column.is_none()
                     })
                     .map(|(column, filter)| property_filter(&node.alias, column, filter)),
             );
-            if sort_key.iter().any(|column| column == DEFAULT_PRIMARY_KEY) {
+            if table
+                .column_id(DEFAULT_PRIMARY_KEY)
+                .is_ok_and(|column| table.sort_key().contains(&column))
+            {
                 if !node.node_ids.is_empty() {
                     predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
                 }
@@ -284,12 +389,7 @@ impl PhysicalPlan {
                     });
                 }
             }
-            source = PhysicalSource::Latest {
-                aggregate_condition: vec![],
-                sort_key: sort_key.to_vec(),
-                alias: node.alias.clone(),
-                input: Box::new(source.filter(predicates)),
-            };
+            source = source.latest(bindings, model, predicates, vec![])?;
         }
         Ok(Self {
             source: source.filter(node_predicates(node)).scoped(&node.alias),
@@ -297,10 +397,15 @@ impl PhysicalPlan {
         })
     }
 
-    pub fn single_node(node: &NodePlan) -> Result<Self> {
+    pub fn single_node(
+        bindings: &mut QueryBindings,
+        model: &(impl QueryDataModel + ?Sized),
+        node: &NodePlan,
+    ) -> Result<Self> {
         Ok(Self {
             outputs: node_outputs(node),
-            source: PhysicalSource::node(node, true)?.filter(node_predicates(node)),
+            source: PhysicalSource::node(bindings, model, node, true)?
+                .filter(node_predicates(node)),
         })
     }
 }

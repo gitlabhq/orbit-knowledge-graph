@@ -2,8 +2,12 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::physical::PhysicalPlan;
 
-pub fn emit_hydration(nodes: &[PhysicalPlan], limit: u32) -> Result<Node> {
-    let mut arms = nodes.iter().map(super::physical::query);
+pub(super) fn emit_hydration<T>(
+    nodes: &[PhysicalPlan],
+    limit: u32,
+    lowerer: &super::physical::PhysicalLowerer<'_, T>,
+) -> Result<Node> {
+    let mut arms = nodes.iter().map(|node| lowerer.query(node));
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
@@ -86,7 +90,7 @@ mod tests {
             &Default::default(),
         )
         .unwrap();
-        super::super::emit(&plan, &input).unwrap().ast
+        super::super::emit(&plan, &input, &model).unwrap().ast
     }
 
     #[test]

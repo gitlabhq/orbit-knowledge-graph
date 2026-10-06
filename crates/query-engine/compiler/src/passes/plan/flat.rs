@@ -15,15 +15,15 @@ use super::HydrationStrategy;
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
 
-struct FlatBuilder<'a, M: QueryDataModel + ?Sized> {
-    facts: &'a PlanningContext<'a, M>,
+struct FlatBuilder<'a, 'm, M: QueryDataModel + ?Sized> {
+    facts: &'a mut PlanningContext<'m, M>,
     definitions: Vec<(Definition, PhysicalPlan)>,
     filtered: HashMap<String, Definition>,
     tagged: HashSet<(String, String)>,
 }
 
 pub(super) fn plan<M: QueryDataModel + ?Sized>(
-    facts: &PlanningContext<'_, M>,
+    facts: &mut PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
     FlatBuilder {
         facts,
@@ -34,14 +34,15 @@ pub(super) fn plan<M: QueryDataModel + ?Sized>(
     .build()
 }
 
-impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
+impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, '_, M> {
     fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
         let mut cascades = Vec::new();
-        for (index, hop) in self.facts.hops.iter().enumerate() {
+        for index in 0..self.facts.hops.len() {
             let membership = self.filter_keys(index)?;
-            let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref));
+            let cascade = self.cascade(index, cascades.last().and_then(Option::as_ref))?;
             let edge = self.edge(index, membership, cascade.as_ref())?;
+            let hop = &self.facts.hops[index];
             source = Some(match source {
                 Some(previous) => {
                     let join = hop
@@ -130,11 +131,13 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     predicates.extend(self.facts.node_id_predicates(&scan_alias, hop));
                     let keys = PhysicalPlan {
                         source: PhysicalSource::edge_keys(
+                            &mut self.facts.bindings,
+                            self.facts.model,
                             hop,
                             &scan_alias,
                             predicates,
                             cascades[index].as_ref(),
-                        ),
+                        )?,
                         outputs: vec![Projection::new(
                             OutputValue::Column(Column::new(&scan_alias, column)),
                             DEFAULT_PRIMARY_KEY,
@@ -146,8 +149,12 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 } else {
                     None
                 };
-                let scan =
-                    PhysicalPlan::node_scan(node, membership, &self.facts.node_sort_key(node)?)?;
+                let scan = PhysicalPlan::node_scan(
+                    &mut self.facts.bindings,
+                    self.facts.model,
+                    node,
+                    membership,
+                )?;
                 plan.outputs.extend(scan.outputs);
                 plan.source = plan.source.inner_join(
                     scan.source,
@@ -181,22 +188,26 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 let first = !self.filtered.contains_key(alias);
                 if first {
                     let keys = if filter_only {
-                        PhysicalPlan::filtered_keys(node, DEFAULT_PRIMARY_KEY)?
+                        PhysicalPlan::filtered_keys(
+                            &mut self.facts.bindings,
+                            self.facts.model,
+                            node,
+                            DEFAULT_PRIMARY_KEY,
+                        )?
                     } else {
-                        let sort_key = self.facts.node_sort_key(node)?;
-                        if sort_key.is_empty() {
-                            return Err(QueryError::Lowering(format!(
-                                "no sort key for node '{alias}'; cannot plan narrowing"
-                            )));
-                        }
-                        let mut keys =
-                            PhysicalPlan::candidate_keys(node, DEFAULT_PRIMARY_KEY, vec![])?;
-                        keys.source = PhysicalSource::Latest {
-                            aggregate_condition: vec![],
-                            alias: alias.clone(),
-                            sort_key,
-                            input: Box::new(keys.source),
-                        };
+                        let mut keys = PhysicalPlan::candidate_keys(
+                            &mut self.facts.bindings,
+                            self.facts.model,
+                            node,
+                            DEFAULT_PRIMARY_KEY,
+                            vec![],
+                        )?;
+                        keys.source = keys.source.latest(
+                            &self.facts.bindings,
+                            self.facts.model,
+                            vec![],
+                            vec![],
+                        )?;
                         keys
                     };
                     let (name, keys) = keys.define(format!("_filter_{alias}"));
@@ -215,12 +226,19 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         Ok(predicates)
     }
 
-    fn cascade(&self, index: usize, upstream: Option<&PhysicalPlan>) -> Option<PhysicalPlan> {
+    fn cascade(
+        &mut self,
+        index: usize,
+        upstream: Option<&PhysicalPlan>,
+    ) -> Result<Option<PhysicalPlan>> {
         let hop = &self.facts.hops[index];
-        let join = hop
+        let Some(join) = hop
             .join_prev
             .as_ref()
-            .filter(|_| hop.cascade_anchor && index > 0)?;
+            .filter(|_| hop.cascade_anchor && index > 0)
+        else {
+            return Ok(None);
+        };
         let previous = &self.facts.hops[index - 1];
         let selective =
             [&previous.from_node, &previous.to_node]
@@ -232,7 +250,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         })
                 });
         if !selective && upstream.is_none() {
-            return None;
+            return Ok(None);
         }
         let alias = format!("{}p", join.prev_alias);
         let mut predicates =
@@ -244,10 +262,17 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 predicates.push(key_membership(&alias, column, definition.clone()));
             }
         }
-        Some(PhysicalPlan {
-            source: PhysicalSource::edge_keys(previous, &alias, predicates, upstream),
+        Ok(Some(PhysicalPlan {
+            source: PhysicalSource::edge_keys(
+                &mut self.facts.bindings,
+                self.facts.model,
+                previous,
+                &alias,
+                predicates,
+                upstream,
+            )?,
             outputs: vec![Projection::col(&alias, &join.prev_col)],
-        })
+        }))
     }
 
     fn edge(
@@ -258,12 +283,6 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
     ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
         let alias = format!("e{index}");
-        let scan = |final_| PhysicalSource::Scan {
-            table: hop.edge_table.clone(),
-            alias: alias.clone(),
-            final_,
-            relationship: Some(hop.input_index),
-        };
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
         if !multi_hop && !dedup && self.facts.aggregate() {
@@ -279,20 +298,36 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     *table.row_semantics() == query_data_model::storage::RowSemantics::Current
                 })
             {
-                return Ok(scan(false).filter(predicates));
+                return Ok(PhysicalSource::scan(
+                    &mut self.facts.bindings,
+                    self.facts.model,
+                    &hop.edge_table,
+                    &alias,
+                    false,
+                    Some(hop.input_index),
+                )?
+                .filter(predicates));
             }
-            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
-            return Ok(PhysicalSource::Latest {
-                sort_key,
-                alias: alias.clone(),
-                aggregate_condition: predicates,
-                input: Box::new(scan(false)),
-            });
+            return PhysicalSource::scan(
+                &mut self.facts.bindings,
+                self.facts.model,
+                &hop.edge_table,
+                &alias,
+                false,
+                Some(hop.input_index),
+            )?
+            .latest(&self.facts.bindings, self.facts.model, vec![], predicates);
         }
         let edge = if multi_hop {
-            super::hops::multi_hop(hop, &alias, &self.facts.nodes)
-                .filter(membership)
-                .cascade(hop, &alias, cascade)
+            super::hops::multi_hop(
+                &mut self.facts.bindings,
+                self.facts.model,
+                hop,
+                &alias,
+                &self.facts.nodes,
+            )?
+            .filter(membership)
+            .cascade(hop, &alias, cascade)
         } else if dedup {
             let (start, end) = hop.direction.edge_columns();
             let narrow_inside = self
@@ -305,7 +340,15 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                         .take(4)
                         .any(|column| column.name() == start || column.name() == end)
                 });
-            let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
+            let mut input = PhysicalSource::scan(
+                &mut self.facts.bindings,
+                self.facts.model,
+                &hop.edge_table,
+                &alias,
+                true,
+                Some(hop.input_index),
+            )?
+            .filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
                 input = input.filter(membership).cascade(hop, &alias, cascade);
                 Vec::new()
@@ -319,7 +362,16 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 scoped.filter(outside).cascade(hop, &alias, cascade)
             }
         } else {
-            scan(false).filter(membership).cascade(hop, &alias, cascade)
+            PhysicalSource::scan(
+                &mut self.facts.bindings,
+                self.facts.model,
+                &hop.edge_table,
+                &alias,
+                false,
+                Some(hop.input_index),
+            )?
+            .filter(membership)
+            .cascade(hop, &alias, cascade)
         };
         let mut predicates = if multi_hop {
             Vec::new()

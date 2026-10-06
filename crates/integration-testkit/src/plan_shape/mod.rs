@@ -272,8 +272,9 @@ fn check<M: QueryDataModel>(
             .check(&explain::logical(&input), &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
         let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let (planned, emitted) = explain::physical(&plan, &lowered.ast);
+        let lowered =
+            lower::emit(&plan, &input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let (planned, emitted) = explain::physical(&plan, &lowered.ast, model);
         let assertions = &scenario.physical[backend];
         assert!(
             assertions.planned.is_some() || assertions.emitted.is_some(),
@@ -667,14 +668,14 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             &HashSet::new(),
         )
         .unwrap();
-        let lowered = lower::emit(&plan, &input).unwrap();
+        let lowered = lower::emit(&plan, &input, &model).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),
             if set { 1 } else { expected_paths }
         );
-        let (planned, _) = explain::physical(&plan, &lowered.ast);
+        let (planned, _) = explain::physical(&plan, &lowered.ast, &model);
         let mode = if set { "SET" } else { "UNION" };
         Assertions {
             expect: vec![format!(

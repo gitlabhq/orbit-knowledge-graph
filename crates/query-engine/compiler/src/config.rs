@@ -92,6 +92,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [input, query_plan]
         }
         lower {
+            reads_env: [data_model]
             reads_state: [input]
             mutates: [query_plan, node, lowered_metadata]
         }
@@ -319,7 +320,7 @@ where
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input)?;
+    let lowered = lower::emit(&query_plan, &input, ctx.data_model())?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(lowered.ast);
     ctx.set_lowered_metadata(lowered.metadata);

@@ -15,6 +15,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{BTreeMap, HashMap};
 
 use super::plan::{Plan, QueryPlan};
+use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
@@ -184,17 +185,29 @@ impl EmitOutput {
     }
 }
 
-pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
+pub fn emit(
+    plan: &QueryPlan,
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let mut node = match plan {
         QueryPlan::Traversal(plan) => {
-            let mut output = physical::execute(&plan.operation.execution);
+            let mut output = physical::PhysicalLowerer {
+                bindings: &plan.bindings,
+                storage: model.query_backend().storage(),
+            }
+            .execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
             traversal::emit_traversal(input, output)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
-            let mut output = physical::execute(&plan.operation.execution);
+            let mut output = physical::PhysicalLowerer {
+                bindings: &plan.bindings,
+                storage: model.query_backend().storage(),
+            }
+            .execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
             Ok(requirements::aggregation(result, output, input.limit))
         }
@@ -204,7 +217,14 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             Ok(query)
         }
         QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
+        QueryPlan::Hydration(plan) => hydration::emit_hydration(
+            &plan.operation.nodes,
+            input.limit,
+            &physical::PhysicalLowerer {
+                bindings: &plan.bindings,
+                storage: model.query_backend().storage(),
+            },
+        ),
     }?;
 
     if !input.join_predicates.is_empty()

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::TableId;
 use crate::storage::{StorageCatalog, StoredColumnRef};
+use crate::{ColumnId, TableId};
 
 static NEXT_QUERY: AtomicU64 = AtomicU64::new(1);
 
@@ -72,20 +72,24 @@ struct Definition {
     body: ScopeId,
 }
 
-pub struct QueryBindings<'a, T> {
+pub struct QueryBindings {
     query: u64,
-    storage: &'a StorageCatalog<T>,
     scopes: Vec<Scope>,
     relations: Vec<Relation>,
     definitions: Vec<Definition>,
     exports: Vec<ExportOrigin>,
 }
 
-impl<'a, T> QueryBindings<'a, T> {
-    pub fn new(storage: &'a StorageCatalog<T>) -> Self {
+impl Default for QueryBindings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl QueryBindings {
+    pub fn new() -> Self {
         Self {
             query: NEXT_QUERY.fetch_add(1, Ordering::Relaxed),
-            storage,
             scopes: vec![Scope {
                 parent: None,
                 outputs: vec![],
@@ -133,19 +137,20 @@ impl<'a, T> QueryBindings<'a, T> {
         Ok(&self.scopes[scope.index].outputs)
     }
 
-    pub fn scan(&mut self, scope: ScopeId, table: TableId) -> Result<RelationId, BindingError> {
+    pub fn scan<T>(
+        &mut self,
+        storage: &StorageCatalog<T>,
+        scope: ScopeId,
+        table: TableId,
+    ) -> Result<RelationId, BindingError> {
         self.check(scope.query)?;
-        let columns = self.storage.table(table).columns();
-        let exports = columns
-            .iter()
-            .map(|column| {
-                self.storage
-                    .column_ref(table, column.name())
-                    .expect("catalog column")
+        let exports = (0..storage.table(table).columns().len())
+            .map(|index| {
+                self.allocate_export(ExportOrigin::Stored(StoredColumnRef {
+                    table,
+                    column: ColumnId(index),
+                }))
             })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|column| self.allocate_export(ExportOrigin::Stored(column)))
             .collect();
         Ok(self.relation(scope, RelationSource::Scan(table), exports))
     }
@@ -157,10 +162,13 @@ impl<'a, T> QueryBindings<'a, T> {
         column: StoredColumnRef,
     ) -> Result<ColumnRef, BindingError> {
         self.check(relation.query)?;
-        let export = self.relations[relation.index]
+        let source = &self.relations[relation.index];
+        if source.source != RelationSource::Scan(column.table) {
+            return Err(BindingError::MissingExport);
+        }
+        let export = source
             .exports
-            .iter()
-            .find(|export| self.exports[export.index] == ExportOrigin::Stored(column))
+            .get(column.column.index())
             .copied()
             .ok_or(BindingError::MissingExport)?;
         self.column(scope, relation, export)

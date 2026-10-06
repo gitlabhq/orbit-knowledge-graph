@@ -4,19 +4,23 @@ use ontology::constants::*;
 
 use super::requirements::{Column, OutputValue, Predicate, Projection, live, relationship_kinds};
 use crate::constants::{DEPTH_COLUMN, PATH_NODES_COLUMN};
+use crate::error::Result;
 use crate::input::Direction;
+use query_data_model::{QueryDataModel, bindings::QueryBindings};
 
 use super::physical::{PhysicalPlan, PhysicalSource};
 use super::{Hop, NodePlan};
 
 pub(super) fn multi_hop(
+    bindings: &mut QueryBindings,
+    model: &(impl QueryDataModel + ?Sized),
     hop: &Hop,
     alias: &str,
     nodes: &HashMap<String, NodePlan>,
-) -> PhysicalSource {
+) -> Result<PhysicalSource> {
     let arms = (hop.min_hops.max(1)..=hop.max_hops)
-        .map(|depth| depth_arm(hop, depth))
-        .collect();
+        .map(|depth| depth_arm(bindings, model, hop, depth))
+        .collect::<Result<Vec<_>>>()?;
     let (from_kind, to_kind) = match hop.direction {
         Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
         Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
@@ -31,34 +35,35 @@ pub(super) fn multi_hop(
         }
     }
     predicates.push(live(alias));
-    PhysicalSource::Filter {
+    Ok(PhysicalSource::Filter {
         predicates,
         input: Box::new(PhysicalSource::Union {
             alias: alias.into(),
             arms,
             relationship: hop.input_index,
         }),
-    }
+    })
 }
 
-fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
+fn depth_arm(
+    bindings: &mut QueryBindings,
+    model: &(impl QueryDataModel + ?Sized),
+    hop: &Hop,
+    depth: u32,
+) -> Result<PhysicalPlan> {
     let (start, end) = hop.direction.edge_columns();
     let end_kind = match hop.direction {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
-    let scan = |alias: &str| PhysicalSource::Scan {
-        relationship: None,
-        table: hop.edge_table.clone(),
-        alias: alias.into(),
-        final_: false,
-    };
+    let mut scan =
+        |alias: &str| PhysicalSource::scan(bindings, model, &hop.edge_table, alias, false, None);
     let mut predicate = vec![];
     if let Some(kind) = relationship_kinds("e1", &hop.rel_types) {
         predicate.push(kind);
     }
     predicate.push(live("e1"));
-    let mut source = scan("e1");
+    let mut source = scan("e1")?;
     for index in 2..=depth {
         let previous = format!("e{}", index - 1);
         let current = format!("e{index}");
@@ -70,7 +75,7 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
             endpoints: (Column::new(&previous, end), Column::new(&current, start)),
             predicates,
             left: Box::new(source),
-            right: Box::new(scan(&current)),
+            right: Box::new(scan(&current)?),
         };
     }
     let last = format!("e{depth}");
@@ -86,7 +91,7 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
             })
             .collect(),
     );
-    PhysicalPlan {
+    Ok(PhysicalPlan {
         source: PhysicalSource::Filter {
             predicates: predicate,
             input: Box::new(source),
@@ -106,5 +111,5 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
             Projection::col("e1", DELETED_COLUMN),
             Projection::col("e1", TRAVERSAL_PATH_COLUMN),
         ],
-    }
+    })
 }

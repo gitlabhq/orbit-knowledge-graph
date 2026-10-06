@@ -45,7 +45,7 @@ fn path_filter(paths: &[TraversalPath], options: HydrationCompileOptions) -> Opt
 }
 
 pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
-    context: PlanningContext<'_, M>,
+    mut context: PlanningContext<'_, M>,
     options: HydrationCompileOptions,
 ) -> Result<Plan<Hydration>> {
     let input = context.input;
@@ -90,11 +90,15 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
             let projected_columns = std::iter::once(node.id_property.clone())
                 .chain(columns)
                 .collect::<Vec<_>>();
-            let table = model.table(table).ok_or_else(|| {
-                QueryError::Lowering(format!("unknown hydration table '{table}'"))
-            })?;
             Ok(PhysicalPlan {
-                source: PhysicalSource::current_rows(table, alias, &projected_columns, predicates)?,
+                source: PhysicalSource::current_rows(
+                    &mut context.bindings,
+                    model,
+                    table,
+                    alias,
+                    &projected_columns,
+                    predicates,
+                )?,
                 outputs: vec![
                     Projection::new(
                         OutputValue::Column(Column::new(alias, &node.id_property)),

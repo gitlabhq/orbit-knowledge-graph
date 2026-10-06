@@ -31,6 +31,7 @@ pub struct BoundFilter {
 }
 
 pub struct Plan<T> {
+    pub bindings: query_data_model::bindings::QueryBindings,
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
@@ -206,6 +207,7 @@ where
     M: QueryDataModel + ?Sized,
 {
     let context = context::PlanningContext {
+        bindings: query_data_model::bindings::QueryBindings::new(),
         input,
         model,
         nodes: HashMap::new(),

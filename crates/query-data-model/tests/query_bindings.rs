@@ -12,10 +12,10 @@ fn catalog() -> StorageCatalog<()> {
 fn scans_and_derived_outputs_have_distinct_scoped_bindings() {
     let storage = catalog();
     let stored = storage.resolve_column("projects", "id").unwrap();
-    let mut bindings = QueryBindings::new(&storage);
+    let mut bindings = QueryBindings::new();
     let root = bindings.root();
-    let left = bindings.scan(root, stored.table).unwrap();
-    let right = bindings.scan(root, stored.table).unwrap();
+    let left = bindings.scan(&storage, root, stored.table).unwrap();
+    let right = bindings.scan(&storage, root, stored.table).unwrap();
     let left_id = bindings.stored_column(root, left, stored).unwrap();
     let right_id = bindings.stored_column(root, right, stored).unwrap();
     assert_ne!(left_id, right_id);
@@ -29,7 +29,7 @@ fn scans_and_derived_outputs_have_distinct_scoped_bindings() {
     );
 
     let child = bindings.scope(root).unwrap();
-    let scan = bindings.scan(child, stored.table).unwrap();
+    let scan = bindings.scan(&storage, child, stored.table).unwrap();
     let inner = bindings.stored_column(child, scan, stored).unwrap();
     let projected = bindings.project(child).unwrap();
     let derived = bindings.derived(root, child).unwrap();
@@ -43,17 +43,16 @@ fn scans_and_derived_outputs_have_distinct_scoped_bindings() {
         Err(BindingError::OutsideScope)
     );
     assert_eq!(bindings.project(child), Err(BindingError::OutsideScope));
-    let foreign = QueryBindings::new(&storage);
+    let foreign = QueryBindings::new();
     assert_eq!(
-        bindings.scan(foreign.root(), stored.table),
+        bindings.scan(&storage, foreign.root(), stored.table),
         Err(BindingError::ForeignQuery)
     );
 }
 
 #[test]
 fn definitions_share_outputs_and_unions_bind_positions() {
-    let storage = catalog();
-    let mut bindings = QueryBindings::new(&storage);
+    let mut bindings = QueryBindings::new();
     let root = bindings.root();
     let body = bindings.scope(root).unwrap();
     let output = bindings.project(body).unwrap();

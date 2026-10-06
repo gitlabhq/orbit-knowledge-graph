@@ -67,7 +67,7 @@ fn hydration_reads_current_local_rows_without_version_columns() {
 
     let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
     let model = query_data_model::DuckDbDataModel::derive(ontology).unwrap();
-    let input = Input {
+    let mut input = Input {
         query_type: QueryType::Hydration,
         nodes: vec![InputNode {
             id: "f".into(),
@@ -79,9 +79,35 @@ fn hydration_reads_current_local_rows_without_version_columns() {
         limit: 10,
         ..Default::default()
     };
+    let mut second = input.nodes[0].clone();
+    second.id = "other_file".into();
+    second.node_ids = vec![2];
+    input.nodes.push(second);
     let planned =
         plan::plan_duckdb(&input, &model, Default::default(), &Default::default()).unwrap();
-    let lowered = lower::emit(&planned, &input).unwrap();
+    let plan::QueryPlan::Hydration(hydration) = &planned else {
+        panic!("expected hydration");
+    };
+    let relations: Vec<_> = hydration
+        .operation
+        .nodes
+        .iter()
+        .map(|node| {
+            let plan::physical::PhysicalSource::Filter { input, .. } = &node.source else {
+                panic!("expected ID filter");
+            };
+            let plan::physical::PhysicalSource::Scan { relation, .. } = input.as_ref() else {
+                panic!("expected current-row scan");
+            };
+            *relation
+        })
+        .collect();
+    assert_ne!(relations[0], relations[1]);
+    assert_eq!(
+        hydration.bindings.source(relations[0]).unwrap(),
+        hydration.bindings.source(relations[1]).unwrap()
+    );
+    let lowered = lower::emit(&planned, &input, &model).unwrap();
     let query =
         compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default()).unwrap();
     let directory = tempfile::tempdir().unwrap();
@@ -89,12 +115,21 @@ fn hydration_reads_current_local_rows_without_version_columns() {
         duckdb_client::DuckDbClient::open(&directory.path().join("hydration.duckdb")).unwrap();
     database.initialize_schema("CREATE TABLE gl_file(id BIGINT, path VARCHAR); INSERT INTO gl_file VALUES (1, 'src/main.rs'), (2, 'other.rs');").unwrap();
     let rows = database.query_arrow(&query.render()).unwrap();
-    assert_eq!(rows.iter().map(|batch| batch.num_rows()).sum::<usize>(), 1);
-    let properties = arrow::util::display::array_value_to_string(rows[0].column(2), 0).unwrap();
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&properties).unwrap(),
-        serde_json::json!({"path": "src/main.rs"})
-    );
+    let mut paths: Vec<_> = rows
+        .iter()
+        .flat_map(|batch| {
+            (0..batch.num_rows()).map(|row| {
+                let properties =
+                    arrow::util::display::array_value_to_string(batch.column(2), row).unwrap();
+                serde_json::from_str::<serde_json::Value>(&properties).unwrap()["path"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+        })
+        .collect();
+    paths.sort();
+    assert_eq!(paths, ["other.rs", "src/main.rs"]);
 }
 
 #[test]

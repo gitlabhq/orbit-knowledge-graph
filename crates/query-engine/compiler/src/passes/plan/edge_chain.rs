@@ -244,11 +244,11 @@ where
     let execution = if context.hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
-        super::fk::star(&context, &center)?
+        super::fk::star(&mut context, &center)?
     } else if use_fk_elision && detect_fk_chain(&context.hops, &context.nodes) {
-        super::fk::chain(&context)?
+        super::fk::chain(&mut context)?
     } else {
-        super::flat::plan(&context)?
+        super::flat::plan(&mut context)?
     };
     if !context.hops.is_empty() {
         context.node_edge_mappings = execution

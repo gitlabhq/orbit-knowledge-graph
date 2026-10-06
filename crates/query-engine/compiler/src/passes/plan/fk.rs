@@ -13,7 +13,7 @@ use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, key_membership
 use super::{Hop, HydrationStrategy, NodePlan};
 
 pub(super) fn star<M: QueryDataModel + ?Sized>(
-    context: &PlanningContext<'_, M>,
+    context: &mut PlanningContext<'_, M>,
     center: &str,
 ) -> Result<ExecutionPlan> {
     let hops = context
@@ -24,13 +24,22 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
                 .fk
                 .as_ref()
                 .ok_or_else(|| QueryError::Lowering("FK star hop missing metadata".into()))?;
-            Ok((hop, fk, context.node(&fk.target_node)?))
+            Ok((
+                hop,
+                fk,
+                context.nodes.get(&fk.target_node).ok_or_else(|| {
+                    QueryError::Lowering(format!("node '{}' not found", fk.target_node))
+                })?,
+            ))
         })
         .collect::<Result<Vec<_>>>()?;
     let nodes = &context.nodes;
     let traversal = !context.aggregate();
-    let center_node = context.node(center)?;
-    let root = PhysicalPlan::single_node(center_node)?;
+    let center_node = context
+        .nodes
+        .get(center)
+        .ok_or_else(|| QueryError::Lowering(format!("node '{center}' not found")))?;
+    let root = PhysicalPlan::single_node(&mut context.bindings, context.model, center_node)?;
     let mut plan = ExecutionPlan {
         source: root.source,
         outputs: root.outputs,
@@ -52,8 +61,14 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         if target.filters.is_empty() && target.node_ids.is_empty() && target.id_range.is_none() {
             continue;
         }
-        let (name, keys) = PhysicalPlan::candidate_keys(target, &fk.referenced_column, vec![])?
-            .define(format!("_candidate_{}", fk.target_node));
+        let (name, keys) = PhysicalPlan::candidate_keys(
+            &mut context.bindings,
+            context.model,
+            target,
+            &fk.referenced_column,
+            vec![],
+        )?
+        .define(format!("_candidate_{}", fk.target_node));
         plan.definitions.push((name.clone(), keys));
         references.insert(fk.target_node.clone(), name);
     }
@@ -64,9 +79,14 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         }
     }
     if !visited.is_empty() && !center_extra.is_empty() {
-        let (name, keys) =
-            PhysicalPlan::candidate_keys(center_node, DEFAULT_PRIMARY_KEY, center_extra.clone())?
-                .define(format!("_candidate_{center}"));
+        let (name, keys) = PhysicalPlan::candidate_keys(
+            &mut context.bindings,
+            context.model,
+            center_node,
+            DEFAULT_PRIMARY_KEY,
+            center_extra.clone(),
+        )?
+        .define(format!("_candidate_{center}"));
         plan.definitions.push((name.clone(), keys));
         plan.source = plan
             .source
@@ -84,9 +104,14 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
                 && target.id_range.is_none()
                 && center_node.has_selective_filters()
             {
-                let (name, keys) =
-                    PhysicalPlan::candidate_keys(center_node, &fk.fk_column, center_extra.clone())?
-                        .define(format!("_narrow_{}", fk.target_node));
+                let (name, keys) = PhysicalPlan::candidate_keys(
+                    &mut context.bindings,
+                    context.model,
+                    center_node,
+                    &fk.fk_column,
+                    center_extra.clone(),
+                )?
+                .define(format!("_narrow_{}", fk.target_node));
                 plan.definitions.push((name.clone(), keys));
                 Some(name)
             } else {
@@ -95,7 +120,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             let membership =
                 name.map(|name| key_membership(&target.alias, &fk.referenced_column, name));
             let scan =
-                PhysicalPlan::node_scan(target, membership, &context.node_sort_key(target)?)?;
+                PhysicalPlan::node_scan(&mut context.bindings, context.model, target, membership)?;
             plan.source = plan.source.inner_join(
                 scan.source,
                 (
@@ -105,8 +130,13 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             );
             plan.outputs.extend(scan.outputs);
         } else if target.hydration == HydrationStrategy::FilterOnly {
-            let (name, keys) = PhysicalPlan::filtered_keys(target, &fk.referenced_column)?
-                .define(format!("_filter_{}", target.alias));
+            let (name, keys) = PhysicalPlan::filtered_keys(
+                &mut context.bindings,
+                context.model,
+                target,
+                &fk.referenced_column,
+            )?
+            .define(format!("_filter_{}", target.alias));
             plan.definitions.push((name.clone(), keys));
             plan.source =
                 plan.source
@@ -145,14 +175,18 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
 }
 
 pub(super) fn chain<M: QueryDataModel + ?Sized>(
-    context: &PlanningContext<'_, M>,
+    context: &mut PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
     let root = &context
         .hops
         .first()
         .ok_or_else(|| QueryError::Lowering("FK chain requires a hop".into()))?
         .from_node;
-    let scan = PhysicalPlan::node_scan(context.node(root)?, None, &[])?;
+    let node = context
+        .nodes
+        .get(root)
+        .ok_or_else(|| QueryError::Lowering(format!("node '{root}' not found")))?;
+    let scan = PhysicalPlan::node_scan(&mut context.bindings, context.model, node, None)?;
     let mut plan = ExecutionPlan {
         source: scan.source,
         outputs: scan.outputs,
@@ -170,7 +204,11 @@ pub(super) fn chain<M: QueryDataModel + ?Sized>(
         } else {
             &hop.from_node
         };
-        let next = PhysicalPlan::node_scan(context.node(alias)?, None, &[])?;
+        let node = context
+            .nodes
+            .get(alias)
+            .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))?;
+        let next = PhysicalPlan::node_scan(&mut context.bindings, context.model, node, None)?;
         plan.source = plan.source.inner_join(
             next.source,
             (

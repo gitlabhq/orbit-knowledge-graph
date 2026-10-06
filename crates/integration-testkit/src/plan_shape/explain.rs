@@ -195,9 +195,19 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
     format!("{alias}.{property} {operator} {value}")
 }
 
-pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
+pub fn physical(
+    plan: &QueryPlan,
+    ast: &Node,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> (Tree, Tree) {
+    use query_data_model::QueryBackendCatalog;
+    let storage = model.query_backend().storage();
     let planned = match plan {
-        QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
+        QueryPlan::Traversal(plan) => PlannedSources {
+            bindings: &plan.bindings,
+            storage,
+        }
+        .execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
             let group = |value: &compiler::passes::plan::aggregation::Group| {
@@ -247,7 +257,13 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             let tree = Tree::node(
                 Operator::Aggregate,
                 items,
-                vec![execution_source(&plan.operation.execution)],
+                vec![
+                    PlannedSources {
+                        bindings: &plan.bindings,
+                        storage,
+                    }
+                    .execution_source(&plan.operation.execution),
+                ],
             );
             let tree = sort(
                 tree,
@@ -255,7 +271,11 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     (export.name().to_owned(), *direction == OrderDirection::Desc)
                 }),
             );
-            definitions(&plan.operation.execution, tree)
+            PlannedSources {
+                bindings: &plan.bindings,
+                storage,
+            }
+            .definitions(&plan.operation.execution, tree)
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -333,7 +353,17 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         QueryPlan::Hydration(plan) => Tree::node(
             Operator::Hydration,
             "",
-            plan.operation.nodes.iter().map(physical_tree).collect(),
+            plan.operation
+                .nodes
+                .iter()
+                .map(|node| {
+                    PlannedSources {
+                        bindings: &plan.bindings,
+                        storage,
+                    }
+                    .physical_tree(node)
+                })
+                .collect(),
         ),
     };
     let emitted = match ast {
@@ -360,108 +390,129 @@ fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     )
 }
 
-fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    definitions(execution, execution_source(execution))
+struct PlannedSources<'a, T> {
+    bindings: &'a query_data_model::bindings::QueryBindings,
+    storage: &'a query_data_model::storage::StorageCatalog<T>,
 }
 
-fn execution_source(execution: &ExecutionPlan) -> Tree {
-    Tree::node(
-        Operator::Project,
-        planned_projections(&execution.outputs),
-        vec![physical_source(&execution.source)],
-    )
-}
+impl<T> PlannedSources<'_, T> {
+    fn execution_tree(&self, execution: &ExecutionPlan) -> Tree {
+        self.definitions(execution, self.execution_source(execution))
+    }
 
-fn definitions(execution: &ExecutionPlan, source: Tree) -> Tree {
-    if execution.definitions.is_empty() {
-        source
-    } else {
+    fn execution_source(&self, execution: &ExecutionPlan) -> Tree {
         Tree::node(
-            Operator::With,
-            "",
-            execution
-                .definitions
-                .iter()
-                .map(|(name, keys)| {
-                    Tree::node(Operator::Cte, name.hint(), vec![physical_tree(keys)])
-                })
-                .chain([source])
-                .collect(),
+            Operator::Project,
+            planned_projections(&execution.outputs),
+            vec![self.physical_source(&execution.source)],
         )
     }
-}
 
-fn physical_tree(plan: &PhysicalPlan) -> Tree {
-    Tree::node(
-        Operator::Project,
-        planned_projections(&plan.outputs),
-        vec![physical_source(&plan.source)],
-    )
-}
-
-fn physical_source(plan: &PhysicalSource) -> Tree {
-    match plan {
-        PhysicalSource::Union { alias, arms, .. } => Tree::node(
-            Operator::Union,
-            format!("ALL AS {alias}"),
-            arms.iter().map(physical_tree).collect(),
-        ),
-        PhysicalSource::Scan {
-            table,
-            alias,
-            final_,
-            ..
-        } => scan(table, alias, *final_),
-        PhysicalSource::Filter { predicates, input } => filter(
-            predicates.iter().flat_map(planned_predicate).collect(),
-            physical_source(input),
-        ),
-        PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
-            Operator::SemiJoin,
-            format!("{} IN subquery", planned_column(value)),
-            vec![physical_source(input), physical_tree(keys)],
-        ),
-        PhysicalSource::Scope { alias, input } => {
-            let tree = if input.outputs.is_empty() {
-                physical_source(&input.source)
-            } else {
-                physical_tree(input)
-            };
-            Tree::node(Operator::Bind, alias, vec![tree])
-        }
-        PhysicalSource::Latest {
-            alias,
-            sort_key,
-            input,
-            aggregate_condition,
-        } => Tree::node(
-            Operator::Deduplicate,
-            format!(
-                "LimitBy {}",
-                sort_key
+    fn definitions(&self, execution: &ExecutionPlan, source: Tree) -> Tree {
+        if execution.definitions.is_empty() {
+            source
+        } else {
+            Tree::node(
+                Operator::With,
+                "",
+                execution
+                    .definitions
                     .iter()
-                    .map(|column| format!("{alias}.{column}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            vec![filter(
-                aggregate_condition
-                    .iter()
-                    .flat_map(planned_predicate)
+                    .map(|(name, keys)| {
+                        Tree::node(Operator::Cte, name.hint(), vec![self.physical_tree(keys)])
+                    })
+                    .chain([source])
                     .collect(),
-                physical_source(input),
-            )],
-        ),
-        PhysicalSource::Join {
-            endpoints,
-            predicates,
-            left,
-            right,
-        } => Tree::node(
-            Operator::Join,
-            planned_join(endpoints, predicates),
-            vec![physical_source(left), physical_source(right)],
-        ),
+            )
+        }
+    }
+
+    fn physical_tree(&self, plan: &PhysicalPlan) -> Tree {
+        Tree::node(
+            Operator::Project,
+            planned_projections(&plan.outputs),
+            vec![self.physical_source(&plan.source)],
+        )
+    }
+
+    fn physical_source(&self, plan: &PhysicalSource) -> Tree {
+        match plan {
+            PhysicalSource::Union { alias, arms, .. } => Tree::node(
+                Operator::Union,
+                format!("ALL AS {alias}"),
+                arms.iter().map(|arm| self.physical_tree(arm)).collect(),
+            ),
+            PhysicalSource::Scan {
+                relation,
+                alias,
+                final_,
+                ..
+            } => {
+                let query_data_model::bindings::RelationSource::Scan(table) =
+                    self.bindings.source(*relation).unwrap()
+                else {
+                    panic!("expected scan");
+                };
+                scan(self.storage.table(*table).name(), alias, *final_)
+            }
+            PhysicalSource::Filter { predicates, input } => filter(
+                predicates.iter().flat_map(planned_predicate).collect(),
+                self.physical_source(input),
+            ),
+            PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
+                Operator::SemiJoin,
+                format!("{} IN subquery", planned_column(value)),
+                vec![self.physical_source(input), self.physical_tree(keys)],
+            ),
+            PhysicalSource::Scope { alias, input } => {
+                let tree = if input.outputs.is_empty() {
+                    self.physical_source(&input.source)
+                } else {
+                    self.physical_tree(input)
+                };
+                Tree::node(Operator::Bind, alias, vec![tree])
+            }
+            PhysicalSource::Latest {
+                alias,
+                sort_key,
+                input,
+                aggregate_condition,
+            } => Tree::node(
+                Operator::Deduplicate,
+                format!(
+                    "LimitBy {}",
+                    sort_key
+                        .iter()
+                        .map(|column| {
+                            let query_data_model::bindings::ExportOrigin::Stored(column) =
+                                self.bindings.origin(column.export()).unwrap()
+                            else {
+                                panic!("expected stored key");
+                            };
+                            format!("{alias}.{}", self.storage.column(column).name())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                vec![filter(
+                    aggregate_condition
+                        .iter()
+                        .flat_map(planned_predicate)
+                        .collect(),
+                    self.physical_source(input),
+                )],
+            ),
+            PhysicalSource::Join {
+                endpoints,
+                predicates,
+                left,
+                right,
+            } => Tree::node(
+                Operator::Join,
+                planned_join(endpoints, predicates),
+                vec![self.physical_source(left), self.physical_source(right)],
+            ),
+        }
     }
 }
 
@@ -842,6 +893,23 @@ fn sort(input: Tree, keys: impl Iterator<Item = (String, bool)>) -> Tree {
 
 #[test]
 fn exact_assertions_preserve_nested_filter_order() {
+    let storage = query_data_model::storage::StorageCatalog::new([
+        query_data_model::storage::TableLayout::new(
+            "gl_project",
+            vec![query_data_model::storage::StoredColumn::new("id", ())],
+            &[],
+        )
+        .unwrap(),
+    ])
+    .unwrap();
+    let mut bindings = query_data_model::bindings::QueryBindings::new();
+    let relation = bindings
+        .scan(
+            &storage,
+            bindings.root(),
+            storage.resolve_table("gl_project").unwrap(),
+        )
+        .unwrap();
     let predicates = [
         Predicate::Ids {
             column: Column::new("p", "id"),
@@ -854,7 +922,7 @@ fn exact_assertions_preserve_nested_filter_order() {
     ];
     let source = predicates.iter().fold(
         PhysicalSource::Scan {
-            table: "gl_project".into(),
+            relation,
             alias: "p".into(),
             final_: false,
             relationship: None,
@@ -869,7 +937,14 @@ fn exact_assertions_preserve_nested_filter_order() {
     )
     .unwrap();
     assertions
-        .check(&physical_source(&source), "planned")
+        .check(
+            &PlannedSources {
+                bindings: &bindings,
+                storage: &storage,
+            }
+            .physical_source(&source),
+            "planned",
+        )
         .unwrap();
     let emitted = query_filter(
         &Expr::conjoin(vec![
