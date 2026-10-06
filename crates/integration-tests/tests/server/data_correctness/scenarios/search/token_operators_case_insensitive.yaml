@@ -29,7 +29,7 @@ expect:
     - "hasToken(lower(mr.title), lower('FIX'))"
     - "hasAllTokens(lower(mr.title), lower('LOGIN Crash'))"
     - "hasAnyTokens(lower(mr.title), lower('URGENT ios'))"
-  indexes_used: [idx_title]
+  indexes_used: [{ table: gl_merge_request, index: idx_title }]
   skip_requirements: ["filter:title"]
   node_count: 1
   nodes:

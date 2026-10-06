@@ -7,6 +7,7 @@ mod format;
 use std::path::Path;
 use std::sync::Arc;
 
+use format::ExpectedIndex;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
@@ -312,30 +313,72 @@ async fn run_frontend(
     apply_expect(&view, expect, label);
 }
 
-fn assert_indexes_used(plan: &serde_json::Value, names: &[String], label: &str) {
-    fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-        match value {
-            serde_json::Value::Object(map) => {
-                if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
-                    && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
-                {
-                    return Some(value);
-                }
-                map.values().find_map(|v| skip_index(v, name))
-            }
-            serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
-            _ => None,
-        }
-    }
-    for name in names {
-        let entry = skip_index(plan, name)
-            .unwrap_or_else(|| panic!("{label}: skip index {name} not applied\nplan: {plan:#}"));
+fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
+    for ExpectedIndex { table, index } in expected {
+        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
+            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
+        });
+        let entry = skip_index(scan, index).unwrap_or_else(|| {
+            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
+        });
         let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
         let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
         assert!(
             selected < initial,
-            "{label}: skip index {name} selected {selected} of {initial} granules\nplan: {plan:#}"
+            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
         );
+    }
+}
+
+/// Strip the database and the schema-version prefix from a `db.v101_gl_user` description.
+fn unversioned_table(description: &str) -> &str {
+    let table = description.rsplit('.').next().unwrap_or(description);
+    match table
+        .strip_prefix('v')
+        .and_then(|rest| rest.split_once('_'))
+    {
+        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
+        _ => table,
+    }
+}
+
+/// Find the `ReadFromMergeTree` step whose `Description` (`db.table`) names `table`.
+fn read_from_merge_tree<'a>(
+    value: &'a serde_json::Value,
+    table: &str,
+) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
+                == Some("ReadFromMergeTree");
+            let scans_table = map
+                .get("Description")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|description| unversioned_table(description) == table);
+            if is_scan && scans_table {
+                return Some(value);
+            }
+            map.values().find_map(|v| read_from_merge_tree(v, table))
+        }
+        serde_json::Value::Array(items) => {
+            items.iter().find_map(|v| read_from_merge_tree(v, table))
+        }
+        _ => None,
+    }
+}
+
+fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
+                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
+            {
+                return Some(value);
+            }
+            map.values().find_map(|v| skip_index(v, name))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
+        _ => None,
     }
 }
 

@@ -198,6 +198,8 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 `contains`, `starts_with`, `ends_with`, and the token operators ignore ASCII
 case: `contains: "Migration"` and `contains: "MIGRATION"` return the same rows.
+The server (ClickHouse) folds ASCII letters only, so `starts_with: "Är"` does
+not match `ärger`. Local queries (DuckDB) fold Unicode, so the same query does.
 `eq` and `in` compare exact values, and so does every operator on a sort-key
 column such as `traversal_path` or `branch`, so the primary key keeps pruning.
 `contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID

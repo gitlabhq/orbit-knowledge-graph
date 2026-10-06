@@ -71,6 +71,14 @@ pub struct RedactionConfig {
     pub deny: BTreeMap<String, Vec<i64>>,
 }
 
+/// A skip index that `EXPLAIN indexes = 1` must apply on `table` and that must prune granules.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedIndex {
+    pub table: String,
+    pub index: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
@@ -121,7 +129,7 @@ pub struct QueryExpect {
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     #[serde(default)]
-    pub indexes_used: Vec<String>,
+    pub indexes_used: Vec<ExpectedIndex>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,

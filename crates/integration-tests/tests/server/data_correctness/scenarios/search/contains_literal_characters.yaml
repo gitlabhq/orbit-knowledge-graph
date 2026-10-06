@@ -22,7 +22,7 @@ query:
     RETURN mr.title LIMIT 10
 
 expect:
-  indexes_used: [idx_title_ngram]
+  indexes_used: [{ table: gl_merge_request, index: idx_title_ngram }]
   skip_requirements: ["filter:title"]
   node_count: 1
   nodes:

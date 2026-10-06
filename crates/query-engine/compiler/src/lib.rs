@@ -1905,6 +1905,33 @@ mod tests {
         );
     }
 
+    /// DuckDB's `lower` folds Unicode while ClickHouse's folds ASCII only, so
+    /// the local shape is pinned here to keep that split deliberate.
+    #[test]
+    fn local_string_filters_fold_case_with_lower_on_both_sides() {
+        for (operator, function) in [
+            ("contains", "contains"),
+            ("starts_with", "starts_with"),
+            ("ends_with", "ends_with"),
+        ] {
+            let query = format!(
+                r#"{{
+                    "query_type": "traversal",
+                    "nodes": [{{"id": "f", "entity": "File", "filters": {{"path": {{"{operator}": "ALI"}}}}}}],
+                    "limit": 10
+                }}"#
+            );
+
+            let sql = compile_local(&query, Frontend::JsonDsl, &ONTOLOGY)
+                .expect("should compile")
+                .base
+                .render();
+
+            let folded = format!("{function}(lower(f.path), lower('ALI'))");
+            assert!(sql.contains(&folded), "expected {folded}, got:\n{sql}");
+        }
+    }
+
     #[test]
     fn cross_namespace_fk_chain_elides_to_node_joins() {
         let query = r#"{

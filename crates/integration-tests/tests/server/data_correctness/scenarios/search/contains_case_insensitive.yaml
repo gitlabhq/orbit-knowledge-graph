@@ -22,7 +22,7 @@ query:
 
 expect:
   sql_contains: ["multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])"]
-  indexes_used: [idx_title_ngram]
+  indexes_used: [{ table: gl_merge_request, index: idx_title_ngram }]
   skip_requirements: ["filter:title"]
   node_count: 2
   nodes:
