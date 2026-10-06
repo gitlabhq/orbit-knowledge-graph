@@ -32,9 +32,7 @@ pub fn ordered_filters(
                 ),
             };
             let (property_id, data_type) = metadata.unwrap_or_default();
-            let in_sort_key = table
-                .and_then(|table| model.table_sort_key(table))
-                .is_some_and(|key| key.contains(property));
+            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
             filters.iter().map(move |filter| {
                 (
                     property.clone(),
