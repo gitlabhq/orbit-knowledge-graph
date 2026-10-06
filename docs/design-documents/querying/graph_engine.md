@@ -96,6 +96,9 @@ These assertions check plan structure; data-correctness scenarios check executio
 ### Query graph prototype
 
 `compiler::query_graph` explores a single owner for query declarations. `compiler::compile_graph` exposes a separate compiler entry point for traversal requests.
+The `query_graph/` directory separates ownership, expressions, relational operations, validation, lowering, SQL rendering, and explain output.
+Its `plan/` directory contains shared access preparation, FK strategies, edge planning, aggregation, predicates, and key scans.
+Access planning passes one temporary state between strategy steps. The graph remains the sole owner of query declarations.
 One block arena owns relation occurrences, CTE definitions, ordered outputs, and their computations.
 Stored ports reference catalog-owned columns through typed table and column identities. Derived ports reference exact output identities.
 The shared storage module owns immutable column declarations and a name lookup index. Backend catalogs supply column type metadata.

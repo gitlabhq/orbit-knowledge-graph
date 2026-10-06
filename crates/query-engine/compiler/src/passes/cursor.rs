@@ -180,13 +180,7 @@ pub fn apply_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
     };
     let mut keys = Vec::new();
     for index in 0..input.nodes.len() {
-        keys.push((
-            graph.stored_column(
-                graph.input_node(root, index)?,
-                ontology::constants::DEFAULT_PRIMARY_KEY,
-            )?,
-            false,
-        ));
+        keys.push((graph.input_identity(root, input, index)?, false));
     }
     let mut predicate = None;
     if let Some(after) = &cursor.after {

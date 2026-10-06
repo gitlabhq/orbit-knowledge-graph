@@ -149,7 +149,7 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
     let mut context = ResultContext::new().with_query_type(input.query_type);
     context.entity_auth.clone_from(model.entity_auth());
     for (index, node) in input.nodes.iter().enumerate() {
-        let relation = graph.input_node(root, index)?;
+        let mut relation = graph.input_node(root, index).ok();
         let entity_name = node
             .entity
             .as_deref()
@@ -160,22 +160,54 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
         let redaction_column = model
             .redaction_id_column(entity.id)
             .unwrap_or(DEFAULT_PRIMARY_KEY);
-        let mut columns = vec![(redaction_id_column(&node.id), redaction_column)];
-        if redaction_column != DEFAULT_PRIMARY_KEY {
-            columns.push((primary_key_column(&node.id), DEFAULT_PRIMARY_KEY));
+        let identity = graph.input_identity(root, input, index)?;
+        if relation.is_none() && redaction_column != DEFAULT_PRIMARY_KEY {
+            use crate::query_graph::{LoweredOperation, ScanInput};
+            let table = model
+                .entity_table(entity_name)
+                .ok_or_else(|| QueryError::Enforcement("missing authorization table".into()))?;
+            let scan = graph.scan(root, table, &node.id)?;
+            graph.bind_scan(scan, ScanInput::Node(index))?;
+            let key = graph.stored_column(scan, DEFAULT_PRIMARY_KEY)?;
+            let deleted = graph.stored_column(scan, ontology::DELETED_COLUMN)?;
+            let right = LoweredOperation::current(scan).filter(Expression::equal(
+                Expression::Column(deleted),
+                Expression::Boolean(false),
+            ));
+            let operation = graph.operation_mut(root)?;
+            let source = match operation {
+                LoweredOperation::Limit { input, .. } => input.as_mut(),
+                source => source,
+            };
+            *source = std::mem::replace(source, LoweredOperation::One).join(
+                right,
+                Expression::equal(Expression::Column(identity), Expression::Column(key)),
+            );
+            relation = Some(scan);
         }
-        if model.entity_has_traversal_path(entity_name) {
+        let authorization_id = if redaction_column == DEFAULT_PRIMARY_KEY {
+            identity
+        } else {
+            graph.stored_column(
+                relation
+                    .ok_or_else(|| QueryError::Enforcement("missing authorization scan".into()))?,
+                redaction_column,
+            )?
+        };
+        let mut columns = vec![(redaction_id_column(&node.id), authorization_id)];
+        if redaction_column != DEFAULT_PRIMARY_KEY {
+            columns.push((primary_key_column(&node.id), identity));
+        }
+        if model.entity_has_traversal_path(entity_name)
+            && let Some(relation) = relation
+        {
             columns.push((
                 traversal_path_column(&node.id),
-                ontology::TRAVERSAL_PATH_COLUMN,
+                graph.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?,
             ));
         }
         for (label, column) in columns {
-            graph.project(
-                root,
-                label,
-                Expression::Column(graph.stored_column(relation, column)?),
-            )?;
+            graph.project(root, label, Expression::Column(column))?;
         }
         graph.project(
             root,
