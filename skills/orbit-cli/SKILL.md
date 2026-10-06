@@ -5,10 +5,10 @@ description: >
   `glab orbit`). Reach for it when a question names a symbol or spans code
   structure. Examples: who calls or extends this, where it is defined, what
   a file defines, how definitions are distributed. One call replaces many
-  file reads and text greps. Works on the working tree and unpushed branches.
-  Not a fit: text or config search, reading one known file, or hosted
-  GitLab data (use the `orbit` skill).
-version: 0.18.2
+  file reads and text greps, including matches in config, templates, and docs.
+  Works on the working tree and unpushed branches. Not a fit: reading one known
+  file, or hosted GitLab data (use the `orbit` skill).
+version: 0.19.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -22,7 +22,7 @@ metadata:
 # Orbit local CLI skill
 
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
-definitions. `context` reads their source and relationships. `sql` runs
+definitions and lists matching lines in config, templates, and docs. `context` reads their source and relationships. `sql` runs
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
@@ -46,15 +46,16 @@ If they decline, note the discrepancy in one line and continue with the correcte
 orbit index .
 orbit grep "rate limit" --path src --kind Method,Function
 orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
-orbit context Definition:<id> src/lib.rs:120-180 crates/duckdb-client
+orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
 
 Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
 single token must also match literally, ignoring case. Results rank exact names,
-then name/path hits, then body mentions. Rows include Definition IDs and ranges;
-body mentions also show the count and first matching line.
+then name/path hits, then body mentions. Rows show each definition's name, kind,
+and range; body hits also list their matching lines. A Mentions section lists
+matching lines in config, templates, and docs.
 
-Pass Definition IDs, exact FQNs, paths, ranges, or directories to `context`.
+Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
