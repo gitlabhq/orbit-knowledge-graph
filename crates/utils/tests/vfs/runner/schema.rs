@@ -62,7 +62,7 @@ pub enum Tag {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
-    Header,
+    Metadata,
     Content,
 }
 

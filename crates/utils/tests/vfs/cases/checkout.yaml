@@ -62,7 +62,7 @@
     - path: grown.rs
       content: small
   rules:
-    - {phase: header, decision: {kind: keep, value: source}}
+    - {phase: metadata, decision: {kind: keep, value: source}}
   tests:
     - name: Deleting a host file refuses reads but keeps its metadata
       assert:

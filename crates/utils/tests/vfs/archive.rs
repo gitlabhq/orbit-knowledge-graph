@@ -73,20 +73,24 @@ fn archive_hardlinks_stay_within_the_selected_root() {
     );
     assert_eq!(vfs.usage().files, 3);
 
-    let mut builder = tar::Builder::new(Vec::new());
-    link.set_entry_type(tar::EntryType::Link);
-    builder
-        .append_link(&mut link, "root/link", "../secret")
-        .unwrap();
-    let bytes = gzip(builder);
-    let error = Vfs::load(
-        Archive(bytes.as_slice()),
-        (),
-        Limits::default(),
-        Default::default(),
-    )
-    .unwrap_err();
-    assert!(matches!(error, SourceError::Io(error) if error.kind() == io::ErrorKind::InvalidData));
+    for (target, expected) in [
+        ("../secret", io::ErrorKind::InvalidData),
+        ("/root/src/file", io::ErrorKind::InvalidData),
+        ("other/file", io::ErrorKind::Other),
+    ] {
+        let mut builder = tar::Builder::new(Vec::new());
+        link.set_entry_type(tar::EntryType::Link);
+        builder.append_link(&mut link, "root/link", target).unwrap();
+        let bytes = gzip(builder);
+        let error = Vfs::load(
+            Archive(bytes.as_slice()),
+            (),
+            Limits::default(),
+            Default::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, SourceError::Io(error) if error.kind() == expected));
+    }
 }
 
 #[test]
@@ -167,14 +171,16 @@ fn archive_policy_receives_the_complete_body() {
     struct CheckBody;
     impl Pass for CheckBody {
         type Tag = ();
-        fn header(&self, file: &mut File<()>) {
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
             if file.path.ends_with(".png") {
-                file.decide(Decision::Drop("image"));
+                Decision::Drop("image")
+            } else {
+                file.decision()
             }
         }
-        fn content(&self, file: &mut File<()>, bytes: &[u8]) {
-            assert_eq!(bytes, b"abcdefgh".repeat(1500));
-            file.decide(Decision::Keep(()));
+        fn content(&self, file: &File<'_, ()>) -> Decision<()> {
+            assert_eq!(file.bytes().unwrap(), b"abcdefgh".repeat(1500));
+            Decision::Keep(())
         }
     }
     let body = b"abcdefgh".repeat(1500);

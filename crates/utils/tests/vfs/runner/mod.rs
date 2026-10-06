@@ -28,31 +28,44 @@ impl Policy {
         )
     }
 
-    fn apply(&self, phase: Phase, file: &mut File<Tag>, bytes: &[u8]) {
+    fn apply(
+        &self,
+        phase: Phase,
+        path: &str,
+        bytes: &[u8],
+        mut result: Decision<Tag>,
+    ) -> Decision<Tag> {
         for (rule, decision) in &self.0 {
             if rule.phase == phase
                 && rule
                     .suffix
                     .as_ref()
-                    .is_none_or(|suffix| file.path.ends_with(suffix))
+                    .is_none_or(|suffix| path.ends_with(suffix))
                 && rule.contains.as_ref().is_none_or(|data| {
                     let needle = data.as_bytes();
                     needle.is_empty() || bytes.windows(needle.len()).any(|window| window == needle)
                 })
             {
-                file.decide(*decision);
+                result = *decision;
             }
         }
+        result
     }
 }
 
 impl Pass for Policy {
     type Tag = Tag;
-    fn header(&self, file: &mut File<Tag>) {
-        self.apply(Phase::Header, file, &[]);
+    fn metadata(&self, file: &File<'_, Tag>) -> Decision<Tag> {
+        assert!(file.bytes().is_none());
+        self.apply(Phase::Metadata, &file.path, &[], file.decision())
     }
-    fn content(&self, file: &mut File<Tag>, bytes: &[u8]) {
-        self.apply(Phase::Content, file, bytes);
+    fn content(&self, file: &File<'_, Tag>) -> Decision<Tag> {
+        self.apply(
+            Phase::Content,
+            &file.path,
+            file.bytes().expect("content phase supplies bytes"),
+            file.decision(),
+        )
     }
 }
 
@@ -112,7 +125,7 @@ fn run_scenario(scenario: &Scenario) {
     for rule in &scenario.rules {
         assert!(
             rule.phase == Phase::Content || rule.contains.is_none(),
-            "header rules cannot inspect bytes"
+            "metadata rules cannot inspect bytes"
         );
     }
     assert!(
@@ -234,7 +247,7 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
                 Step::Files { expect } => assert_eq!(
                     vfs.files()
                         .map(|file| Row {
-                            path: file.path.clone(),
+                            path: file.path.to_string(),
                             size: file.size,
                             decision: verdict(file.decision())
                         })
@@ -243,7 +256,7 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
                 ),
                 Step::Subtree { path, expect } => assert_eq!(
                     vfs.subtree(Path::new(&path))
-                        .map(|file| file.path.clone())
+                        .map(|file| file.path.to_string())
                         .collect::<Vec<_>>(),
                     expect
                 ),

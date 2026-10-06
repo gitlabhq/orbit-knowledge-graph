@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use flate2::read::GzDecoder;
 use tar::EntryType;
@@ -38,11 +38,32 @@ impl<R: Read> Source for Archive<R> {
             if kind != EntryType::Regular && !is_link {
                 continue;
             }
-            let Some(path) = relative_path(&entry, &mut root)? else {
+            let entry_path = entry.path().map_err(std::io::Error::other)?.into_owned();
+            let Some(path) = relative_path(&entry_path, &mut root)? else {
                 continue;
             };
+            if path.as_os_str().is_empty() {
+                continue;
+            }
+            let path = path.to_string_lossy();
             if is_link {
-                let target = link_target(&entry, kind, &mut root)?;
+                let target = entry
+                    .link_name()
+                    .map_err(std::io::Error::other)?
+                    .filter(|target| !target.as_os_str().is_empty())
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "archive link has no target",
+                        )
+                    })?;
+                let target = if kind == EntryType::Link {
+                    let relative = relative_path(&target, &mut root)?
+                        .ok_or_else(|| std::io::Error::other("archive hard link outside root"))?;
+                    format!("/{}", relative.display())
+                } else {
+                    target.to_string_lossy().into_owned()
+                };
                 into.put(&path, Put::Symlink(target))?;
                 continue;
             }
@@ -62,80 +83,24 @@ impl<R: Read> Source for Archive<R> {
     }
 }
 
-fn relative_path<R: Read>(
-    entry: &tar::Entry<'_, R>,
+fn relative_path<'a>(
+    path: &'a Path,
     root: &mut Option<OsString>,
-) -> Result<Option<String>, SourceError> {
-    let entry_path = entry.path().map_err(std::io::Error::other)?;
-    if !is_safe_relative_path(&entry_path) {
+) -> Result<Option<&'a Path>, SourceError> {
+    if !is_safe_relative_path(path) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "path traversal detected in archive entry",
         )
         .into());
     }
-    let shown = entry_path.to_string_lossy();
-    if shown.is_empty() {
-        return Ok(None);
-    }
-    let relative = match strip_root(&entry_path, root) {
-        Ok(path) => path,
-        Err(e) => {
-            warn!(entry = %shown, error = %e, "skipping archive entry outside the archive root");
-            return Ok(None);
-        }
-    };
-    if relative.as_os_str().is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(relative.to_string_lossy().into_owned()))
-}
-
-fn link_target<R: Read>(
-    entry: &tar::Entry<'_, R>,
-    kind: EntryType,
-    root: &mut Option<OsString>,
-) -> Result<String, SourceError> {
-    let target = entry
-        .link_name()
-        .map_err(std::io::Error::other)?
-        .map(|t| t.to_string_lossy().into_owned())
-        .filter(|target| !target.is_empty())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "archive link has no target",
-            )
-        })?;
-    if kind == EntryType::Link && !is_safe_relative_path(Path::new(&target)) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid archive hard link",
-        )
-        .into());
-    }
-    Ok(match kind {
-        EntryType::Link => format!("/{}", strip_root(Path::new(&target), root)?.display()),
-        _ => target,
-    })
-}
-
-fn strip_root(path: &Path, root: &mut Option<OsString>) -> Result<PathBuf, SourceError> {
     let mut components = path.components();
     let Some(first) = components.next() else {
-        return Ok(PathBuf::new());
+        return Ok(None);
     };
-    let first = first.as_os_str().to_os_string();
-    match root {
-        None => *root = Some(first),
-        Some(expected) if first != *expected => {
-            return Err(SourceError::Io(std::io::Error::other(format!(
-                "archive entry '{}' is not under the expected root directory '{}'",
-                path.display(),
-                expected.to_string_lossy()
-            ))));
-        }
-        _ => {}
+    if first.as_os_str() != root.get_or_insert_with(|| first.as_os_str().to_owned()) {
+        warn!(entry = %path.display(), "skipping archive entry outside the archive root");
+        return Ok(None);
     }
-    Ok(components.as_path().to_path_buf())
+    Ok(Some(components.as_path()))
 }

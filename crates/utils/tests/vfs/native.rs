@@ -14,13 +14,16 @@ use std::sync::{
 struct Checked(Arc<AtomicUsize>);
 impl Pass for Checked {
     type Tag = ();
-    fn header(&self, file: &mut File<()>) {
-        file.decide(Decision::Keep(()));
+    fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+        assert!(file.bytes().is_none());
+        Decision::Keep(())
     }
-    fn content(&self, file: &mut File<()>, bytes: &[u8]) {
+    fn content(&self, file: &File<'_, ()>) -> Decision<()> {
         self.0.fetch_add(1, SeqCst);
-        if bytes.contains(&0) {
-            file.decide(Decision::List("binary"));
+        if file.bytes().unwrap().contains(&0) {
+            Decision::List("binary")
+        } else {
+            file.decision()
         }
     }
 }
@@ -100,6 +103,180 @@ fn concurrent_first_reads_run_content_once() {
         vfs.files().next().unwrap().decision(),
         Decision::List("binary")
     );
+}
+
+#[test]
+fn loading_decisions_are_not_repeated_by_reads() {
+    struct CountContent(Arc<AtomicUsize>);
+    impl Pass for CountContent {
+        type Tag = ();
+        fn content(&self, file: &File<'_, ()>) -> Decision<()> {
+            self.0.fetch_add(1, SeqCst);
+            file.decision()
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), b"content").unwrap();
+    for spill in [false, true] {
+        for linked in [false, true] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let limits = Limits {
+                resident_bytes: spill.then_some(0),
+                ..Limits::default()
+            };
+            let vfs = if linked {
+                Vfs::load(
+                    Checkout(root.path()),
+                    CountContent(count.clone()),
+                    limits,
+                    Default::default(),
+                )
+            } else {
+                Vfs::load(
+                    orbit_utils::vfs::sources::Memory(vec![("file".into(), b"content".to_vec())]),
+                    CountContent(count.clone()),
+                    limits,
+                    Default::default(),
+                )
+            }
+            .unwrap();
+            assert_eq!(count.load(SeqCst), 1);
+            for _ in 0..3 {
+                assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"content");
+            }
+            assert_eq!(count.load(SeqCst), 1);
+            assert_eq!(
+                vfs.stat(Path::new("file")).unwrap().decision,
+                Some(Decision::Keep(()))
+            );
+        }
+    }
+}
+
+#[test]
+fn resident_duplicates_share_content_after_loading() {
+    let vfs = Vfs::load(
+        orbit_utils::vfs::sources::Memory(vec![
+            ("a".into(), b"shared".to_vec()),
+            ("b".into(), b"shared".to_vec()),
+            ("a".into(), b"replacement".to_vec()),
+            ("c".into(), b"shared".to_vec()),
+        ]),
+        (),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let b = vfs.read(Path::new("b")).unwrap();
+    let c = vfs.read(Path::new("c")).unwrap();
+    assert!(Arc::ptr_eq(&b, &c));
+    assert_eq!(&*vfs.read(Path::new("a")).unwrap(), b"replacement");
+    drop(vfs);
+    assert_eq!(&*b, b"shared");
+}
+
+#[test]
+fn composed_passes_observe_previous_decisions_without_changing_file_metadata() {
+    struct Stage(u8);
+    impl Pass for Stage {
+        type Tag = u8;
+
+        fn metadata(&self, file: &File<'_, u8>) -> Decision<u8> {
+            assert!(file.bytes().is_none());
+            assert_eq!(file.path, "file");
+            assert_eq!(file.size, 7);
+            assert_eq!(
+                file.decision(),
+                if self.0 == 1 {
+                    Decision::Pending
+                } else {
+                    Decision::Keep(self.0 - 1)
+                }
+            );
+            Decision::Keep(self.0)
+        }
+
+        fn content(&self, file: &File<'_, u8>) -> Decision<u8> {
+            assert_eq!(file.path, "file");
+            assert_eq!(file.size, 7);
+            assert_eq!(file.bytes(), Some(b"content".as_slice()));
+            assert_eq!(
+                file.decision(),
+                Decision::Keep(if self.0 == 1 { 3 } else { self.0 + 9 })
+            );
+            Decision::Keep(self.0 + 10)
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), b"content").unwrap();
+    for linked in [false, true] {
+        let pass = Stage(1).then(Stage(2).then(Stage(3)));
+        let vfs = if linked {
+            Vfs::load(
+                Checkout(root.path()),
+                pass,
+                Limits::default(),
+                Default::default(),
+            )
+        } else {
+            Vfs::load(
+                orbit_utils::vfs::sources::Memory(vec![("file".into(), b"content".to_vec())]),
+                pass,
+                Limits::default(),
+                Default::default(),
+            )
+        }
+        .unwrap();
+        assert_eq!(
+            vfs.files().next().unwrap().decision(),
+            Decision::Keep(if linked { 3 } else { 13 })
+        );
+        for _ in 0..2 {
+            assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"content");
+            assert_eq!(
+                vfs.stat(Path::new("file")).unwrap().decision,
+                Some(Decision::Keep(13))
+            );
+        }
+    }
+}
+
+#[test]
+fn file_bytes_are_borrowed_only_while_classifying_including_empty_files() {
+    struct Inspect(Arc<AtomicUsize>);
+    impl Pass for Inspect {
+        type Tag = ();
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+            assert!(file.bytes().is_none());
+            Decision::Keep(())
+        }
+        fn content(&self, file: &File<'_, ()>) -> Decision<()> {
+            let bytes = file.bytes().expect("content includes empty slices");
+            assert_eq!(bytes.len() as u64, file.size);
+            self.0.fetch_add(1, SeqCst);
+            file.decision()
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("empty"), b"").unwrap();
+    std::fs::write(root.path().join("full"), b"content").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let vfs = Vfs::load(
+        Checkout(root.path()),
+        Inspect(calls.clone()).then(Inspect(calls.clone())),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(calls.load(SeqCst), 0);
+    assert!(vfs.files().all(|file| file.bytes().is_none()));
+    for _ in 0..2 {
+        assert_eq!(&*vfs.read(Path::new("empty")).unwrap(), b"");
+        assert_eq!(&*vfs.read(Path::new("full")).unwrap(), b"content");
+    }
+    assert_eq!(calls.load(SeqCst), 4);
+    assert!(vfs.files().all(|file| file.bytes().is_none()));
 }
 
 #[test]
@@ -215,12 +392,12 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
     struct Filter;
     impl Pass for Filter {
         type Tag = ();
-        fn header(&self, file: &mut File<()>) {
-            file.decide(match file.path.as_str() {
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+            match file.path.as_ref() {
                 "listed" => Decision::List("excluded"),
                 "dropped" => Decision::Drop("excluded"),
                 _ => Decision::Keep(()),
-            });
+            }
         }
     }
     let reads = AtomicUsize::new(0);

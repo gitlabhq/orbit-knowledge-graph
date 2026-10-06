@@ -6,7 +6,7 @@
     - path: b.log
       content: bb
   rules:
-    - {phase: header, decision: {kind: drop, value: log}}
+    - {phase: metadata, decision: {kind: drop, value: log}}
   limits: {total_bytes: 2}
   load_error: cap:total_bytes
 
@@ -18,7 +18,7 @@
     - path: b.log
       content: ""
   rules:
-    - {phase: header, decision: {kind: drop, value: log}}
+    - {phase: metadata, decision: {kind: drop, value: log}}
   limits: {files: 1}
   load_error: cap:files
 

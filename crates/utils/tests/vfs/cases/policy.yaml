@@ -12,9 +12,9 @@
     - path: build.log
       content: log
   rules:
-    - {phase: header, suffix: .rs, decision: {kind: keep, value: source}}
-    - {phase: header, suffix: .png, decision: {kind: list, value: excluded}}
-    - {phase: header, suffix: .log, decision: {kind: drop, value: log}}
+    - {phase: metadata, suffix: .rs, decision: {kind: keep, value: source}}
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .log, decision: {kind: drop, value: log}}
     - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
   tests:
     - name: Listed files refuse reads and dropped files disappear
@@ -41,8 +41,8 @@
     - path: b.keep.png
       content: source
   rules:
-    - {phase: header, suffix: .png, decision: {kind: list, value: excluded}}
-    - {phase: header, suffix: .keep.png, decision: {kind: keep, value: source}}
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .keep.png, decision: {kind: keep, value: source}}
   tests:
     - name: The later keep decision makes the matching file readable
       assert:
@@ -55,7 +55,7 @@
     - path: file
       content: data
   rules:
-    - {phase: header, decision: {kind: keep, value: source}}
+    - {phase: metadata, decision: {kind: keep, value: source}}
     - {phase: content, decision: {kind: pending}}
   tests:
     - name: Pending is never exposed after content classification
@@ -83,7 +83,7 @@
     - path: blob.rs
       content: "x\0y"
   rules:
-    - {phase: header, decision: {kind: keep, value: source}}
+    - {phase: metadata, decision: {kind: keep, value: source}}
     - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
   tests:
     - name: Inventory reflects the decision after a refused read
@@ -99,7 +99,7 @@
     - path: file
       content: drop
   rules:
-    - {phase: header, decision: {kind: keep, value: source}}
+    - {phase: metadata, decision: {kind: keep, value: source}}
     - {phase: content, decision: {kind: drop, value: content}}
   tests:
     - name: Rejected content remains listed after loading

@@ -12,7 +12,7 @@ flowchart LR
         memory[Memory]
     end
     sources --> loading["Loading::put"]
-    loading --> policy["Pass::header / content"]
+    loading --> policy["Pass::metadata / content"]
     policy --> freeze["Sort and freeze"]
     freeze --> store["Vfs: read / read_dir / stat"]
     store --> inventory["files / subtree / usage"]
@@ -72,9 +72,9 @@ Only supplied paths enter the store; a link cannot resolve unless its target is 
 Paths through host symlinked parent directories are refused, including links into the checkout.
 
 Disk files remain linked rather than copied.
-Header `Keep` defers content checks until the first read; header `Pending` reads during loading, then releases those bytes.
+Metadata `Keep` defers content checks until the first read; metadata `Pending` reads during loading, then releases those bytes.
 Therefore, the default `()` pass reads checkout files during loading.
-Set `Keep` in a header pass to defer that read.
+Return `Keep` from a metadata pass to defer that read.
 
 Checkouts are live, not snapshots. Deleted files return read errors; size changes are rejected.
 Same-size edits can change later reads, while the first content decision remains cached.
@@ -123,16 +123,20 @@ enum Role { Source, #[default] Input }
 struct Filter;
 impl Pass for Filter {
     type Tag = Role;
-    fn header(&self, file: &mut File<Role>) {
+    fn metadata(&self, file: &File<'_, Role>) -> Decision<Role> {
         if file.path.ends_with(".png") {
-            file.decide(Decision::List("image"));
+            Decision::List("image")
         } else if file.path.ends_with(".rs") {
-            file.decide(Decision::Keep(Role::Source));
+            Decision::Keep(Role::Source)
+        } else {
+            file.decision()
         }
     }
-    fn content(&self, file: &mut File<Role>, bytes: &[u8]) {
-        if bytes.contains(&0) {
-            file.decide(Decision::List("binary"));
+    fn content(&self, file: &File<'_, Role>) -> Decision<Role> {
+        if file.bytes().is_some_and(|bytes| bytes.contains(&0)) {
+            Decision::List("binary")
+        } else {
+            file.decision()
         }
     }
 }
@@ -145,12 +149,18 @@ impl Pass for Filter {
 | `List(reason)` | Retain a node without readable content |
 | `Drop(reason)` | Omit the node from the frozen inventory |
 
-Passes are trusted, synchronous and infallible. They should change decisions, not paths or sizes.
+Passes are synchronous and infallible. They receive read-only inputs and return a decision.
 They do not count resources or receive symlinks. The store lists links as `List("symlink")`.
 Oversize files become `List("oversize")` before policy runs.
 
 Compose passes with `first.then(second)`. Each stage runs in order; the second sees the first's decision and can override it.
-Header `List` or `Drop` skips content processing and never invokes a lazy reader.
+The metadata chain starts with `Pending`. The content chain starts with the final metadata decision.
+Each pass receives an immutable file. `file.decision()` exposes the preceding pass's result.
+`file.bytes()` is `None` during metadata checks and `Some(bytes)` during content checks, including `Some(&[])` for empty files.
+It returns a borrowed slice and never performs I/O. The store attaches bytes only for the content callback.
+Inventory files own their paths and retain no content slice. Chained passes borrow the path and bytes without copying them.
+The store keeps the metadata decision and caches the final content decision once, without changing the metadata result.
+Metadata `List` or `Drop` skips content processing and never invokes a lazy reader.
 
 Linked files can be rejected after freezing. `decision()` and `stat` report that late decision.
 A late `Drop` keeps its node and reads as `Unsupported`, because the frozen inventory cannot remove it.
@@ -209,14 +219,16 @@ Resident and scratch budgets count unique blobs. They exclude metadata, source b
 Concurrent stores have separate budgets, so callers must account for concurrency when sizing memory.
 
 SHA-256 identifies content before storage. Identical bytes share storage but remain separate file rows.
+File nodes retain shared resident bytes or a spill descriptor. The deduplication map is discarded after loading.
 Scratch is one anonymous temporary file, closed when the store drops. Its configured directory must exist.
 Use a disk-backed volume rather than tmpfs when spilling should reduce RAM use.
 LZ4 compresses each spilled blob independently, only when it shrinks. Reads remain random-access.
 
 `Usage.bytes` counts offered bytes; `Usage.files` counts final nodes.
-`kept` sums current kept-node sizes. `resident` and `spilled` count allocated blob bytes.
+`kept` sums current kept-node sizes. `resident` and `spilled` count bytes allocated during loading.
 `deduped_bytes` counts avoided duplicate writes; `duplicate_paths` counts overwritten entries.
-Replacing a path can leave an unused blob allocated until drop, so these totals are not an accounting identity.
+Unused resident blobs are released after loading. Scratch bytes remain allocated until the store drops.
+Replacing paths can therefore make these totals differ from the content reachable through the final inventory.
 
 `Options.cancelled` accepts a `Send + Sync` predicate, such as `move || token.is_cancelled()`.
 It is polled once per `put`. Cancellation stops at the next offered file, not during blocked reads or decompression.
@@ -294,7 +306,7 @@ Empty fixture sets are valid; an empty scenario list is not. Failures report the
 | `name` | Description of the scenario's behavior |
 | `sources` | Nonempty list: `memory`, `lazy`, `checkout`, `changed`, `archive` |
 | `fixtures` | Inline files with `path` and `content`; paths imply directories |
-| `rules` | Ordered header/content decisions, split across a real `Pass::then` chain |
+| `rules` | Ordered metadata/content decisions, split across a real `Pass::then` chain |
 | `limits` | The five VFS limits; omitted fields are unlimited |
 | `options` | `compress_spill`, `scratch: default/existing/missing`, `cancel_after` |
 | `load_error` | Exact source error expectation; excludes post-load tests |
@@ -308,7 +320,7 @@ Fixtures remain ordered so memory, lazy, and archive scenarios can test duplicat
 A `link` target replaces content for checkout, changed, and archive sources.
 Host fixture paths are checked before writes. Archive corruption and reader faults belong in the Rust source tests.
 
-Rules require `phase: header/content` and `decision`.
+Rules require `phase: metadata/content` and `decision`.
 Optional `suffix` matches names; `contains` matches bytes during content processing only.
 Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list/drop, value: reason}`.
 Policy reasons are `binary`, `excluded`, `log`, or `content`.

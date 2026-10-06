@@ -4,14 +4,14 @@
 //! Source ──put──▶ Loading<T> ──freeze──▶ Vfs<T>
 //!                   │                      read / read_dir / stat
 //!                   ▼                      files / subtree / usage
-//!            Pass::header (path, size)
-//!            Pass::content (bytes)       →  Decision<T>: Keep(T) | List(why) | Drop(why)
+//!            Pass::metadata (&File)
+//!            Pass::content (&File)       →  Decision<T>: Keep(T) | List(why) | Drop(why)
 //! ```
 //!
 //! Decisions are policy and belong to a [`Pass`]; where bytes live, when they
 //! are read and what a path resolves to is mechanism and belongs to the store.
 //! Virtual paths resolve lexically under `/`. Checkout sources keep host paths separate
-//! and reject symlink traversal during disk reads. Custom sources and passes are trusted.
+//! and reject symlink traversal during disk reads. Custom sources select trusted host paths.
 //! Disk-linked contents are live, not snapshots; callers must provide a stable checkout
 //! when they need one revision. Repeated reads can perform I/O again.
 //!
