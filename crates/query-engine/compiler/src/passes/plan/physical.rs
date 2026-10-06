@@ -189,9 +189,7 @@ impl PhysicalPlan {
             predicates.extend(
                 node.filters
                     .iter()
-                    .filter(|(column, filter)| {
-                        sort_key.contains(column) && filter.filter.rhs_column.is_none()
-                    })
+                    .filter(|(_, filter)| filter.in_sort_key && filter.filter.rhs_column.is_none())
                     .map(|(column, filter)| property_filter(&node.alias, column, filter)),
             );
             if sort_key.iter().any(|column| column == DEFAULT_PRIMARY_KEY) {

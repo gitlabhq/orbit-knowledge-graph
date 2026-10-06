@@ -25,6 +25,7 @@ pub enum Predicate {
         column: Column,
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
+        in_sort_key: bool,
     },
     Ids {
         column: Column,
@@ -88,6 +89,7 @@ pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Pred
         column: Column::new(alias, property),
         filter: bound.filter.clone(),
         data_type: bound.data_type,
+        in_sort_key: bound.in_sort_key,
     }
 }
 

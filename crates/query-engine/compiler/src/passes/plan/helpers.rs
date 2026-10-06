@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{ColumnSelection, FilterOp, InputFilter};
+use query_data_model::QueryBackendCatalog;
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
@@ -18,13 +19,20 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let metadata = match owner {
-                FilterOwner::Entity(entity) => model
-                    .property_for_entity_id(entity, property)
-                    .map(|property| (Some(property.id), Some(property.data_type))),
-                FilterOwner::Table(table) => Some((None, model.table_column_type(table, property))),
+            let (metadata, table) = match owner {
+                FilterOwner::Entity(entity) => (
+                    model
+                        .property_for_entity_id(entity, property)
+                        .map(|property| (Some(property.id), Some(property.data_type))),
+                    model.query_backend().entity_table(entity),
+                ),
+                FilterOwner::Table(table) => (
+                    Some((None, model.table_column_type(table, property))),
+                    Some(table),
+                ),
             };
             let (property_id, data_type) = metadata.unwrap_or_default();
+            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
             filters.iter().map(move |filter| {
                 (
                     property.clone(),
@@ -35,6 +43,7 @@ pub fn ordered_filters(
                         selectivity: property_id
                             .map(|property| model.property_selectivity(property))
                             .unwrap_or_default(),
+                        in_sort_key,
                     },
                 )
             })

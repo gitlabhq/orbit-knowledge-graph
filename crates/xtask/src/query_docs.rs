@@ -3,7 +3,7 @@
 //!
 //! Currently this owns the **text-indexed properties** table: the set of
 //! `(entity, property)` pairs that accept the `token_match`, `all_tokens`, and
-//! `any_tokens` operators. That set is the columns carrying a `text(...)`
+//! `any_tokens` operators. That set is the columns carrying the `text`
 //! storage index in the ontology YAML — the same signal the compiler's
 //! token-operator validation enforces — so the table is fully derivable and
 //! must never be hand-edited.
@@ -103,8 +103,8 @@ fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
 /// Renders the markdown table body (without the surrounding marker comments).
 fn render_table(ontology: &Ontology) -> Result<String> {
     // Node-only by design: the validator's token-op gate keys off
-    // `text_index_tokenizer`, which is itself node-only, and no edge YAML
-    // carries a `text(...)` index. If an edge ever gains one, extend both this
+    // `text_indexed_columns`, which is itself node-only, and no edge YAML
+    // carries a `text` index. If an edge ever gains one, extend both this
     // iteration and the validator lookup together so the docs can't omit it.
     let mut rows: Vec<(&str, Vec<&str>)> = ontology
         .nodes()

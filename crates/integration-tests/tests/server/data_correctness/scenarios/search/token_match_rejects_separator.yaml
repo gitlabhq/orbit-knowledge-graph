@@ -1,0 +1,17 @@
+description: token_match rejects a value with a word separator at compile time instead of failing in ClickHouse
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"token_match": "fix-bug"}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND token_match(mr.title, 'fix-bug')
+    RETURN mr.title LIMIT 10
+
+expect:
+  compile_error: "token_match value must be one word"

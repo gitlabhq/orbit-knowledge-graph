@@ -122,6 +122,15 @@ impl TestContext {
         query.fetch_arrow().await.map_err(|e| e.to_string())
     }
 
+    pub async fn explain_plan(&self, pq: &ParameterizedQuery) -> serde_json::Value {
+        let text = self
+            .create_client()
+            .explain_plan(&pq.render())
+            .await
+            .expect("explain failed");
+        serde_json::from_str(&text).expect("explain output is JSON")
+    }
+
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
     /// every inserted row.
     pub async fn optimize_all(&self) {

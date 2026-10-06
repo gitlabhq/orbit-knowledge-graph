@@ -154,9 +154,7 @@ fn traversal_path_values<'a>(
 ) -> Result<Vec<&'a str>> {
     match traversal_path_filter.op.unwrap_or(FilterOp::Eq) {
         FilterOp::Eq | FilterOp::StartsWith => traversal_path_filter
-            .value
-            .as_ref()
-            .and_then(|v| v.as_str())
+            .value_str()
             .map(|path| vec![path])
             .ok_or_else(|| invalid_traversal_path_filter_invariant(label)),
         FilterOp::In => {

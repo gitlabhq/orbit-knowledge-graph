@@ -1254,7 +1254,7 @@ fn like_rejects_contains_on_email() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE operators"),
+        err.to_string().contains("string operators"),
         "expected like_allowed rejection, got: {err}"
     );
 }
@@ -1274,7 +1274,7 @@ fn like_rejects_starts_with_on_email() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE operators"),
+        err.to_string().contains("string operators"),
         "expected like_allowed rejection, got: {err}"
     );
 }

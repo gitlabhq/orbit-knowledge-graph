@@ -53,7 +53,8 @@ center node, and a shortest path needs both endpoints bounded.
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`.
 - Lists: `x.state IN ['opened', 'merged']`.
 - Strings: `STARTS WITH`, `ENDS WITH`, `CONTAINS`. The pattern needs at least
-  3 characters.
+  3 characters. Matching ignores ASCII case, except on sort-key columns such as
+  `branch`.
 - Nulls: `IS NULL`, `IS NOT NULL`.
 
 Values are literals. There are no query parameters, so never splice untrusted
@@ -61,13 +62,16 @@ text into a query.
 
 ### Text-token search
 
-For word searches, use token functions rather than substring `CONTAINS`.
-These functions require a text-indexed property, such as `MergeRequest.title`
-or `Definition.fqn`. Other properties reject them.
+`CONTAINS` is indexed on text-indexed properties, such as `MergeRequest.title`
+or `Definition.fqn`. Use it for a word prefix (`'migrat'`) or a phrase with its
+words in order (`'fix flaky'`). Use the token functions when word order does not
+matter. Words are runs of letters and digits, so `token_match(d.file_path,
+'main')` matches `src/main.rs`. Properties without a text index reject the
+token functions.
 
-- `token_match(property, 'token')` matches one token.
-- `all_tokens(property, 'first second')` requires every token.
-- `any_tokens(property, 'first second')` requires at least one token.
+- `token_match(property, 'token')` matches one whole word; the value is a single word.
+- `all_tokens(property, 'first second')` requires every word, in any order.
+- `any_tokens(property, 'first second')` requires at least one word.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest {project_id: 278964})
