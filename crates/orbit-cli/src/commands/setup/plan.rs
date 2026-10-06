@@ -10,7 +10,6 @@ use super::{Component, Options, Target};
 pub(super) struct Selection {
     pub(super) agents: Vec<Agent>,
     pub(super) components: BTreeSet<Component>,
-    pub(super) graph_first: bool,
 }
 
 impl Selection {
@@ -28,7 +27,6 @@ impl Selection {
         Ok(Selection {
             agents,
             components: options.components.clone(),
-            graph_first: options.graph_first,
         })
     }
 
@@ -46,11 +44,7 @@ impl Selection {
         } else {
             agents_named(&options.agents)?
         };
-        Ok(Selection {
-            agents,
-            components,
-            graph_first: false,
-        })
+        Ok(Selection { agents, components })
     }
 
     pub(super) fn selected_agent_names(&self) -> Vec<String> {

@@ -4,14 +4,12 @@
 //! tool call.
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
 
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
 use crate::commands::setup::spec;
-use crate::{telemetry, workspace};
+use crate::workspace;
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub(crate) enum Kind {
@@ -34,31 +32,7 @@ const SOURCE_EXTS: &[&str] = &[
     "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
 ];
 
-const GRAPH_FIRST_ENV: &str = "ORBIT_GRAPH_FIRST";
-
-const SESSION_TTL: Duration = Duration::from_secs(2 * 24 * 60 * 60);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Event {
-    Deny,
-    OrbitUsed,
-}
-
-impl Event {
-    fn action(self) -> &'static str {
-        match self {
-            Event::Deny => "graph_first_deny",
-            Event::OrbitUsed => "graph_first_orbit_used",
-        }
-    }
-}
-
-pub(crate) fn run(
-    kind: Kind,
-    graph_first: bool,
-    tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>,
-    coding_agent: Option<&str>,
-) {
+pub(crate) fn run(kind: Kind) {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -69,200 +43,20 @@ pub(crate) fn run(
     if !local_graph_exists() {
         return;
     }
-    let graph_first =
-        graph_first_enabled(graph_first, std::env::var(GRAPH_FIRST_ENV).ok().as_deref())
-            .then(|| {
-                Some(GraphFirst {
-                    sessions: session_dir()?,
-                    project_dir: std::env::var("CLAUDE_PROJECT_DIR")
-                        .ok()
-                        .filter(|dir| !dir.is_empty()),
-                })
-            })
-            .flatten();
-    let (response, event) = respond(kind, &call, graph_first.as_ref());
-    if let Some(response) = response {
+    if let Some(response) = respond(kind, &call) {
         println!("{response}");
     }
-    if let (Some(tracker), Some(event)) = (tracker, event) {
-        telemetry::emit_hook_guard_event(tracker, event.action(), coding_agent);
-    }
 }
 
-struct GraphFirst {
-    sessions: PathBuf,
-    project_dir: Option<String>,
-}
-
-fn respond(
-    kind: Kind,
-    call: &Value,
-    graph_first: Option<&GraphFirst>,
-) -> (Option<Value>, Option<Event>) {
-    let session = graph_first.zip(session_id(call));
-    let mut event = None;
-    if runs_orbit(call)
-        && let Some((graph_first, id)) = &session
-        && claim_session(&graph_first.sessions, id)
-    {
-        event = Some(Event::OrbitUsed);
-    }
-    if !should_nudge(kind, call) {
-        return (None, event);
-    }
-    if let Some((graph_first, id)) = &session
-        && should_block(kind, call, graph_first)
-        && claim_session(&graph_first.sessions, id)
-    {
-        let deny = json!({
+fn respond(kind: Kind, call: &Value) -> Option<Value> {
+    should_nudge(kind, call).then(|| {
+        json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": spec::graph_first_deny_text(),
-            }
-        });
-        return (Some(deny), Some(Event::Deny));
-    }
-    let nudge = json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": nudge_text(kind),
-        }
-    });
-    (Some(nudge), event)
-}
-
-fn graph_first_enabled(installed: bool, env: Option<&str>) -> bool {
-    match env
-        .map(|value| value.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("1" | "true" | "on" | "yes") => true,
-        Some("0" | "false" | "off" | "no") => false,
-        _ => installed,
-    }
-}
-
-fn session_dir() -> Option<PathBuf> {
-    let base = dirs::runtime_dir()
-        .or_else(dirs::cache_dir)
-        .unwrap_or_else(std::env::temp_dir);
-    Some(base.join("orbit-hook-sessions"))
-}
-
-fn session_id(call: &Value) -> Option<String> {
-    let raw = call.get("session_id").and_then(Value::as_str)?;
-    let id: String = raw
-        .chars()
-        .map(
-            |c| match c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                true => c,
-                false => '_',
-            },
-        )
-        .take(64)
-        .collect();
-    (!id.is_empty()).then_some(id)
-}
-
-fn claim_session(dir: &Path, id: &str) -> bool {
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    let claimed = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dir.join(id))
-        .is_ok();
-    if claimed {
-        prune_sessions(dir, SystemTime::now());
-    }
-    claimed
-}
-
-fn prune_sessions(dir: &Path, now: SystemTime) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let stale = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > SESSION_TTL);
-        if stale {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-}
-
-fn command_of(call: &Value) -> &str {
-    call.get("tool_input")
-        .unwrap_or(call)
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-}
-
-fn runs_orbit(call: &Value) -> bool {
-    let tool = call.get("tool_name").and_then(Value::as_str).unwrap_or("");
-    tool.starts_with("mcp__orbit__") || invokes_orbit(command_of(call))
-}
-
-fn invokes_orbit(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| {
-            let mut words = segment
-                .split_whitespace()
-                .filter(|t| !t.starts_with('-') && !t.contains('='))
-                .map(basename)
-                .skip_while(|word| COMMAND_WRAPPERS.contains(word));
-            match words.next() {
-                Some("orbit") => true,
-                Some("glab") => words.next() == Some("orbit"),
-                _ => false,
+                "additionalContext": nudge_text(kind),
             }
         })
-}
-
-fn should_block(kind: Kind, call: &Value, graph_first: &GraphFirst) -> bool {
-    let cwd = call.get("cwd").and_then(Value::as_str);
-    let Some(root) = graph_first.project_dir.as_deref().or(cwd) else {
-        return false;
-    };
-    if cwd.is_some_and(|cwd| !Path::new(cwd).starts_with(root)) {
-        return false;
-    }
-    let command = command_of(call);
-    if !command.is_empty() {
-        return command_paths(command).all(|path| path.starts_with(root));
-    }
-    let key = match kind {
-        Kind::Search => "path",
-        Kind::Read => "file_path",
-    };
-    let path = Path::new(
-        call.get("tool_input")
-            .unwrap_or(call)
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or(""),
-    );
-    path.is_relative() || path.starts_with(root)
-}
-
-fn command_paths(command: &str) -> impl Iterator<Item = PathBuf> + '_ {
-    let home = dirs::home_dir();
-    command
-        .split(|c: char| c.is_whitespace() || "|;&()`<>=".contains(c))
-        .map(|token| token.trim_matches(['\'', '"']))
-        .filter_map(move |token| match token.strip_prefix("~/") {
-            Some(rest) => home.as_ref().map(|home| home.join(rest)),
-            None => token.starts_with('/').then(|| PathBuf::from(token)),
-        })
-        .filter(|path| !path.starts_with("/dev") && path.exists())
+    })
 }
 
 fn local_graph_exists() -> bool {
@@ -440,86 +234,24 @@ mod tests {
         assert!(should_nudge(Kind::Search, &call));
     }
 
-    fn decide(kind: Kind, call: &Value, graph_first: Option<&GraphFirst>) -> &'static str {
-        match respond(kind, call, graph_first).0 {
-            None => "none",
-            Some(out) if out["hookSpecificOutput"]["permissionDecision"] == "deny" => "deny",
-            Some(_) => "nudge",
-        }
-    }
-
     #[test]
-    fn graph_first_blocks_once_per_session_unless_orbit_ran_first() {
-        let dir = tempfile::tempdir().unwrap();
-        let graph_first = GraphFirst {
-            sessions: dir.path().to_path_buf(),
-            project_dir: Some("/repo".to_string()),
-        };
-        let read =
-            |id: &str, path: &str| json!({"session_id": id, "tool_input": {"file_path": path}});
-        let bash = |id: &str, cmd: &str| json!({"session_id": id, "tool_input": {"command": cmd}});
-        let glob =
-            json!({"session_id": "c", "tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
-        let mcp = json!({"session_id": "h", "tool_name": "mcp__orbit__run_sql", "tool_input": {}});
-        for (kind, call, expected) in [
-            (Kind::Read, read("a", "/repo/src/main.rs"), "deny"),
-            (Kind::Read, read("a", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, bash("b", "cd repo && rg foo"), "deny"),
-            (Kind::Search, glob, "deny"),
-            (Kind::Search, bash("c2", "find . -name '*.rs'"), "deny"),
-            (Kind::Search, bash("d", "glab orbit grep foo"), "none"),
-            (Kind::Read, read("d", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, bash("g", "time orbit grep foo"), "none"),
-            (Kind::Read, read("g", "/repo/src/main.rs"), "nudge"),
-            (Kind::Search, mcp, "none"),
-            (Kind::Read, read("h", "/repo/src/main.rs"), "nudge"),
-            (Kind::Read, read("e", "/elsewhere/lib.rs"), "nudge"),
-            (
-                Kind::Search,
-                bash("i", "orbit context Foo && grep bar src/"),
-                "nudge",
-            ),
-            (Kind::Search, bash("j", "rg foo /etc"), "nudge"),
-            (Kind::Search, bash("k", "rg foo src 2>/dev/null"), "deny"),
-            (
-                Kind::Read,
-                json!({"tool_input": {"file_path": "/repo/a.rs"}}),
-                "nudge",
-            ),
-        ] {
-            assert_eq!(decide(kind, &call, Some(&graph_first)), expected, "{call}");
-        }
-        assert_eq!(decide(Kind::Read, &read("f", "/repo/a.rs"), None), "nudge");
-        let mixed = bash("f", "orbit context Foo && grep bar src/");
-        assert_eq!(decide(Kind::Search, &mixed, None), "nudge");
-        let event = |kind, call| respond(kind, &call, Some(&graph_first)).1;
+    fn searches_and_source_reads_get_a_nudge_and_nothing_is_denied() {
+        let search = json!({"tool_input": {"command": "rg foo src"}});
+        let out = respond(Kind::Search, &search).unwrap();
+        assert!(out["hookSpecificOutput"]["permissionDecision"].is_null());
         assert_eq!(
-            event(Kind::Search, bash("m", "orbit grep x")),
-            Some(Event::OrbitUsed)
+            out["hookSpecificOutput"]["additionalContext"],
+            nudge_text(Kind::Search)
         );
-        assert_eq!(
-            event(Kind::Read, read("n", "/repo/a.rs")),
-            Some(Event::Deny)
-        );
-        assert_eq!(event(Kind::Read, read("n", "/repo/a.rs")), None);
-        prune_sessions(dir.path(), SystemTime::now() + SESSION_TTL * 2);
-        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
-        assert_eq!(
-            session_id(&json!({"session_id": "../x"})).as_deref(),
-            Some("___x")
-        );
-    }
-
-    #[test]
-    fn graph_first_env_overrides_the_installed_flag() {
-        assert!(graph_first_enabled(false, Some("1")) && !graph_first_enabled(true, Some("off")));
-        assert!(graph_first_enabled(true, None) && graph_first_enabled(true, Some("junk")));
+        let build = json!({"tool_input": {"command": "cargo build"}});
+        assert!(respond(Kind::Search, &build).is_none());
+        let read = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
+        assert!(respond(Kind::Read, &read).is_some());
     }
 
     #[test]
     fn nudge_text_names_the_launcher_verbs() {
         assert!(nudge_text(Kind::Search).contains("`orbit grep"));
         assert!(nudge_text(Kind::Read).contains("`orbit context"));
-        assert!(spec::graph_first_deny_text().contains("`orbit grep"));
     }
 }
