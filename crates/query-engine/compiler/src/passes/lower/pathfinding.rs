@@ -8,6 +8,7 @@ use ontology::constants::*;
 use serde_json::Value;
 
 use crate::ast::*;
+use crate::bindings::Definition;
 use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
@@ -54,13 +55,13 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
         first_hop_filter: &pf.forward_first_hop_filter,
         anchor_entity: Some(start_entity),
         edge_tables: &pf.edge.tables,
-        scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
+        scope_cte: path_scope_cte.as_ref().map(|c| &c.name),
         include_tp: pf.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
     };
 
     let forward_cte = Cte::new(
-        FORWARD_CTE,
+        &Definition::new(FORWARD_CTE),
         build_frontier(
             start_anchor.edge_filter,
             pf.forward_depth,
@@ -70,7 +71,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
     );
     let backward_cte = if pf.backward_depth > 0 {
         Some(Cte::new(
-            BACKWARD_CTE,
+            &Definition::new(BACKWARD_CTE),
             build_frontier(
                 end_anchor.edge_filter.clone(),
                 pf.backward_depth,
@@ -118,7 +119,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+        from: TableRef::cte(&forward_cte.name, FORWARD_ALIAS),
         where_clause: Expr::and_all([
             Some(Expr::binary(
                 Op::Eq,
@@ -129,12 +130,12 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
                 Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
                 Expr::string(end_entity),
             )),
-            endpoint_filter(end_np, FORWARD_ALIAS, END_ID_COLUMN),
+            endpoint_filter(end_np, &end_anchor, FORWARD_ALIAS, END_ID_COLUMN),
         ]),
         ..Default::default()
     };
 
-    let intersection_query = Query {
+    let intersection_query = backward_cte.as_ref().map(|backward_cte| Query {
         select: vec![
             SelectExpr::new(
                 Expr::binary(
@@ -189,8 +190,8 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             }
             TableRef::join(
                 JoinType::Inner,
-                TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
-                TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+                TableRef::cte(&forward_cte.name, FORWARD_ALIAS),
+                TableRef::cte(&backward_cte.name, BACKWARD_ALIAS),
                 join_cond,
             )
         },
@@ -204,12 +205,12 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             Expr::int(pf.max_depth as i64),
         )),
         ..Default::default()
-    };
+    });
 
-    let paths_union = if pf.backward_depth == 0 {
-        TableRef::subquery(direct_query, PATHS_ALIAS)
+    let paths_union = if let Some(intersection) = intersection_query {
+        TableRef::union_all(vec![direct_query, intersection], PATHS_ALIAS)
     } else {
-        TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
+        TableRef::subquery(direct_query, PATHS_ALIAS)
     };
 
     let order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
@@ -240,7 +241,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
 #[derive(Clone)]
 struct Anchor {
     edge_filter: Option<Expr>,
-    cte_name: Option<String>,
+    cte_name: Option<Definition>,
     has_tp: bool,
 }
 
@@ -271,7 +272,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         };
     }
 
-    let cte_name = node_filter_cte(alias);
+    let cte_name = Definition::new(node_filter_cte(alias));
 
     let mut scan_where = Vec::new();
     for (prop, filter) in &np.filters {
@@ -321,21 +322,21 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
 }
 
 fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
-    let start_cte = start.cte_name.as_deref()?;
-    let end_cte = end.cte_name.as_deref()?;
+    let start_cte = start.cte_name.as_ref()?;
+    let end_cte = end.cte_name.as_ref()?;
     if !start.has_tp || !end.has_tp {
         return None;
     }
     // UNION, not intersect: endpoints at different namespace depths are linked
     // by edges carrying only the deeper tp, so equality yields an empty scope.
-    let arm = |cte: &str, alias: &str| Query {
+    let arm = |cte: &Definition, alias: &str| Query {
         select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::scan(cte, alias),
+        from: TableRef::cte(cte, alias),
         group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
         ..Default::default()
     };
     Some(Cte::new(
-        PATH_SCOPE_CTE,
+        &Definition::new(PATH_SCOPE_CTE),
         Query {
             union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
             ..arm(start_cte, PATH_SCOPE_START_ALIAS)
@@ -347,7 +348,7 @@ const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
 const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
 const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
-fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
+fn endpoint_filter(np: &NodePlan, anchor: &Anchor, alias: &str, col: &str) -> Option<Expr> {
     if !np.node_ids.is_empty() {
         return Expr::col_in(
             alias,
@@ -357,7 +358,10 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
         );
     }
     if !np.filters.is_empty() || np.id_range.is_some() {
-        let cte_name = node_filter_cte(&np.alias);
+        let cte_name = anchor
+            .cte_name
+            .clone()
+            .expect("filtered endpoint has an anchor definition");
         return Some(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, col)),
             cte_name,
@@ -367,10 +371,10 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
     None
 }
 
-fn scope_filter(alias: &str, cte_name: &str) -> Expr {
+fn scope_filter(alias: &str, cte_name: &Definition) -> Expr {
     Expr::InSubquery {
         expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
-        cte_name: cte_name.to_string(),
+        cte_name: cte_name.clone(),
         column: TRAVERSAL_PATH_COLUMN.to_string(),
     }
 }
@@ -387,7 +391,7 @@ struct FrontierOpts<'a> {
     first_hop_filter: &'a Option<Vec<String>>,
     anchor_entity: Option<&'a str>,
     edge_tables: &'a [String],
-    scope_cte: Option<&'a str>,
+    scope_cte: Option<&'a Definition>,
     include_tp: bool,
     anchor_denorm_tags: Vec<Expr>,
 }

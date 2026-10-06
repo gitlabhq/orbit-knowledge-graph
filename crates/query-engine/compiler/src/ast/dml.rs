@@ -5,6 +5,7 @@
 
 use std::sync::LazyLock;
 
+use crate::bindings::Definition;
 use regex::Regex;
 use serde_json::Value;
 
@@ -61,7 +62,7 @@ pub enum Expr {
     /// multiple tables against the same set.
     InSubquery {
         expr: Box<Expr>,
-        cte_name: String,
+        cte_name: Definition,
         column: String,
     },
     /// Like InSubquery but embeds the query directly instead of referencing
@@ -166,6 +167,10 @@ pub enum Op {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
+    Cte {
+        definition: Definition,
+        alias: String,
+    },
     Scan {
         table: String,
         alias: String,
@@ -237,7 +242,7 @@ impl OrderExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cte {
-    pub name: String,
+    pub name: Definition,
     pub query: Box<Query>,
     pub recursive: bool,
     /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
@@ -248,9 +253,9 @@ pub struct Cte {
 }
 
 impl Cte {
-    pub fn new(name: impl Into<String>, query: Query) -> Self {
+    pub fn new(name: &Definition, query: Query) -> Self {
         Self {
-            name: name.into(),
+            name: name.clone(),
             query: Box::new(query),
             recursive: false,
             materialized: false,
@@ -508,6 +513,12 @@ impl Expr {
 }
 
 impl TableRef {
+    pub fn cte(definition: &Definition, alias: impl Into<String>) -> Self {
+        Self::Cte {
+            definition: definition.clone(),
+            alias: alias.into(),
+        }
+    }
     pub fn with_relationship(mut self, index: usize) -> Self {
         self.set_relationship(index);
         self
@@ -515,6 +526,7 @@ impl TableRef {
 
     fn set_relationship(&mut self, index: usize) {
         match self {
+            Self::Cte { .. } => {}
             Self::Scan { relationship, .. } => *relationship = Some(index),
             Self::Subquery { query, .. } => query.from.set_relationship(index),
             Self::Union { queries, .. } => {

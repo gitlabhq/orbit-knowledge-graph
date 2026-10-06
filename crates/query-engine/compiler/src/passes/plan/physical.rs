@@ -9,7 +9,7 @@ use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
-    pub definitions: Vec<(String, PhysicalPlan)>,
+    pub definitions: Vec<(crate::bindings::Definition, PhysicalPlan)>,
     pub outputs: Vec<Projection>,
     pub bindings: Vec<BindingSource>,
 }
@@ -32,7 +32,11 @@ impl BindingSource {
     }
 }
 
-pub(super) fn key_membership(alias: &str, column: &str, name: String) -> Predicate {
+pub(super) fn key_membership(
+    alias: &str,
+    column: &str,
+    name: crate::bindings::Definition,
+) -> Predicate {
     Predicate::Membership {
         column: Column::new(alias, column),
         definition: name,

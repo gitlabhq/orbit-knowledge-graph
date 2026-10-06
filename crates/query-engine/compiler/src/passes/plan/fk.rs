@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use super::requirements::{Column, OutputValue, Projection, id_list};
+use crate::bindings::Definition;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::Direction;
@@ -52,7 +53,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         if target.filters.is_empty() && target.node_ids.is_empty() && target.id_range.is_none() {
             continue;
         }
-        let name = format!("_candidate_{}", fk.target_node);
+        let name = Definition::new(format!("_candidate_{}", fk.target_node));
         plan.definitions.push((
             name.clone(),
             PhysicalPlan::candidate_keys(target, &fk.referenced_column, vec![])?,
@@ -66,7 +67,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         }
     }
     if !visited.is_empty() && !center_extra.is_empty() {
-        let name = format!("_candidate_{center}");
+        let name = Definition::new(format!("_candidate_{center}"));
         plan.definitions.push((
             name.clone(),
             PhysicalPlan::candidate_keys(center_node, DEFAULT_PRIMARY_KEY, center_extra.clone())?,
@@ -87,7 +88,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
                 && target.id_range.is_none()
                 && center_node.has_selective_filters()
             {
-                let name = format!("_narrow_{}", fk.target_node);
+                let name = Definition::new(format!("_narrow_{}", fk.target_node));
                 plan.definitions.push((
                     name.clone(),
                     PhysicalPlan::candidate_keys(center_node, &fk.fk_column, center_extra.clone())?,
@@ -109,7 +110,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
             );
             plan.outputs.extend(scan.outputs);
         } else if target.hydration == HydrationStrategy::FilterOnly {
-            let name = format!("_filter_{}", target.alias);
+            let name = Definition::new(format!("_filter_{}", target.alias));
             plan.definitions.push((
                 name.clone(),
                 PhysicalPlan::filtered_keys(target, &fk.referenced_column)?,

@@ -13,12 +13,14 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
     {
+        let seed = compiler::bindings::Definition::new("seed");
+        let result_definition = compiler::bindings::Definition::new("result");
         let ast = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
-                "result",
+                &result_definition,
                 Query {
                     ctes: vec![Cte::new(
-                        "seed",
+                        &seed,
                         Query {
                             select: vec![SelectExpr::star()],
                             from: TableRef::scan("measurements", "m"),
@@ -34,12 +36,12 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
                         },
                         "n",
                     )],
-                    from: TableRef::scan("seed", "s"),
+                    from: TableRef::cte(&seed, "s"),
                     ..Default::default()
                 },
             )],
             select: vec![SelectExpr::col("r", "n")],
-            from: TableRef::scan("result", "r"),
+            from: TableRef::cte(&result_definition, "r"),
             ..Default::default()
         }));
         let compiled =

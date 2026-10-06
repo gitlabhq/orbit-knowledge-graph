@@ -16,6 +16,45 @@ use std::sync::LazyLock;
 
 pub use clickhouse::codegen;
 
+#[derive(Default)]
+struct DefinitionNames {
+    names: HashMap<crate::bindings::Definition, String>,
+    used: std::collections::HashSet<String>,
+}
+
+impl DefinitionNames {
+    fn new(node: &crate::ast::Node) -> crate::error::Result<Self> {
+        crate::ast::bindings::validate_definitions(node)?;
+        let mut names = Self::default();
+        if let crate::ast::Node::Query(query) = node {
+            crate::ast::visit::visit_queries(query, &mut |query| {
+                crate::ast::visit::visit_relations(&query.from, &mut |table| {
+                    if let crate::ast::TableRef::Scan { table, .. } = table {
+                        names.used.insert(table.clone());
+                    }
+                });
+                Ok(())
+            })?;
+        }
+        Ok(names)
+    }
+
+    fn name(&mut self, definition: &crate::bindings::Definition) -> String {
+        if let Some(name) = self.names.get(definition) {
+            return name.clone();
+        }
+        let hint = definition.hint();
+        let mut name = hint.to_owned();
+        let mut suffix = 1;
+        while !self.used.insert(name.clone()) {
+            name = format!("{hint}_{suffix}");
+            suffix += 1;
+        }
+        self.names.insert(definition.clone(), name.clone());
+        name
+    }
+}
+
 fn validate_aggregate(
     function: crate::input::AggFunction,
     argument: Option<&crate::ast::Expr>,
@@ -108,6 +147,102 @@ impl std::fmt::Display for ParameterizedQuery {
 mod tests {
     use super::*;
     use crate::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+
+    #[test]
+    fn definition_references_require_scope_not_matching_names() {
+        use crate::bindings::Definition;
+
+        let declared = Definition::new("items");
+        let foreign = Definition::new("items");
+        let definition = Cte::new(
+            &declared,
+            Query {
+                select: vec![SelectExpr::col("n", "id")],
+                from: TableRef::scan("nodes", "n"),
+                ..Default::default()
+            },
+        );
+        for reference in [
+            TableRef::cte(&foreign, "r"),
+            TableRef::subquery(
+                Query {
+                    ctes: vec![definition.clone()],
+                    from: TableRef::scan("nodes", "n"),
+                    ..Default::default()
+                },
+                "nested",
+            ),
+        ] {
+            let ast = Node::Query(Box::new(Query {
+                ctes: if matches!(reference, TableRef::Cte { .. }) {
+                    vec![definition.clone()]
+                } else {
+                    vec![]
+                },
+                from: reference,
+                where_clause: Some(Expr::InSubquery {
+                    expr: Box::new(Expr::int(1)),
+                    cte_name: declared.clone(),
+                    column: "id".into(),
+                }),
+                ..Default::default()
+            }));
+            for result in [
+                codegen(&ast, ResultContext::new(), QueryConfig::default()),
+                duckdb::codegen(&ast, ResultContext::new()),
+            ] {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("outside its definition scope")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn definition_names_do_not_capture_stored_tables_or_each_other() {
+        use crate::bindings::Definition;
+
+        let outer = Definition::new("items");
+        let inner = Definition::new("items");
+        let ast = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                &outer,
+                Query {
+                    ctes: vec![Cte::new(
+                        &inner,
+                        Query {
+                            select: vec![SelectExpr::col("n", "id")],
+                            from: TableRef::scan("items", "n"),
+                            ..Default::default()
+                        },
+                    )],
+                    select: vec![SelectExpr::col("i", "id")],
+                    from: TableRef::cte(&inner, "i"),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::col("r", "id")],
+            from: TableRef::cte(&outer, "r"),
+            ..Default::default()
+        }));
+        let render = || {
+            [
+                codegen(&ast, ResultContext::new(), QueryConfig::default()),
+                duckdb::codegen(&ast, ResultContext::new()),
+            ]
+        };
+        for (first, repeated) in render().into_iter().zip(render()) {
+            let sql = first.unwrap().sql;
+            assert_eq!(sql, repeated.unwrap().sql);
+            assert!(sql.contains("items_2 AS (WITH items_1 AS ("), "{sql}");
+            assert!(sql.contains("FROM items AS n"), "{sql}");
+            assert!(sql.contains("FROM items_1 AS i"), "{sql}");
+            assert!(sql.contains("FROM items_2 AS r"), "{sql}");
+        }
+    }
 
     #[test]
     fn aggregate_codegen_rejects_missing_arguments_except_row_count() {
@@ -269,24 +404,26 @@ mod tests {
     #[test]
     fn nested_cte_definitions_survive_both_renderers() {
         for recursive in [false, true] {
+            let seed_definition = crate::bindings::Definition::new("seed");
+            let result_definition = crate::bindings::Definition::new("result");
             let seed = Query {
                 select: vec![SelectExpr::new(Expr::int(7), "id")],
                 from: TableRef::scan("system.one", "one"),
                 ..Default::default()
             };
             let body = Query {
-                ctes: vec![Cte::new("seed", seed)],
+                ctes: vec![Cte::new(&seed_definition, seed)],
                 select: vec![SelectExpr::col("s", "id")],
-                from: TableRef::scan("seed", "s"),
+                from: TableRef::cte(&seed_definition, "s"),
                 limit: Some(1),
                 ..Default::default()
             };
-            let mut outer = Cte::new("result", body);
+            let mut outer = Cte::new(&result_definition, body);
             outer.recursive = recursive;
             let ast = Node::Query(Box::new(Query {
                 ctes: vec![outer],
                 select: vec![SelectExpr::col("r", "id")],
-                from: TableRef::scan("result", "r"),
+                from: TableRef::cte(&result_definition, "r"),
                 ..Default::default()
             }));
             let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();

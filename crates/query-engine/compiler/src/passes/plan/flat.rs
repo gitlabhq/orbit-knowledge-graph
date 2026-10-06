@@ -1,5 +1,6 @@
+use crate::bindings::Definition;
 use query_data_model::QueryDataModel;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -16,8 +17,8 @@ use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource
 
 struct FlatBuilder<'a, M: QueryDataModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
-    definitions: Vec<(String, PhysicalPlan)>,
-    filtered: HashSet<String>,
+    definitions: Vec<(Definition, PhysicalPlan)>,
+    filtered: HashMap<String, Definition>,
     tagged: HashSet<(String, String)>,
 }
 
@@ -27,7 +28,7 @@ pub(super) fn plan<M: QueryDataModel + ?Sized>(
     FlatBuilder {
         facts,
         definitions: Vec::new(),
-        filtered: HashSet::new(),
+        filtered: HashMap::new(),
         tagged: HashSet::new(),
     }
     .build()
@@ -112,7 +113,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 let edge = &format!("e{index}");
                 let joined = node.hydration != HydrationStrategy::Skip
                     && !(node.hydration == HydrationStrategy::FilterOnly
-                        && self.filtered.contains(alias));
+                        && self.filtered.contains_key(alias));
                 plan.bindings.push(BindingSource {
                     node: alias.clone(),
                     alias: edge.clone(),
@@ -139,7 +140,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                             DEFAULT_PRIMARY_KEY,
                         )],
                     };
-                    let name = format!("_narrow_{alias}");
+                    let name = Definition::new(format!("_narrow_{alias}"));
                     plan.definitions.push((name.clone(), keys));
                     Some(key_membership(alias, DEFAULT_PRIMARY_KEY, name))
                 } else {
@@ -177,8 +178,12 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 if !eligible {
                     continue;
                 }
-                let first = self.filtered.insert(alias.clone());
-                let name = format!("_filter_{alias}");
+                let first = !self.filtered.contains_key(alias);
+                let name = self
+                    .filtered
+                    .entry(alias.clone())
+                    .or_insert_with(|| Definition::new(format!("_filter_{alias}")))
+                    .clone();
                 if first {
                     let keys = if filter_only {
                         PhysicalPlan::filtered_keys(node, DEFAULT_PRIMARY_KEY)?
@@ -220,7 +225,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
             [&previous.from_node, &previous.to_node]
                 .into_iter()
                 .any(|alias| {
-                    self.filtered.contains(alias)
+                    self.filtered.contains_key(alias)
                         || self.facts.nodes.get(alias).is_some_and(|node| {
                             !node.node_ids.is_empty() || node.id_range.is_some()
                         })
@@ -234,8 +239,8 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 .filtered_edge_predicates(&alias, previous, &mut HashSet::new());
         let (start, end) = previous.direction.edge_columns();
         for (node, column) in [(&previous.from_node, start), (&previous.to_node, end)] {
-            if self.filtered.contains(node) {
-                predicates.push(key_membership(&alias, column, format!("_filter_{node}")));
+            if let Some(definition) = self.filtered.get(node) {
+                predicates.push(key_membership(&alias, column, definition.clone()));
             }
         }
         Some(PhysicalPlan {

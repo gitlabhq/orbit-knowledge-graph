@@ -29,7 +29,7 @@ fn visit_table_queries_ref(
     callback: &mut impl FnMut(&Query) -> Result<()>,
 ) -> Result<()> {
     match table {
-        TableRef::Scan { .. } => Ok(()),
+        TableRef::Scan { .. } | TableRef::Cte { .. } => Ok(()),
         TableRef::Subquery { query, .. } => visit_queries(query, callback),
         TableRef::Union { queries, .. } => {
             for query in queries {
@@ -109,9 +109,10 @@ pub fn visit_relations<'a>(table: &'a TableRef, callback: &mut impl FnMut(&'a Ta
             visit_relations(left, callback);
             visit_relations(right, callback);
         }
-        TableRef::Scan { .. } | TableRef::Subquery { .. } | TableRef::Union { .. } => {
-            callback(table)
-        }
+        TableRef::Scan { .. }
+        | TableRef::Cte { .. }
+        | TableRef::Subquery { .. }
+        | TableRef::Union { .. } => callback(table),
     }
 }
 
@@ -146,7 +147,7 @@ fn visit_table_queries(
     callback: &mut impl FnMut(&mut Query) -> Result<()>,
 ) -> Result<()> {
     match table {
-        TableRef::Scan { .. } => Ok(()),
+        TableRef::Scan { .. } | TableRef::Cte { .. } => Ok(()),
         TableRef::Subquery { query, .. } => visit_queries_mut(query, callback),
         TableRef::Union { queries, .. } => {
             for query in queries {

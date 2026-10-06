@@ -50,7 +50,7 @@ pub(super) fn render_literal(parameter: &ParamValue) -> String {
 }
 
 pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new();
+    let mut ctx = Context::new(ast)?;
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -68,18 +68,20 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
 }
 
 struct Context {
+    definitions: super::DefinitionNames,
     params: HashMap<String, ParamValue>,
     param_counter: usize,
     error: Option<String>,
 }
 
 impl Context {
-    fn new() -> Self {
-        Self {
+    fn new(node: &Node) -> Result<Self> {
+        Ok(Self {
+            definitions: super::DefinitionNames::new(node)?,
             params: HashMap::new(),
             param_counter: 0,
             error: None,
-        }
+        })
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
@@ -128,7 +130,11 @@ impl Context {
             .iter()
             .map(|cte| {
                 let inner = self.emit_query_with_limit(&cte.query, !cte.recursive)?;
-                Ok(format!("{} AS ({})", cte.name, inner))
+                Ok(format!(
+                    "{} AS ({})",
+                    self.definitions.name(&cte.name),
+                    inner
+                ))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -320,7 +326,10 @@ impl Context {
                 column,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!(
+                    "{e} IN (SELECT {column} FROM {})",
+                    self.definitions.name(cte_name)
+                )
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -502,6 +511,9 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
+            TableRef::Cte { definition, alias } => {
+                Ok(format!("{} AS {alias}", self.definitions.name(definition)))
+            }
             TableRef::Scan { table, alias, .. } => Ok(format!("{table} AS {alias}")),
             TableRef::Join {
                 join_type,
@@ -721,15 +733,16 @@ mod tests {
 
     #[test]
     fn recursive_cte_strips_limit() {
+        let definition = crate::bindings::Definition::new("path_cte");
         let q = Query {
             ctes: vec![Cte {
-                name: "path_cte".into(),
+                name: definition.clone(),
                 query: Box::new(Query {
                     select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
                     from: TableRef::scan("gl_project", "p"),
                     union_all: vec![Query {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
-                        from: TableRef::scan("path_cte", "c"),
+                        from: TableRef::cte(&definition, "c"),
                         ..Default::default()
                     }],
                     limit: Some(1000),
@@ -739,7 +752,7 @@ mod tests {
                 materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
-            from: TableRef::scan("path_cte", "r"),
+            from: TableRef::cte(&definition, "r"),
             limit: Some(10),
             ..Default::default()
         };

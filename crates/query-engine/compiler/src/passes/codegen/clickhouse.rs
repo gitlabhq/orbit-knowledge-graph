@@ -18,7 +18,7 @@ pub fn codegen(
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new();
+    let mut ctx = Context::new(ast)?;
     let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -59,7 +59,7 @@ pub fn codegen(
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
-    let mut ctx = Context::new();
+    let mut ctx = Context::new(node)?;
     let sql = match node {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -71,16 +71,18 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
 }
 
 struct Context {
+    definitions: super::DefinitionNames,
     params: ParamBindings,
     error: Option<String>,
 }
 
 impl Context {
-    fn new() -> Self {
-        Self {
+    fn new(node: &Node) -> Result<Self> {
+        Ok(Self {
+            definitions: super::DefinitionNames::new(node)?,
             params: ParamBindings::default(),
             error: None,
-        }
+        })
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
@@ -126,9 +128,17 @@ impl Context {
             .map(|cte| {
                 let inner = self.emit_query(&cte.query)?;
                 if cte.materialized {
-                    Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
+                    Ok(format!(
+                        "{} AS MATERIALIZED ({})",
+                        self.definitions.name(&cte.name),
+                        inner
+                    ))
                 } else {
-                    Ok(format!("{} AS ({})", cte.name, inner))
+                    Ok(format!(
+                        "{} AS ({})",
+                        self.definitions.name(&cte.name),
+                        inner
+                    ))
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -333,7 +343,10 @@ impl Context {
                 column,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!(
+                    "{e} IN (SELECT {column} FROM {})",
+                    self.definitions.name(cte_name)
+                )
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);
@@ -393,6 +406,9 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
+            TableRef::Cte { definition, alias } => {
+                Ok(format!("{} AS {alias}", self.definitions.name(definition)))
+            }
             TableRef::Scan {
                 table,
                 alias,
@@ -652,7 +668,7 @@ mod tests {
 
     #[test]
     fn literals() {
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(&Node::Query(Box::default())).unwrap();
 
         assert_eq!(ctx.emit_literal(&Value::from("hello")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from(42)), "{p1:Int64}");
@@ -666,7 +682,7 @@ mod tests {
 
     #[test]
     fn param_interning() {
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(&Node::Query(Box::default())).unwrap();
         let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
         let array_type = SqlType::Array(crate::ast::ScalarType::String);
 
@@ -690,7 +706,7 @@ mod tests {
 
     #[test]
     fn unary_ops() {
-        let mut ctx = Context::new();
+        let mut ctx = Context::new(&Node::Query(Box::default())).unwrap();
 
         assert_eq!(
             ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at"))),
@@ -917,16 +933,17 @@ mod tests {
     #[test]
     fn union_all_in_cte_body() {
         use crate::ast::Cte;
+        let definition = crate::bindings::Definition::new("path_cte");
 
         let q = Query {
             ctes: vec![Cte {
-                name: "path_cte".into(),
+                name: definition.clone(),
                 query: Box::new(Query {
                     select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
                     from: TableRef::scan("gl_project", "p"),
                     union_all: vec![Query {
                         select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
-                        from: TableRef::scan("path_cte", "c"),
+                        from: TableRef::cte(&definition, "c"),
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -935,7 +952,7 @@ mod tests {
                 materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
-            from: TableRef::scan("path_cte", "r"),
+            from: TableRef::cte(&definition, "r"),
             limit: Some(10),
             ..Default::default()
         };

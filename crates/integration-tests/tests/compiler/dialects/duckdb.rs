@@ -279,6 +279,8 @@ fn temporal_parameters_bind_and_render_without_clickhouse_syntax() {
 #[test]
 fn nested_cte_codegen_executes_with_its_local_definition() {
     use compiler::ast::{Cte, Expr, Node, Query, SelectExpr, TableRef};
+    let seed = compiler::bindings::Definition::new("seed");
+    let result_definition = compiler::bindings::Definition::new("result");
 
     let directory = tempfile::tempdir().unwrap();
     let database =
@@ -288,10 +290,10 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
         .unwrap();
     let ast = Node::Query(Box::new(Query {
         ctes: vec![Cte::new(
-            "result",
+            &result_definition,
             Query {
                 ctes: vec![Cte::new(
-                    "seed",
+                    &seed,
                     Query {
                         select: vec![SelectExpr::col("n", "id")],
                         from: TableRef::scan("nodes", "n"),
@@ -299,12 +301,12 @@ fn nested_cte_codegen_executes_with_its_local_definition() {
                     },
                 )],
                 select: vec![SelectExpr::col("s", "id")],
-                from: TableRef::scan("seed", "s"),
+                from: TableRef::cte(&seed, "s"),
                 ..Default::default()
             },
         )],
         select: vec![SelectExpr::new(Expr::col("r", "id"), "id")],
-        from: TableRef::scan("result", "r"),
+        from: TableRef::cte(&result_definition, "r"),
         ..Default::default()
     }));
     let query = compiler::passes::codegen::duckdb::codegen(&ast, Default::default()).unwrap();

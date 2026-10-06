@@ -56,7 +56,7 @@ pub enum Predicate {
     },
     Membership {
         column: Column,
-        definition: String,
+        definition: crate::bindings::Definition,
         key: String,
     },
 }

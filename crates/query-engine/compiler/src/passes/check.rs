@@ -198,14 +198,17 @@ mod tests {
                         "result",
                     )]
                 }
-                "nested_cte" => query.ctes.push(Cte::new(
-                    "outer_cte",
-                    Query {
-                        ctes: vec![Cte::new("inner_cte", inner)],
-                        from: TableRef::scan("inner_cte", "nested"),
-                        ..Default::default()
-                    },
-                )),
+                "nested_cte" => {
+                    let inner_definition = crate::bindings::Definition::new("inner_cte");
+                    query.ctes.push(Cte::new(
+                        &crate::bindings::Definition::new("outer_cte"),
+                        Query {
+                            ctes: vec![Cte::new(&inner_definition, inner)],
+                            from: TableRef::cte(&inner_definition, "nested"),
+                            ..Default::default()
+                        },
+                    ));
+                }
                 "union" => query.union_all.push(inner),
                 "derived" => query.from = TableRef::subquery(inner, "derived"),
                 "table_union" => query.from = TableRef::union_all(vec![inner], "arms"),
@@ -636,10 +639,11 @@ mod tests {
     #[test]
     fn rejects_cte_with_sensitive_table_missing_filter() {
         use crate::ast::Cte;
+        let base = crate::bindings::Definition::new("base");
 
         let node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
-                "base",
+                &base,
                 Query {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
@@ -654,7 +658,7 @@ mod tests {
                 expr: Expr::col("base", "node_id"),
                 alias: None,
             }],
-            from: TableRef::scan("base", "b"),
+            from: TableRef::cte(&base, "b"),
             ..Default::default()
         }));
 
@@ -672,6 +676,7 @@ mod tests {
     #[test]
     fn accepts_cte_with_security_filter() {
         use crate::ast::Cte;
+        let base = crate::bindings::Definition::new("base");
 
         let filter = Expr::func(
             Function::StartsWith,
@@ -682,7 +687,7 @@ mod tests {
         );
         let node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
-                "base",
+                &base,
                 Query {
                     select: vec![SelectExpr {
                         expr: Expr::col("p", "id"),
@@ -697,7 +702,7 @@ mod tests {
                 expr: Expr::col("base", "node_id"),
                 alias: None,
             }],
-            from: TableRef::scan("base", "b"),
+            from: TableRef::cte(&base, "b"),
             ..Default::default()
         }));
 

@@ -385,7 +385,9 @@ fn definitions(execution: &ExecutionPlan, source: Tree) -> Tree {
             execution
                 .definitions
                 .iter()
-                .map(|(name, keys)| Tree::node(Operator::Cte, name, vec![physical_tree(keys)]))
+                .map(|(name, keys)| {
+                    Tree::node(Operator::Cte, name.hint(), vec![physical_tree(keys)])
+                })
                 .chain([source])
                 .collect(),
         )
@@ -543,7 +545,11 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             column,
             definition,
             key,
-        } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
+        } => vec![format!(
+            "{} IN {}.{key}",
+            planned_column(column),
+            definition.hint()
+        )],
     }
 }
 
@@ -679,7 +685,7 @@ fn expression(value: &Expr) -> String {
             expr,
             cte_name,
             column,
-        } => format!("{} IN {cte_name}.{column}", expression(expr)),
+        } => format!("{} IN {}.{column}", expression(expr), cte_name.hint()),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
         Expr::Scalar(_) => "scalar(subquery)".into(),
         Expr::Star => "*".into(),
@@ -717,6 +723,7 @@ fn projections(values: &[SelectExpr]) -> String {
 
 fn relation(value: &TableRef) -> Tree {
     match value {
+        TableRef::Cte { definition, alias } => scan(definition.hint(), alias, false),
         TableRef::Scan {
             table,
             alias,
@@ -810,7 +817,7 @@ fn query(value: &Query) -> Tree {
             value
                 .ctes
                 .iter()
-                .map(|cte| Tree::node(Operator::Cte, &cte.name, vec![query(&cte.query)]))
+                .map(|cte| Tree::node(Operator::Cte, cte.name.hint(), vec![query(&cte.query)]))
                 .chain([tree])
                 .collect(),
         );
