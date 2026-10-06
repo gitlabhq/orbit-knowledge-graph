@@ -1,24 +1,34 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: main.rs, data: code}
-  - {path: manifest.toml, data: config}
-  - {path: logo.png, data: image}
-  - {path: blob.rs, data: "a\0b"}
-  - {path: build.log, data: log}
+name: File policy controls content access and inventory
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: main.rs
+    content: code
+  - path: manifest.toml
+    content: config
+  - path: logo.png
+    content: image
+  - path: blob.rs
+    content: "a\0b"
+  - path: build.log
+    content: log
 rules:
   - {phase: header, suffix: .rs, decision: {kind: keep, value: source}}
   - {phase: header, suffix: .png, decision: {kind: list, value: excluded}}
   - {phase: header, suffix: .log, decision: {kind: drop, value: log}}
-  - {phase: content, contains: [0], decision: {kind: list, value: binary}}
-steps:
-  - {op: read, path: blob.rs, expect: {error: Unsupported}}
-  - {op: stat, path: blob.rs, expect: {ok: {path: /blob.rs, kind: file, len: 3, decision: {kind: list, value: binary}}}}
-  - {op: read, path: logo.png, expect: {error: Unsupported}}
-  - {op: stat, path: build.log, expect: {error: NotFound}}
-  - op: files
-    expect:
-      - {path: blob.rs, size: 3, decision: {kind: list, value: binary}}
-      - {path: logo.png, size: 5, decision: {kind: list, value: excluded}}
-      - {path: main.rs, size: 4, decision: {kind: keep, value: source}}
-      - {path: manifest.toml, size: 6, decision: {kind: keep, value: input}}
-  - {op: usage, expect: {files: 4, bytes: 21, kept: 10}}
+  - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
+tests:
+  - name: Listed files refuse reads and dropped files disappear
+    assert:
+      - {op: read, path: blob.rs, expect: {error: Unsupported}}
+      - {op: stat, path: blob.rs, expect: {ok: {path: /blob.rs, kind: file, len: 3, decision: {kind: list, value: binary}}}}
+      - {op: read, path: logo.png, expect: {error: Unsupported}}
+      - {op: stat, path: build.log, expect: {error: NotFound}}
+  - name: Inventory reports the policy result for each retained file
+    assert:
+      - op: files
+        expect:
+          - {path: blob.rs, size: 3, decision: {kind: list, value: binary}}
+          - {path: logo.png, size: 5, decision: {kind: list, value: excluded}}
+          - {path: main.rs, size: 4, decision: {kind: keep, value: source}}
+          - {path: manifest.toml, size: 6, decision: {kind: keep, value: input}}
+      - {op: usage, expect: {files: 4, bytes: 21, kept: 10}}

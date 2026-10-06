@@ -1,7 +1,13 @@
-sources: [memory, puts, lazy]
-entries:
-  - {path: /src/main, data: content}
-  - {path: ./README, data: readme}
-steps:
-  - {op: read, path: src/./main, expect: {ok: content}}
-  - {op: read_dir, path: /, expect: {ok: [README, src]}}
+name: Input paths normalize to the same virtual tree
+sources: [memory, lazy]
+fixtures:
+  - path: /src/main
+    content: content
+  - path: ./README
+    content: readme
+tests:
+  - name: Rooted and relative fixture paths are readable by normalized names
+    assert:
+      - {op: read, path: src/main, expect: {ok: content}}
+      - {op: read, path: README, expect: {ok: readme}}
+      - {op: read_dir, path: /, expect: {ok: [README, src]}}

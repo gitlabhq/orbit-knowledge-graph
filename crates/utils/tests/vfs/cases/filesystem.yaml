@@ -1,25 +1,46 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: src/main.rs, data: "fn main() {}"}
-  - {path: src/lib/mod.rs, data: "pub mod a;"}
-  - {path: README.md, data: "# hi"}
-steps:
-  - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
-  - {op: read, path: src/lib/../main.rs, expect: {ok: "fn main() {}"}}
-  - {op: read, path: ../escape, expect: {error: NotFound}}
-  - {op: read, path: src/../../escape, expect: {error: NotFound}}
-  - {op: read, path: src, expect: {error: IsADirectory}}
-  - {op: read_dir, path: README.md, expect: {error: NotADirectory}}
-  - {op: read_dir, path: /, expect: {ok: [README.md, src]}}
-  - {op: read_dir, path: src, expect: {ok: [lib, main.rs]}}
-  - {op: stat, path: src/main.rs, expect: {ok: {path: /src/main.rs, kind: file, len: 12, decision: {kind: keep, value: input}}}}
-  - {op: stat, path: /src, expect: {ok: {path: /src, kind: dir, len: 0}}}
-  - {op: subtree, path: src, expect: [src/lib/mod.rs, src/main.rs]}
-  - {op: subtree, path: ../, expect: []}
-  - {op: subtree, path: missing, expect: []}
-  - op: files
-    expect:
-      - {path: README.md, size: 4, decision: {kind: keep, value: input}}
-      - {path: src/lib/mod.rs, size: 10, decision: {kind: keep, value: input}}
-      - {path: src/main.rs, size: 12, decision: {kind: keep, value: input}}
-  - {op: usage, expect: {files: 3, bytes: 26, kept: 26}}
+name: File paths define the repository tree
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: src/main.rs
+    content: |-
+      fn main() {}
+  - path: src/lib/mod.rs
+    content: |-
+      pub mod a;
+  - path: README.md
+    content: |-
+      # hi
+  - path: src/lib/empty.rs
+    content: ""
+tests:
+  - name: Reads preserve content and normalize paths within the root
+    assert:
+      - {op: read, path: /src/main.rs, expect: {ok: "fn main() {}"}}
+      - {op: read, path: src/lib/../main.rs, expect: {ok: "fn main() {}"}}
+      - {op: read, path: ../escape, expect: {error: NotFound}}
+      - {op: read, path: src/../../escape, expect: {error: NotFound}}
+      - {op: read, path: src, expect: {error: IsADirectory}}
+  - name: Directories follow fixture paths without explicit directory entries
+    assert:
+      - {op: read_dir, path: README.md, expect: {error: NotADirectory}}
+      - {op: read_dir, path: /, expect: {ok: [README.md, src]}}
+      - {op: read_dir, path: src, expect: {ok: [lib, main.rs]}}
+      - {op: read_dir, path: src/lib, expect: {ok: [empty.rs, mod.rs]}}
+      - {op: stat, path: /src, expect: {ok: {path: /src, kind: dir, len: 0}}}
+      - {op: stat, path: /src/lib, expect: {ok: {path: /src/lib, kind: dir, len: 0}}}
+  - name: An empty file is readable and remains in the inventory
+    assert:
+      - {op: read, path: src/lib/empty.rs, expect: {ok: ""}}
+      - {op: stat, path: src/lib/empty.rs, expect: {ok: {path: /src/lib/empty.rs, kind: file, len: 0, decision: {kind: keep, value: input}}}}
+      - op: files
+        expect:
+          - {path: README.md, size: 4, decision: {kind: keep, value: input}}
+          - {path: src/lib/empty.rs, size: 0, decision: {kind: keep, value: input}}
+          - {path: src/lib/mod.rs, size: 10, decision: {kind: keep, value: input}}
+          - {path: src/main.rs, size: 12, decision: {kind: keep, value: input}}
+      - {op: usage, expect: {files: 4, bytes: 26, kept: 26}}
+  - name: Subtrees contain sorted descendants only
+    assert:
+      - {op: subtree, path: src, expect: [src/lib/empty.rs, src/lib/mod.rs, src/main.rs]}
+      - {op: subtree, path: ../, expect: []}
+      - {op: subtree, path: missing, expect: []}

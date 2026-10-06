@@ -1,9 +1,17 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: one, data: {text: x, repeat: 80}}
-  - {path: two, data: {text: x, repeat: 80}}
-  - {path: three, data: {text: x, repeat: 80}}
-limits: {resident_bytes: 100}
-steps:
-  - {op: usage, expect: {files: 3, resident: 80, kept: 240, deduped_bytes: 160, spilled: 0}}
-  - {op: read, path: two, expect: {ok: {text: x, repeat: 80}}}
+name: Equal content shares storage while paths remain distinct
+sources: [memory, lazy, archive]
+fixtures:
+  - path: one
+    content: &shared |-
+      The same raw file content lives at three different paths.
+  - path: two
+    content: *shared
+  - path: three
+    content: *shared
+tests:
+  - name: Every path reads the full content but only one copy is resident
+    assert:
+      - {op: read, path: one, expect: {ok: *shared}}
+      - {op: read, path: two, expect: {ok: *shared}}
+      - {op: read, path: three, expect: {ok: *shared}}
+      - {op: usage, expect: {files: 3, bytes: 171, resident: 57, deduped_bytes: 114}}

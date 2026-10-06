@@ -1,15 +1,30 @@
+name: Checkout applies Git ignore rules to the fixture tree
 sources: [checkout]
-entries:
-  - {path: .git/config, data: "[core]\n"}
-  - {path: .git/info/exclude, data: "tmp/\n"}
-  - {path: .gitignore, data: "build/\n"}
-  - {path: .ignore, data: "notes/\n"}
-  - {path: .env, data: x}
-  - {path: notes/x, data: x}
-  - {path: tmp/x, data: x}
-  - {path: build/x, data: x}
-steps:
-  - {op: read_dir, path: /, expect: {ok: [.env, .gitignore, .ignore, notes]}}
-  - {op: read, path: notes/x, expect: {ok: x}}
-  - {op: stat, path: tmp/x, expect: {error: NotFound}}
-  - {op: stat, path: build/x, expect: {error: NotFound}}
+fixtures:
+  - path: .git/config
+    content: |
+      [core]
+  - path: .git/info/exclude
+    content: |
+      tmp/
+  - path: .gitignore
+    content: |
+      build/
+  - path: .ignore
+    content: |
+      notes/
+  - path: .env
+    content: ""
+  - path: notes/x
+    content: ""
+  - path: tmp/x
+    content: ""
+  - path: build/x
+    content: ""
+tests:
+  - name: Git excludes apply while dotfiles and ripgrep-ignored paths remain
+    assert:
+      - {op: read_dir, path: /, expect: {ok: [.env, .gitignore, .ignore, notes]}}
+      - {op: read, path: notes/x, expect: {ok: ""}}
+      - {op: stat, path: tmp/x, expect: {error: NotFound}}
+      - {op: stat, path: build/x, expect: {error: NotFound}}

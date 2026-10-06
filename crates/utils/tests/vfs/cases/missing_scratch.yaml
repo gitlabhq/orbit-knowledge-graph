@@ -1,6 +1,8 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: file, data: x}
+name: Spill fails when the scratch directory is missing
+sources: [memory, lazy, archive]
+fixtures:
+  - path: file
+    content: x
 limits: {resident_bytes: 0}
 options: {scratch: missing}
 load_error: NotFound

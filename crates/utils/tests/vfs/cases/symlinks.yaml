@@ -1,21 +1,34 @@
-sources: [puts, lazy, checkout, changed, archive]
-entries:
-  - {path: shared/child, data: content}
-  - {path: alias, link: shared}
-  - {path: nested/chain, link: ../alias}
-  - {path: root, link: /}
-  - {path: escape, link: ../../outside}
-  - {path: dangling, link: absent}
-  - {path: ping, link: pong}
-  - {path: pong, link: ping}
-steps:
-  - {op: read, path: alias/child, expect: {ok: content}}
-  - {op: read, path: nested/chain/child, expect: {ok: content}}
-  - {op: read, path: root/shared/child, expect: {ok: content}}
-  - {op: read_dir, path: alias, expect: {ok: [child]}}
-  - {op: subtree, path: alias, expect: [shared/child]}
-  - {op: stat, path: nested/chain, expect: {ok: {path: /shared, kind: dir, len: 0, link: ../alias}}}
-  - {op: read, path: escape/secret, expect: {error: NotFound}}
-  - {op: stat, path: dangling, expect: {error: NotFound}}
-  - {op: read, path: ping, expect: {error: Other}}
-  - {op: usage, expect: {files: 8, kept: 7}}
+name: Links resolve within the fixture tree
+sources: [checkout, changed, archive]
+fixtures:
+  - path: shared/child
+    content: content
+  - path: alias
+    link: shared
+  - path: nested/chain
+    link: ../alias
+  - path: root
+    link: /
+  - path: escape
+    link: ../../outside
+  - path: dangling
+    link: absent
+  - path: ping
+    link: pong
+  - path: pong
+    link: ping
+tests:
+  - name: Reads and directory queries follow relative and rooted links
+    assert:
+      - {op: read, path: alias/child, expect: {ok: content}}
+      - {op: read, path: nested/chain/child, expect: {ok: content}}
+      - {op: read, path: root/shared/child, expect: {ok: content}}
+      - {op: read_dir, path: alias, expect: {ok: [child]}}
+      - {op: subtree, path: alias, expect: [shared/child]}
+      - {op: stat, path: nested/chain, expect: {ok: {path: /shared, kind: dir, len: 0, link: ../alias}}}
+  - name: Escapes and dangling links fail and cycles terminate
+    assert:
+      - {op: read, path: escape/secret, expect: {error: NotFound}}
+      - {op: stat, path: dangling, expect: {error: NotFound}}
+      - {op: read, path: ping, expect: {error: Other}}
+      - {op: usage, expect: {files: 8, kept: 7}}

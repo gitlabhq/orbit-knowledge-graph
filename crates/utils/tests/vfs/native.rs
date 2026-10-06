@@ -194,19 +194,127 @@ fn host_links_and_replaced_parents_are_not_followed() {
 #[test]
 fn invalid_scenarios_fail_before_execution() {
     for yaml in [
-        "sources: [memory]\nentries: []\nsteps: []\ntypo: true",
-        "sources: [memory]\nentries: [{path: file, typo: true}]\nsteps: []",
-        "sources: [memory]\nentries: []\nsteps: [{op: read, path: file, expect: {}}]",
-        "sources: [memory]\nentries: []\nsteps: [{op: files, expect: [], typo: true}]",
-        "sources: [memory]\nentries: []\nlimits: {typo: 1}\nsteps: []",
-        "sources: [memory]\nentries: []\nsteps: []",
-        "sources: []\nentries: []\nload_error: empty",
+        "fixtures: []\ntests: []\ntypo: true",
+        "fixtures: [{path: file, typo: true}]\ntests: []",
+        "fixtures: []\ntests: [{name: read, assert: [{op: read, path: file, expect: {}}]}]",
+        "fixtures: []\ntests: [{name: files, assert: [{op: files, expect: [], typo: true}]}]",
+        "fixtures: []\nlimits: {typo: 1}\ntests: []",
+        "fixtures: []\ntests: []",
+        "fixtures: []\ntests: [{name: empty, assert: []}]",
+        "fixtures: [{path: file, content: {text: x, repeat: 2}}]\nload_error: empty",
     ] {
+        let yaml = format!("name: Invalid scenario\nsources: [memory]\n{yaml}");
         assert!(
-            std::panic::catch_unwind(|| super::runner::run(yaml)).is_err(),
+            std::panic::catch_unwind(|| super::runner::run(&yaml)).is_err(),
             "accepted invalid scenario: {yaml}"
         );
     }
+}
+
+#[test]
+fn lazy_readers_run_once_and_only_for_readable_files() {
+    struct Files<'a>(&'a AtomicUsize);
+    impl Source for Files<'_> {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            for path in ["kept", "listed", "dropped", "oversize"] {
+                into.put(
+                    path,
+                    Put::Lazy {
+                        size: if path == "oversize" { 100 } else { 4 },
+                        read: Box::new(move || {
+                            assert_eq!(path, "kept", "rejected content must not be read");
+                            self.0.fetch_add(1, SeqCst);
+                            Ok(b"data".to_vec())
+                        }),
+                    },
+                )?;
+            }
+            Ok(())
+        }
+    }
+    struct Filter;
+    impl Pass for Filter {
+        type Tag = ();
+        fn header(&self, file: &mut File<()>) {
+            file.decide(match file.path.as_str() {
+                "listed" => Decision::List("excluded"),
+                "dropped" => Decision::Drop("excluded"),
+                _ => Decision::Keep(()),
+            });
+        }
+    }
+    let reads = AtomicUsize::new(0);
+    let vfs = Vfs::load(
+        Files(&reads),
+        Filter,
+        Limits {
+            file_bytes: Some(4),
+            ..Limits::default()
+        },
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(reads.load(SeqCst), 1);
+    for _ in 0..2 {
+        assert_eq!(&*vfs.read(Path::new("kept")).unwrap(), b"data");
+    }
+    assert_eq!(reads.load(SeqCst), 1);
+    assert_eq!(
+        vfs.read(Path::new("listed")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert_eq!(
+        vfs.read(Path::new("oversize")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert_eq!(
+        vfs.read(Path::new("dropped")).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+}
+
+#[test]
+fn lazy_errors_size_mismatches_and_overflow_fail_loading() {
+    struct Input(u64, bool);
+    impl Source for Input {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            into.put(
+                "file",
+                Put::Lazy {
+                    size: self.0,
+                    read: Box::new(move || {
+                        assert_ne!(self.0, u64::MAX, "oversize content must not be read");
+                        if self.1 {
+                            Err(io::Error::other("stream reset"))
+                        } else {
+                            Ok(b"larger".to_vec())
+                        }
+                    }),
+                },
+            )?;
+            into.put("extra", Put::Bytes(vec![b'x']))
+        }
+    }
+    for (size, fail, expected) in [
+        (6, true, io::ErrorKind::Other),
+        (1, false, io::ErrorKind::InvalidData),
+    ] {
+        let error =
+            Vfs::load(Input(size, fail), (), Limits::default(), Default::default()).unwrap_err();
+        assert!(matches!(error, SourceError::Io(error) if error.kind() == expected));
+    }
+    let error = Vfs::load(
+        Input(u64::MAX, false),
+        (),
+        Limits {
+            file_bytes: Some(1),
+            total_bytes: Some(u64::MAX),
+            ..Limits::default()
+        },
+        Default::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, SourceError::Cap(cap) if cap.metric == "total_bytes"));
 }
 
 #[test]

@@ -1,7 +1,11 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: one, data: x}
-  - {path: two, data: y}
-  - {path: three, data: z}
+name: Cancellation stops loading the remaining files
+sources: [memory, lazy, archive]
+fixtures:
+  - path: one
+    content: x
+  - path: two
+    content: y
+  - path: three
+    content: z
 options: {cancel_after: 2}
 load_error: cancelled

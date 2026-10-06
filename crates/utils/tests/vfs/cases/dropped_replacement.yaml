@@ -1,9 +1,15 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: file, data: first}
-  - {path: file, data: drop}
+name: A dropped replacement removes the earlier file
+sources: [memory, lazy, archive]
+fixtures:
+  - path: file
+    content: first
+  - path: file
+    content: drop
 rules:
   - {phase: content, contains: drop, decision: {kind: drop, value: content}}
-steps:
-  - {op: files, expect: []}
-  - {op: usage, expect: {files: 0, duplicate_paths: 1}}
+tests:
+  - name: The old content cannot survive a dropped replacement
+    assert:
+      - {op: files, expect: []}
+      - {op: read, path: file, expect: {error: NotFound}}
+      - {op: usage, expect: {files: 0, duplicate_paths: 1}}

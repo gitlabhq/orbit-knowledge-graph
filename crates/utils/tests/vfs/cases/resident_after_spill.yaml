@@ -1,8 +1,14 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: large, data: {text: x, repeat: 16}}
-  - {path: small, data: fits}
+name: Spilling a large file leaves room for a small one
+sources: [memory, lazy, archive]
+fixtures:
+  - path: large
+    content: 0123456789abcdef
+  - path: small
+    content: fits
 limits: {resident_bytes: 4}
-steps:
-  - {op: usage, expect: {resident: 4, spilled: 16}}
-  - {op: read, path: small, expect: {ok: fits}}
+tests:
+  - name: The small file uses the remaining memory budget
+    assert:
+      - {op: usage, expect: {resident: 4, spilled: 16}}
+      - {op: read, path: small, expect: {ok: fits}}
+      - {op: read, path: large, expect: {ok: 0123456789abcdef}}

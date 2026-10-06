@@ -1,0 +1,39 @@
+- name: An empty fixture set creates an empty repository
+  sources: [memory, lazy, checkout, changed]
+  fixtures: []
+  tests:
+    - name: The root exists without files
+      assert:
+        - {op: read_dir, path: /, expect: {ok: []}}
+        - {op: stat, path: /, expect: {ok: {path: /, kind: dir, len: 0}}}
+        - {op: files, expect: []}
+        - {op: usage, expect: {files: 0, bytes: 0}}
+
+- name: A path with empty content creates a file and its parents
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/nested/file.txt
+      content: ""
+    - path: only-in-this-tree.txt
+      content: first
+  tests:
+    - name: File paths imply both parent directories
+      assert:
+        - {op: read_dir, path: /, expect: {ok: [only-in-this-tree.txt, src]}}
+        - {op: read_dir, path: src, expect: {ok: [nested]}}
+        - {op: read_dir, path: src/nested, expect: {ok: [file.txt]}}
+        - {op: read, path: src/nested/file.txt, expect: {ok: ""}}
+
+- name: A separate fixture set defines a separate tree
+  sources: [memory, lazy, checkout, changed, archive]
+  fixtures:
+    - path: src/nested/file.txt
+      content: |-
+        Content belongs to this fixture set.
+  tests:
+    - name: Earlier fixture sets do not contribute files or content
+      assert:
+        - {op: read, path: src/nested/file.txt, expect: {ok: "Content belongs to this fixture set."}}
+        - {op: read, path: only-in-this-tree.txt, expect: {error: NotFound}}
+        - {op: read_dir, path: /, expect: {ok: [src]}}
+        - {op: usage, expect: {files: 1}}

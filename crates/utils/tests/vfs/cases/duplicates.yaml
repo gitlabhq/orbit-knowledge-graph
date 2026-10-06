@@ -1,7 +1,12 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: file, data: first}
-  - {path: file, data: second}
-steps:
-  - {op: read, path: file, expect: {ok: second}}
-  - {op: usage, expect: {files: 1, duplicate_paths: 1}}
+name: The last file at a repeated path wins
+sources: [memory, lazy, archive]
+fixtures:
+  - path: file
+    content: first
+  - path: file
+    content: second
+tests:
+  - name: Repeated paths produce one node with the final content
+    assert:
+      - {op: read, path: file, expect: {ok: second}}
+      - {op: usage, expect: {files: 1, duplicate_paths: 1}}

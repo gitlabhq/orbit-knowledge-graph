@@ -1,8 +1,12 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: tiny, data: x}
+name: Compression does not expand a tiny spilled file
+sources: [memory, lazy, archive]
+fixtures:
+  - path: tiny
+    content: x
 limits: {resident_bytes: 0, spilled_bytes: 1}
 options: {compress_spill: true}
-steps:
-  - {op: read, path: tiny, expect: {ok: x}}
-  - {op: usage, expect: {spilled: 1, resident: 0}}
+tests:
+  - name: One byte still fits in a one-byte spill budget
+    assert:
+      - {op: read, path: tiny, expect: {ok: x}}
+      - {op: usage, expect: {spilled: 1, resident: 0}}

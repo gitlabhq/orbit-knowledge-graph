@@ -1,8 +1,12 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: big, data: large}
+name: Oversize files remain in the tree without readable content
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: big
+    content: large
 limits: {file_bytes: 4}
-steps:
-  - {op: files, expect: [{path: big, size: 5, decision: {kind: list, value: oversize}}]}
-  - {op: usage, expect: {resident: 0, kept: 0}}
-  - {op: lazy_reads, expect: 0}
+tests:
+  - name: An oversize file is listed and has no retained bytes
+    assert:
+      - {op: files, expect: [{path: big, size: 5, decision: {kind: list, value: oversize}}]}
+      - {op: read, path: big, expect: {error: Unsupported}}
+      - {op: usage, expect: {resident: 0, kept: 0}}

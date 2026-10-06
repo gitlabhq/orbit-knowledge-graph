@@ -1,3 +1,4 @@
+name: An archive without files reports empty input
 sources: [archive]
-entries: []
+fixtures: []
 load_error: empty

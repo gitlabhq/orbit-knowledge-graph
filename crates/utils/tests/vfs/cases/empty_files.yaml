@@ -1,0 +1,33 @@
+name: Empty files define directories even with zero byte budgets
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: root.txt
+    content: ""
+  - path: nested/deep/empty.txt
+    content: ""
+  - path: sibling/empty.txt
+    content: ""
+limits: {file_bytes: 0, total_bytes: 0, resident_bytes: 0, spilled_bytes: 0}
+tests:
+  - name: Empty content creates readable file nodes
+    assert:
+      - {op: read, path: root.txt, expect: {ok: ""}}
+      - {op: read, path: nested/deep/empty.txt, expect: {ok: ""}}
+      - {op: read, path: sibling/empty.txt, expect: {ok: ""}}
+      - {op: stat, path: nested/deep/empty.txt, expect: {ok: {path: /nested/deep/empty.txt, kind: file, len: 0, decision: {kind: keep, value: input}}}}
+  - name: Paths alone create every parent directory
+    assert:
+      - {op: read_dir, path: /, expect: {ok: [nested, root.txt, sibling]}}
+      - {op: read_dir, path: nested, expect: {ok: [deep]}}
+      - {op: read_dir, path: nested/deep, expect: {ok: [empty.txt]}}
+      - {op: stat, path: nested/deep, expect: {ok: {path: /nested/deep, kind: dir, len: 0}}}
+      - {op: read, path: nested/deep, expect: {error: IsADirectory}}
+      - {op: subtree, path: nested, expect: [nested/deep/empty.txt]}
+  - name: Zero byte usage does not mean zero files
+    assert:
+      - {op: usage, expect: {files: 3, bytes: 0, kept: 0, resident: 0, spilled: 0}}
+      - op: files
+        expect:
+          - {path: nested/deep/empty.txt, size: 0, decision: {kind: keep, value: input}}
+          - {path: root.txt, size: 0, decision: {kind: keep, value: input}}
+          - {path: sibling/empty.txt, size: 0, decision: {kind: keep, value: input}}

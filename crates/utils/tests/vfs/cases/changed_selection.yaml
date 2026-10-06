@@ -1,9 +1,18 @@
+name: Changed paths select files from the fixture tree
 sources: [changed]
-entries:
-  - {path: a, data: a}
-  - {path: untouched, data: x}
-  - {path: dir/child, data: x}
+fixtures:
+  - path: a
+    content: a
+  - path: untouched
+    content: x
+  - path: dir/child
+    content: x
 changed: [a, dir, missing]
-steps:
-  - {op: read_dir, path: /, expect: {ok: [a]}}
-  - {op: usage, expect: {files: 1}}
+tests:
+  - name: Only selected regular files enter the VFS
+    assert:
+      - {op: read_dir, path: /, expect: {ok: [a]}}
+      - {op: read, path: a, expect: {ok: a}}
+      - {op: stat, path: untouched, expect: {error: NotFound}}
+      - {op: stat, path: dir/child, expect: {error: NotFound}}
+      - {op: usage, expect: {files: 1}}

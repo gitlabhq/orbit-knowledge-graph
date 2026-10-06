@@ -1,9 +1,13 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: file, data: drop}
+name: Content policy can remove a file during loading
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: file
+    content: drop
 rules:
   - {phase: content, decision: {kind: drop, value: content}}
-steps:
-  - {op: files, expect: []}
-  - {op: read_dir, path: /, expect: {ok: []}}
-  - {op: stat, path: file, expect: {error: NotFound}}
+tests:
+  - name: Dropped content leaves no file node
+    assert:
+      - {op: files, expect: []}
+      - {op: read_dir, path: /, expect: {ok: []}}
+      - {op: stat, path: file, expect: {error: NotFound}}

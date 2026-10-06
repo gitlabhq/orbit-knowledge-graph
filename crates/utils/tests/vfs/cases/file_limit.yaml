@@ -1,7 +1,10 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: a.log, data: a}
-  - {path: b.log, data: b}
+name: The file limit includes empty files dropped by policy
+sources: [memory, lazy, checkout, changed, archive]
+fixtures:
+  - path: a.log
+    content: ""
+  - path: b.log
+    content: ""
 rules:
   - {phase: header, decision: {kind: drop, value: log}}
 limits: {files: 1}

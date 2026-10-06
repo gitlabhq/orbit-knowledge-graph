@@ -1,5 +1,7 @@
-sources: [memory, puts, lazy, archive]
-entries:
-  - {path: big, data: large}
+name: Content beyond the spill budget fails loading
+sources: [memory, lazy, archive]
+fixtures:
+  - path: big
+    content: large
 limits: {resident_bytes: 0, spilled_bytes: 4}
 load_error: cap:spilled_bytes
