@@ -647,12 +647,9 @@ fn literal(value: &serde_json::Value) -> String {
 fn expression(value: &Expr) -> String {
     match value {
         Expr::EmptyTupleArray(fields) => format!("empty_tuple_array({fields:?})"),
-        Expr::TextSearch { mode, value, query } => format!(
-            "{}({}, {})",
-            mode.to_string().to_lowercase(),
-            expression(value),
-            expression(query)
-        ),
+        Expr::TextSearch { mode, value, query } => {
+            format!("{mode}({}, {})", expression(value), expression(query))
+        }
         Expr::TimeBucket { unit, value } => {
             format!("bucket({}, {})", unit.name(), expression(value))
         }

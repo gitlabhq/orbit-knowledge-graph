@@ -77,27 +77,19 @@ pub(crate) fn filter_expression(
                 filter.value_str().unwrap_or(""),
             ));
             let col = fold(col);
-            let search = |mode| Expr::TextSearch {
-                mode,
-                value: Box::new(col.clone()),
-                query: Box::new(needle.clone()),
+            let mode = match op {
+                FilterOp::Contains => TextMatch::Contains,
+                FilterOp::TokenMatch => TextMatch::TokenMatch,
+                FilterOp::AllTokens => TextMatch::AllTokens,
+                FilterOp::AnyTokens => TextMatch::AnyTokens,
+                FilterOp::StartsWith => return Expr::func(Function::StartsWith, vec![col, needle]),
+                FilterOp::EndsWith => return Expr::func(Function::EndsWith, vec![col, needle]),
+                _ => unreachable!(),
             };
-            match op {
-                FilterOp::StartsWith => Expr::func(Function::StartsWith, vec![col, needle]),
-                FilterOp::EndsWith => Expr::func(Function::EndsWith, vec![col, needle]),
-                FilterOp::Contains => search(TextMatch::Substring),
-                FilterOp::TokenMatch => search(TextMatch::Token),
-                FilterOp::AllTokens => search(TextMatch::AllTokens),
-                FilterOp::AnyTokens => search(TextMatch::AnyTokens),
-                FilterOp::Eq
-                | FilterOp::Ne
-                | FilterOp::Gt
-                | FilterOp::Gte
-                | FilterOp::Lt
-                | FilterOp::Lte
-                | FilterOp::In
-                | FilterOp::IsNull
-                | FilterOp::IsNotNull => unreachable!(),
+            Expr::TextSearch {
+                mode,
+                value: Box::new(col),
+                query: Box::new(needle),
             }
         }
     }

@@ -229,7 +229,7 @@ impl Context {
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(*name, args),
             Expr::TextSearch {
-                mode: TextMatch::Substring,
+                mode: TextMatch::Contains,
                 value,
                 query,
             } => format!(

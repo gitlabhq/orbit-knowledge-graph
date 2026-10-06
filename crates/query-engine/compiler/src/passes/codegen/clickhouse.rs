@@ -260,8 +260,8 @@ impl Context {
             Expr::TextSearch { mode, value, query } => {
                 let (value, query) = (self.emit_expr(value), self.emit_expr(query));
                 match mode {
-                    TextMatch::Substring => format!("multiSearchAny({value}, [{query}])"),
-                    TextMatch::Token => format!("hasToken({value}, {query})"),
+                    TextMatch::Contains => format!("multiSearchAny({value}, [{query}])"),
+                    TextMatch::TokenMatch => format!("hasToken({value}, {query})"),
                     TextMatch::AllTokens => format!("hasAllTokens({value}, {query})"),
                     TextMatch::AnyTokens => format!("hasAnyTokens({value}, {query})"),
                 }

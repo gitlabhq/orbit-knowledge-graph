@@ -161,7 +161,7 @@ mod tests {
     fn token_search_uses_clickhouse_modes_and_rejects_duckdb() {
         use crate::ast::TextMatch;
         for (mode, function) in [
-            (TextMatch::Token, "hasToken"),
+            (TextMatch::TokenMatch, "hasToken"),
             (TextMatch::AllTokens, "hasAllTokens"),
             (TextMatch::AnyTokens, "hasAnyTokens"),
         ] {

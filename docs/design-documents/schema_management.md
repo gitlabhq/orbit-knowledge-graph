@@ -13,9 +13,11 @@ materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates prop
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
 storage metadata also owns table-level MergeTree settings. These are indexes, projections, primary
 keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL. A `text`
-index declares the Orbit text-search pair for one column: `text(tokenizer = splitByNonAlpha)` and
-`ngrambf_v1`, both over `lower(column)`. The compiler's lower()-wrapped string operators prune
-with them; sort-key columns stay exact for the primary key.
+index declares the Orbit text-search pair for one column: a `text(tokenizer = splitByNonAlpha)`
+index and an `ngrambf_v1` index, both over `lower(column)`. The compiler emits `contains`,
+`starts_with`, `ends_with`, and the token operators on `lower(column)`, so they are
+case-insensitive and prune with these indexes. Sort-key columns such as `branch` stay exact so
+the primary key keeps pruning.
 
 ## Schema Version Tracking
 
