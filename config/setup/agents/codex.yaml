@@ -12,6 +12,7 @@ mcp:
     project: .codex/config.toml
     global: "~/.codex/config.toml"
   format: codex
+  coding_agent: codex
 skills:
   dir:
     project: .agents/skills

@@ -50,7 +50,7 @@
     },
     "mcp": {
       "type": "object",
-      "required": ["file", "format"],
+      "required": ["file", "format", "coding_agent"],
       "additionalProperties": false,
       "properties": {
         "file": { "$ref": "#/definitions/scopedPath" },
@@ -58,6 +58,11 @@
           "type": "string",
           "enum": ["claude", "codex", "opencode"],
           "description": "Serializer for the MCP entry: `claude` = mcpServers JSON, `codex` = [mcp_servers.<name>] TOML, `opencode` = mcp JSON with an array command."
+        },
+        "coding_agent": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "description": "Value of the `AI_AGENT` env var in the MCP entry, so telemetry knows which agent called the server. Use the ids that `orbit` already reports, such as `claude-code`."
         }
       },
       "description": "Config file that receives the shared `mcp_server` entry from setup.yaml."

@@ -505,11 +505,17 @@ mod tests {
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
-            json!({"type": "local", "command": ["orbit", "mcp", "serve"], "enabled": true})
+            json!({
+                "type": "local",
+                "command": ["orbit", "mcp", "serve"],
+                "enabled": true,
+                "environment": {"AI_AGENT": "opencode"}
+            })
         );
         let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
         assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
         assert!(codex.contains(r#"args = ["mcp", "serve"]"#), "{codex}");
+        assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
         assert!(
             dir.path()
                 .join(".agents/skills/orbit-cli/SKILL.md")
@@ -562,7 +568,12 @@ mod tests {
         assert_eq!(servers["theirs"], json!({"command": "their-server"}));
         assert_eq!(
             servers["orbit"],
-            json!({"type": "stdio", "command": "orbit", "args": ["mcp", "serve"]})
+            json!({
+                "type": "stdio",
+                "command": "orbit",
+                "args": ["mcp", "serve"],
+                "env": {"AI_AGENT": "claude-code"}
+            })
         );
 
         uninstall_named(&["claude"], dir.path());
