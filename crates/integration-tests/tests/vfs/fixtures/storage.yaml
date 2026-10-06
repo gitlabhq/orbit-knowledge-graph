@@ -1,0 +1,124 @@
+- name: Equal content shares storage while paths remain distinct
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: one
+      content: &shared |-
+        The same raw file content lives at three different paths.
+    - path: two
+      content: *shared
+    - path: three
+      content: *shared
+  tests:
+    - name: Every path reads the full content but only one copy is resident
+      assert:
+        - {op: read, path: one, expect: {ok: *shared}}
+        - {op: read, path: two, expect: {ok: *shared}}
+        - {op: read, path: three, expect: {ok: *shared}}
+        - {op: usage, expect: {files: 3, bytes: 171, resident: 57, deduped_bytes: 114}}
+
+- name: The last file at a repeated path wins
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: file
+      content: first
+    - path: file
+      content: second
+  tests:
+    - name: Repeated paths produce one node with the final content
+      assert:
+        - {op: read, path: file, expect: {ok: second}}
+        - {op: usage, expect: {files: 1, duplicate_paths: 1}}
+
+- name: A rejected replacement updates metadata and removes access to old content
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: file
+      content: first
+    - path: file
+      content: rejected
+  rules:
+    - {phase: content, contains: rejected, decision: {kind: list, value: content}}
+  tests:
+    - name: The catalog reflects the rejected replacement
+      assert:
+        - {op: files, expect: [{path: file, size: 8, decision: {kind: list, value: content}}]}
+        - {op: stat, path: file, expect: {ok: {path: /file, kind: file, len: 8, decision: {kind: list, value: content}}}}
+        - {op: read, path: file, expect: {error: Unsupported}}
+        - {op: usage, expect: {files: 1, kept: 0, duplicate_paths: 1}}
+
+- name: Spilled content reads back without compression
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: file
+      content: &raw |-
+        Content stored on disk.
+  limits: {resident_bytes: 0}
+  tests:
+    - name: Reads return the original bytes from scratch storage
+      assert:
+        - {op: read, path: file, expect: {ok: *raw}}
+        - {op: usage, expect: {resident: 0, spilled: 23}}
+
+- name: Compressed spill preserves raw file content
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: large
+      content: &compressed |
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+        Repeated content compresses well.
+    - path: duplicate
+      content: *compressed
+    - path: small
+      content: fits
+  limits: {resident_bytes: 4}
+  options: {scratch: existing, compress_spill: true}
+  tests:
+    - name: Resident and spilled files return their complete original bytes
+      assert:
+        - {op: read, path: large, expect: {ok: *compressed}}
+        - {op: read, path: duplicate, expect: {ok: *compressed}}
+        - {op: read, path: small, expect: {ok: fits}}
+        - {op: usage, expect: {files: 3, resident: 4, deduped_bytes: 272, spilled_below: 100}}
+
+- name: Spilling a large file leaves room for a small one
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: large
+      content: 0123456789abcdef
+    - path: small
+      content: fits
+  limits: {resident_bytes: 4}
+  tests:
+    - name: The small file uses the remaining memory budget
+      assert:
+        - {op: usage, expect: {resident: 4, spilled: 16}}
+        - {op: read, path: small, expect: {ok: fits}}
+        - {op: read, path: large, expect: {ok: 0123456789abcdef}}
+
+- name: Compression does not expand a tiny spilled file
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: tiny
+      content: x
+  limits: {resident_bytes: 0, spilled_bytes: 1}
+  options: {compress_spill: true}
+  tests:
+    - name: One byte still fits in a one-byte spill budget
+      assert:
+        - {op: read, path: tiny, expect: {ok: x}}
+        - {op: usage, expect: {spilled: 1, resident: 0}}
+
+- name: Spill fails when the scratch directory is missing
+  sources: [memory, lazy, archive]
+  fixtures:
+    - path: file
+      content: x
+  limits: {resident_bytes: 0}
+  options: {scratch: missing}
+  load_error: NotFound

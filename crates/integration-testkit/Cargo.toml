@@ -12,6 +12,9 @@ gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }
 orbit-versions = { path = "../orbit-versions" }
 futures = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 orbit-server = { path = "../orbit-server" }
 ontology = { path = "../ontology" }
 orbit-migrations = { path = "../orbit-migrations" }
