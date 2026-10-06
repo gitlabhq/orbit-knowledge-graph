@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 
 use components::Report;
 use detect::Machine;
+use index_repo::IndexOutcome;
 use plan::{Plan, Selection};
 use spec::ScopedPath;
 
@@ -64,14 +65,15 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
 
-    let indexed = match options.index {
-        true => index_repo::index_current_repository()?,
-        false => None,
+    let index_outcome = match index_repo::current_repository_root() {
+        None => IndexOutcome::OutsideRepository,
+        Some(_) if !options.index => IndexOutcome::NotIndexed,
+        Some(repo_root) => index_repo::index_repository(repo_root)?,
     };
-    if let Some(command) = summary::format_try_it_command(indexed.as_ref()) {
+    if let Some(command) = summary::format_try_it_command(&index_outcome) {
         tui::card("Try it", command)?;
     }
-    tui::outro(summary::format_closing_line(indexed.as_ref()))?;
+    tui::outro(summary::format_closing_line(&index_outcome))?;
     Ok(())
 }
 
