@@ -313,8 +313,19 @@ CH_NODE="$(pod_field "$CH_NS" "$CH_POD" '{.spec.nodeName}')"
 GKG_NODE="$(pod_field "$GKG_NS" "$GKG_POD" '{.spec.nodeName}')"
 CH_LIMIT="$(mem_limit "$CH_NS" "$CH_POD" "$CH_CONTAINER")"
 GKG_LIMIT="$(mem_limit "$GKG_NS" "$GKG_POD" "$GKG_CONTAINER")"
+# Sample with the kubectl binary directly: mise + caproni per call cost CPU on the measured runner.
+SAMPLE_KUBECONFIG="$ROOT/.loadtest_kubeconfig"
+KUBECTL_BIN="$(mise -C "$CAPRONI_DIR" which kubectl 2>/dev/null)" || KUBECTL_BIN=""
+mise -C "$CAPRONI_DIR" exec -- k3d kubeconfig get caproni > "$SAMPLE_KUBECONFIG" 2>/dev/null || true
+if [ -n "$KUBECTL_BIN" ] && "$KUBECTL_BIN" --kubeconfig "$SAMPLE_KUBECONFIG" get --raw /healthz >/dev/null 2>&1; then
+  log "     memory sampling uses kubectl directly"
+  skc() { "$KUBECTL_BIN" --kubeconfig "$SAMPLE_KUBECONFIG" "$@"; }
+else
+  log "     direct kubectl unavailable; memory sampling goes through caproni"
+  skc() { kc "$@"; }
+fi
 # Node's Summary API document with whitespace removed, so the awk below can match on it.
-node_summary() { kc get --raw "/api/v1/nodes/$1/proxy/stats/summary" 2>/dev/null | tr -d ' \t\n'; }
+node_summary() { skc get --raw "/api/v1/nodes/$1/proxy/stats/summary" 2>/dev/null | tr -d ' \t\n'; }
 # workingSetBytes of one container (args: summary namespace pod container); empty if absent.
 working_set() {
   awk -v ns="$2" -v pod="$3" -v c="$4" 'BEGIN { RS = "\"podRef\":" }
@@ -327,7 +338,7 @@ working_set() {
     }' <<< "$1"
 }
 MEM_PEAK="$ROOT/.loadtest_mem_peak"
-# Keeps the max of each container in MEM_PEAK, sampling about every 2s until killed.
+# Keeps the max of each container in MEM_PEAK, sampling about every 5s until killed.
 sample_memory() {
   local ch_max="" gkg_max="" json ch gkg
   while :; do
@@ -338,7 +349,7 @@ sample_memory() {
     if [ -n "$ch" ] && [ "$ch" -gt "${ch_max:-0}" ]; then ch_max="$ch"; fi
     if [ -n "$gkg" ] && [ "$gkg" -gt "${gkg_max:-0}" ]; then gkg_max="$gkg"; fi
     printf '%s %s\n' "${ch_max:-unknown}" "${gkg_max:-unknown}" > "$MEM_PEAK.tmp" && mv "$MEM_PEAK.tmp" "$MEM_PEAK"
-    sleep 2
+    sleep 5
   done
 }
 # Kubernetes quantity (16Gi, 8G, 512Mi, plain bytes) to bytes; empty if unparseable.
@@ -406,7 +417,7 @@ REPORT="$ROOT/loadtest-results.md"
   echo "$MEM_LINE"
   tail -n +2 "$LT_OUT"
 } > "$REPORT"
-rm -f "$LT_OUT" "$MEM_PEAK"
+rm -f "$LT_OUT" "$MEM_PEAK" "$SAMPLE_KUBECONFIG"
 
 # Report the partial results above, then fail like before if the load test did.
 [ "$LT_STATUS" = 0 ] || { echo "xtask loadtest failed (exit $LT_STATUS)" >&2; exit "$LT_STATUS"; }
