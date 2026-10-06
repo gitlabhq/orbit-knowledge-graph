@@ -91,26 +91,26 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
-    pub fn current_rows(
-        table: &query_data_model::storage::TableLayout,
+    pub fn current_rows<T>(
+        table: &query_data_model::storage::TableLayout<T>,
         alias: &str,
         columns: &[String],
         predicates: Vec<Predicate>,
     ) -> Result<Self> {
         let scan = Self::Scan {
-            table: table.name.clone(),
+            table: table.name().to_owned(),
             alias: alias.into(),
             final_: false,
             relationship: None,
         }
         .filter(predicates);
-        if table.row_semantics == query_data_model::storage::RowSemantics::Current {
+        if *table.row_semantics() == query_data_model::storage::RowSemantics::Current {
             return Ok(scan);
         }
-        if table.sort_key.is_empty() {
+        if table.sort_key().is_empty() {
             return Err(QueryError::Lowering(format!(
                 "table '{}' has no latest-row key",
-                table.name
+                table.name()
             )));
         }
         let mut outputs = Vec::new();
@@ -134,7 +134,7 @@ impl PhysicalSource {
                 source: Self::Latest {
                     sort_key: table
                         .sort_columns()
-                        .map(|column| column.name.clone())
+                        .map(|column| column.name().to_owned())
                         .collect(),
                     alias: alias.into(),
                     aggregate_condition: vec![],
