@@ -184,7 +184,7 @@ fn is_code(path: &str) -> bool {
 fn is_test(path: &str) -> bool {
     static TEST: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
-            r"(^|/)(tests?|spec|__tests__)/|(^|/)test_[^/]*$|_test\.|\.test\.|\.spec\.|-test\.",
+            r"(^|/)(tests?|spec|__tests__|fixtures?|scenarios|testdata|mocks?)/|(^|/)[\w-]*tests?[\w-]*/|(^|/)test_[^/]*$|_test\.|\.test\.|\.spec\.|-test\.",
         )
         .expect("valid test path regex")
     });
@@ -218,12 +218,44 @@ fn defining_rank(hit: &Hit, alternatives: &[String]) -> u8 {
     }
 }
 
+const FULL_LINES: usize = 3;
+const LINE_CHARS: usize = 160;
+
 fn located(lines: &[&Hit]) -> String {
-    lines
+    let mut parts: Vec<String> = lines
         .iter()
-        .map(|h| format!(":{} {}", h.line, h.text))
-        .collect::<Vec<_>>()
-        .join("  ")
+        .take(FULL_LINES)
+        .map(|h| match h.text.chars().count() > LINE_CHARS {
+            true => format!(
+                ":{} {}…",
+                h.line,
+                h.text.chars().take(LINE_CHARS).collect::<String>()
+            ),
+            false => format!(":{} {}", h.line, h.text),
+        })
+        .collect();
+    let rest: Vec<usize> = lines.iter().skip(FULL_LINES).map(|h| h.line).collect();
+    if !rest.is_empty() {
+        parts.push(runs(&rest));
+    }
+    parts.join("  ")
+}
+
+fn runs(lines: &[usize]) -> String {
+    let mut parts = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let mut end = index;
+        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
+            end += 1;
+        }
+        parts.push(match end > index {
+            true => format!(":{}-{}", lines[index], lines[end]),
+            false => format!(":{}", lines[index]),
+        });
+        index = end + 1;
+    }
+    parts.join(" ")
 }
 
 fn code_row(hits: &[&Hit]) -> String {
@@ -341,10 +373,10 @@ pub(super) fn render(hits: &[Hit], alternatives: &[String]) -> String {
             let class = if is_test(file) { 3 } else { best };
             (class, list.len(), format!("  {file}   {}", code_row(list)))
         })
-        .chain(
-            text.iter()
-                .map(|(file, list)| (4, list.len(), format!("  {file}   {}", located(list)))),
-        )
+        .chain(text.iter().map(|(file, list)| {
+            let class = if is_test(file) { 5 } else { 4 };
+            (class, list.len(), format!("  {file}   {}", located(list)))
+        }))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
     let mut out = String::new();
@@ -473,10 +505,7 @@ mod tests {
             lines[3].starts_with("  src/routes/feeds.js   default:25-38 :26 "),
             "{out}"
         );
-        assert!(
-            lines[3].contains(":37 app.get('/x', middleware.maintenanceMode, y);"),
-            "{out}"
-        );
+        assert!(lines[3].ends_with(":29-37"), "{out}");
         assert!(lines[4].starts_with("  test/controllers.js"), "{out}");
         assert!(
             lines[5].starts_with("  install/data/defaults.json   :130 "),
