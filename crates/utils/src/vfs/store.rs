@@ -5,14 +5,12 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
-use super::disk;
-use super::loading::{Loading, Node, Slot};
+use super::loading::{Content, Loading, Node};
 use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
-use super::scratch::{Blob, Scratch};
+use super::scratch::Scratch;
 use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,11 +29,12 @@ pub struct Stat<T> {
 }
 
 pub struct Vfs<T> {
-    pub(super) passes: Arc<dyn Pass<Tag = T>>,
+    pub(super) passes: Box<dyn Pass<Tag = T>>,
     pub(super) nodes: Vec<Node<T>>,
     pub(super) links: FxHashMap<String, String>,
     pub(super) scratch: Scratch,
     pub(super) usage: Usage,
+    pub(super) max_file_bytes: u64,
 }
 
 impl<T: Tag> Vfs<T> {
@@ -51,7 +50,7 @@ impl<T: Tag> Vfs<T> {
     }
 
     pub fn read(&self, path: &Path) -> io::Result<Bytes> {
-        let key = self.resolve(path)?;
+        let (key, _) = self.resolve(path)?;
         let Some(node) = self.node(&key) else {
             return Err(match self.is_dir(&key) {
                 true => {
@@ -60,18 +59,35 @@ impl<T: Tag> Vfs<T> {
                 false => not_found(),
             });
         };
-        let (Some(slot), Decision::Keep(_)) = (&node.slot, node.file.decision()) else {
+        if matches!(node.file.decision(), Decision::List(_)) {
             return Err(unsupported(&node.file));
-        };
-        let bytes = match slot {
-            Slot::Stored(Blob::Memory(bytes)) => bytes.clone(),
-            Slot::Stored(Blob::Spilled {
+        }
+        let bytes = match &node.content {
+            Content::Memory(bytes) => bytes.clone(),
+            Content::Spilled {
                 offset,
                 len,
                 raw_len,
-            }) => self.scratch.read(*offset, *len, *raw_len)?,
-            Slot::Linked(on_disk) => disk::read(on_disk, node.file.size)?.into(),
-            Slot::Link(_) => return Err(not_found()),
+            } => self.scratch.read(*offset, *len, *raw_len)?,
+            Content::ReadOnDemand(read) => {
+                let bytes = read(self.max_file_bytes)?;
+                if bytes.len() as u64 > self.max_file_bytes {
+                    return Err(io::Error::new(
+                        io::ErrorKind::FileTooLarge,
+                        "reader exceeded file byte limit",
+                    ));
+                }
+                if bytes.len() as u64 != node.file.size {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "source size mismatch",
+                    ));
+                }
+                bytes.into()
+            }
+            Content::Unavailable => return Err(unsupported(&node.file)),
+            Content::Failed(error) => return Err(io::Error::new(error.kind(), error.clone())),
+            Content::Symlink(_) => return Err(not_found()),
         };
         match node.file.classify(&*self.passes, &bytes) {
             Decision::Keep(_) => Ok(bytes),
@@ -80,7 +96,7 @@ impl<T: Tag> Vfs<T> {
     }
 
     pub fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
-        let key = self.resolve(path)?;
+        let (key, _) = self.resolve(path)?;
         if self.node(&key).is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::NotADirectory,
@@ -104,11 +120,7 @@ impl<T: Tag> Vfs<T> {
     }
 
     pub fn stat(&self, path: &Path) -> io::Result<Stat<T>> {
-        let link = self
-            .links
-            .get(&self.resolve_parents(path)?)
-            .map(PathBuf::from);
-        let key = self.resolve(path)?;
+        let (key, link) = self.resolve(path)?;
         let (kind, len, decision) = match self.node(&key) {
             Some(node) => (Kind::File, node.file.size, Some(node.file.decision())),
             None if self.is_dir(&key) => (Kind::Dir, 0, None),
@@ -119,7 +131,7 @@ impl<T: Tag> Vfs<T> {
             kind,
             len,
             decision,
-            link,
+            link: link.map(PathBuf::from),
         })
     }
 
@@ -128,13 +140,18 @@ impl<T: Tag> Vfs<T> {
     }
 
     pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
-        let key = self.resolve(dir).ok();
+        let key = self.resolve(dir).ok().map(|(key, _)| key);
         key.into_iter().flat_map(|key| self.subtree_of(&key))
     }
 
     pub fn usage(&self) -> Usage {
         Usage {
-            kept: self.files().filter(|f| f.keeps()).map(|f| f.size).sum(),
+            kept: self
+                .nodes
+                .iter()
+                .filter(|node| node.file.keeps() && !matches!(node.content, Content::Failed(_)))
+                .map(|node| node.file.size)
+                .sum(),
             ..self.usage
         }
     }
@@ -162,14 +179,16 @@ impl<T: Tag> Vfs<T> {
         key.is_empty() || self.subtree_of(key).next().is_some()
     }
 
-    fn resolve(&self, path: &Path) -> io::Result<String> {
+    fn resolve(&self, path: &Path) -> io::Result<(String, Option<&str>)> {
         let mut key = key(path).ok_or_else(not_found)?;
         if self.links.is_empty() {
-            return Ok(key);
+            return Ok((key, None));
         }
+        let mut link = None;
         let mut hops = 0;
-        while let Some(next) = follow_first_link(&key, &self.links) {
+        while let Some((next, target)) = follow_first_link(&key, &self.links) {
             key = next?;
+            link = link.or(target);
             hops += 1;
             if hops > MAX_LINK_DEPTH {
                 return Err(io::Error::other(format!(
@@ -178,19 +197,7 @@ impl<T: Tag> Vfs<T> {
                 )));
             }
         }
-        Ok(key)
-    }
-
-    fn resolve_parents(&self, path: &Path) -> io::Result<String> {
-        let key = key(path).ok_or_else(not_found)?;
-        let Some((parent, name)) = key.rsplit_once('/') else {
-            return Ok(key);
-        };
-        let parent = self.resolve(Path::new(parent))?;
-        Ok(match parent.is_empty() {
-            true => name.to_string(),
-            false => format!("{parent}/{name}"),
-        })
+        Ok((key, link))
     }
 }
 
@@ -202,7 +209,7 @@ impl<T> std::fmt::Debug for Vfs<T> {
 
 fn unsupported<T: Tag>(file: &File<'_, T>) -> io::Error {
     let why = match file.decision() {
-        Decision::List(why) | Decision::Drop(why) => why,
+        Decision::List(why) => why,
         _ => "no bytes",
     };
     io::Error::new(

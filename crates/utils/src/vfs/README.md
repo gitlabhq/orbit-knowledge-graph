@@ -42,8 +42,8 @@ Loading is concurrent; freezing produces a sorted node vector used for lookups a
 | Source | Use case | Storage |
 |---|---|---|
 | `Memory(Vec<(String, Vec<u8>)>)` | Tests, generated files, small inputs | Owned, deduplicated bytes |
-| `Directory(&Path)` | Existing local directory, with Git ignore rules | Linked disk files |
-| `Changeset { root, paths }` | Explicit changed-file list | Linked disk files; no recursive walk |
+| `Directory(&Path)` | Existing local directory, with Git ignore rules | Safe on-demand file readers |
+| `Changeset { root, paths }` | Explicit changed-file list | Safe on-demand file readers; no recursive walk |
 | `Archive(reader)` | Gitaly-style tar.gz with one outer directory | Owned bytes; optional spill |
 | Your own `Source` | Other transports or archive contracts | Whatever each `Put` supplies |
 
@@ -67,11 +67,12 @@ It ignores ripgrep `.ignore` rules, ancestor ignore files, and global Git ignore
 It excludes `.git` and does not walk through directory symlinks.
 
 Changeset accepts safe relative paths. Missing files and non-regular entries other than symlinks are skipped.
-Other filesystem failures abort loading. Removed paths belong to the caller's change-set bookkeeping.
+Discovery failures abort loading. Content-reader failures remain attached to cataloged files.
+Removed paths belong to the caller's change-set bookkeeping.
 Only supplied paths enter the store; a link cannot resolve unless its target is present too.
 Paths through host symlinked parent directories are refused, including links into the source directory.
 
-Disk files remain linked rather than copied.
+Directory sources use `safe_fs::File` readers rather than copying host files.
 Metadata `Keep` defers content checks until the first read; metadata `Pending` reads during loading, then releases those bytes.
 Therefore, the default `()` pass reads directory files during loading.
 Return `Keep` from a metadata pass to defer that read.
@@ -144,12 +145,14 @@ impl Pass for Filter {
 
 | Decision | Meaning during loading |
 |---|---|
-| `Pending` | Request content; after content, become `Keep(Tag::default())` |
-| `Keep(tag)` | Retain content or link a disk file, with the caller's tag |
+| `Pending` | Request content; after successful classification, become `Keep(Tag::default())` if still pending |
+| `Keep(tag)` | Retain content or an on-demand reader, with the caller's tag |
 | `List(reason)` | Retain a node without readable content |
-| `Drop(reason)` | Omit the node from the frozen inventory |
 
 Passes are synchronous and infallible. They receive read-only inputs and return a decision.
+Every valid file offered to a successful load remains in the catalog, including empty files and rejected content.
+Policy controls content access, never catalog membership. Duplicate paths retain the last offered entry.
+Sources define which files they offer; ignored paths and skipped archive entry types never reach the catalog.
 They do not count resources or receive symlinks. The store lists links as `List("symlink")`.
 Oversize files become `List("oversize")` before policy runs.
 
@@ -160,10 +163,14 @@ Each pass receives an immutable file. `file.decision()` exposes the preceding pa
 It returns a borrowed slice and never performs I/O. The store attaches bytes only for the content callback.
 Inventory files own their paths and retain no content slice. Chained passes borrow the path and bytes without copying them.
 The store keeps the metadata decision and caches the final content decision once, without changing the metadata result.
-Metadata `List` or `Drop` skips content processing and never invokes a lazy reader.
+Metadata `List` skips content processing and never invokes a lazy reader.
 
-Linked files can be rejected after freezing. `decision()` and `stat` report that late decision.
-A late `Drop` keeps its node and reads as `Unsupported`, because the frozen inventory cannot remove it.
+On-demand content can be rejected after freezing. `decision()` and `stat` report that late decision.
+Rejection at either phase keeps the node and reads as `Unsupported`.
+Content-reader failures during loading are stored with content and returned by `read()`, separately from file metadata and policy decisions.
+The file retains its metadata decision, which can remain `Pending` if content classification never ran.
+`read()` returns the recorded error kind and shared cause without rerunning that failed loading reader.
+On-demand failures after loading affect only that read. Later reads can retry, and policy runs once after the first successful read.
 Content `Pending` still settles to the default tag.
 
 ## Read and inspect
@@ -195,10 +202,11 @@ Relative link targets resolve from the link's parent. Absolute targets refer to 
 For example, `/etc/passwd` resolves only if the store contains an `etc/passwd` node.
 No virtual lookup falls back to the host filesystem.
 
-Disk-backed nodes use separate host paths. Linux uses `openat2(NO_SYMLINKS)`; macOS uses `O_NOFOLLOW_ANY`.
+The VFS stores readers, not host paths. Directory readers use `orbit_utils::safe_fs` for host access.
+Linux uses `openat2(NO_SYMLINKS)`; macOS uses `O_NOFOLLOW_ANY`.
 These refuse symlinks in any host component, including replacements after loading.
 Linux requires kernel and syscall-policy support for `openat2`; there is no weaker fallback.
-Windows code in `disk.rs` cross-compiles, but directory and scratch operations still contain Unix-specific code.
+Windows code in `safe_fs/syscalls.rs` cross-compiles, but entry inspection and scratch operations still contain Unix-specific code.
 
 Non-UTF-8 names use lossy inventory keys while retaining real host paths for I/O.
 Collisions count as duplicate paths. Sequential duplicates are last-wins; concurrent duplicate order depends on scheduling.
@@ -214,7 +222,7 @@ Collisions count as duplicate paths. Sequential duplicates are last-wins; concur
 | `spilled_bytes` | Fail before reserving scratch beyond the cap |
 
 `None` means unlimited. Zero is a real limit; `resident_bytes: Some(0)` spills all nonempty content.
-File count and total bytes include dropped offers and duplicate entries.
+File count and total bytes include rejected content and duplicate entries.
 Resident and scratch budgets count unique blobs. They exclude metadata, source buffers, and returned read buffers.
 Concurrent stores have separate budgets, so callers must account for concurrency when sizing memory.
 
@@ -225,7 +233,8 @@ Use a disk-backed volume rather than tmpfs when spilling should reduce RAM use.
 LZ4 compresses each spilled blob independently, only when it shrinks. Reads remain random-access.
 
 `Usage.bytes` counts offered bytes; `Usage.files` counts final nodes.
-`kept` sums current kept-node sizes. `resident` and `spilled` count bytes allocated during loading.
+`kept` sums current kept-node sizes, excluding recorded loading failures.
+`resident` and `spilled` count bytes allocated during loading.
 `deduped_bytes` counts avoided duplicate writes; `duplicate_paths` counts overwritten entries.
 Unused resident blobs are released after loading. Scratch bytes remain allocated until the store drops.
 Replacing paths can therefore make these totals differ from the content reachable through the final inventory.
@@ -241,7 +250,7 @@ use orbit_utils::vfs::{Loading, Put, Source, SourceError, Tag};
 struct Generated;
 impl Source for Generated {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        into.put("generated.txt", Put::Lazy {
+        into.put("generated.txt", Put::ReadAndStore {
             size: 5,
             read: Box::new(|| Ok(b"hello".to_vec())),
         })
@@ -249,8 +258,38 @@ impl Source for Generated {
 }
 ```
 
-`Put` accepts owned bytes, a synchronous one-shot reader, a disk path with its size, or a virtual link target.
+`Put` accepts owned bytes, a one-shot reader, a repeatable reader, or a virtual link target.
+`ReadAndStore` invokes its reader during loading if policy needs bytes, then stores accepted content in memory or scratch.
+`ReadOnDemand` retains a thread-safe reader. Metadata `Keep` defers it until a read; `Pending` invokes it during loading for classification.
+Later reads invoke that reader again, but content classification runs once. The store checks every returned buffer against the declared size.
+Readers return `Vec<u8>`; they must bound resource use within their own transport or filesystem implementation.
+Metadata rejection never invokes either reader.
+
+```rust,no_run
+use std::sync::Arc;
+use orbit_utils::{safe_fs, vfs::{Loading, Put, Tag, SourceError}};
+
+fn offer<T: Tag>(into: &Loading<T>, path: &str, file: safe_fs::File) -> Result<(), SourceError> {
+    into.put(path, Put::ReadOnDemand {
+        size: file.size(),
+        read: Arc::new(move |max_bytes| file.read(max_bytes)),
+    })
+}
+```
+
+`safe_fs::inspect` returns a regular file reader, a symlink target, or no entry for other file types.
+It refuses symlinked parents; it returns a final symlink's target without following it.
+`safe_fs::File::read(max_bytes)` rejects sizes above the maximum with `FileTooLarge` and a `SizeLimitExceeded` error payload.
+It checks the recorded size before opening, the opened file's size before reading, and the returned byte count.
+Zero permits only empty files. A read never returns truncated content as a success.
+The VFS passes `Limits.file_bytes` to on-demand readers, or `u64::MAX` when that limit is absent.
+Readers must enforce the maximum while reading; checking a returned buffer cannot prevent allocations inside a custom reader.
+An oversized file stays cataloged. Metadata rejection lists it as `oversize` without invoking the reader.
+Read-time oversize errors propagate to the caller. An oversize error during loading is recorded as a reader failure, not a policy decision.
+The caller selects the trusted root and validates relative paths. Virtual link targets remain separate from host readers.
 A source can call `put` concurrently. It must propagate worker failures and wait for workers before returning.
+Reader callbacks report per-file failures. Source validation, cancellation, global caps, and storage failures still abort loading.
+An archive source must also propagate a broken underlying stream; a damaged archive is not a valid partial repository.
 The store verifies produced content length against the declared size.
 Custom sources are trusted to select host paths and enforce their transport or archive contracts.
 
@@ -322,7 +361,7 @@ Host fixture paths are checked before writes. Archive corruption and reader faul
 
 Rules require `phase: metadata/content` and `decision`.
 Optional `suffix` matches names; `contains` matches bytes during content processing only.
-Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list/drop, value: reason}`.
+Decisions use `{kind: pending}`, `{kind: keep, value: source/input}`, or `{kind: list, value: reason}`.
 Policy reasons are `binary`, `excluded`, `log`, or `content`.
 
 Operations are `read`, `read_dir`, `stat`, `files`, `subtree`, and `usage`.

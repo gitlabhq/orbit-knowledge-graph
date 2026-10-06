@@ -173,7 +173,7 @@ fn archive_policy_receives_the_complete_body() {
         type Tag = ();
         fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
             if file.path.ends_with(".png") {
-                Decision::Drop("image")
+                Decision::List("image")
             } else {
                 file.decision()
             }
@@ -204,5 +204,33 @@ fn archive_policy_receives_the_complete_body() {
     )
     .unwrap();
     assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), body);
-    assert_eq!(vfs.read_dir(Path::new("/")).unwrap(), ["big.txt"]);
+    assert_eq!(
+        vfs.read_dir(Path::new("/")).unwrap(),
+        ["big.txt", "logo.png"]
+    );
+    assert_eq!(
+        vfs.stat(Path::new("logo.png")).unwrap().decision,
+        Some(Decision::List("image"))
+    );
+    assert_eq!(
+        vfs.read(Path::new("logo.png")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+}
+
+#[test]
+fn truncated_entry_bodies_abort_the_archive_source() {
+    let mut builder = tar::Builder::new(Vec::new());
+    builder
+        .append_data(&mut header(4096), "root/file", vec![b'x'; 4096].as_slice())
+        .unwrap();
+    let mut tar = builder.into_inner().unwrap();
+    tar.truncate(512 + 100);
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(&tar).unwrap();
+    let bytes = encoder.finish().unwrap();
+    assert!(matches!(
+        Vfs::load(Archive(bytes.as_slice()), (), Limits::default(), Default::default()),
+        Err(SourceError::Io(error)) if error.kind() == io::ErrorKind::UnexpectedEof
+    ));
 }

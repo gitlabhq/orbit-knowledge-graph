@@ -2,7 +2,7 @@
 //! symlinks followed inside the repository and nowhere else.
 
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
@@ -37,33 +37,27 @@ pub(super) fn key(path: &Path) -> Option<String> {
     Some(key)
 }
 
-pub(super) fn follow_first_link(
+pub(super) fn follow_first_link<'a>(
     key: &str,
-    links: &FxHashMap<String, String>,
-) -> Option<io::Result<String>> {
-    let mut end = 0;
-    loop {
-        end = match key[end..].find('/') {
-            Some(i) => end + i,
-            None => key.len(),
-        };
+    links: &'a FxHashMap<String, String>,
+) -> Option<(io::Result<String>, Option<&'a str>)> {
+    for end in key
+        .match_indices('/')
+        .map(|(index, _)| index)
+        .chain(std::iter::once(key.len()))
+    {
         let prefix = &key[..end];
         if let Some(target) = links.get(prefix) {
             let rest = &key[end..];
             let parent = prefix.rsplit_once('/').map_or("", |(parent, _)| parent);
-            let resolved = match target.starts_with('/') {
-                true => PathBuf::from(target),
-                false => Path::new(parent).join(target),
-            };
-            return Some(
+            let resolved = Path::new(parent).join(target);
+            return Some((
                 self::key(&resolved.join(rest.trim_start_matches('/'))).ok_or_else(not_found),
-            );
+                rest.is_empty().then_some(target.as_str()),
+            ));
         }
-        if end == key.len() {
-            return None;
-        }
-        end += 1;
     }
+    None
 }
 
 pub(super) fn not_found() -> io::Error {

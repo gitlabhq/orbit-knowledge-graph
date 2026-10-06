@@ -5,7 +5,7 @@
 //!                   │                      read / read_dir / stat
 //!                   ▼                      files / subtree / usage
 //!            Pass::metadata (&File)
-//!            Pass::content (&File)       →  Decision<T>: Keep(T) | List(why) | Drop(why)
+//!            Pass::content (&File)       →  Decision<T>: Keep(T) | List(why)
 //! ```
 //!
 //! Decisions are policy and belong to a [`Pass`]; where bytes live, when they
@@ -20,7 +20,6 @@
 
 #![doc = include_str!("README.md")]
 
-mod disk;
 mod limits;
 mod loading;
 mod path;

@@ -1,34 +1,33 @@
 //! Concurrent loading uses per-shard locks for nodes and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
-//! Disk files are linked; metadata-pending files are read for classification during loading.
+//! On-demand readers retain their backing; pending files are read for classification during loading.
 //! Freezing sorts and deduplicates nodes in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
-use super::disk;
 use super::limits::add_capped;
 use super::path::key;
-use super::scratch::{Blob, Scratch};
+use super::scratch::Scratch;
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
 
 pub enum Put<'a> {
     Bytes(Vec<u8>),
     /// Called synchronously at most once, only for `Keep` or `Pending`.
-    Lazy {
+    ReadAndStore {
         size: u64,
         read: Box<dyn FnOnce() -> io::Result<Vec<u8>> + 'a>,
     },
-    OnDisk {
-        path: PathBuf,
+    ReadOnDemand {
         size: u64,
+        read: Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>,
     },
     Symlink(String),
 }
@@ -37,11 +36,11 @@ const NODE_SHARDS: usize = 64;
 const BLOB_SHARDS: usize = 256;
 
 pub struct Loading<T> {
-    passes: Arc<dyn Pass<Tag = T>>,
+    passes: Box<dyn Pass<Tag = T>>,
     limits: Limits,
     cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     nodes: Vec<Mutex<Vec<Node<T>>>>,
-    blobs: Vec<Mutex<FxHashMap<[u8; 32], Blob>>>,
+    blobs: Vec<Mutex<FxHashMap<[u8; 32], Content>>>,
     scratch: Scratch,
     files: AtomicU64,
     bytes: AtomicU64,
@@ -51,13 +50,17 @@ pub struct Loading<T> {
 
 pub(super) struct Node<T> {
     pub(super) file: File<'static, T>,
-    pub(super) slot: Option<Slot>,
+    pub(super) content: Content,
 }
 
-pub(super) enum Slot {
-    Stored(Blob),
-    Linked(PathBuf),
-    Link(String),
+#[derive(Clone)]
+pub(super) enum Content {
+    Unavailable,
+    Failed(Arc<io::Error>),
+    Memory(super::Bytes),
+    Spilled { offset: u64, len: u64, raw_len: u64 },
+    ReadOnDemand(Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>),
+    Symlink(String),
 }
 
 impl<T: Tag> Loading<T> {
@@ -67,7 +70,7 @@ impl<T: Tag> Loading<T> {
         options: Options,
     ) -> Self {
         Self {
-            passes: Arc::new(passes),
+            passes: Box::new(passes),
             scratch: Scratch::new(&options, limits.spilled_bytes),
             limits,
             cancelled: options.cancelled,
@@ -91,7 +94,7 @@ impl<T: Tag> Loading<T> {
             })?;
         let size = match &what {
             Put::Bytes(bytes) => bytes.len() as u64,
-            Put::Lazy { size, .. } | Put::OnDisk { size, .. } => *size,
+            Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
         };
         add_capped(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
@@ -99,7 +102,7 @@ impl<T: Tag> Loading<T> {
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
-            self.add_node(file, Some(Slot::Link(target)));
+            self.add_node(file, Content::Symlink(target));
             return Ok(());
         }
         let mut file = File::new(key, size, Decision::Pending);
@@ -108,17 +111,19 @@ impl<T: Tag> Loading<T> {
             _ => self.passes.metadata(&file),
         };
         match (file.decision(), what) {
-            (Decision::Drop(_) | Decision::List(_), _) => self.add_node(file, None),
-            (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None)?,
-            (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None)?,
-            (Decision::Keep(_), Put::OnDisk { path, .. }) => {
-                self.add_node(file, Some(Slot::Linked(path)))
+            (Decision::List(_), _) => self.add_node(file, Content::Unavailable),
+            (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes), None)?,
+            (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read(), None)?,
+            (Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
+                self.add_node(file, Content::ReadOnDemand(read))
             }
-            (Decision::Pending, Put::OnDisk { path, .. }) => match disk::read(&path, size) {
-                Ok(bytes) => self.put_bytes(file, bytes, Some(path))?,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
-            },
+            (Decision::Pending, Put::ReadOnDemand { read, .. }) => {
+                self.put_bytes(
+                    file,
+                    read(self.limits.file_bytes.unwrap_or(u64::MAX)),
+                    Some(Content::ReadOnDemand(read)),
+                )?;
+            }
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
         }
         Ok(())
@@ -127,30 +132,43 @@ impl<T: Tag> Loading<T> {
     fn put_bytes(
         &self,
         file: File<'static, T>,
-        bytes: Vec<u8>,
-        on_disk: Option<PathBuf>,
+        bytes: io::Result<Vec<u8>>,
+        backing: Option<Content>,
     ) -> Result<(), SourceError> {
-        if bytes.len() as u64 != file.size {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "source size mismatch").into());
-        }
-        file.classify(&*self.passes, &bytes);
-        let slot = match (file.decision(), on_disk) {
-            (Decision::Keep(_), Some(path)) => Some(Slot::Linked(path)),
-            (Decision::Keep(_), None) => Some(Slot::Stored(self.store(bytes)?)),
-            _ => None,
+        let bytes = match bytes.and_then(|bytes| {
+            if bytes.len() as u64 != file.size {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "source size mismatch",
+                ))
+            } else {
+                Ok(bytes)
+            }
+        }) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.add_node(file, Content::Failed(Arc::new(error)));
+                return Ok(());
+            }
         };
-        self.add_node(file, slot);
+        file.classify(&*self.passes, &bytes);
+        let content = match (file.decision(), backing) {
+            (Decision::Keep(_), Some(content)) => content,
+            (Decision::Keep(_), None) => self.store(bytes)?,
+            _ => Content::Unavailable,
+        };
+        self.add_node(file, content);
         Ok(())
     }
 
-    fn add_node(&self, file: File<'static, T>, slot: Option<Slot>) {
+    fn add_node(&self, file: File<'static, T>, content: Content) {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
         let shard = &self.nodes[hasher.finish() as usize % NODE_SHARDS];
-        lock(shard).push(Node { file, slot });
+        lock(shard).push(Node { file, content });
     }
 
-    fn store(&self, bytes: Vec<u8>) -> Result<Blob, SourceError> {
+    fn store(&self, bytes: Vec<u8>) -> Result<Content, SourceError> {
         let id: [u8; 32] = Sha256::digest(&bytes).into();
         let len = bytes.len() as u64;
         let mut shard = lock(&self.blobs[id[0] as usize]);
@@ -166,7 +184,7 @@ impl<T: Tag> Loading<T> {
                     len,
                     self.limits.resident_bytes,
                 ) {
-                    Ok(_) => Blob::Memory(bytes.into()),
+                    Ok(_) => Content::Memory(bytes.into()),
                     Err(_) => self.scratch.append(&bytes)?,
                 };
                 vacant.insert(blob)
@@ -191,11 +209,10 @@ impl<T: Tag> Loading<T> {
             true
         });
         let duplicate_paths = offered - nodes.len();
-        nodes.retain(|node| !matches!(node.file.decision(), Decision::Drop(_)));
         let links = nodes
             .iter()
-            .filter_map(|node| match &node.slot {
-                Some(Slot::Link(target)) => Some((node.file.path.to_string(), target.clone())),
+            .filter_map(|node| match &node.content {
+                Content::Symlink(target) => Some((node.file.path.to_string(), target.clone())),
                 _ => None,
             })
             .collect();
@@ -214,6 +231,7 @@ impl<T: Tag> Loading<T> {
             links,
             scratch: self.scratch,
             usage,
+            max_file_bytes: self.limits.file_bytes.unwrap_or(u64::MAX),
         }
     }
 }

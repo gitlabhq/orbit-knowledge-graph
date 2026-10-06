@@ -176,6 +176,329 @@ fn resident_duplicates_share_content_after_loading() {
 }
 
 #[test]
+fn on_demand_readers_remain_lazy_repeatable_and_size_checked() {
+    struct Inputs(Arc<AtomicUsize>);
+    impl Source for Inputs {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            let calls = self.0;
+            into.put(
+                "file",
+                Put::ReadOnDemand {
+                    size: 4,
+                    read: Arc::new(move |max_bytes| {
+                        assert_eq!(max_bytes, 10);
+                        let call = calls.fetch_add(1, SeqCst);
+                        Ok(if call == 0 {
+                            b"data".to_vec()
+                        } else {
+                            b"grown".to_vec()
+                        })
+                    }),
+                },
+            )?;
+            into.put(
+                "listed",
+                Put::ReadOnDemand {
+                    size: 4,
+                    read: Arc::new(|_| panic!("metadata-rejected readers must not run")),
+                },
+            )
+        }
+    }
+    struct Filter;
+    impl Pass for Filter {
+        type Tag = ();
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+            if file.path == "listed" {
+                Decision::List("excluded")
+            } else {
+                Decision::Keep(())
+            }
+        }
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let vfs = Vfs::load(
+        Inputs(calls.clone()),
+        Filter,
+        Limits {
+            file_bytes: Some(10),
+            ..Limits::default()
+        },
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(calls.load(SeqCst), 0);
+    assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"data");
+    assert_eq!(
+        vfs.read(Path::new("file")).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(calls.load(SeqCst), 2);
+    assert_eq!(
+        vfs.read(Path::new("listed")).unwrap_err().kind(),
+        io::ErrorKind::Unsupported
+    );
+    assert_eq!(vfs.usage().files, 2);
+    assert_eq!(vfs.usage().resident, 0);
+}
+
+#[test]
+fn safe_fs_inspects_links_without_following_them_and_reopens_files_safely() {
+    use orbit_utils::safe_fs::{self, Entry};
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let path = root.path().canonicalize().unwrap();
+    std::fs::write(path.join("file"), b"inside").unwrap();
+    std::fs::write(outside.path().join("file"), b"secret").unwrap();
+    symlink("file", path.join("alias")).unwrap();
+    symlink(outside.path(), path.join("escape")).unwrap();
+    assert!(
+        matches!(safe_fs::inspect(&path.join("alias")).unwrap(), Some(Entry::Symlink(target)) if target == Path::new("file"))
+    );
+    assert!(safe_fs::inspect(&path.join("escape/file")).is_err());
+    assert!(safe_fs::inspect(&path).unwrap().is_none());
+    let Some(Entry::File(file)) = safe_fs::inspect(&path.join("file")).unwrap() else {
+        panic!("expected a file");
+    };
+    assert_eq!(file.size(), 6);
+    assert_eq!(file.read(6).unwrap(), b"inside");
+    std::fs::remove_file(path.join("file")).unwrap();
+    symlink(outside.path().join("file"), path.join("file")).unwrap();
+    assert!(file.read(6).is_err());
+}
+
+#[test]
+fn a_file_removed_after_metadata_classification_remains_cataloged() {
+    struct RemoveDuringMetadata(std::path::PathBuf);
+    impl Pass for RemoveDuringMetadata {
+        type Tag = ();
+        fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
+            std::fs::remove_file(self.0.join(file.path.as_ref())).unwrap();
+            Decision::Pending
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file"), b"content").unwrap();
+    let vfs = Vfs::load(
+        Directory(root.path()),
+        RemoveDuringMetadata(root.path().into()),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(vfs.files().next().unwrap().path, "file");
+    assert_eq!(
+        vfs.stat(Path::new("file")).unwrap().decision,
+        Some(Decision::Pending)
+    );
+    assert_eq!(
+        vfs.read(Path::new("file")).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+    assert_eq!(vfs.usage().files, 1);
+    assert_eq!(vfs.usage().bytes, 7);
+}
+
+#[test]
+fn safe_fs_read_limits_are_inclusive_and_checked_before_opening() {
+    use orbit_utils::safe_fs::{self, Entry, SizeLimitExceeded};
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().canonicalize().unwrap().join("file");
+    std::fs::write(&path, b"data").unwrap();
+    let Some(Entry::File(file)) = safe_fs::inspect(&path).unwrap() else {
+        panic!("expected a regular file");
+    };
+    assert_eq!(file.read(4).unwrap(), b"data");
+    assert_eq!(file.read(5).unwrap(), b"data");
+    std::fs::remove_file(&path).unwrap();
+    let error = file.read(3).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::FileTooLarge);
+    let limit = error
+        .get_ref()
+        .unwrap()
+        .downcast_ref::<SizeLimitExceeded>()
+        .unwrap();
+    assert_eq!(limit.size, 4);
+    assert_eq!(limit.max_bytes, 3);
+
+    std::fs::write(&path, b"grown").unwrap();
+    assert_eq!(
+        file.read(4).unwrap_err().kind(),
+        io::ErrorKind::FileTooLarge
+    );
+    assert_eq!(file.read(5).unwrap_err().kind(), io::ErrorKind::InvalidData);
+
+    std::fs::write(&path, b"").unwrap();
+    let Some(Entry::File(empty)) = safe_fs::inspect(&path).unwrap() else {
+        panic!("expected an empty regular file");
+    };
+    assert!(empty.read(0).unwrap().is_empty());
+    std::fs::write(&path, b"x").unwrap();
+    assert_eq!(
+        empty.read(0).unwrap_err().kind(),
+        io::ErrorKind::FileTooLarge
+    );
+}
+
+#[test]
+fn reader_errors_preserve_their_cause_and_do_not_run_content_policy() {
+    #[derive(Debug, thiserror::Error)]
+    #[error("reader disconnected")]
+    struct Disconnected;
+
+    struct Inputs;
+    impl Source for Inputs {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            for kind in [
+                io::ErrorKind::NotFound,
+                io::ErrorKind::FileTooLarge,
+                io::ErrorKind::PermissionDenied,
+                io::ErrorKind::Other,
+            ] {
+                into.put(
+                    &format!("{kind:?}"),
+                    Put::ReadOnDemand {
+                        size: 7,
+                        read: Arc::new(move |_| Err(io::Error::new(kind, Disconnected))),
+                    },
+                )?;
+            }
+            into.put("healthy", Put::Bytes(b"data".to_vec()))
+        }
+    }
+    struct Filter;
+    impl Pass for Filter {
+        type Tag = ();
+        fn content(&self, file: &File<'_, ()>) -> Decision<()> {
+            assert_eq!(file.path, "healthy");
+            Decision::Keep(())
+        }
+    }
+    let vfs = Vfs::load(Inputs, Filter, Limits::default(), Default::default()).unwrap();
+    for file in vfs.files().filter(|file| file.path != "healthy") {
+        let original = vfs.read(Path::new(file.path.as_ref())).unwrap_err();
+        let original_cause = original
+            .get_ref()
+            .unwrap()
+            .downcast_ref::<Arc<io::Error>>()
+            .unwrap();
+        assert!(original_cause.get_ref().unwrap().is::<Disconnected>());
+        assert_eq!(file.decision(), Decision::Pending);
+        for _ in 0..2 {
+            let error = vfs.read(Path::new(file.path.as_ref())).unwrap_err();
+            assert_eq!(error.kind(), original.kind());
+            assert_eq!(error.to_string(), "reader disconnected");
+            let shared = error
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<Arc<io::Error>>()
+                .unwrap();
+            assert!(Arc::ptr_eq(shared, original_cause));
+        }
+    }
+    assert_eq!(vfs.usage().files, 5);
+    assert_eq!(vfs.usage().kept, 4);
+    assert_eq!(&*vfs.read(Path::new("healthy")).unwrap(), b"data");
+}
+
+#[test]
+fn an_on_demand_failure_after_loading_can_be_retried() {
+    struct Input(Arc<AtomicUsize>);
+    impl Source for Input {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            into.put(
+                "file",
+                Put::ReadOnDemand {
+                    size: 4,
+                    read: Arc::new(move |_| {
+                        if self.0.fetch_add(1, SeqCst) == 0 {
+                            Err(io::ErrorKind::NotFound.into())
+                        } else {
+                            Ok(b"data".to_vec())
+                        }
+                    }),
+                },
+            )
+        }
+    }
+    let reads = Arc::new(AtomicUsize::new(0));
+    let classifications = Arc::new(AtomicUsize::new(0));
+    let vfs = Vfs::load(
+        Input(reads.clone()),
+        Checked(classifications.clone()),
+        Limits::default(),
+        Default::default(),
+    )
+    .unwrap();
+    assert_eq!(reads.load(SeqCst), 0);
+    assert_eq!(
+        vfs.read(Path::new("file")).unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
+    assert_eq!(classifications.load(SeqCst), 0);
+    for _ in 0..2 {
+        assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"data");
+    }
+    assert_eq!(classifications.load(SeqCst), 1);
+    assert_eq!(reads.load(SeqCst), 3);
+}
+
+#[test]
+fn oversized_on_demand_files_remain_cataloged_during_loading_and_later_reads() {
+    struct GrowDuringMetadata {
+        path: std::path::PathBuf,
+        defer: bool,
+    }
+    impl Pass for GrowDuringMetadata {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            std::fs::write(&self.path, b"too large").unwrap();
+            if self.defer {
+                Decision::Keep(())
+            } else {
+                Decision::Pending
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("file");
+    for defer in [false, true] {
+        std::fs::write(&path, b"data").unwrap();
+        let vfs = Vfs::load(
+            Directory(root.path()),
+            GrowDuringMetadata {
+                path: path.clone(),
+                defer,
+            },
+            Limits {
+                file_bytes: Some(4),
+                ..Limits::default()
+            },
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(vfs.files().next().unwrap().size, 4);
+        assert_eq!(vfs.usage().files, 1);
+        assert_eq!(vfs.usage().resident, 0);
+        assert_eq!(
+            vfs.read(Path::new("file")).unwrap_err().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        assert_eq!(
+            vfs.stat(Path::new("file")).unwrap().decision,
+            Some(if defer {
+                Decision::Keep(())
+            } else {
+                Decision::Pending
+            })
+        );
+    }
+}
+
+#[test]
 fn composed_passes_observe_previous_decisions_without_changing_file_metadata() {
     struct Stage(u8);
     impl Pass for Stage {
@@ -373,10 +696,10 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
     struct Files<'a>(&'a AtomicUsize);
     impl Source for Files<'_> {
         fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-            for path in ["kept", "listed", "dropped", "oversize"] {
+            for path in ["kept", "listed", "oversize"] {
                 into.put(
                     path,
-                    Put::Lazy {
+                    Put::ReadAndStore {
                         size: if path == "oversize" { 100 } else { 4 },
                         read: Box::new(move || {
                             assert_eq!(path, "kept", "rejected content must not be read");
@@ -395,7 +718,6 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
         fn metadata(&self, file: &File<'_, ()>) -> Decision<()> {
             match file.path.as_ref() {
                 "listed" => Decision::List("excluded"),
-                "dropped" => Decision::Drop("excluded"),
                 _ => Decision::Keep(()),
             }
         }
@@ -425,19 +747,21 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
         io::ErrorKind::Unsupported
     );
     assert_eq!(
-        vfs.read(Path::new("dropped")).unwrap_err().kind(),
-        io::ErrorKind::NotFound
+        vfs.files()
+            .map(|file| file.path.as_ref())
+            .collect::<Vec<_>>(),
+        ["kept", "listed", "oversize"]
     );
 }
 
 #[test]
-fn lazy_errors_size_mismatches_and_overflow_fail_loading() {
+fn reader_failures_are_cataloged_but_global_limits_abort_loading() {
     struct Input(u64, bool);
     impl Source for Input {
         fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
             into.put(
                 "file",
-                Put::Lazy {
+                Put::ReadAndStore {
                     size: self.0,
                     read: Box::new(move || {
                         assert_ne!(self.0, u64::MAX, "oversize content must not be read");
@@ -456,9 +780,14 @@ fn lazy_errors_size_mismatches_and_overflow_fail_loading() {
         (6, true, io::ErrorKind::Other),
         (1, false, io::ErrorKind::InvalidData),
     ] {
-        let error =
-            Vfs::load(Input(size, fail), (), Limits::default(), Default::default()).unwrap_err();
-        assert!(matches!(error, SourceError::Io(error) if error.kind() == expected));
+        let vfs = Vfs::load(Input(size, fail), (), Limits::default(), Default::default()).unwrap();
+        assert_eq!(vfs.read(Path::new("file")).unwrap_err().kind(), expected);
+        let file = vfs.files().find(|file| file.path == "file").unwrap();
+        assert_eq!(file.decision(), Decision::Pending);
+        assert_eq!(file.size, size);
+        assert_eq!(&*vfs.read(Path::new("extra")).unwrap(), b"x");
+        assert_eq!(vfs.usage().files, 2);
+        assert_eq!(vfs.usage().kept, 1);
     }
     let error = Vfs::load(
         Input(u64::MAX, false),

@@ -161,9 +161,24 @@
         - {op: read_dir, path: alias, expect: {ok: [child]}}
         - {op: subtree, path: alias, expect: [shared/child]}
         - {op: stat, path: nested/chain, expect: {ok: {path: /shared, kind: dir, len: 0, link: ../alias}}}
+        - {op: stat, path: alias/child, expect: {ok: {path: /shared/child, kind: file, len: 7, decision: {kind: keep, value: input}}}}
     - name: Escapes and dangling links fail and cycles terminate
       assert:
         - {op: read, path: escape/secret, expect: {error: NotFound}}
         - {op: stat, path: dangling, expect: {error: NotFound}}
         - {op: read, path: ping, expect: {error: Other}}
         - {op: usage, expect: {files: 8, kept: 7}}
+
+- name: Stat reports the requested link after resolving parent links
+  sources: [directory, changeset, archive]
+  fixtures:
+    - {path: actual/file, content: payload}
+    - {path: actual/alias, link: file}
+    - {path: actual/chain, link: alias}
+    - {path: parent, link: actual}
+  tests:
+    - name: Parent links do not replace the final link target
+      assert:
+        - {op: stat, path: parent/alias, expect: {ok: {path: /actual/file, kind: file, len: 7, decision: {kind: keep, value: input}, link: file}}}
+        - {op: stat, path: parent/chain, expect: {ok: {path: /actual/file, kind: file, len: 7, decision: {kind: keep, value: input}, link: alias}}}
+        - {op: stat, path: parent/file, expect: {ok: {path: /actual/file, kind: file, len: 7, decision: {kind: keep, value: input}}}}

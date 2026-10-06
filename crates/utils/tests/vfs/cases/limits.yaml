@@ -1,4 +1,4 @@
-- name: The byte limit includes files dropped by policy
+- name: The byte limit includes files whose content is rejected
   sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: a.log
@@ -6,11 +6,11 @@
     - path: b.log
       content: bb
   rules:
-    - {phase: metadata, decision: {kind: drop, value: log}}
+    - {phase: metadata, decision: {kind: list, value: log}}
   limits: {total_bytes: 2}
   load_error: cap:total_bytes
 
-- name: The file limit includes empty files dropped by policy
+- name: The file limit includes rejected empty files
   sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: a.log
@@ -18,7 +18,7 @@
     - path: b.log
       content: ""
   rules:
-    - {phase: metadata, decision: {kind: drop, value: log}}
+    - {phase: metadata, decision: {kind: list, value: log}}
   limits: {files: 1}
   load_error: cap:files
 
