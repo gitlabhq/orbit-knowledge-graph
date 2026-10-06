@@ -268,7 +268,7 @@ Normalize ClickHouse Timestamp
 
 Authorized Vulnerability Path Is Visible
     [Arguments]    ${project_id}
-    ${resp}=    Query Vulnerability Counts For Project As Victim    ${project_id}    ${None}
+    ${resp}=    Query Vulnerability Counts For Project As Victim    ${project_id}
     Response Has Project Count    ${resp}    ${project_id}    1
 
 Direct Vulnerability Search Is Hidden

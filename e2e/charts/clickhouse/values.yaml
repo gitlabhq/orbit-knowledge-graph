@@ -1,6 +1,6 @@
 image:
   repository: clickhouse/clickhouse-server
-  tag: "26.9"
+  tag: "26.6"
   pullPolicy: IfNotPresent
 
 # 1 = a single node with plain engines. 3 = three replicas that each run an

@@ -66,7 +66,7 @@ In CI the `e2e` job runs automatically on `main` and manually on MRs.
 
 Every suite sends GQL text to `POST /api/v4/orbit/query`. Suite 01 turns on the
 `orbit_gql_queries` feature flag for the instance, so Rails selects the GQL
-frontend for every user. With the flag on, Rails rejects JSON DSL queries. See
+frontend for every user. With the flag on, Orbit rejects JSON DSL queries. See
 [Orbit query frontend](../design-documents/querying/orbit_query_frontend.md).
 
 ## Parallel execution
@@ -95,7 +95,7 @@ other suite runs in a parallel worker pool.
 - In CI the runner pod uses the prebaked `e2e-robot` image. The
   `e2e-robot-image` job builds it from `e2e/Dockerfile.robot` whenever that file
   changes, tagged by its content hash. Local runs default to
-  `python:3.12-slim` and install Robot Framework at pod startup.
+  `python:3.14-slim` and install Robot Framework at pod startup.
 
 ## Setup phases
 

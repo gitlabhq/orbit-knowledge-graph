@@ -82,6 +82,7 @@ Group Scoped Multi Hop Traversal Returns Cross Namespace Closed Issue
     ...    MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:CLOSES]->(issue:WorkItem) WHERE g.id = ${XNS_GROUP_ID_A} RETURN g, p, mr, issue.id LIMIT 100
     ...    ${XNS_ISSUE_ID_B}
 
+
 *** Keywords ***
 Seed Cross Namespace Fixture
     ${suffix}=    Random Suffix

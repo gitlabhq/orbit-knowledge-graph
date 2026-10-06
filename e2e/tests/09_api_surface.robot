@@ -30,7 +30,9 @@ Schema Lists Domains And Nodes
 Schema Call Describes A Node
     [Tags]    api
     ${resp}=    Orbit Query    CALL db.schema('Vulnerability')
-    Should Contain    ${{json.dumps($resp)}}    Vulnerability
+    Should Be Equal    ${resp["result"]["domains"][0]["nodes"][0]["name"]}    Vulnerability
+    ${headers}=    GitLab Auth Headers
+    GET    ${GITLAB_URL}/api/v4/orbit/schema/dsl    headers=${headers}    expected_status=404
 
 Response Format Guidance Is Served
     [Tags]    api

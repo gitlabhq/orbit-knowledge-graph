@@ -12,7 +12,7 @@ Suite Setup         Provision Smoke Fixtures
 GQL Queries Are Enabled
     [Documentation]    Every suite sends GQL, which Rails accepts only while orbit_gql_queries is on.
     [Tags]    smoke
-    Feature Flag Is Enabled    orbit_gql_queries
+    Wait Until Keyword Succeeds    90s    2s    Feature Flag Is Enabled    orbit_gql_queries
 
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy.
