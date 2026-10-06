@@ -179,7 +179,11 @@ The result is a `CompiledQueryContext` with SQL, parameters, hydration, paginati
 The graph borrows the catalog during compilation; no graph is stored inside its catalog owner.
 
 Identity-key cursors support page readback, query binding, and seek predicates. Cursors ordered by user properties return an unsupported error.
-Scope-depth constraints and required scope guards also return errors. Neighbors and pathfinding planners remain unfinished.
+Scope-depth constraints and required scope guards also return errors. Pathfinding planning remains unfinished.
+Neighbor planning selects directional table routes and retains center scans for uncovered filters and indirect authorization identities.
+Eligible both-direction queries use one scan, conditional tuple arrays, concatenation, and expansion. Both matching directions retain their own result row.
+Incoming namespace queries narrow edge paths through a derived lookup. Multiple routes and directions compose through positional UNION outputs.
+Neighbor plans are available through graph planning; the request compiler entry point still accepts traversal only.
 Hydration planning reuses the existing prefix-pruning and path-budget policy. Each entity arm projects requested fields through full-key latest-row selection before deletion filtering.
 Arms produce identity, entity type, and JSON properties with matching positional UNION outputs. A wrapper applies the shared result limit.
 Large dynamic path sets bind one array; smaller sets render individual prefix predicates. Hydration is available through graph planning with compile options.

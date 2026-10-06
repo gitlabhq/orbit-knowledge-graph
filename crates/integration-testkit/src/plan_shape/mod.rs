@@ -369,6 +369,8 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                         let root = graph.plan_with_options(input, options)?;
                         let planned = if input.query_type == compiler::QueryType::Hydration {
                             explain::graph_hydration(&graph, root)
+                        } else if input.query_type == compiler::QueryType::Neighbors {
+                            explain::graph_neighbors(&graph, root, input)
                         } else {
                             explain::query_graph(&graph, root)
                         };

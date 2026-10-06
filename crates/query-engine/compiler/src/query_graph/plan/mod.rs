@@ -7,6 +7,7 @@ mod foreign_keys;
 mod hops;
 mod hydration;
 mod keys;
+mod neighbors;
 mod predicates;
 
 struct KeyScan<'a> {
@@ -76,6 +77,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         options: crate::passes::plan::HydrationCompileOptions,
     ) -> Result<BlockId> {
         match input.query_type {
+            crate::input::QueryType::Neighbors => self.neighbors(input),
             crate::input::QueryType::Hydration => self.hydration(input, options),
             crate::input::QueryType::Aggregation => self.aggregation(input),
             _ => self.traversal(input),

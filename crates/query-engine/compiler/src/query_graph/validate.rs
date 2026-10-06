@@ -4,9 +4,9 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
     pub fn validate(
         &self,
         root: BlockId,
-        check: impl Fn(BlockId, &[Projection<E>], &O) -> Result<()>,
+        mut check: impl FnMut(BlockId, &[Projection<E>], &O) -> Result<()>,
     ) -> Result<()> {
-        self.visit(root, &HashSet::new(), &mut HashSet::new(), &check)
+        self.visit(root, &HashSet::new(), &mut HashSet::new(), &mut check)
     }
 
     fn visit(
@@ -14,7 +14,7 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         id: BlockId,
         inherited: &HashSet<DefinitionId>,
         owned: &mut HashSet<BlockId>,
-        check: &impl Fn(BlockId, &[Projection<E>], &O) -> Result<()>,
+        check: &mut impl FnMut(BlockId, &[Projection<E>], &O) -> Result<()>,
     ) -> Result<()> {
         let block = self.block(id)?;
         if !owned.insert(id) {

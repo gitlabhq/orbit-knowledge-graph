@@ -406,6 +406,104 @@ pub(super) trait GraphPhase: std::fmt::Debug {
     fn version(&self) -> compiler::query_graph::ColumnRef<'_>;
 }
 
+pub(super) fn graph_neighbors<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::PhysicalOperation<'a>,
+    >,
+    root: compiler::query_graph::BlockId,
+    input: &Input,
+) -> Tree {
+    use compiler::query_graph::{Relational, Source};
+    let center = &input.nodes[0];
+    let config = input.neighbors.as_ref().unwrap();
+    let tables = |root| {
+        let mut tables = Vec::new();
+        graph
+            .validate(root, |block, _, _| {
+                for relation in graph.relations(block)? {
+                    let relation = graph.relation(relation)?;
+                    if matches!(relation.hint.as_str(), "e" | "_e")
+                        && let Source::Stored(table) = relation.source
+                    {
+                        tables.push(table.name().to_string());
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+        tables.sort();
+        tables.dedup();
+        tables
+    };
+    let Relational::Limit { input: source, .. } = graph.operation(root).unwrap() else {
+        unreachable!()
+    };
+    let fused = matches!(source.as_ref(), Relational::Expand { .. });
+    let access = if fused {
+        format!("fused table={}", tables(root).join(", "))
+    } else {
+        let Relational::Source { relation, .. } = source.as_ref() else {
+            unreachable!()
+        };
+        let Source::Derived(body) = graph.relation(*relation).unwrap().source else {
+            unreachable!()
+        };
+        let arms = graph.union_arms(body).unwrap();
+        let (outgoing, incoming) = if config.direction == compiler::input::Direction::Both {
+            let arms = arms.unwrap();
+            (tables(arms[0]), tables(arms[1]))
+        } else {
+            (tables(body), tables(body))
+        };
+        format!(
+            "directional outgoing=[{}] incoming=[{}]",
+            outgoing.join(", "),
+            incoming.join(", ")
+        )
+    };
+    let mut center_scan = false;
+    graph
+        .validate(root, |block, _, _| {
+            for relation in graph.relations(block)? {
+                center_scan |= graph.relation(relation)?.input
+                    == Some(compiler::query_graph::ScanInput::Node(0));
+            }
+            Ok(())
+        })
+        .unwrap();
+    let direction = match config.direction {
+        compiler::input::Direction::Both => "both",
+        compiler::input::Direction::Incoming => "incoming",
+        compiler::input::Direction::Outgoing => "outgoing",
+    };
+    let lookup = graph
+        .catalog()
+        .traversal_path_lookup(
+            center.entity.as_deref().unwrap(),
+            ontology::TraversalPathKind::Id,
+        )
+        .map_or_else(
+            || "none".into(),
+            |(table, column)| format!("{table}.{column}"),
+        );
+    Tree::node(
+        Operator::Neighbors,
+        format!(
+            "center={} direction={direction} {access} center_filter={} relationships=[{}] path_lookup={lookup}",
+            center.id,
+            center_scan && (!center.filters.is_empty() || center.id_range.is_some()),
+            config.rel_types.join(", ")
+        ),
+        vec![leaf(
+            Operator::NodeScan,
+            format!("{} AS {}", center.entity.as_deref().unwrap(), center.id),
+        )],
+    )
+}
+
 pub(super) fn graph_hydration<'a, M: query_data_model::QueryDataModel + ?Sized>(
     graph: &compiler::query_graph::QueryGraph<
         'a,
@@ -865,9 +963,20 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
             graph_expression(graph, left),
             graph_expression(graph, right)
         ),
+        Expression::Or(left, right) => format!(
+            "({}) OR ({})",
+            graph_expression(graph, left),
+            graph_expression(graph, right)
+        ),
         Expression::And(_, _) => graph_conjunction(graph, value)
             .iter()
-            .map(|part| format!("({part})"))
+            .map(|part| {
+                if part.starts_with("ArrayContains") {
+                    part.clone()
+                } else {
+                    format!("({part})")
+                }
+            })
             .collect::<Vec<_>>()
             .join(" AND "),
         value => format!("{value:?}"),
