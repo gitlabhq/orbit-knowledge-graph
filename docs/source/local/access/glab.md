@@ -25,13 +25,13 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 
 Install and run GitLab Orbit Local with the GitLab CLI (`glab`).
 
-With `glab orbit`, you can index local repositories and connect AI agents
+Use `glab orbit` to index local repositories and connect AI agents
 and MCP clients to the code graph.
 
 ## Differences from the standalone binary
 
 `glab orbit` and the standalone [`orbit` binary](cli.md) support the same commands.
-When you use `glab orbit`:
+When you use `glab orbit`, the following credential and installation setup applies:
 
 - Installation and updates to the `orbit` binary are handled automatically.
 - Your GitLab credentials are passed to the binary. You can then run
@@ -81,7 +81,7 @@ To set up GitLab Orbit Local:
 
 1. Optional. To connect an MCP client by hand instead, start the MCP server with
    `glab orbit mcp serve`.
-   For per-client configuration, see [connect through the MCP](mcp.md).
+   For configuration for each client, see [connect through the MCP](mcp.md).
 
 ## Commands
 
