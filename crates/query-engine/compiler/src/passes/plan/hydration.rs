@@ -30,7 +30,7 @@ pub enum HydrationPathFilter {
     PrefixSet(Vec<TraversalPath>),
 }
 
-fn path_filter(
+pub(crate) fn path_filter(
     paths: &[TraversalPath],
     options: HydrationCompileOptions,
 ) -> Option<HydrationPathFilter> {

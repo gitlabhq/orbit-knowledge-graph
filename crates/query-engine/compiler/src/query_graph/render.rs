@@ -491,6 +491,74 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::Strings(values) => format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| self
+                        .render_expression_with(&Expression::Text(value.clone()), column))
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ")
+            ),
+            Expression::JsonObject(fields) => {
+                if fields.is_empty() {
+                    "'{}'".into()
+                } else {
+                    let mut entries = Vec::new();
+                    for (name, value) in fields {
+                        entries.push(
+                            self.render_expression_with(&Expression::Text(name.clone()), column)?,
+                        );
+                        entries.push(self.render_expression_with(value, column)?);
+                    }
+                    format!("toJSONString(map({}))", entries.join(", "))
+                }
+            }
+            Expression::Prefixes {
+                value,
+                paths,
+                array,
+            } => {
+                let value = self.render_expression_with(value, column)?;
+                if *array {
+                    format!(
+                        "arrayExists(_gkg_path -> startsWith({value}, _gkg_path), {})",
+                        self.render_expression_with(paths, column)?
+                    )
+                } else if let Expression::Strings(paths) = paths.as_ref() {
+                    format!(
+                        "({})",
+                        paths
+                            .iter()
+                            .map(|path| Ok(format!(
+                                "startsWith({value}, {})",
+                                self.render_expression_with(
+                                    &Expression::Text(path.clone()),
+                                    column
+                                )?
+                            )))
+                            .collect::<Result<Vec<_>>>()?
+                            .join(" OR ")
+                    )
+                } else if let Expression::Array(paths) = paths.as_ref() {
+                    format!(
+                        "({})",
+                        paths
+                            .iter()
+                            .map(|path| Ok(format!(
+                                "startsWith({value}, {})",
+                                self.render_expression_with(path, column)?
+                            )))
+                            .collect::<Result<Vec<_>>>()?
+                            .join(" OR ")
+                    )
+                } else {
+                    format!(
+                        "arrayExists(_gkg_path -> startsWith({value}, _gkg_path), {})",
+                        self.render_expression_with(paths, column)?
+                    )
+                }
+            }
             Expression::HasAny(value, values) => {
                 if let Expression::Array(values) = values.as_ref()
                     && let [element] = values.as_slice()

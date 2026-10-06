@@ -179,7 +179,13 @@ The result is a `CompiledQueryContext` with SQL, parameters, hydration, paginati
 The graph borrows the catalog during compilation; no graph is stored inside its catalog owner.
 
 Identity-key cursors support page readback, query binding, and seek predicates. Cursors ordered by user properties return an unsupported error.
-Scope-depth constraints and required scope guards also return errors. Neighbors, pathfinding, and hydration planners remain unfinished.
+Scope-depth constraints and required scope guards also return errors. Neighbors and pathfinding planners remain unfinished.
+Hydration planning reuses the existing prefix-pruning and path-budget policy. Each entity arm projects requested fields through full-key latest-row selection before deletion filtering.
+Arms produce identity, entity type, and JSON properties with matching positional UNION outputs. A wrapper applies the shared result limit.
+Large dynamic path sets bind one array; smaller sets render individual prefix predicates. Hydration is available through graph planning with compile options.
+Bounded variable-hop traversal builds one UNION arm per requested positive depth, preserving direction, endpoint tags, and path tuples.
+Each arm uses shared scans, joins, filters, and array expressions. Derived endpoint columns remain available to result enforcement and cursor planning.
+This slice supports one variable-length relationship; mixed multi-relationship expansion remains unfinished.
 Graph planning supports single-edge conditional counts and property-grouped counts, including a joined node for grouping properties.
 Grouping accepts scalar expressions, including typed time buckets. Node and edge identity filters share range and membership construction.
 Scalar property predicates support comparisons, membership, null checks, and text matching with the existing sort-key case-folding rule.

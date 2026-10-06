@@ -362,12 +362,16 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                     backend,
                     path,
                     &mut failures,
-                    |input, _options| {
+                    |input, options| {
                         use compiler::query_graph::{Expression, PhysicalOperation, QueryGraph};
                         let mut graph =
                             QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(&remote);
-                        let root = graph.plan(input)?;
-                        let planned = explain::query_graph(&graph, root);
+                        let root = graph.plan_with_options(input, options)?;
+                        let planned = if input.query_type == compiler::QueryType::Hydration {
+                            explain::graph_hydration(&graph, root)
+                        } else {
+                            explain::query_graph(&graph, root)
+                        };
                         let graph = graph.lower_operations()?;
                         let emitted = explain::query_graph(&graph, root);
                         graph.render_parameterized(root)?;

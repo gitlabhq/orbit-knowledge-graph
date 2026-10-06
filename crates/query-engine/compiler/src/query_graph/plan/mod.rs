@@ -4,6 +4,8 @@ mod access;
 mod aggregation;
 mod edges;
 mod foreign_keys;
+mod hops;
+mod hydration;
 mod keys;
 mod predicates;
 
@@ -48,10 +50,10 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
             let relationship = &input.relationships[index];
             let (start, end) = relationship.direction.edge_columns();
             if relationship.from == node.id {
-                return self.stored_column(relation, start);
+                return self.column(relation, start);
             }
             if relationship.to == node.id {
-                return self.stored_column(relation, end);
+                return self.column(relation, end);
             }
         }
         Err(GraphError::MissingOutput)
@@ -62,7 +64,19 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
 {
     pub fn plan(&mut self, input: &crate::input::Input) -> Result<BlockId> {
+        self.plan_with_options(
+            input,
+            crate::passes::plan::HydrationCompileOptions::default(),
+        )
+    }
+
+    pub fn plan_with_options(
+        &mut self,
+        input: &crate::input::Input,
+        options: crate::passes::plan::HydrationCompileOptions,
+    ) -> Result<BlockId> {
         match input.query_type {
+            crate::input::QueryType::Hydration => self.hydration(input, options),
             crate::input::QueryType::Aggregation => self.aggregation(input),
             _ => self.traversal(input),
         }
@@ -72,6 +86,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         if input.query_type != crate::input::QueryType::Traversal {
             return Err(GraphError::UnsupportedInput("expected traversal".into()));
         }
-        self.access(input)
+        if input
+            .relationships
+            .iter()
+            .any(|relationship| relationship.hops.max > 1)
+        {
+            self.variable_hops(input)
+        } else {
+            self.access(input)
+        }
     }
 }

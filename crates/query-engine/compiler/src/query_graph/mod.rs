@@ -297,6 +297,19 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         self.stored_port(relation, column)
     }
 
+    pub fn column(&self, relation: RelationId, name: &str) -> Result<ColumnRef<'catalog>> {
+        let body = match self.relation(relation)?.source {
+            Source::Stored(_) => return self.stored_column(relation, name),
+            Source::Derived(body) => body,
+            Source::Definition(definition) => self.definition(definition)?.body,
+        };
+        let output = self
+            .outputs(body)?
+            .find(|output| self.output_label(*output).is_ok_and(|label| label == name))
+            .ok_or(GraphError::MissingOutput)?;
+        self.output_column(relation, output)
+    }
+
     pub fn stored_port(
         &self,
         relation: RelationId,
@@ -373,6 +386,13 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
                 slot: output.slot,
             })
             .collect())
+    }
+
+    pub fn union_arms(&self, block: BlockId) -> Result<Option<&[BlockId]>> {
+        Ok(match &self.block(block)?.body {
+            Body::UnionAll { arms, .. } => Some(arms),
+            _ => None,
+        })
     }
 
     pub fn replace_output(&mut self, output: OutputId, value: E) -> Result<E> {

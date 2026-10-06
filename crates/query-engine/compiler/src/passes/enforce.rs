@@ -235,7 +235,11 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
                 .and_then(|node| node.entity.as_deref())
                 .ok_or_else(|| QueryError::Enforcement("edge endpoint has no entity".into()))
         };
-        let prefix = format!("e{index}_");
+        let prefix = if relationship.hops.max > 1 {
+            format!("hop_e{index}_")
+        } else {
+            format!("e{index}_")
+        };
         for (suffix, value) in [
             ("type", kind.as_str()),
             ("src_type", entity(source)?),
@@ -257,8 +261,8 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
             src_type_column: format!("{prefix}src_type"),
             dst_column: format!("{prefix}dst"),
             dst_type_column: format!("{prefix}dst_type"),
+            path_column: (relationship.hops.max > 1).then(|| format!("{prefix}path_nodes")),
             column_prefix: prefix,
-            path_column: None,
             rel_types: relationship.types.clone(),
             from_alias: relationship.from.clone(),
             to_alias: relationship.to.clone(),

@@ -6,6 +6,13 @@ pub enum Expression<'catalog> {
     Integer(i64),
     Boolean(bool),
     Text(String),
+    Strings(Vec<String>),
+    JsonObject(Vec<(String, Self)>),
+    Prefixes {
+        value: Box<Self>,
+        paths: Box<Self>,
+        array: bool,
+    },
     Count,
     CountIf(Box<Self>),
     LatestPath {
@@ -95,6 +102,25 @@ impl<'catalog> Expression<'catalog> {
         bindings: &mut orbit_utils::query_types::ParamBindings,
     ) {
         let literal = match self {
+            Self::Strings(values) => Some((SqlType::String.to_array(), serde_json::json!(values))),
+            Self::JsonObject(fields) => {
+                for (_, value) in fields {
+                    value.bind_parameters(bindings);
+                }
+                None
+            }
+            Self::Prefixes {
+                value,
+                paths,
+                array,
+            } => {
+                value.bind_parameters(bindings);
+                if !*array && let Self::Strings(values) = paths.as_ref() {
+                    **paths = Self::Array(values.iter().cloned().map(Self::Text).collect());
+                }
+                paths.bind_parameters(bindings);
+                None
+            }
             Self::Predicate {
                 value, argument, ..
             } => {
@@ -167,6 +193,16 @@ impl<'catalog> Expression<'catalog> {
         map: &impl Fn(ColumnRef<'catalog>) -> Result<ColumnRef<'catalog>>,
     ) -> Result<Self> {
         Ok(match self {
+            Self::Prefixes {
+                value,
+                paths,
+                array,
+            } => Self::Prefixes {
+                value: Box::new(value.rebind(map)?),
+                paths: Box::new(paths.rebind(map)?),
+                array: *array,
+            },
+            Self::Strings(_) => self.clone(),
             Self::Predicate {
                 operator,
                 value,
@@ -238,6 +274,16 @@ impl<'catalog> Expression<'catalog> {
                 Ok(())
             }
             Self::Column(column) => visit(*column),
+            Self::Prefixes { value, paths, .. } => {
+                value.columns(visit)?;
+                paths.columns(visit)
+            }
+            Self::JsonObject(fields) => {
+                for (_, value) in fields {
+                    value.columns(visit)?;
+                }
+                Ok(())
+            }
             Self::LatestPath {
                 path,
                 version,
@@ -287,6 +333,8 @@ impl<'catalog> Expression<'catalog> {
 
     pub(super) fn aggregate(&self) -> bool {
         match self {
+            Self::Prefixes { value, paths, .. } => value.aggregate() || paths.aggregate(),
+            Self::JsonObject(fields) => fields.iter().any(|(_, value)| value.aggregate()),
             Self::Predicate {
                 value, argument, ..
             } => {

@@ -232,6 +232,27 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         visiting: &mut HashSet<OutputId>,
     ) -> Result<ValueType> {
         match expression {
+            Expression::Strings(_) => Ok(ValueType::Array(Box::new(ValueType::Scalar(
+                SqlType::String,
+            )))),
+            Expression::JsonObject(fields) => {
+                for (_, value) in fields {
+                    if self.expression_type(value, visiting)? != ValueType::Scalar(SqlType::String)
+                    {
+                        return Err(GraphError::ExpressionType);
+                    }
+                }
+                Ok(ValueType::Scalar(SqlType::String))
+            }
+            Expression::Prefixes { value, paths, .. } => {
+                if self.expression_type(value, visiting)? != ValueType::Scalar(SqlType::String)
+                    || self.expression_type(paths, visiting)?
+                        != ValueType::Array(Box::new(ValueType::Scalar(SqlType::String)))
+                {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ValueType::Scalar(SqlType::Bool))
+            }
             Expression::Predicate {
                 operator,
                 value,

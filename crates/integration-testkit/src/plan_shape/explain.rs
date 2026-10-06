@@ -406,6 +406,72 @@ pub(super) trait GraphPhase: std::fmt::Debug {
     fn version(&self) -> compiler::query_graph::ColumnRef<'_>;
 }
 
+pub(super) fn graph_hydration<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::PhysicalOperation<'a>,
+    >,
+    root: compiler::query_graph::BlockId,
+) -> Tree {
+    use compiler::query_graph::{Expression, Relational, Source};
+    let Relational::Limit { input, .. } = graph.operation(root).unwrap() else {
+        unreachable!()
+    };
+    let Relational::Source { relation, .. } = input.as_ref() else {
+        unreachable!()
+    };
+    let Source::Derived(body) = graph.relation(*relation).unwrap().source else {
+        unreachable!()
+    };
+    let arms = graph
+        .union_arms(body)
+        .unwrap()
+        .unwrap_or(std::slice::from_ref(&body));
+    Tree::node(
+        Operator::Hydration,
+        "",
+        arms.iter()
+            .map(|arm| {
+                let Relational::Filter { input, predicate } = graph.operation(*arm).unwrap() else {
+                    unreachable!()
+                };
+                let Relational::Source { relation, .. } = input.as_ref() else {
+                    unreachable!()
+                };
+                let Source::Derived(keys) = graph.relation(*relation).unwrap().source else {
+                    unreachable!()
+                };
+                let fields = graph
+                    .outputs(*arm)
+                    .unwrap()
+                    .find_map(|output| match &graph.projection(output).unwrap().value {
+                        Expression::JsonObject(fields) => Some(fields),
+                        _ => None,
+                    })
+                    .unwrap();
+                let projection = fields
+                    .iter()
+                    .map(|(_, value)| match value {
+                        Expression::ToString(value) => graph_expression(graph, value),
+                        _ => unreachable!(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Tree::node(
+                    Operator::Project,
+                    projection,
+                    vec![filter(
+                        vec![graph_expression(graph, predicate)],
+                        graph_operation(graph, graph.operation(keys).unwrap()),
+                    )],
+                )
+            })
+            .collect(),
+    )
+}
+
 impl GraphPhase for compiler::query_graph::LatestRows<'_> {
     const PLANNED: bool = true;
     fn version(&self) -> compiler::query_graph::ColumnRef<'_> {
@@ -429,6 +495,13 @@ pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: G
     >,
     root: compiler::query_graph::BlockId,
 ) -> Tree {
+    if let Some(arms) = graph.union_arms(root).unwrap() {
+        return Tree::node(
+            Operator::Union,
+            "ALL",
+            arms.iter().map(|arm| query_graph(graph, *arm)).collect(),
+        );
+    }
     let projection = graph
         .outputs(root)
         .unwrap()
@@ -572,6 +645,46 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
 ) -> String {
     use compiler::query_graph::{Expression, Port};
     match value {
+        Expression::Strings(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| text_literal(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Expression::Prefixes {
+            value,
+            paths,
+            array,
+        } => {
+            let value = graph_expression(graph, value);
+            let Expression::Strings(paths) = paths.as_ref() else {
+                unreachable!()
+            };
+            let paths = paths
+                .iter()
+                .map(|path| text_literal(path))
+                .collect::<Vec<_>>();
+            if L::PLANNED {
+                format!(
+                    "{value} PREFIX {} [{}]",
+                    if *array { "SET" } else { "UNION" },
+                    paths.join(", ")
+                )
+            } else if *array {
+                format!(
+                    "ArrayExists(_gkg_path -> StartsWith({value}, _gkg_path), [{}])",
+                    paths.join(", ")
+                )
+            } else {
+                paths
+                    .iter()
+                    .map(|path| format!("StartsWith({value}, {path})"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ")
+            }
+        }
         Expression::Predicate {
             operator,
             value,
@@ -618,6 +731,49 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
                 format!("{operator:?}({}, {})", fold(value), fold(argument))
             }
         }
+        Expression::Array(values)
+            if values
+                .iter()
+                .all(|value| matches!(value, Expression::Tuple(_))) =>
+        {
+            if L::PLANNED {
+                format!(
+                    "path[{}]",
+                    values
+                        .iter()
+                        .map(|value| match value {
+                            Expression::Tuple(fields) => format!(
+                                "({})",
+                                fields
+                                    .iter()
+                                    .map(|field| graph_expression(graph, field))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!(
+                    "Array({})",
+                    values
+                        .iter()
+                        .map(|value| graph_expression(graph, value))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+        Expression::Tuple(values) => format!(
+            "Tuple({})",
+            values
+                .iter()
+                .map(|value| graph_expression(graph, value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Expression::Array(values) => format!(
             "[{}]",
             values
@@ -690,6 +846,15 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        Expression::In(left, right)
+            if !L::PLANNED
+                && matches!(right.as_ref(), Expression::Integers(values) if values.len() == 1) =>
+        {
+            let Expression::Integers(values) = right.as_ref() else {
+                unreachable!()
+            };
+            format!("{} = {}", graph_expression(graph, left), values[0])
+        }
         Expression::In(left, right) => format!(
             "{} IN {}",
             graph_expression(graph, left),
@@ -700,11 +865,11 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
             graph_expression(graph, left),
             graph_expression(graph, right)
         ),
-        Expression::And(left, right) => format!(
-            "({}) AND ({})",
-            graph_expression(graph, left),
-            graph_expression(graph, right)
-        ),
+        Expression::And(_, _) => graph_conjunction(graph, value)
+            .iter()
+            .map(|part| format!("({part})"))
+            .collect::<Vec<_>>()
+            .join(" AND "),
         value => format!("{value:?}"),
     }
 }
@@ -760,11 +925,26 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPha
                     &declaration.hint,
                     matches!(read, ReadMode::Current),
                 ),
-                Source::Derived(body) => Tree::node(
-                    Operator::Bind,
-                    &declaration.hint,
-                    vec![query_graph(graph, body)],
-                ),
+                Source::Derived(body) => {
+                    if let Some(arms) = graph.union_arms(body).unwrap()
+                        && matches!(
+                            declaration.input,
+                            Some(compiler::query_graph::ScanInput::Relationship(_))
+                        )
+                    {
+                        Tree::node(
+                            Operator::Union,
+                            format!("ALL AS {}", declaration.hint),
+                            arms.iter().map(|arm| query_graph(graph, *arm)).collect(),
+                        )
+                    } else {
+                        Tree::node(
+                            Operator::Bind,
+                            &declaration.hint,
+                            vec![query_graph(graph, body)],
+                        )
+                    }
+                }
                 Source::Definition(definition) => scan(
                     graph.definition_hint(definition).unwrap(),
                     &declaration.hint,
