@@ -782,10 +782,14 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPha
             ) {
                 filter(vec![membership], graph_operation(graph, left))
             } else {
+                let keys = match graph.relation(*relation).unwrap().source {
+                    Source::Derived(body) => query_graph(graph, body),
+                    _ => graph_operation(graph, right),
+                };
                 Tree::node(
                     Operator::SemiJoin,
                     format!("{} IN subquery", graph_expression(graph, value)),
-                    vec![graph_operation(graph, left), graph_operation(graph, right)],
+                    vec![graph_operation(graph, left), keys],
                 )
             }
         }

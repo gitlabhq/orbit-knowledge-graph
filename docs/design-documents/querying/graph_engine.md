@@ -137,7 +137,8 @@ The family examples demonstrate primitives, not full production optimization par
 
 `QueryGraph::traversal` accepts normalized traversal input and selects FK-star or FK-chain node joins, or an edge-scan fallback.
 Eligibility checks fixed single hops, direction, relationship filters, point selectivity, connectivity, and scope preservation or global endpoints.
-All node relations remain present in this slice, including relations needed for role checks. It does not perform endpoint elision.
+Traversal retains node relations, including relations needed for role checks. Aggregation can omit unused primary-key targets in FK stars.
+Grouping, property measures, ordering, comparisons, and elevated-role requirements retain target scans. Filter-only targets use authoritative current-row key queries.
 Star substitution requires a common FK holder, fixed single hops, one direction per hop, and no relationship filters.
 Multi-ID predicates use typed array membership. Incoming self-relationships retain the catalog's physical FK holder.
 `yaml_plan_shapes` runs all existing ClickHouse fixtures through graph planning and lowering with their unchanged logical and physical assertions.
@@ -152,7 +153,12 @@ Selective centers declare key queries for unfiltered targets. Target membership 
 Membership uses `IN` subqueries with exact candidate output handles. Duplicate candidate keys cannot multiply the left input.
 The fixture assertions define the required plans. Ordered selective nodes reuse candidate-key CTEs with full-key latest-row selection.
 Scan materialization preserves declaration handles and creates a boundary for joined node filters. SQL rendering prunes columns by demand.
-CTE materialization preferences, endpoint elision, cascade filtering, denormalized coverage, and execution-result equivalence remain unfinished.
+Pinned IDs, ranges, and filter-key queries seed edge-key cascades. Each downstream membership can include the preceding cascade through derived output handles.
+Shared filter-only nodes define authoritative current-row keys once. Cascades retain that membership without adding it again to every consuming hop.
+Node predicates on shared edge scope columns are rebound to the edge occurrence and deduplicated. Reserved endpoint columns retain their identity meaning.
+Leading endpoint sort keys place cascade membership inside the current-row scan boundary; other layouts place it outside.
+Cross-node comparisons use typed column references. FK-star edge outputs retain the holder's stored foreign key when it references the primary key.
+CTE materialization preferences, traversal endpoint elision, joined-node cascade narrowing, denormalized coverage, and execution-result equivalence remain unfinished.
 
 The graph pipeline reuses parsing, validation, normalization, field restrictions, and scope preparation in their existing order.
 Response policy, result enforcement, scope application, authorization, pagination, and post-checks operate on the graph after lowering.
@@ -170,7 +176,8 @@ Scope-depth constraints and required scope guards also return errors. Neighbors,
 Graph planning supports single-edge conditional counts and property-grouped counts, including a joined node for grouping properties.
 Grouping accepts scalar expressions, including typed time buckets. Node and edge identity filters share range and membership construction.
 Scalar property predicates support comparisons, membership, null checks, and text matching with the existing sort-key case-folding rule.
-These aggregation plans compose shared scan, filter, latest-row, join, and aggregate operations. Broader aggregation strategies remain unfinished.
+Aggregation and traversal share access planning for FK strategies and multi-edge queries. Aggregation adds grouping and measures to the resulting operation.
+These plans compose shared scan, filter, latest-row, join, and aggregate operations. Broader aggregation strategies remain unfinished.
 Request-contract assertions cover parameter binding, cursor binding, excerpts, scope lookups, result metadata, and rejection of empty authorization contexts.
 The planner suite executes against the original fixture assertions. SQL execution and result equivalence have not been verified.
 
