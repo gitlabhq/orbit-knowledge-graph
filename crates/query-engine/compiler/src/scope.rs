@@ -4,6 +4,7 @@ mod application;
 mod preparation;
 
 pub use application::apply;
+pub use application::apply_graph;
 pub use preparation::prepare;
 
 #[derive(Clone, Default)]
@@ -15,6 +16,12 @@ pub struct QueryScope {
 }
 
 impl QueryScope {
+    pub fn nodes(nodes: HashMap<String, ScopeProof>) -> Self {
+        Self {
+            nodes,
+            ..Self::default()
+        }
+    }
     pub fn table_scans(&self) -> &HashSet<String> {
         &self.table_scans
     }
@@ -27,7 +34,7 @@ use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
-const UNRESOLVED_PATH: &str = "0/";
+pub(crate) const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]

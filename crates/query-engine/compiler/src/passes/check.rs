@@ -27,6 +27,30 @@ pub fn check_ast(
     }
 }
 
+pub fn check_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    root: crate::query_graph::BlockId,
+    context: &SecurityContext,
+) -> Result<()> {
+    graph.validate_lowered(root)?;
+    for (block, relation, predicate) in crate::passes::security::graph_filters(graph, context)? {
+        if !graph
+            .operation(block)?
+            .has_source_filter(relation, &predicate)
+        {
+            return Err(QueryError::Security(
+                "post-check failed: scan missing authorized path predicate".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_query(
     q: &Query,
     ctx: &SecurityContext,

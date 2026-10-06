@@ -151,6 +151,102 @@ fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
     }
 }
 
+pub fn apply_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &mut crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    root: crate::query_graph::BlockId,
+    input: &Input,
+    query_hash: u64,
+) -> Result<usize> {
+    use crate::query_graph::{Expression as E, Relational};
+    if input.cursor.is_some() && input.order_by.is_some() {
+        return Err(QueryError::PaginationError(
+            "graph cursors with nullable property ordering are not implemented".into(),
+        ));
+    }
+    let operation = graph.operation_mut(root)?;
+    let Relational::Limit { count, .. } = operation else {
+        return Err(QueryError::PipelineInvariant(
+            "graph traversal has no page limit".into(),
+        ));
+    };
+    *count = input.fetch_limit();
+    let Some(cursor) = &input.cursor else {
+        return Ok(0);
+    };
+    let mut keys = Vec::new();
+    for index in 0..input.nodes.len() {
+        keys.push((
+            graph.stored_column(
+                graph.input_node(root, index)?,
+                ontology::constants::DEFAULT_PRIMARY_KEY,
+            )?,
+            false,
+        ));
+    }
+    let mut predicate = None;
+    if let Some(after) = &cursor.after {
+        let values = decode(after, query_hash)?;
+        if values.len() != keys.len() {
+            return Err(QueryError::PaginationError(
+                "cursor key count mismatch".into(),
+            ));
+        }
+        let values = values
+            .iter()
+            .map(|value| {
+                value
+                    .as_ref()
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .ok_or_else(|| {
+                        QueryError::PaginationError(
+                            "graph cursor requires integer identity keys".into(),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut prefix: Option<E<'a>> = None;
+        for ((key, _), value) in keys.iter().zip(values) {
+            let column = E::Column(*key);
+            let advance = E::Greater(Box::new(column.clone()), Box::new(E::Integer(value)));
+            let advance = match &prefix {
+                Some(prefix) => E::And(Box::new(prefix.clone()), Box::new(advance)),
+                None => advance,
+            };
+            predicate = Some(match predicate {
+                Some(previous) => E::Or(Box::new(previous), Box::new(advance)),
+                None => advance,
+            });
+            let equal = E::equal(column, E::Integer(value));
+            prefix = Some(match prefix {
+                Some(prefix) => E::And(Box::new(prefix), Box::new(equal)),
+                None => equal,
+            });
+        }
+    }
+    for (index, (key, _)) in keys.iter().enumerate() {
+        graph.project(
+            root,
+            cursor_column(index),
+            E::ToString(Box::new(E::Column(*key))),
+        )?;
+    }
+    let key_count = keys.len();
+    let Relational::Limit { input: source, .. } = graph.operation_mut(root)? else {
+        unreachable!()
+    };
+    let mut operation = std::mem::replace(source.as_mut(), Relational::One);
+    if let Some(predicate) = predicate {
+        operation = operation.filter(predicate);
+    }
+    **source = operation.sort(keys);
+    Ok(key_count)
+}
+
 /// User sort properties and aggregation keys can be NULL (NULLs sort last in
 /// ClickHouse, both directions); compiler-generated tie-breakers are primary
 /// keys and never are.

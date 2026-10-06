@@ -33,6 +33,109 @@ fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
 }
 
+pub enum GraphStage<'graph, 'catalog> {
+    Logical(&'graph Input),
+    Planned(
+        &'graph crate::query_graph::QueryGraph<
+            'catalog,
+            query_data_model::ClickHouseDataModel,
+            crate::query_graph::Expression<'catalog>,
+            crate::query_graph::PhysicalOperation<'catalog>,
+        >,
+        crate::query_graph::BlockId,
+    ),
+    Emitted(
+        &'graph crate::query_graph::QueryGraph<
+            'catalog,
+            query_data_model::ClickHouseDataModel,
+            crate::query_graph::Expression<'catalog>,
+            crate::query_graph::LoweredOperation<'catalog>,
+        >,
+        crate::query_graph::BlockId,
+    ),
+}
+
+pub fn compile_graph(
+    raw: &str,
+    frontend: crate::Frontend,
+    model: &std::sync::Arc<query_data_model::ClickHouseDataModel>,
+    security_context: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    compile_graph_observed(raw, frontend, model, security_context, |_| Ok(()))
+}
+
+pub fn compile_graph_observed(
+    raw: &str,
+    frontend: crate::Frontend,
+    model: &std::sync::Arc<query_data_model::ClickHouseDataModel>,
+    security_context: &SecurityContext,
+    mut observe: impl FnMut(GraphStage<'_, '_>) -> Result<()>,
+) -> Result<CompiledQueryContext> {
+    use crate::query_graph::{Expression, PhysicalOperation, QueryGraph};
+    let mut context =
+        ClickhouseJsonDslCtx::new(security_context.clone(), std::sync::Arc::clone(model));
+    context.set_raw(raw.into());
+    match frontend {
+        crate::Frontend::JsonDsl => json_dsl_parse(&mut context)?,
+        crate::Frontend::Gql => gql_parse(&mut context)?,
+    }
+    validate(&mut context)?;
+    if matches!(frontend, crate::Frontend::Gql) {
+        validate_relationships(&mut context)?;
+    }
+    normalize(&mut context)?;
+    observe(GraphStage::Logical(require(
+        context.input().as_ref(),
+        "input",
+    )?))?;
+    restrict(&mut context)?;
+    let input = require(context.take_input(), "input")?;
+    let scope = require(context.take_scope_proofs(), "scope_proofs")?;
+    let mut pagination = require(context.take_pagination(), "pagination")?;
+    let mut graph = QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(model.as_ref());
+    let root = graph.traversal(&input)?;
+    observe(GraphStage::Planned(&graph, root))?;
+    let mut graph = graph.lower_operations()?;
+    observe(GraphStage::Emitted(&graph, root))?;
+    response_policy::apply_graph_excerpts(&mut graph, root, &input)?;
+    let result_context = enforce::enforce_graph_return(&mut graph, root, &input)?;
+    crate::scope::apply_graph(&mut graph, &scope, &input)?;
+    if !security_context.scope_proofs.is_empty() {
+        let scope = crate::scope::QueryScope::nodes(security_context.scope_proofs.clone());
+        crate::scope::apply_graph(&mut graph, &scope, &input)?;
+    }
+    security::apply_graph_security(&mut graph, security_context)?;
+    pagination.key_count = cursor::apply_graph(&mut graph, root, &input, pagination.query_hash)?;
+    check::check_graph(&graph, root, security_context)?;
+    let hydration = hydrate::generate_graph_hydration(&input, &graph, root, security_context);
+    let mut query_config = settings::resolve(input.query_type.into());
+    for block in graph.blocks() {
+        query_config
+            .compiler_derived
+            .optimize_move_to_prewhere_if_final |= graph
+            .operation(block)
+            .is_ok_and(|operation| operation.reads_current());
+        if graph.definitions(block)?.next().is_some() {
+            query_config
+                .compiler_derived
+                .use_index_for_in_with_subqueries_max_values = Some(IN_SUBQUERY_INDEX_MAX_VALUES);
+        }
+    }
+    if input.relationships.len() >= 3 {
+        query_config.compiler_derived.join_order_algorithm = Some("dpsize".into());
+    }
+    let has_virtual_columns = hydration_has_virtuals(&hydration);
+    let base = codegen::clickhouse::codegen_graph(graph, root, result_context, query_config)?;
+    Ok(CompiledQueryContext {
+        query_type: input.query_type,
+        base,
+        hydration,
+        input,
+        pagination,
+        has_virtual_columns,
+    })
+}
+
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
         pub security_ctx: SecurityContext,

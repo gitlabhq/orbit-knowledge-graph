@@ -27,25 +27,49 @@ pub fn codegen(
         return Err(crate::error::QueryError::Codegen(error));
     }
 
-    // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
-    // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
-    // (bare integers, 0/1 bools, escaped quoted strings).
     if matches!(ast, Node::Query(_)) {
-        let mut settings = query_config
-            .to_clickhouse_settings()
-            .map_err(crate::error::QueryError::Codegen)?;
-
-        settings.extend(query_config.compiler_derived.to_clickhouse_settings());
-
-        if !settings.is_empty() {
-            let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
-            sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
-        }
+        append_settings(&mut sql, &query_config)?;
     }
 
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params.into_map(),
+        result_context,
+        query_config,
+        dialect: SqlDialect::ClickHouse,
+    })
+}
+
+fn append_settings(sql: &mut String, query_config: &QueryConfig) -> Result<()> {
+    let mut settings = query_config
+        .to_clickhouse_settings()
+        .map_err(crate::error::QueryError::Codegen)?;
+
+    settings.extend(query_config.compiler_derived.to_clickhouse_settings());
+
+    if !settings.is_empty() {
+        let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
+        sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
+    }
+    Ok(())
+}
+
+pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    root: crate::query_graph::BlockId,
+    result_context: ResultContext,
+    query_config: QueryConfig,
+) -> Result<ParameterizedQuery> {
+    let (mut sql, params) = graph.render_parameterized(root)?;
+    append_settings(&mut sql, &query_config)?;
+    Ok(ParameterizedQuery {
+        sql,
+        params,
         result_context,
         query_config,
         dialect: SqlDialect::ClickHouse,

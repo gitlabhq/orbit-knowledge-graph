@@ -95,7 +95,7 @@ These assertions check plan structure; data-correctness scenarios check executio
 
 ### Query graph prototype
 
-`compiler::query_graph` explores a single owner for query declarations. It is separate from the production compiler pipeline.
+`compiler::query_graph` explores a single owner for query declarations. `compiler::compile_graph` exposes a separate compiler entry point for traversal requests.
 One block arena owns relation occurrences, CTE definitions, ordered outputs, and their computations.
 Stored ports borrow validated column names from the current data-model catalog. Derived ports reference exact output identities.
 UNION declares its own outputs and maps them positionally to its arms. It does not inherit first-arm provenance.
@@ -118,7 +118,7 @@ These use inner joins, semi-join narrowing, grouping with count, directional UNI
 Each example adds a keyset page wrapper after lowering, then produces planned explain, emitted explain, and SQL.
 An additional example adds a project authorization scan after lowering. Both rewrites use the lowered graph and retain existing declaration handles.
 The authorization example assumes project identifiers; it does not implement the production role and redaction policies.
-Explain includes actual operations, ordered projections, sources, and CTE references. It is not yet connected to the plan-fixture matcher.
+Explain includes actual operations, ordered projections, sources, and CTE references. The plan-fixture matcher checks planned and emitted views.
 `validate_lowered` checks the graph independently from SQL rendering. It checks UNION compatibility, expression types, and expansion input types.
 Scalar types reuse `SqlType`. Tuple and recursive array shapes use `ValueType` in the prototype.
 Operation validation checks input visibility, duplicate source use, grouped output references, and semi-join output visibility.
@@ -129,7 +129,7 @@ Tuple construction, field access, conditional singleton arrays, and concatenatio
 Both matching directions produce a tuple, preserving self-loop multiplicity. Conditional count and sum keep conditions within the aggregate.
 Nested aggregates and aggregates without a grouping boundary are rejected. Grouped results must be projected before further relational computation.
 Recursive definition visibility is modeled; cyclic output-type inference is rejected until explicit recursive type contracts are supported.
-Production integration, parameter binding, outer joins, implicit type coercion, and backend-specific lowering remain outside this prototype.
+Server routing, outer joins, implicit type coercion, and backend-specific lowering remain outside this prototype.
 The family examples demonstrate primitives, not full production optimization parity.
 
 `QueryGraph::traversal` accepts normalized traversal input and selects FK-star or FK-chain node joins, or an edge-scan fallback.
@@ -138,6 +138,7 @@ All node relations remain present in this slice, including relations needed for 
 Star substitution requires a common FK holder, fixed single hops, one direction per hop, and no relationship filters.
 Multi-ID predicates use typed array membership. Incoming self-relationships retain the catalog's physical FK holder.
 `run_query_graph_foreign_keys` reuses seven existing JSON/GQL fixtures and their logical assertions.
+The fixture runner uses `compile_graph_observed`, which exposes logical, planned, and emitted stages from the compiler entry point.
 The same structural matcher checks planned and emitted graph views for FK substitution, relationship-filter guards, pinned endpoints, and cross-namespace guards.
 The fixture entry point and assertions are compile-checked only. Unsupported input forms return errors rather than silently dropping constraints.
 Filtered star targets declare reusable candidate-key CTEs before the narrowed center. Pinned target IDs also constrain the holder's FK column.
@@ -145,6 +146,22 @@ Selective centers declare key queries for unfiltered targets. Target membership 
 Membership uses semi-joins with exact candidate output handles. Duplicate candidate keys cannot multiply the left input.
 The star assertions check candidate dependency order, membership placement, and deletion checks after deduplication in planned and emitted views.
 Production `IN` rendering, CTE materialization preferences, endpoint elision, cascade filtering, denormalized coverage, and execution-result equivalence remain unfinished.
+
+The graph pipeline reuses parsing, validation, normalization, field restrictions, and scope preparation in their existing order.
+Response policy, result enforcement, scope application, authorization, pagination, and post-checks operate on the graph after lowering.
+Scan declarations retain their input-node or relationship index. Later phases use that index to attach policy to each occurrence, including candidate scans.
+All traversal nodes retain stored scans, so authorization can apply each table's role floor directly.
+Result enforcement projects redaction identities and edge metadata into the existing `ResultContext` contract.
+Scope lookups compute the latest path and preserve the existing unresolved-path fallback. Each lookup contributes one aggregate row.
+Security checks cover stored scans in every block, including scope lookups, and reject an empty authorization context.
+Hydration planning shares the existing projection-based implementation. Code generation binds literals and appends the existing query settings.
+The result is a `CompiledQueryContext` with SQL, parameters, hydration, pagination, and redaction metadata.
+The graph borrows the catalog during compilation; no graph is stored inside its catalog owner.
+
+Identity-key cursors support page readback, query binding, and seek predicates. Cursors ordered by user properties return an unsupported error.
+Scope-depth constraints and required scope guards also return errors. Real-input aggregation, neighbors, pathfinding, and hydration planners remain unfinished.
+Request-contract assertions cover parameter binding, cursor binding, excerpts, scope lookups, result metadata, and rejection of empty authorization contexts.
+The assertions and examples are compile-checked only. SQL execution and result equivalence have not been verified.
 
 ### Plan fixture assertions
 

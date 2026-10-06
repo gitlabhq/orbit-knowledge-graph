@@ -37,6 +37,81 @@ use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
+pub(crate) fn graph_filters<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    context: &SecurityContext,
+) -> Result<
+    Vec<(
+        crate::query_graph::BlockId,
+        crate::query_graph::RelationId,
+        crate::query_graph::Expression<'a>,
+    )>,
+> {
+    use crate::query_graph::{Expression as E, Source};
+    if context.traversal_paths.is_empty() {
+        return Err(crate::error::QueryError::Security(
+            "security context has no traversal_path entries".into(),
+        ));
+    }
+    let mut filters = Vec::new();
+    for block in graph.blocks() {
+        let Ok(relations) = graph.relations(block) else {
+            continue;
+        };
+        for relation in relations {
+            let Source::Stored(table) = graph.relation(relation)?.source else {
+                continue;
+            };
+            if !should_apply_security_filter(table, graph.catalog()) {
+                continue;
+            }
+            let paths = context.paths_at_least(graph.catalog().table_minimum_access_level(table));
+            let paths = TraversalPathTrie::from_paths(&paths).to_minimal_prefixes();
+            let column = graph.stored_column(relation, TRAVERSAL_PATH_COLUMN)?;
+            let predicate = paths
+                .iter()
+                .map(|path| {
+                    E::StartsWith(
+                        Box::new(E::Column(column)),
+                        Box::new(E::Text(path.as_str().into())),
+                    )
+                })
+                .reduce(|left, right| E::Or(Box::new(left), Box::new(right)))
+                .unwrap_or(E::Boolean(false));
+            filters.push((block, relation, predicate));
+        }
+    }
+    Ok(filters)
+}
+
+pub fn apply_graph_security<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &mut crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    context: &SecurityContext,
+) -> Result<()> {
+    for (block, relation, predicate) in graph_filters(graph, context)? {
+        if graph
+            .operation_mut(block)?
+            .filter_source(relation, &predicate)
+            != 1
+        {
+            return Err(crate::error::QueryError::Security(
+                "security scan occurrence mismatch".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Per-alias role floors come from `ontology.min_access_level_for_table`;
 /// tables without a `redaction` block keep the historical Reporter floor.
 pub fn apply_security_context(

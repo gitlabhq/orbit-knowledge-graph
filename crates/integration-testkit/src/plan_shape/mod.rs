@@ -226,8 +226,9 @@ impl Assertions {
 }
 
 pub fn run_query_graph_foreign_keys(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    use compiler::query_graph::{Expression, PhysicalOperation, QueryGraph};
-    let model = ClickHouseDataModel::derive(ontology).unwrap();
+    use compiler::config::GraphStage;
+    let model = Arc::new(ClickHouseDataModel::derive(ontology).unwrap());
+    let security = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
     for (file, substituted, edge_table) in [
         ("chain_traversal.yaml", true, "gl_ci_edge"),
         ("chain_edge_filter_guard.yaml", false, "gl_ci_edge"),
@@ -242,21 +243,6 @@ pub fn run_query_graph_foreign_keys(directory: &Path, ontology: Arc<ontology::On
             orbit_utils::yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         for (language, raw) in scenario.query {
             let label = format!("{} [{language}/query-graph]", path.display());
-            let input = match language.as_str() {
-                "json" => frontend::json_dsl::parse(&raw, model.ontology()).map(|(input, _)| input),
-                "gql" => frontend::gql::parse(&raw),
-                _ => unreachable!(),
-            }
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-            let input = normalize::normalize(input, &model).unwrap();
-            scenario
-                .logical
-                .check(&explain::logical(&input), &format!("{label}.logical"))
-                .unwrap();
-            let mut graph = QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(&model);
-            let root = graph
-                .traversal(&input)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
             let mut assertions = if file == "chain_traversal.yaml" {
                 Assertions {
                     expect: vec![
@@ -347,25 +333,48 @@ pub fn run_query_graph_foreign_keys(directory: &Path, ontology: Arc<ontology::On
                 }
                 _ => {}
             }
-            assertions
-                .check(
-                    &explain::query_graph(&graph, root),
-                    &format!("{label}.planned"),
-                )
-                .unwrap();
-            let graph = graph.lower_operations().unwrap();
-            assertions
-                .check(
-                    &explain::query_graph(&graph, root),
-                    &format!("{label}.emitted"),
-                )
-                .unwrap();
-            graph
-                .validate_lowered(root)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            graph
-                .render(root)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let frontend = match language.as_str() {
+                "json" => compiler::Frontend::JsonDsl,
+                "gql" => compiler::Frontend::Gql,
+                _ => unreachable!(),
+            };
+            let compiled = compiler::config::compile_graph_observed(
+                &raw,
+                frontend,
+                &model,
+                &security,
+                |stage| {
+                    let result = match stage {
+                        GraphStage::Logical(input) => scenario
+                            .logical
+                            .check(&explain::logical(input), &format!("{label}.logical")),
+                        GraphStage::Planned(graph, root) => assertions.check(
+                            &explain::query_graph(graph, root),
+                            &format!("{label}.planned"),
+                        ),
+                        GraphStage::Emitted(graph, root) => assertions.check(
+                            &explain::query_graph(graph, root),
+                            &format!("{label}.emitted"),
+                        ),
+                    };
+                    result.map_err(compiler::QueryError::PipelineInvariant)
+                },
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            assert!(
+                !compiled.base.params.is_empty(),
+                "{label}: bound parameters"
+            );
+            assert_eq!(
+                compiled.base.result_context.len(),
+                compiled.input.nodes.len(),
+                "{label}: redaction identities"
+            );
+            assert_eq!(
+                compiled.base.result_context.edges().len(),
+                compiled.input.relationships.len(),
+                "{label}: edge identities"
+            );
         }
     }
 }

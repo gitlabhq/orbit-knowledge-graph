@@ -108,6 +108,12 @@ pub enum GraphError {
 
 type Result<T> = std::result::Result<T, GraphError>;
 
+impl From<GraphError> for crate::error::QueryError {
+    fn from(error: GraphError) -> Self {
+        Self::Lowering(error.to_string())
+    }
+}
+
 pub struct QueryGraph<'catalog, M: QueryDataModel + ?Sized, E, O> {
     catalog: &'catalog M,
     owner: u64,
@@ -145,6 +151,13 @@ struct Definition {
 pub struct Relation<'catalog> {
     pub hint: String,
     pub source: Source<'catalog>,
+    pub input: Option<ScanInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanInput {
+    Node(usize),
+    Relationship(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -402,6 +415,39 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         Ok(operation)
     }
 
+    pub fn catalog(&self) -> &'catalog M {
+        self.catalog
+    }
+
+    pub fn bind_scan(&mut self, relation: RelationId, input: ScanInput) -> Result<()> {
+        let Body::Select { relations, .. } = &mut self.block_mut(relation.block)?.body else {
+            return Err(GraphError::ExpectedSelect);
+        };
+        relations[relation.slot].input = Some(input);
+        Ok(())
+    }
+
+    pub fn input_node(&self, root: BlockId, index: usize) -> Result<RelationId> {
+        self.relations(root)?
+            .find(|relation| {
+                self.relation(*relation)
+                    .is_ok_and(|relation| relation.input == Some(ScanInput::Node(index)))
+            })
+            .ok_or(GraphError::MissingOutput)
+    }
+
+    pub fn relations(&self, block: BlockId) -> Result<impl Iterator<Item = RelationId>> {
+        let Body::Select { relations, .. } = &self.block(block)?.body else {
+            return Err(GraphError::ExpectedSelect);
+        };
+        Ok((0..relations.len()).map(move |slot| RelationId { block, slot }))
+    }
+
+    pub fn blocks(&self) -> impl Iterator<Item = BlockId> {
+        let owner = self.owner;
+        (0..self.blocks.len()).map(move |slot| BlockId { owner, slot })
+    }
+
     pub fn relation(&self, relation: RelationId) -> Result<&Relation<'catalog>> {
         let Body::Select { relations, .. } = &self.block(relation.block)?.body else {
             return Err(GraphError::ExpectedSelect);
@@ -533,7 +579,11 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
             block,
             slot: relations.len(),
         };
-        relations.push(Relation { hint, source });
+        relations.push(Relation {
+            hint,
+            source,
+            input: None,
+        });
         Ok(id)
     }
 }
@@ -546,6 +596,11 @@ pub enum Expression<'catalog> {
     Text(String),
     Count,
     CountIf(Box<Self>),
+    LatestPath {
+        path: ColumnRef<'catalog>,
+        version: ColumnRef<'catalog>,
+        deletion: ColumnRef<'catalog>,
+    },
     Sum {
         value: Box<Self>,
         condition: Option<Box<Self>>,
@@ -567,9 +622,71 @@ pub enum Expression<'catalog> {
     Equal(Box<Self>, Box<Self>),
     And(Box<Self>, Box<Self>),
     In(Box<Self>, Box<Self>),
+    Or(Box<Self>, Box<Self>),
+    Excerpt {
+        value: Box<Self>,
+        max_chars: u32,
+    },
+    ToString(Box<Self>),
+    Parameter {
+        name: String,
+        data_type: SqlType,
+    },
 }
 
 impl<'catalog> Expression<'catalog> {
+    fn bind_parameters(&mut self, bindings: &mut orbit_utils::query_types::ParamBindings) {
+        let literal = match self {
+            Self::Integer(value) => Some((SqlType::Int64, serde_json::json!(*value))),
+            Self::Boolean(value) => Some((SqlType::Bool, serde_json::json!(*value))),
+            Self::Text(value) => Some((SqlType::String, serde_json::json!(value))),
+            Self::Integers(values) => Some((SqlType::Int64.to_array(), serde_json::json!(values))),
+            Self::Equal(left, right)
+            | Self::And(left, right)
+            | Self::Or(left, right)
+            | Self::In(left, right)
+            | Self::Greater(left, right)
+            | Self::StartsWith(left, right) => {
+                left.bind_parameters(bindings);
+                right.bind_parameters(bindings);
+                None
+            }
+            Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
+                for value in values {
+                    value.bind_parameters(bindings);
+                }
+                None
+            }
+            Self::Excerpt { value, .. }
+            | Self::ToString(value)
+            | Self::CountIf(value)
+            | Self::Field { tuple: value, .. } => {
+                value.bind_parameters(bindings);
+                None
+            }
+            Self::Keep { condition, value } => {
+                condition.bind_parameters(bindings);
+                value.bind_parameters(bindings);
+                None
+            }
+            Self::Sum { value, condition } => {
+                value.bind_parameters(bindings);
+                if let Some(condition) = condition {
+                    condition.bind_parameters(bindings);
+                }
+                None
+            }
+            Self::Column(_) | Self::Count | Self::LatestPath { .. } | Self::Parameter { .. } => {
+                None
+            }
+        };
+        if let Some((data_type, value)) = literal {
+            *self = Self::Parameter {
+                name: bindings.intern(data_type, &value),
+                data_type,
+            };
+        }
+    }
     pub fn equal(left: Self, right: Self) -> Self {
         Self::Equal(Box::new(left), Box::new(right))
     }
@@ -605,6 +722,16 @@ impl<'catalog> Expression<'catalog> {
     fn columns(&self, visit: &mut impl FnMut(ColumnRef<'catalog>) -> Result<()>) -> Result<()> {
         match self {
             Self::Column(column) => visit(*column),
+            Self::LatestPath {
+                path,
+                version,
+                deletion,
+            } => {
+                visit(*path)?;
+                visit(*version)?;
+                visit(*deletion)
+            }
+            Self::Excerpt { value, .. } | Self::ToString(value) => value.columns(visit),
             Self::CountIf(condition) => condition.columns(visit),
             Self::Sum { value, condition } => {
                 value.columns(visit)?;
@@ -626,6 +753,7 @@ impl<'catalog> Expression<'catalog> {
             }
             Self::Equal(left, right)
             | Self::And(left, right)
+            | Self::Or(left, right)
             | Self::In(left, right)
             | Self::Greater(left, right)
             | Self::StartsWith(left, right) => {
@@ -638,14 +766,16 @@ impl<'catalog> Expression<'catalog> {
 
     fn aggregate(&self) -> bool {
         match self {
-            Self::Count | Self::CountIf(_) | Self::Sum { .. } => true,
+            Self::Count | Self::CountIf(_) | Self::Sum { .. } | Self::LatestPath { .. } => true,
             Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
                 values.iter().any(Self::aggregate)
             }
             Self::Field { tuple, .. } => tuple.aggregate(),
+            Self::Excerpt { value, .. } | Self::ToString(value) => value.aggregate(),
             Self::Keep { condition, value } => condition.aggregate() || value.aggregate(),
             Self::Equal(left, right)
             | Self::And(left, right)
+            | Self::Or(left, right)
             | Self::In(left, right)
             | Self::Greater(left, right)
             | Self::StartsWith(left, right) => left.aggregate() || right.aggregate(),
@@ -727,6 +857,46 @@ pub type PhysicalOperation<'a> = Relational<'a, LatestRows<'a>>;
 pub type LoweredOperation<'a> = Relational<'a, std::convert::Infallible>;
 
 impl<'a, L> Relational<'a, L> {
+    fn bind_parameters(&mut self, bindings: &mut orbit_utils::query_types::ParamBindings) {
+        match self {
+            Self::Filter { input, predicate } => {
+                predicate.bind_parameters(bindings);
+                input.bind_parameters(bindings);
+            }
+            Self::Join {
+                left,
+                right,
+                condition,
+                ..
+            } => {
+                condition.bind_parameters(bindings);
+                left.bind_parameters(bindings);
+                right.bind_parameters(bindings);
+            }
+            Self::Aggregate { input, .. }
+            | Self::Expand { input, .. }
+            | Self::Latest { input, .. }
+            | Self::Sort { input, .. }
+            | Self::FirstBy { input, .. }
+            | Self::Limit { input, .. } => input.bind_parameters(bindings),
+            Self::One | Self::Source { .. } => {}
+        }
+    }
+
+    pub fn reads_current(&self) -> bool {
+        match self {
+            Self::Source { read, .. } => matches!(read, ReadMode::Current),
+            Self::Join { left, right, .. } => left.reads_current() || right.reads_current(),
+            Self::Filter { input, .. }
+            | Self::Aggregate { input, .. }
+            | Self::Expand { input, .. }
+            | Self::Latest { input, .. }
+            | Self::Sort { input, .. }
+            | Self::FirstBy { input, .. }
+            | Self::Limit { input, .. } => input.reads_current(),
+            Self::One => false,
+        }
+    }
     pub fn source(relation: RelationId) -> Self {
         Self::Source {
             relation,
@@ -841,6 +1011,54 @@ impl<'a, L> Relational<'a, L> {
             _ => None,
         }
     }
+
+    pub fn filter_source(&mut self, relation: RelationId, predicate: &Expression<'a>) -> usize {
+        let Some(source) = self.source_mut(relation) else {
+            return 0;
+        };
+        *source = std::mem::replace(source, Self::One).filter(predicate.clone());
+        1
+    }
+
+    pub fn source_mut(&mut self, relation: RelationId) -> Option<&mut Self> {
+        match self {
+            Self::Source {
+                relation: source, ..
+            } if *source == relation => Some(self),
+            Self::Join { left, right, .. } => left
+                .source_mut(relation)
+                .or_else(|| right.source_mut(relation)),
+            Self::Filter { input, .. }
+            | Self::Aggregate { input, .. }
+            | Self::Expand { input, .. }
+            | Self::Latest { input, .. }
+            | Self::Sort { input, .. }
+            | Self::FirstBy { input, .. }
+            | Self::Limit { input, .. } => input.source_mut(relation),
+            _ => None,
+        }
+    }
+
+    pub fn has_source_filter(&self, relation: RelationId, expected: &Expression<'a>) -> bool {
+        match self {
+            Self::Filter { input, predicate } => {
+                (predicate == expected
+                    && matches!(input.as_ref(), Self::Source { relation: source, .. } if *source == relation))
+                    || input.has_source_filter(relation, expected)
+            }
+            Self::Join { left, right, .. } => {
+                left.has_source_filter(relation, expected)
+                    || right.has_source_filter(relation, expected)
+            }
+            Self::Aggregate { input, .. }
+            | Self::Expand { input, .. }
+            | Self::Latest { input, .. }
+            | Self::Sort { input, .. }
+            | Self::FirstBy { input, .. }
+            | Self::Limit { input, .. } => input.has_source_filter(relation, expected),
+            _ => false,
+        }
+    }
 }
 
 impl<'a> PhysicalOperation<'a> {
@@ -932,6 +1150,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .any(|node| !node.node_ids.is_empty() || node.id_range.is_some());
             eligible &= key.is_some()
                 && relationship.direction != Direction::Both
+                && relationship.hops.min == 1
                 && relationship.hops.max == 1
                 && relationship.filters.is_empty()
                 && !point_selective
@@ -948,7 +1167,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let mut relations = HashMap::new();
         let mut node_operations = HashMap::new();
         let mut node_predicates = HashMap::new();
-        for node in &input.nodes {
+        for (index, node) in input.nodes.iter().enumerate() {
             let entity = node
                 .entity
                 .as_deref()
@@ -958,6 +1177,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .entity_table(entity)
                 .ok_or_else(|| GraphError::UnknownStored(entity.into()))?;
             let relation = self.scan(root, table, &node.id)?;
+            self.bind_scan(relation, ScanInput::Node(index))?;
             let mut operation = PhysicalOperation::current(relation);
             let deleted = self.stored_column(relation, "_deleted")?;
             operation = operation.filter(Expression::equal(
@@ -1169,7 +1389,11 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
         }
         let mut operation;
-        if eligible || star {
+        if input.relationships.is_empty() && input.nodes.len() == 1 {
+            operation = node_operations
+                .remove(input.nodes[0].id.as_str())
+                .expect("declared node");
+        } else if eligible || star {
             let first = if star {
                 star_center.expect("FK star holder")
             } else {
@@ -1221,7 +1445,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             operation = PhysicalOperation::One;
             let mut edges = Vec::new();
             for (index, relationship) in input.relationships.iter().enumerate() {
-                if relationship.hops.max != 1 || relationship.direction == Direction::Both {
+                if relationship.hops.min != 1
+                    || relationship.hops.max != 1
+                    || relationship.direction == Direction::Both
+                {
                     return Err(GraphError::UnsupportedInput(
                         "variable or bidirectional traversal".into(),
                     ));
@@ -1230,6 +1457,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .catalog
                     .relationship_table_for_query(&relationship.types);
                 let edge = self.scan(root, table, format!("e{index}"))?;
+                self.bind_scan(edge, ScanInput::Relationship(index))?;
                 let (start, end) = relationship.direction.edge_columns();
                 let mut scan = PhysicalOperation::current(edge).filter(Expression::equal(
                     Expression::Column(self.stored_column(edge, "_deleted")?),
@@ -1399,6 +1627,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let alias = self.relation(original)?.hint.clone();
         let body = self.select(PhysicalOperation::One);
         let relation = self.scan(body, table, alias)?;
+        if let Some(input) = self.relation(original)?.input.clone() {
+            self.bind_scan(relation, input)?;
+        }
         let mut operation = PhysicalOperation::source(relation);
         for predicate in predicates {
             operation = operation.filter(predicate.rebind(&|column| {
@@ -1716,8 +1947,37 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     ) -> Result<ValueType> {
         match expression {
             Expression::Integer(_) | Expression::Count => Ok(ValueType::Scalar(SqlType::Int64)),
+            Expression::LatestPath {
+                path,
+                version,
+                deletion,
+            } => {
+                if self.column_type(*path, visiting)? != ValueType::Scalar(SqlType::String)
+                    || self.column_type(*deletion, visiting)? != ValueType::Scalar(SqlType::Bool)
+                {
+                    return Err(GraphError::ExpressionType);
+                }
+                self.column_type(*version, visiting)?;
+                Ok(ValueType::Scalar(SqlType::String))
+            }
             Expression::Boolean(_) => Ok(ValueType::Scalar(SqlType::Bool)),
             Expression::Text(_) => Ok(ValueType::Scalar(SqlType::String)),
+            Expression::Excerpt { value, .. } => {
+                if self.expression_type(value, visiting)? != ValueType::Scalar(SqlType::String) {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ValueType::Scalar(SqlType::String))
+            }
+            Expression::ToString(value) => {
+                self.expression_type(value, visiting)?;
+                Ok(ValueType::Scalar(SqlType::String))
+            }
+            Expression::Parameter { data_type, .. } => Ok(match data_type {
+                SqlType::Array(element) => {
+                    ValueType::Array(Box::new(ValueType::Scalar((*element).into())))
+                }
+                ty => ValueType::Scalar(*ty),
+            }),
             Expression::Integers(_) => Ok(ValueType::Array(Box::new(ValueType::Scalar(
                 SqlType::Int64,
             )))),
@@ -1821,11 +2081,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             Expression::Equal(left, right)
             | Expression::Greater(left, right)
             | Expression::And(left, right)
+            | Expression::Or(left, right)
             | Expression::StartsWith(left, right) => {
                 let left = self.expression_type(left, visiting)?;
                 let right = self.expression_type(right, visiting)?;
                 if left != right
-                    || matches!(expression, Expression::And(..))
+                    || matches!(expression, Expression::And(..) | Expression::Or(..))
                         && left != ValueType::Scalar(SqlType::Bool)
                     || matches!(expression, Expression::StartsWith(..))
                         && left != ValueType::Scalar(SqlType::String)
@@ -1958,6 +2219,29 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         self.render_block(root, true)
     }
 
+    pub fn render_parameterized(
+        mut self,
+        root: BlockId,
+    ) -> Result<(
+        String,
+        std::collections::HashMap<String, orbit_utils::query_types::ParamValue>,
+    )> {
+        self.validate_lowered(root)?;
+        let mut bindings = orbit_utils::query_types::ParamBindings::default();
+        for block in &mut self.blocks {
+            if let Body::Select {
+                outputs, operation, ..
+            } = &mut block.body
+            {
+                for output in outputs {
+                    output.value.bind_parameters(&mut bindings);
+                }
+                operation.bind_parameters(&mut bindings);
+            }
+        }
+        Ok((self.render(root)?, bindings.into_map()))
+    }
+
     fn check_projection(
         &self,
         expression: &Expression<'catalog>,
@@ -1965,7 +2249,13 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         aggregate_input: Option<&[ColumnRef<'catalog>]>,
     ) -> Result<()> {
         match expression {
-            Expression::Count | Expression::CountIf(_) | Expression::Sum { .. } => {
+            Expression::Excerpt { value, .. } | Expression::ToString(value) => {
+                self.check_projection(value, available, aggregate_input)
+            }
+            Expression::Count
+            | Expression::CountIf(_)
+            | Expression::Sum { .. }
+            | Expression::LatestPath { .. } => {
                 let input = aggregate_input.ok_or(GraphError::AggregatePlacement)?;
                 expression.columns(&mut |column| {
                     if input.contains(&column) {
@@ -1977,6 +2267,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Expression::Equal(left, right)
             | Expression::And(left, right)
+            | Expression::Or(left, right)
             | Expression::In(left, right)
             | Expression::Greater(left, right)
             | Expression::StartsWith(left, right) => {
@@ -2438,6 +2729,33 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::LatestPath {
+                path,
+                version,
+                deletion,
+            } => format!(
+                "coalesce(if(argMaxOrNull({}, {}), NULL, argMaxOrNull({}, {})), '{}')",
+                column(*deletion)?,
+                column(*version)?,
+                column(*path)?,
+                column(*version)?,
+                crate::scope::UNRESOLVED_PATH
+            ),
+            Expression::Parameter { name, data_type } => format!(
+                "{{{name}:{}}}",
+                orbit_utils::clickhouse::type_name(*data_type)
+            ),
+            Expression::ToString(value) => {
+                format!("toString({})", self.render_expression_with(value, column)?)
+            }
+            Expression::Excerpt { value, max_chars } => {
+                let value = self.render_expression_with(value, column)?;
+                let shortened = format!("substringUTF8({value}, 1, {max_chars})");
+                format!(
+                    "concat({shortened}, if(length({value}) > length({shortened}), '{}', ''))",
+                    crate::passes::response_policy::TEXT_TRUNCATION_SUFFIX
+                )
+            }
             Expression::CountIf(condition) => format!(
                 "countIf({})",
                 self.render_expression_with(condition, column)?
@@ -2487,12 +2805,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             ),
             Expression::Equal(left, right)
             | Expression::And(left, right)
+            | Expression::Or(left, right)
             | Expression::In(left, right)
             | Expression::Greater(left, right) => {
                 let operator = match expression {
                     Expression::Equal(..) => "=",
                     Expression::Greater(..) => ">",
                     Expression::In(..) => "IN",
+                    Expression::Or(..) => "OR",
                     _ => "AND",
                 };
                 format!(

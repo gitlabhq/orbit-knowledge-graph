@@ -105,13 +105,46 @@ pub fn generate_hydration_plan(
     model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
+    hydration_for_projection(
+        input,
+        model,
+        security_ctx,
+        |alias| matches!(emitted, Node::Query(query) if query.selects_alias(alias)),
+    )
+}
+
+pub fn generate_graph_hydration<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    input: &Input,
+    graph: &crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    root: crate::query_graph::BlockId,
+    security_ctx: &SecurityContext,
+) -> HydrationPlan {
+    hydration_for_projection(input, graph.catalog(), security_ctx, |alias| {
+        graph
+            .outputs(root)
+            .expect("root block")
+            .any(|output| graph.output_label(output).expect("output") == alias)
+    })
+}
+
+fn hydration_for_projection(
+    input: &Input,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    security_ctx: &SecurityContext,
+    projected: impl Fn(&str) -> bool,
+) -> HydrationPlan {
     match input.query_type {
         QueryType::Hydration => HydrationPlan::None,
         QueryType::PathFinding | QueryType::Neighbors => {
             HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, model);
+            let mut templates = build_static_templates(input, model, projected);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
@@ -129,10 +162,9 @@ pub fn generate_hydration_plan(
 
 fn build_static_templates(
     input: &Input,
-    emitted: &Node,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    projected: impl Fn(&str) -> bool,
 ) -> Vec<HydrationTemplate> {
-    let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
     input
         .nodes
         .iter()

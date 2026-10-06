@@ -134,6 +134,103 @@ pub fn enforce_local_return(
     Ok(ctx)
 }
 
+pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
+    graph: &mut crate::query_graph::QueryGraph<
+        'a,
+        M,
+        crate::query_graph::Expression<'a>,
+        crate::query_graph::LoweredOperation<'a>,
+    >,
+    root: crate::query_graph::BlockId,
+    input: &Input,
+) -> Result<ResultContext> {
+    use crate::query_graph::Expression;
+    let model = graph.catalog();
+    let mut context = ResultContext::new().with_query_type(input.query_type);
+    context.entity_auth.clone_from(model.entity_auth());
+    for (index, node) in input.nodes.iter().enumerate() {
+        let relation = graph.input_node(root, index)?;
+        let entity_name = node
+            .entity
+            .as_deref()
+            .ok_or_else(|| QueryError::Enforcement("node has no entity".into()))?;
+        let entity = model
+            .entity(entity_name)
+            .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity_name}'")))?;
+        let redaction_column = model
+            .redaction_id_column(entity.id)
+            .unwrap_or(DEFAULT_PRIMARY_KEY);
+        let mut columns = vec![(redaction_id_column(&node.id), redaction_column)];
+        if redaction_column != DEFAULT_PRIMARY_KEY {
+            columns.push((primary_key_column(&node.id), DEFAULT_PRIMARY_KEY));
+        }
+        if model.entity_has_traversal_path(entity_name) {
+            columns.push((
+                traversal_path_column(&node.id),
+                ontology::TRAVERSAL_PATH_COLUMN,
+            ));
+        }
+        for (label, column) in columns {
+            graph.project(
+                root,
+                label,
+                Expression::Column(graph.stored_column(relation, column)?),
+            )?;
+        }
+        graph.project(
+            root,
+            redaction_type_column(&node.id),
+            Expression::Text(entity_name.into()),
+        )?;
+        context.add_node(&node.id, entity_name);
+    }
+    for (index, relationship) in input.relationships.iter().enumerate() {
+        let [kind] = relationship.types.as_slice() else {
+            return Err(QueryError::Enforcement(
+                "graph edge identity requires one relationship kind".into(),
+            ));
+        };
+        let (source, target) = if relationship.direction == crate::input::Direction::Incoming {
+            (&relationship.to, &relationship.from)
+        } else {
+            (&relationship.from, &relationship.to)
+        };
+        let entity = |alias: &str| {
+            input
+                .nodes
+                .iter()
+                .find(|node| node.id == alias)
+                .and_then(|node| node.entity.as_deref())
+                .ok_or_else(|| QueryError::Enforcement("edge endpoint has no entity".into()))
+        };
+        let prefix = format!("e{index}_");
+        for (suffix, value) in [
+            ("type", kind.as_str()),
+            ("src_type", entity(source)?),
+            ("dst_type", entity(target)?),
+        ] {
+            graph.project(
+                root,
+                format!("{prefix}{suffix}"),
+                Expression::Text(value.into()),
+            )?;
+        }
+        context.add_edge(EdgeMeta {
+            type_column: format!("{prefix}type"),
+            src_column: format!("{prefix}src"),
+            src_type_column: format!("{prefix}src_type"),
+            dst_column: format!("{prefix}dst"),
+            dst_type_column: format!("{prefix}dst_type"),
+            column_prefix: prefix,
+            path_column: None,
+            rel_types: relationship.types.clone(),
+            from_alias: relationship.from.clone(),
+            to_alias: relationship.to.clone(),
+        });
+    }
+    Ok(context)
+}
+
 fn enforce_lowered_return_with(
     node: &mut Node,
     input: &Input,
