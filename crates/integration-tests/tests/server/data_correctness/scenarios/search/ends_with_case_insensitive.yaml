@@ -1,4 +1,4 @@
-description: ends_with matches a suffix regardless of case and prunes granules with the text skip index
+description: ends_with matches a suffix regardless of case and prunes granules with the ngram skip index
 
 config:
   unmerged_seed: true
@@ -20,7 +20,7 @@ query:
 
 expect:
   sql_contains: ["endsWith(lower(u.name), lower('BUILDER'))"]
-  indexes_used: [idx_name]
+  indexes_used: [idx_name_ngram]
   skip_requirements: ["filter:name"]
   node_count: 1
   nodes:

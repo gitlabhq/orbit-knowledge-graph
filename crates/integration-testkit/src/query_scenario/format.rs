@@ -120,8 +120,6 @@ pub struct QueryExpect {
     pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
-    /// ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply and that
-    /// must prune granules: `[idx_title_ngram]`.
     #[serde(default)]
     pub indexes_used: Vec<String>,
     /// Assert total edge count across all types.

@@ -118,8 +118,6 @@ impl TestContext {
             .map_err(|e| e.to_string())
     }
 
-    /// `EXPLAIN PLAN indexes = 1` of the query with its parameters bound, as
-    /// the JSON plan tree.
     pub async fn explain_indexes(&self, pq: &ParameterizedQuery) -> serde_json::Value {
         let sql = format!("EXPLAIN PLAN json = 1, indexes = 1 {}", pq.sql);
         let batches = self

@@ -1,4 +1,4 @@
-description: contains matches regardless of case and prunes granules with the ngram skip index
+description: contains ignores case, spans a token boundary, matches a word prefix, and prunes granules with the ngram skip index
 
 config:
   unmerged_seed: true
@@ -12,16 +12,16 @@ query:
       "query_type": "traversal",
       "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
                  "columns": ["title"],
-                 "filters": {"title": {"contains": "SHIP FEATURE"}}}],
+                 "filters": {"title": {"contains": "SHIP FEAT"}}}],
       "order_by": "mr.id",
       "limit": 10
     }
   gql: |
-    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEATURE'
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
     RETURN mr.title ORDER BY mr.id LIMIT 10
 
 expect:
-  sql_contains: ["(lower(mr.title) LIKE lower('%SHIP FEATURE%'))"]
+  sql_contains: ["(lower(mr.title) LIKE lower('%SHIP FEAT%'))"]
   indexes_used: [idx_title_ngram]
   skip_requirements: ["filter:title"]
   node_count: 2

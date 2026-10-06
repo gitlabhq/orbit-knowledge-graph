@@ -1,6 +1,7 @@
 description: contains treats %, _, and backslash in the needle literally, and the escaped pattern still prunes with the ngram skip index
 
 config:
+  redaction: { allow: { merge_request: [2101, 2102] } }
   unmerged_seed: true
   extra_seed:
     gl_merge_request:
