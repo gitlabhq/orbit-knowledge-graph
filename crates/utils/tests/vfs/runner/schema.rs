@@ -86,7 +86,6 @@ pub enum Verdict {
     Pending,
     Keep(Tag),
     List(String),
-    Drop(String),
 }
 
 #[derive(Debug, Default, Deserialize)]

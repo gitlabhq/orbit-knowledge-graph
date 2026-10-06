@@ -138,6 +138,12 @@ impl OntologyArchive {
             error => ArchiveError::Invalid(error.to_string()),
         })?;
 
+        for file in files.files() {
+            if !file.keeps() {
+                files.read(Path::new(file.path.as_ref()))?;
+            }
+        }
+
         let manifest_json = files
             .read(Path::new(MANIFEST_PATH))
             .ok()
@@ -240,7 +246,7 @@ impl Source for OntologySource<'_> {
             let path = source_path(&entry.path()?)?;
             into.put(
                 &path,
-                Put::Lazy {
+                Put::ReadAndStore {
                     size: entry.size(),
                     read: Box::new(move || {
                         let mut content = String::new();

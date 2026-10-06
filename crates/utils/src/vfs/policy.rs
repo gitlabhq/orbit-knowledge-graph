@@ -1,7 +1,6 @@
 //! Passes classify files by path, size and content. They do not enforce limits or see symlinks.
 //! Metadata `Pending` requests content during loading; after content it becomes `Keep(Default)`.
-//! Linked files kept by metadata run content passes on first read. A late `Drop` remains
-//! in the inventory with its reason because nodes are frozen; reading it returns `Unsupported`.
+//! Every offered file remains cataloged. Rejected content reads as `Unsupported`.
 //! Passes return decisions; file metadata and cached decisions remain owned by the store.
 
 use std::{borrow::Cow, sync::OnceLock};
@@ -12,7 +11,6 @@ pub enum Decision<T> {
     Pending,
     Keep(T),
     List(&'static str),
-    Drop(&'static str),
 }
 
 pub trait Tag: Copy + Default + Send + Sync + 'static {}

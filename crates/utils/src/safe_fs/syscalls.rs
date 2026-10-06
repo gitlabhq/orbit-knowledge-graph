@@ -1,21 +1,16 @@
-//! Linked files are reopened without following host symlinks, including parent components.
+//! OS-specific file access refuses host symlinks, including parent components.
 //! The kernel enforces this in one open: openat2 on Linux, O_NOFOLLOW_ANY on macOS.
 //! Windows opens and pins parents without write/delete sharing, rejecting all reparse points.
-//! Reads are bounded by the recorded size; symlink replacements and size changes fail.
 
 use std::fs::File;
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
 #[cfg(unix)]
 use rustix::fs::{CWD, Mode, OFlags};
 
-pub(super) fn open_parent(path: &Path) -> io::Result<File> {
-    open(path.parent().unwrap_or(Path::new(".")), true)
-}
-
 #[cfg(unix)]
-fn open(path: &Path, directory: bool) -> io::Result<File> {
+pub(super) fn open(path: &Path, directory: bool) -> io::Result<File> {
     let flags = if directory {
         OFlags::DIRECTORY
     } else {
@@ -41,7 +36,7 @@ fn open(path: &Path, directory: bool) -> io::Result<File> {
 }
 
 #[cfg(windows)]
-fn open(path: &Path, directory: bool) -> io::Result<File> {
+pub(super) fn open(path: &Path, directory: bool) -> io::Result<File> {
     use std::fs::OpenOptions;
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use std::path::{Component, Prefix};
@@ -104,24 +99,4 @@ fn open(path: &Path, directory: bool) -> io::Result<File> {
     handles
         .pop()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty disk path"))
-}
-
-pub(super) fn read(path: &Path, size: u64) -> io::Result<Vec<u8>> {
-    let file = open(path, false)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() != size {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "linked file changed",
-        ));
-    }
-    let mut bytes = Vec::new();
-    file.take(size.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != size {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "linked file changed",
-        ));
-    }
-    Ok(bytes)
 }

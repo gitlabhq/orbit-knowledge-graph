@@ -5,6 +5,7 @@
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 use flate2::read::GzDecoder;
 use tar::EntryType;
@@ -68,12 +69,30 @@ impl<R: Read> Source for Archive<R> {
                 continue;
             }
             let size = entry.size();
-            let read = Box::new(move || {
+            let mut stream_error = None;
+            let read = Box::new(|| {
                 let mut bytes = Vec::new();
-                entry.read_to_end(&mut bytes)?;
+                let result = entry.read_to_end(&mut bytes).and_then(|_| {
+                    if bytes.len() as u64 == size {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "truncated archive entry",
+                        ))
+                    }
+                });
+                if let Err(error) = result {
+                    let error = Arc::new(error);
+                    stream_error = Some(error.clone());
+                    return Err(std::io::Error::new(error.kind(), error));
+                }
                 Ok(bytes)
             });
-            into.put(&path, Put::Lazy { size, read })?;
+            into.put(&path, Put::ReadAndStore { size, read })?;
+            if let Some(error) = stream_error {
+                return Err(std::io::Error::new(error.kind(), error).into());
+            }
         }
         if any_entry_seen {
             Ok(())

@@ -80,7 +80,13 @@ fn build_file_inventory_graph(
         let reason = reasons
             .get(entry.path.as_ref())
             .copied()
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                if matches!(entry.decision(), FileDecision::Pending) {
+                    FileReason::Fault(FileFault::FileRead)
+                } else {
+                    FileReason::None
+                }
+            });
         graph.add_unparsed_file(&entry.path, language, entry.size, reason);
     }
     graph.drop_construction_indexes();
@@ -291,7 +297,7 @@ impl PipelineContext {
                     .stat(Path::new(path))
                     .ok()
                     .and_then(|stat| stat.decision);
-                if let Some(FileDecision::List(reason) | FileDecision::Drop(reason)) = reason {
+                if let Some(FileDecision::List(reason)) = reason {
                     return AnalyzerError::skip(FileSkip::Filter(reason), "");
                 }
             }
@@ -1004,7 +1010,7 @@ impl Pipeline {
         if ctx.vfs.usage().files > 0 {
             let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
             for entry in ctx.vfs.files() {
-                if let FileDecision::List(reason) | FileDecision::Drop(reason) = entry.decision() {
+                if let FileDecision::List(reason) = entry.decision() {
                     reasons.insert(
                         entry.path.as_ref(),
                         FileReason::Skip(FileSkip::Filter(reason)),
@@ -1782,7 +1788,14 @@ pub(crate) mod testing {
                     let path = self.0.canonicalize()?.join(&file.path);
                     let size =
                         std::fs::metadata(&path).map_or(file.size, |metadata| metadata.len());
-                    into.put(&file.path, Put::OnDisk { path, size })?;
+                    let source = orbit_utils::safe_fs::File::new(path, size);
+                    into.put(
+                        &file.path,
+                        Put::ReadOnDemand {
+                            size,
+                            read: Arc::new(move |max_bytes| source.read(max_bytes)),
+                        },
+                    )?;
                 }
                 Ok(())
             }

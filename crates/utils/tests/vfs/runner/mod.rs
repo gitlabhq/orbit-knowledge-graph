@@ -20,7 +20,6 @@ impl Policy {
                         Verdict::Pending => Decision::Pending,
                         Verdict::Keep(tag) => Decision::Keep(*tag),
                         Verdict::List(reason) => Decision::List(reason_label(reason)),
-                        Verdict::Drop(reason) => Decision::Drop(reason_label(reason)),
                     };
                     (rule.clone(), decision)
                 })
@@ -81,10 +80,9 @@ fn reason_label(value: &str) -> &'static str {
 
 fn verdict(decision: Decision<Tag>) -> Verdict {
     match decision {
-        Decision::Pending => panic!("Pending is observable after loading"),
+        Decision::Pending => Verdict::Pending,
         Decision::Keep(tag) => Verdict::Keep(tag),
         Decision::List(reason) => Verdict::List(reason.into()),
-        Decision::Drop(reason) => Verdict::Drop(reason.into()),
     }
 }
 
