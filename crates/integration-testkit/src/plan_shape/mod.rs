@@ -225,166 +225,16 @@ impl Assertions {
     }
 }
 
-pub fn run_query_graph_foreign_keys(directory: &Path, ontology: Arc<ontology::Ontology>) {
-    use compiler::config::GraphStage;
-    let model = Arc::new(ClickHouseDataModel::derive(ontology).unwrap());
-    let security = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    for (file, substituted, edge_table) in [
-        ("chain_traversal.yaml", true, "gl_ci_edge"),
-        ("chain_edge_filter_guard.yaml", false, "gl_ci_edge"),
-        ("chain_point_guard.yaml", false, "gl_ci_edge"),
-        ("cross_namespace_chain_guard.yaml", false, "gl_edge"),
-        ("star_candidate_dependencies.yaml", true, "gl_edge"),
-        ("star_target_narrowing.yaml", true, "gl_edge"),
-        ("incoming_self_relationship.yaml", true, "gl_ci_edge"),
-    ] {
-        let path = directory.join("foreign_keys").join(file);
-        let scenario: Scenario =
-            orbit_utils::yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        for (language, raw) in scenario.query {
-            let label = format!("{} [{language}/query-graph]", path.display());
-            let mut assertions = if file == "chain_traversal.yaml" {
-                Assertions {
-                    expect: vec![
-                        "(Join ON mr.head_pipeline_id = pipe.id (_) (_))".into(),
-                        "(Scan Table(gl_merge_request) AS mr)".into(),
-                        "(Scan Table(gl_job) AS j)".into(),
-                        "(Filter u.username = 'alice', u._deleted = false (_))".into(),
-                        "(Filter j.status = 'failed', j._deleted = false (_))".into(),
-                        "(Project u.id AS e0_src, mr.id AS e0_dst, pipe.id AS e2_src, j.id AS e2_dst, ... (_))".into(),
-                    ],
-                    reject: vec![
-                        "(Scan Table(gl_edge) ...)".into(),
-                        "(Scan Table(gl_ci_edge) ...)".into(),
-                    ],
-                    ..Default::default()
-                }
-            } else if substituted {
-                Assertions {
-                    reject: vec![format!("(Scan Table({edge_table}) ...)")],
-                    ..Default::default()
-                }
-            } else {
-                Assertions {
-                    expect: vec![
-                        format!("(Scan Table({edge_table}) AS e0)"),
-                        format!("(Scan Table({edge_table}) AS e1)"),
-                    ],
-                    ..Default::default()
-                }
-            };
-            match file {
-                "chain_edge_filter_guard.yaml" => assertions
-                    .expect
-                    .push("(Filter e0.target_id = 1, ... (_))".into()),
-                "chain_point_guard.yaml" => {
-                    assertions.expect.push("(Filter mr.id = 1, ... (_))".into())
-                }
-                "cross_namespace_chain_guard.yaml" => assertions
-                    .expect
-                    .push("(Join ON e0.target_id = e1.target_id (_) (_))".into()),
-                "star_candidate_dependencies.yaml" => assertions.expect.extend([
-                    "(Join ON mr.author_id = u.id (_) (_))".into(),
-                    "(Join ON mr.project_id = p.id (_) (_))".into(),
-                    "(Filter p.id IN [1000, 1001], ... (_))".into(),
-                ]),
-                "star_target_narrowing.yaml" => assertions.expect.extend([
-                    "(Join ON mr.project_id = p.id (_) (_))".into(),
-                    "(Filter mr.id = 1, ... (_))".into(),
-                ]),
-                "incoming_self_relationship.yaml" => {
-                    assertions.expect.extend([
-                        "(Join ON canceled.auto_canceled_by_id = canceling.id (_) (_))".into(),
-                        "(Project canceled.id AS e0_src, canceling.id AS e0_dst, ... (_))".into(),
-                    ]);
-                    assertions.reject.push(
-                        "(Join ON canceling.auto_canceled_by_id = canceled.id (_) (_))".into(),
-                    );
-                }
-                _ => {}
-            }
-            match file {
-                "star_candidate_dependencies.yaml" => {
-                    assertions.ctes = Some(CteAssertions {
-                        absent: None,
-                        exact_order: Some(vec![
-                            "_candidate_p".into(),
-                            "_candidate_u".into(),
-                            "_candidate_mr".into(),
-                        ]),
-                    });
-                    assertions.expect.extend([
-                        "(CTE _candidate_u (Project u.id AS id (_)))".into(),
-                        "(CTE _candidate_mr (Project mr.id AS id (_)))".into(),
-                        "(SemiJoin ON mr.author_id = _candidate_u.id (_) (_))".into(),
-                        "(SemiJoin ON mr.project_id = _candidate_p.id (_) (_))".into(),
-                    ]);
-                }
-                "star_target_narrowing.yaml" => {
-                    assertions.ctes = Some(CteAssertions {
-                        absent: None,
-                        exact_order: Some(vec!["_narrow_p".into()]),
-                    });
-                    assertions.expect.extend([
-                        "(CTE _narrow_p (Project mr.project_id AS id (Filter mr.id = 1, mr._deleted = false (Scan Table(gl_merge_request) AS mr))))".into(),
-                        "(SemiJoin ON p.id = _narrow_p.id (Scan Table(gl_project) AS p) (_))".into(),
-                        "(Filter p._deleted = false (Deduplicate ... (_)))".into(),
-                    ]);
-                }
-                _ => {}
-            }
-            let frontend = match language.as_str() {
-                "json" => compiler::Frontend::JsonDsl,
-                "gql" => compiler::Frontend::Gql,
-                _ => unreachable!(),
-            };
-            let compiled = compiler::config::compile_graph_observed(
-                &raw,
-                frontend,
-                &model,
-                &security,
-                |stage| {
-                    let result = match stage {
-                        GraphStage::Logical(input) => scenario
-                            .logical
-                            .check(&explain::logical(input), &format!("{label}.logical")),
-                        GraphStage::Planned(graph, root) => assertions.check(
-                            &explain::query_graph(graph, root),
-                            &format!("{label}.planned"),
-                        ),
-                        GraphStage::Emitted(graph, root) => assertions.check(
-                            &explain::query_graph(graph, root),
-                            &format!("{label}.emitted"),
-                        ),
-                    };
-                    result.map_err(compiler::QueryError::PipelineInvariant)
-                },
-            )
-            .unwrap_or_else(|error| panic!("{label}: {error}"));
-            assert!(
-                !compiled.base.params.is_empty(),
-                "{label}: bound parameters"
-            );
-            assert_eq!(
-                compiled.base.result_context.len(),
-                compiled.input.nodes.len(),
-                "{label}: redaction identities"
-            );
-            assert_eq!(
-                compiled.base.result_context.edges().len(),
-                compiled.input.relationships.len(),
-                "{label}: edge identities"
-            );
-        }
-    }
-}
-
 fn check<M: QueryDataModel>(
     scenario: &Scenario,
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    failures: &mut Vec<String>,
+    build: impl Fn(
+        &Input,
+        plan::HydrationCompileOptions,
+    ) -> compiler::Result<(pattern::Expression, pattern::Expression)>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -392,66 +242,81 @@ fn check<M: QueryDataModel>(
             path.display(),
             scenario.name
         );
-        let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model.ontology()).map(|(input, _)| input),
-            "gql" => frontend::gql::parse(raw),
-            _ => panic!("{label}: unknown frontend"),
-        }
-        .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut input =
-            normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut options = plan::HydrationCompileOptions::default();
-        if let Some(hydration) = &scenario.hydration {
-            input.query_type = compiler::input::QueryType::Hydration;
-            for (alias, paths) in &hydration.paths {
-                let node = input
-                    .nodes
-                    .iter_mut()
-                    .find(|node| &node.id == alias)
-                    .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
-                node.traversal_paths = paths
-                    .iter()
-                    .map(|path| {
-                        orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
-                    })
-                    .collect();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let input = match language.as_str() {
+                "json" => frontend::json_dsl::parse(raw, model.ontology()).map(|(input, _)| input),
+                "gql" => frontend::gql::parse(raw),
+                _ => return vec![format!("{label}: unknown frontend")],
             }
-            options = plan::HydrationCompileOptions {
-                dynamic: hydration.dynamic,
-                path_segment_budget: hydration.path_segment_budget,
+            .and_then(|input| normalize::normalize(input, model));
+            let mut input = match input {
+                Ok(input) => input,
+                Err(error) => return vec![format!("{label}: {error}")],
             };
-        }
-        scenario
-            .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
-            .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let (planned, emitted) = explain::physical(&plan, &lowered.ast);
-        let assertions = &scenario.physical[backend];
-        assert!(
-            assertions.planned.is_some() || assertions.emitted.is_some(),
-            "{label}: missing assertion targets"
-        );
-        for (phase, assertions, actual) in [
-            ("planned", &assertions.planned, planned),
-            ("emitted", &assertions.emitted, emitted),
-        ] {
-            if let Some(assertions) = assertions {
-                assertions
-                    .check(&actual, &format!("{label}.physical.{backend}.{phase}"))
-                    .unwrap_or_else(|error| panic!("{error}"));
+            let mut options = plan::HydrationCompileOptions::default();
+            if let Some(hydration) = &scenario.hydration {
+                input.query_type = compiler::input::QueryType::Hydration;
+                for (alias, paths) in &hydration.paths {
+                    let node = input
+                        .nodes
+                        .iter_mut()
+                        .find(|node| &node.id == alias)
+                        .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
+                    node.traversal_paths = paths
+                        .iter()
+                        .map(|path| {
+                            orbit_utils::traversal_path::TraversalPath::new_unchecked(path.clone())
+                        })
+                        .collect();
+                }
+                options = plan::HydrationCompileOptions {
+                    dynamic: hydration.dynamic,
+                    path_segment_budget: hydration.path_segment_budget,
+                };
             }
-        }
-        match backend {
-            "clickhouse" => {
-                compiler::emit_simple_query(&lowered.ast).unwrap();
+            let mut errors = Vec::new();
+            if let Err(error) = scenario
+                .logical
+                .check(&explain::logical(&input), &format!("{label}.logical"))
+            {
+                errors.push(error);
             }
-            "duckdb" => {
-                compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                    .unwrap();
+            let (planned, emitted) = match build(&input, options) {
+                Ok(views) => views,
+                Err(error) => {
+                    errors.push(format!("{label}: {error}"));
+                    return errors;
+                }
+            };
+            let assertions = &scenario.physical[backend];
+            assert!(
+                assertions.planned.is_some() || assertions.emitted.is_some(),
+                "{label}: missing assertion targets"
+            );
+            for (phase, assertions, actual) in [
+                ("planned", &assertions.planned, planned),
+                ("emitted", &assertions.emitted, emitted),
+            ] {
+                if let Some(assertions) = assertions
+                    && let Err(error) =
+                        assertions.check(&actual, &format!("{label}.physical.{backend}.{phase}"))
+                {
+                    errors.push(error);
+                }
             }
-            _ => unreachable!(),
+            errors
+        }));
+        match result {
+            Ok(errors) if errors.is_empty() => println!("PASS {label}"),
+            Ok(errors) => failures.push(errors.join("\n")),
+            Err(error) => {
+                let message = error
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| error.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic");
+                failures.push(format!("{label}: {message}"));
+            }
         }
     }
 }
@@ -463,32 +328,105 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
+    let mut failures = Vec::new();
+    let mut cases = 0;
+    let mut totals = BTreeMap::<String, (usize, usize)>::new();
     for path in &paths {
-        let scenario: Scenario =
-            orbit_utils::yaml::from_str(&std::fs::read_to_string(path).unwrap())
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        assert!(
-            !scenario.physical.is_empty() && !scenario.query.is_empty(),
-            "{}: missing query arms or backend assertions",
-            path.display()
-        );
-        scenario
-            .validate_frontends()
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        for backend in scenario.physical.keys() {
-            match backend.as_str() {
-                "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, &remote, options, &HashSet::new())
-                }),
-                "duckdb" => check(&scenario, &local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, &local, options, &HashSet::new())
-                }),
-                _ => panic!("unknown backend {backend}"),
+        let scenario = std::fs::read_to_string(path)
+            .map_err(|error| error.to_string())
+            .and_then(|yaml| {
+                orbit_utils::yaml::from_str::<Scenario>(&yaml).map_err(|error| error.to_string())
+            })
+            .and_then(|scenario| {
+                scenario.validate_frontends()?;
+                if scenario.physical.is_empty() || scenario.query.is_empty() {
+                    return Err("missing query arms or backend assertions".into());
+                }
+                Ok(scenario)
+            });
+        let scenario = match scenario {
+            Ok(scenario) => scenario,
+            Err(error) => {
+                cases += 1;
+                failures.push(format!("{}: {error}", path.display()));
+                continue;
             }
+        };
+        for backend in scenario.physical.keys() {
+            cases += scenario.query.len();
+            let previous_failures = failures.len();
+            match backend.as_str() {
+                "clickhouse" => check(
+                    &scenario,
+                    &remote,
+                    backend,
+                    path,
+                    &mut failures,
+                    |input, _options| {
+                        use compiler::query_graph::{Expression, PhysicalOperation, QueryGraph};
+                        let mut graph =
+                            QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(&remote);
+                        let root = graph.plan(input)?;
+                        let planned = explain::query_graph(&graph, root);
+                        let graph = graph.lower_operations()?;
+                        let emitted = explain::query_graph(&graph, root);
+                        graph.render_parameterized(root)?;
+                        Ok((planned, emitted))
+                    },
+                ),
+                "duckdb" => check(
+                    &scenario,
+                    &local,
+                    backend,
+                    path,
+                    &mut failures,
+                    |input, options| {
+                        let plan = plan::plan_duckdb(input, &local, options, &HashSet::new())?;
+                        let lowered = lower::emit(&plan, input)?;
+                        let views = explain::physical(&plan, &lowered.ast);
+                        compiler::passes::codegen::duckdb::codegen(
+                            &lowered.ast,
+                            Default::default(),
+                        )?;
+                        Ok(views)
+                    },
+                ),
+                _ => {
+                    for language in scenario.query.keys() {
+                        failures.push(format!(
+                            "{} [{language}/{backend}]: unknown backend",
+                            path.display()
+                        ));
+                    }
+                }
+            }
+            let area = path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .unwrap()
+                .to_string_lossy();
+            let total = totals.entry(format!("{backend}/{area}")).or_default();
+            total.0 += scenario.query.len();
+            total.1 += failures.len() - previous_failures;
         }
-        println!("PASS {}", scenario.name);
     }
-    println!("{} plan fixtures passed", paths.len());
+    for (index, failure) in failures.iter().enumerate() {
+        eprintln!("FAIL {}: {failure}\n", index + 1);
+    }
+    for (area, (cases, failed)) in totals {
+        println!("{area}: {} passed, {failed} failed", cases - failed);
+    }
+    println!(
+        "{} fixtures, {cases} cases: {} passed, {} failed",
+        paths.len(),
+        cases - failures.len(),
+        failures.len()
+    );
+    assert!(
+        failures.is_empty(),
+        "{} of {cases} plan cases failed",
+        failures.len()
+    );
 }
 
 #[test]

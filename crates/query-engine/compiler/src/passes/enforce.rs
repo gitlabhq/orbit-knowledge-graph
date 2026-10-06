@@ -209,11 +209,15 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
             ("src_type", entity(source)?),
             ("dst_type", entity(target)?),
         ] {
-            graph.project(
-                root,
-                format!("{prefix}{suffix}"),
-                Expression::Text(value.into()),
-            )?;
+            let label = format!("{prefix}{suffix}");
+            if graph.outputs(root)?.any(|output| {
+                graph
+                    .output_label(output)
+                    .is_ok_and(|existing| existing == label)
+            }) {
+                continue;
+            }
+            graph.project(root, label, Expression::Text(value.into()))?;
         }
         context.add_edge(EdgeMeta {
             type_column: format!("{prefix}type"),

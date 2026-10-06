@@ -618,6 +618,18 @@ pub enum Expression<'catalog> {
     },
     Concat(Vec<Self>),
     Greater(Box<Self>, Box<Self>),
+    GreaterEqual(Box<Self>, Box<Self>),
+    LessEqual(Box<Self>, Box<Self>),
+    Bucket {
+        unit: crate::input::TruncateUnit,
+        value: Box<Self>,
+    },
+    Predicate {
+        operator: crate::input::FilterOp,
+        value: Box<Self>,
+        argument: Option<Box<Self>>,
+        fold_case: bool,
+    },
     StartsWith(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     And(Box<Self>, Box<Self>),
@@ -635,8 +647,47 @@ pub enum Expression<'catalog> {
 }
 
 impl<'catalog> Expression<'catalog> {
+    fn membership(column: ColumnRef<'catalog>, values: &[i64]) -> Self {
+        if let [value] = values {
+            Self::equal(Self::Column(column), Self::Integer(*value))
+        } else {
+            Self::In(
+                Box::new(Self::Column(column)),
+                Box::new(Self::Integers(values.to_vec())),
+            )
+        }
+    }
+    fn identity_predicates(
+        column: ColumnRef<'catalog>,
+        node: &crate::input::InputNode,
+    ) -> Vec<Self> {
+        let mut predicates = Vec::new();
+        if !node.node_ids.is_empty() {
+            predicates.push(Self::membership(column, &node.node_ids));
+        }
+        if let Some(range) = &node.id_range {
+            predicates.push(Self::GreaterEqual(
+                Box::new(Self::Column(column)),
+                Box::new(Self::Integer(range.start)),
+            ));
+            predicates.push(Self::LessEqual(
+                Box::new(Self::Column(column)),
+                Box::new(Self::Integer(range.end)),
+            ));
+        }
+        predicates
+    }
     fn bind_parameters(&mut self, bindings: &mut orbit_utils::query_types::ParamBindings) {
         let literal = match self {
+            Self::Predicate {
+                value, argument, ..
+            } => {
+                value.bind_parameters(bindings);
+                if let Some(argument) = argument {
+                    argument.bind_parameters(bindings);
+                }
+                None
+            }
             Self::Integer(value) => Some((SqlType::Int64, serde_json::json!(*value))),
             Self::Boolean(value) => Some((SqlType::Bool, serde_json::json!(*value))),
             Self::Text(value) => Some((SqlType::String, serde_json::json!(value))),
@@ -646,6 +697,8 @@ impl<'catalog> Expression<'catalog> {
             | Self::Or(left, right)
             | Self::In(left, right)
             | Self::Greater(left, right)
+            | Self::GreaterEqual(left, right)
+            | Self::LessEqual(left, right)
             | Self::StartsWith(left, right) => {
                 left.bind_parameters(bindings);
                 right.bind_parameters(bindings);
@@ -658,6 +711,7 @@ impl<'catalog> Expression<'catalog> {
                 None
             }
             Self::Excerpt { value, .. }
+            | Self::Bucket { value, .. }
             | Self::ToString(value)
             | Self::CountIf(value)
             | Self::Field { tuple: value, .. } => {
@@ -696,6 +750,26 @@ impl<'catalog> Expression<'catalog> {
         map: &impl Fn(ColumnRef<'catalog>) -> Result<ColumnRef<'catalog>>,
     ) -> Result<Self> {
         Ok(match self {
+            Self::Predicate {
+                operator,
+                value,
+                argument,
+                fold_case,
+            } => Self::Predicate {
+                operator: *operator,
+                value: Box::new(value.rebind(map)?),
+                argument: argument
+                    .as_ref()
+                    .map(|argument| argument.rebind(map).map(Box::new))
+                    .transpose()?,
+                fold_case: *fold_case,
+            },
+            Self::Array(values) => Self::Array(
+                values
+                    .iter()
+                    .map(|value| value.rebind(map))
+                    .collect::<Result<_>>()?,
+            ),
             Self::Column(column) => Self::Column(map(*column)?),
             Self::Equal(left, right) => Self::equal(left.rebind(map)?, right.rebind(map)?),
             Self::In(left, right) => {
@@ -707,6 +781,16 @@ impl<'catalog> Expression<'catalog> {
             Self::Greater(left, right) => {
                 Self::Greater(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
             }
+            Self::GreaterEqual(left, right) => {
+                Self::GreaterEqual(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
+            }
+            Self::LessEqual(left, right) => {
+                Self::LessEqual(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
+            }
+            Self::Bucket { unit, value } => Self::Bucket {
+                unit: *unit,
+                value: Box::new(value.rebind(map)?),
+            },
             Self::StartsWith(left, right) => {
                 Self::StartsWith(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
             }
@@ -721,6 +805,15 @@ impl<'catalog> Expression<'catalog> {
 
     fn columns(&self, visit: &mut impl FnMut(ColumnRef<'catalog>) -> Result<()>) -> Result<()> {
         match self {
+            Self::Predicate {
+                value, argument, ..
+            } => {
+                value.columns(visit)?;
+                if let Some(argument) = argument {
+                    argument.columns(visit)?;
+                }
+                Ok(())
+            }
             Self::Column(column) => visit(*column),
             Self::LatestPath {
                 path,
@@ -731,7 +824,9 @@ impl<'catalog> Expression<'catalog> {
                 visit(*version)?;
                 visit(*deletion)
             }
-            Self::Excerpt { value, .. } | Self::ToString(value) => value.columns(visit),
+            Self::Excerpt { value, .. } | Self::Bucket { value, .. } | Self::ToString(value) => {
+                value.columns(visit)
+            }
             Self::CountIf(condition) => condition.columns(visit),
             Self::Sum { value, condition } => {
                 value.columns(visit)?;
@@ -756,6 +851,8 @@ impl<'catalog> Expression<'catalog> {
             | Self::Or(left, right)
             | Self::In(left, right)
             | Self::Greater(left, right)
+            | Self::GreaterEqual(left, right)
+            | Self::LessEqual(left, right)
             | Self::StartsWith(left, right) => {
                 left.columns(visit)?;
                 right.columns(visit)
@@ -766,18 +863,30 @@ impl<'catalog> Expression<'catalog> {
 
     fn aggregate(&self) -> bool {
         match self {
+            Self::Predicate {
+                value, argument, ..
+            } => {
+                value.aggregate()
+                    || argument
+                        .as_ref()
+                        .is_some_and(|argument| argument.aggregate())
+            }
             Self::Count | Self::CountIf(_) | Self::Sum { .. } | Self::LatestPath { .. } => true,
             Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
                 values.iter().any(Self::aggregate)
             }
             Self::Field { tuple, .. } => tuple.aggregate(),
-            Self::Excerpt { value, .. } | Self::ToString(value) => value.aggregate(),
+            Self::Excerpt { value, .. } | Self::Bucket { value, .. } | Self::ToString(value) => {
+                value.aggregate()
+            }
             Self::Keep { condition, value } => condition.aggregate() || value.aggregate(),
             Self::Equal(left, right)
             | Self::And(left, right)
             | Self::Or(left, right)
             | Self::In(left, right)
             | Self::Greater(left, right)
+            | Self::GreaterEqual(left, right)
+            | Self::LessEqual(left, right)
             | Self::StartsWith(left, right) => left.aggregate() || right.aggregate(),
             _ => false,
         }
@@ -802,11 +911,12 @@ pub enum JoinKind {
     Inner,
     Cross,
     Semi,
+    Membership,
 }
 
 #[derive(Clone, Debug)]
 pub struct LatestRows<'catalog> {
-    version: ColumnRef<'catalog>,
+    pub version: ColumnRef<'catalog>,
     deletion: Option<ColumnRef<'catalog>>,
 }
 
@@ -829,11 +939,15 @@ pub enum Relational<'catalog, Latest> {
     },
     Aggregate {
         input: Box<Self>,
-        groups: Vec<ColumnRef<'catalog>>,
+        groups: Vec<Expression<'catalog>>,
     },
     Expand {
         input: Box<Self>,
         column: ColumnRef<'catalog>,
+    },
+    Materialize {
+        input: Box<Self>,
+        relation: RelationId,
     },
     Latest {
         input: Box<Self>,
@@ -863,6 +977,12 @@ impl<'a, L> Relational<'a, L> {
                 predicate.bind_parameters(bindings);
                 input.bind_parameters(bindings);
             }
+            Self::Aggregate { input, groups } => {
+                for group in groups {
+                    group.bind_parameters(bindings);
+                }
+                input.bind_parameters(bindings);
+            }
             Self::Join {
                 left,
                 right,
@@ -873,8 +993,8 @@ impl<'a, L> Relational<'a, L> {
                 left.bind_parameters(bindings);
                 right.bind_parameters(bindings);
             }
-            Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
+            Self::Expand { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -890,6 +1010,7 @@ impl<'a, L> Relational<'a, L> {
             Self::Filter { input, .. }
             | Self::Aggregate { input, .. }
             | Self::Expand { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -931,7 +1052,19 @@ impl<'a, L> Relational<'a, L> {
             condition,
         }
     }
+
+    pub fn membership(self, value: ColumnRef<'a>, key: ColumnRef<'a>) -> Self {
+        Self::Join {
+            left: Box::new(self),
+            right: Box::new(Self::source(key.relation)),
+            kind: JoinKind::Membership,
+            condition: Expression::equal(Expression::Column(value), Expression::Column(key)),
+        }
+    }
     pub fn aggregate(self, groups: Vec<ColumnRef<'a>>) -> Self {
+        self.group_by(groups.into_iter().map(Expression::Column).collect())
+    }
+    pub fn group_by(self, groups: Vec<Expression<'a>>) -> Self {
         Self::Aggregate {
             input: Box::new(self),
             groups,
@@ -941,6 +1074,12 @@ impl<'a, L> Relational<'a, L> {
         Self::Expand {
             input: Box::new(self),
             column,
+        }
+    }
+    pub fn materialize(self, relation: RelationId) -> Self {
+        Self::Materialize {
+            input: Box::new(self),
+            relation,
         }
     }
     pub fn sort(self, keys: Vec<(ColumnRef<'a>, bool)>) -> Self {
@@ -967,6 +1106,7 @@ impl<'a, L> Relational<'a, L> {
             Self::Filter { input, .. }
             | Self::Aggregate { input, .. }
             | Self::Expand { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -995,6 +1135,7 @@ impl<'a, L> Relational<'a, L> {
             } => *expanded == column || input.expands(column),
             Self::Filter { input, .. }
             | Self::Aggregate { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -1009,6 +1150,14 @@ impl<'a, L> Relational<'a, L> {
             Self::Aggregate { input, .. } => Some(input),
             Self::Sort { input, .. } | Self::Limit { input, .. } => input.aggregate_input(),
             _ => None,
+        }
+    }
+
+    fn groups(&self) -> &[Expression<'a>] {
+        match self {
+            Self::Aggregate { groups, .. } => groups,
+            Self::Sort { input, .. } | Self::Limit { input, .. } => input.groups(),
+            _ => &[],
         }
     }
 
@@ -1031,6 +1180,7 @@ impl<'a, L> Relational<'a, L> {
             Self::Filter { input, .. }
             | Self::Aggregate { input, .. }
             | Self::Expand { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -1052,6 +1202,7 @@ impl<'a, L> Relational<'a, L> {
             }
             Self::Aggregate { input, .. }
             | Self::Expand { input, .. }
+            | Self::Materialize { input, .. }
             | Self::Latest { input, .. }
             | Self::Sort { input, .. }
             | Self::FirstBy { input, .. }
@@ -1073,6 +1224,309 @@ impl<'a> PhysicalOperation<'a> {
 impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
 {
+    pub fn plan(&mut self, input: &crate::input::Input) -> Result<BlockId> {
+        match input.query_type {
+            crate::input::QueryType::Aggregation => self.aggregation(input),
+            _ => self.traversal(input),
+        }
+    }
+
+    fn aggregation(&mut self, input: &crate::input::Input) -> Result<BlockId> {
+        use crate::input::{AggExpr, Direction, InputGroupByKey, group_by_output_names};
+        if !input.join_predicates.is_empty()
+            || input.aggregation.sort.is_some()
+            || input.relationships.len() > 1
+        {
+            return Err(GraphError::UnsupportedInput(
+                "aggregation joins or ordering".into(),
+            ));
+        }
+        let root = self.select(PhysicalOperation::One);
+        let mut columns = std::collections::HashMap::new();
+        let mut condition = None;
+        let mut operation = if let [relationship] = input.relationships.as_slice() {
+            if relationship.direction == Direction::Both
+                || relationship.hops.min != 1
+                || relationship.hops.max != 1
+                || !relationship.filters.is_empty()
+            {
+                return Err(GraphError::UnsupportedInput(
+                    "aggregation relationship".into(),
+                ));
+            }
+            let table = self
+                .catalog
+                .relationship_table_for_query(&relationship.types);
+            let edge = self.scan(root, table, "e0")?;
+            self.bind_scan(edge, ScanInput::Relationship(0))?;
+            let [kind] = relationship.types.as_slice() else {
+                return Err(GraphError::UnsupportedInput(
+                    "aggregation relationship kinds".into(),
+                ));
+            };
+            let (source, target) = if relationship.direction == Direction::Incoming {
+                (&relationship.to, &relationship.from)
+            } else {
+                (&relationship.from, &relationship.to)
+            };
+            let entity = |alias: &str| {
+                input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == alias)
+                    .and_then(|node| node.entity.as_deref())
+                    .ok_or(GraphError::MissingOutput)
+            };
+            let mut predicates = Vec::new();
+            for (column, value) in [
+                ("relationship_kind", kind.as_str()),
+                ("source_kind", entity(source)?),
+                ("target_kind", entity(target)?),
+            ] {
+                predicates.push(Expression::equal(
+                    Expression::Column(self.stored_column(edge, column)?),
+                    Expression::Text(value.into()),
+                ));
+            }
+            predicates.push(Expression::equal(
+                Expression::Column(self.stored_column(edge, "_deleted")?),
+                Expression::Boolean(false),
+            ));
+            for (alias, column) in [(source, "source_id"), (target, "target_id")] {
+                let node = input
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == *alias)
+                    .ok_or(GraphError::MissingOutput)?;
+                let column = self.stored_column(edge, column)?;
+                columns.insert((node.id.clone(), "id".into()), column);
+                if !node.filters.is_empty() || node.id_range.is_some() || node.id_property != "id" {
+                    return Err(GraphError::UnsupportedInput(
+                        "aggregation endpoint filters".into(),
+                    ));
+                }
+                if !node.node_ids.is_empty() {
+                    predicates.push(Expression::membership(column, &node.node_ids));
+                }
+            }
+            condition = predicates
+                .into_iter()
+                .reduce(|left, right| Expression::And(Box::new(left), Box::new(right)));
+            PhysicalOperation::source(edge)
+                .filter(condition.clone().expect("edge predicates"))
+                .latest(self.stored_column(edge, "_version")?, None)
+        } else {
+            if input.nodes.len() != 1 {
+                return Err(GraphError::UnsupportedInput(
+                    "disconnected aggregation".into(),
+                ));
+            }
+            PhysicalOperation::One
+        };
+        for (index, node) in input.nodes.iter().enumerate() {
+            let mut properties = input
+                .aggregation
+                .group_by
+                .iter()
+                .filter_map(|group| match group {
+                    InputGroupByKey::Property {
+                        node: alias,
+                        property,
+                        ..
+                    } if alias == &node.id => Some(property.as_str()),
+                    _ => None,
+                })
+                .chain(
+                    input
+                        .aggregation
+                        .metrics
+                        .iter()
+                        .filter(|metric| metric.expr.node() == node.id)
+                        .filter_map(|metric| metric.expr.property()),
+                )
+                .collect::<Vec<_>>();
+            properties.sort_unstable();
+            properties.dedup();
+            if properties.is_empty() && !input.relationships.is_empty() {
+                continue;
+            }
+            let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
+            let table = self
+                .catalog
+                .entity_table(entity)
+                .ok_or(GraphError::MissingOutput)?;
+            let node_block = if input.relationships.is_empty() {
+                root
+            } else {
+                self.select(PhysicalOperation::One)
+            };
+            let relation = self.scan(node_block, table, &node.id)?;
+            self.bind_scan(relation, ScanInput::Node(index))?;
+            let scan = self.node_source(relation, node)?;
+            let mut node_columns = Vec::new();
+            if !properties.contains(&"id") {
+                properties.push("id");
+            }
+            for property in properties {
+                let stored = self
+                    .catalog
+                    .property_column_named(entity, property)
+                    .ok_or(GraphError::MissingOutput)?;
+                node_columns.push((property, self.stored_column(relation, stored)?));
+            }
+            let edge = columns.get(&(node.id.clone(), "id".into())).copied();
+            let scan = if node_block != root {
+                *self.operation_mut(node_block)? = scan;
+                let derived = self.derive(root, node_block, &node.id)?;
+                for (property, column) in &mut node_columns {
+                    let output =
+                        self.project(node_block, *property, Expression::Column(*column))?;
+                    *column = self.output_column(derived, output)?;
+                }
+                PhysicalOperation::source(derived)
+            } else {
+                scan
+            };
+            for (property, column) in node_columns {
+                columns.insert((node.id.clone(), property.into()), column);
+            }
+            let identity = columns[&(node.id.clone(), "id".into())];
+            if let Some(edge) = edge {
+                operation = operation.join(
+                    scan,
+                    Expression::equal(Expression::Column(identity), Expression::Column(edge)),
+                );
+            } else {
+                operation = scan;
+            }
+        }
+        let mut groups = Vec::new();
+        for (group, label) in input
+            .aggregation
+            .group_by
+            .iter()
+            .zip(group_by_output_names(&input.aggregation.group_by))
+        {
+            let InputGroupByKey::Property {
+                node,
+                property,
+                truncate,
+                ..
+            } = group
+            else {
+                return Err(GraphError::UnsupportedInput(
+                    "aggregation node group".into(),
+                ));
+            };
+            let column = *columns
+                .get(&(node.clone(), property.clone()))
+                .ok_or(GraphError::MissingOutput)?;
+            let value = match truncate {
+                Some(unit) => Expression::Bucket {
+                    unit: *unit,
+                    value: Box::new(Expression::Column(column)),
+                },
+                None => Expression::Column(column),
+            };
+            if !groups.contains(&value) {
+                groups.push(value.clone());
+            }
+            self.project(root, label, value)?;
+        }
+        for metric in &input.aggregation.metrics {
+            let value = match &metric.expr {
+                AggExpr::Count(target) if target.property.is_none() => {
+                    condition.clone().map_or(Expression::Count, |condition| {
+                        Expression::CountIf(Box::new(condition))
+                    })
+                }
+                AggExpr::Sum(property) => Expression::Sum {
+                    value: Box::new(Expression::Column(
+                        *columns
+                            .get(&(property.node.clone(), property.property.clone()))
+                            .ok_or(GraphError::MissingOutput)?,
+                    )),
+                    condition: condition.clone().map(Box::new),
+                },
+                _ => return Err(GraphError::UnsupportedInput("aggregation measure".into())),
+            };
+            self.project(root, metric.output_name(), value)?;
+        }
+        *self.operation_mut(root)? = operation.group_by(groups).limit(input.limit);
+        Ok(root)
+    }
+
+    fn node_source(
+        &self,
+        relation: RelationId,
+        node: &crate::input::InputNode,
+    ) -> Result<PhysicalOperation<'catalog>> {
+        use crate::input::FilterOp;
+        let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
+        let mut operation = PhysicalOperation::current(relation);
+        for predicate in
+            Expression::identity_predicates(self.stored_column(relation, &node.id_property)?, node)
+        {
+            operation = operation.filter(predicate);
+        }
+        let mut properties = node.filters.iter().collect::<Vec<_>>();
+        properties.sort_by_key(|(name, _)| *name);
+        for (name, filters) in properties {
+            let column = self
+                .catalog
+                .property_column_named(entity, name)
+                .ok_or_else(|| GraphError::UnknownStored(name.clone()))?;
+            for filter in filters {
+                if filter.rhs_column.is_some() {
+                    return Err(GraphError::UnsupportedInput(
+                        "nonliteral equality filter".into(),
+                    ));
+                }
+                let literal = |value: &serde_json::Value| match value {
+                    serde_json::Value::String(value) => Ok(Expression::Text(value.clone())),
+                    serde_json::Value::Bool(value) => Ok(Expression::Boolean(*value)),
+                    serde_json::Value::Number(value) if value.as_i64().is_some() => {
+                        Ok(Expression::Integer(value.as_i64().unwrap()))
+                    }
+                    _ => Err(GraphError::UnsupportedInput("filter value".into())),
+                };
+                let operator = filter.op.unwrap_or(FilterOp::Eq);
+                let value = match filter.value.as_ref() {
+                    _ if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) => None,
+                    Some(serde_json::Value::Array(values)) if operator == FilterOp::In => {
+                        if values.is_empty() {
+                            operation = operation.filter(Expression::Boolean(false));
+                            continue;
+                        }
+                        Some(Expression::Array(
+                            values.iter().map(literal).collect::<Result<_>>()?,
+                        ))
+                    }
+                    Some(value) => Some(literal(value)?),
+                    _ => return Err(GraphError::UnsupportedInput("filter value".into())),
+                };
+                let value_column = Expression::Column(self.stored_column(relation, column)?);
+                let predicate = if operator == FilterOp::Eq {
+                    Expression::equal(value_column, value.expect("equality operand"))
+                } else {
+                    let Source::Stored(table) = self.relation(relation)?.source else {
+                        return Err(GraphError::MissingOutput);
+                    };
+                    Expression::Predicate {
+                        operator,
+                        value: Box::new(value_column),
+                        argument: value.map(Box::new),
+                        fold_case: !self.catalog.in_sort_key(table, column),
+                    }
+                };
+                operation = operation.filter(predicate);
+            }
+        }
+        Ok(operation.filter(Expression::equal(
+            Expression::Column(self.stored_column(relation, "_deleted")?),
+            Expression::Boolean(false),
+        )))
+    }
     pub fn traversal(&mut self, input: &crate::input::Input) -> Result<BlockId> {
         use crate::input::{ColumnSelection, Direction, FilterOp, QueryType};
         use std::collections::HashMap;
@@ -1178,55 +1632,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .ok_or_else(|| GraphError::UnknownStored(entity.into()))?;
             let relation = self.scan(root, table, &node.id)?;
             self.bind_scan(relation, ScanInput::Node(index))?;
-            let mut operation = PhysicalOperation::current(relation);
-            let deleted = self.stored_column(relation, "_deleted")?;
-            operation = operation.filter(Expression::equal(
-                Expression::Column(deleted),
-                Expression::Boolean(false),
-            ));
-            if !node.node_ids.is_empty() {
-                let id = Expression::Column(self.stored_column(relation, &node.id_property)?);
-                operation = operation.filter(if let [value] = node.node_ids.as_slice() {
-                    Expression::equal(id, Expression::Integer(*value))
-                } else {
-                    Expression::In(
-                        Box::new(id),
-                        Box::new(Expression::Integers(node.node_ids.clone())),
-                    )
-                });
-            }
-            if node.id_range.is_some() {
-                return Err(GraphError::UnsupportedInput("ID range predicate".into()));
-            }
-            let mut properties = node.filters.iter().collect::<Vec<_>>();
-            properties.sort_by_key(|(name, _)| *name);
-            for (name, filters) in properties {
-                let column = self
-                    .catalog
-                    .property_column_named(entity, name)
-                    .ok_or_else(|| GraphError::UnknownStored(name.clone()))?;
-                for filter in filters {
-                    if filter.op.unwrap_or(FilterOp::Eq) != FilterOp::Eq
-                        || filter.rhs_column.is_some()
-                    {
-                        return Err(GraphError::UnsupportedInput(
-                            "nonliteral equality filter".into(),
-                        ));
-                    }
-                    let value = match filter.value.as_ref() {
-                        Some(serde_json::Value::String(value)) => Expression::Text(value.clone()),
-                        Some(serde_json::Value::Bool(value)) => Expression::Boolean(*value),
-                        Some(serde_json::Value::Number(value)) if value.as_i64().is_some() => {
-                            Expression::Integer(value.as_i64().unwrap())
-                        }
-                        _ => return Err(GraphError::UnsupportedInput("filter value".into())),
-                    };
-                    operation = operation.filter(Expression::equal(
-                        Expression::Column(self.stored_column(relation, column)?),
-                        value,
-                    ));
-                }
-            }
+            let operation = self.node_source(relation, node)?;
             relations.insert(node.id.as_str(), relation);
             let mut predicates = Vec::new();
             let mut source = &operation;
@@ -1236,7 +1642,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             predicates.reverse();
             node_predicates.insert(node.id.as_str(), predicates);
-            node_operations.insert(node.id.as_str(), operation);
+            node_operations.insert(
+                node.id.as_str(),
+                if input.relationships.is_empty() {
+                    operation
+                } else {
+                    operation.materialize(relation)
+                },
+            );
         }
         if star {
             let center = star_center.expect("FK star holder");
@@ -1328,7 +1741,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     candidate,
                 )?;
             }
-            node_operations.insert(center, center_operation);
+            node_operations.insert(center, center_operation.materialize(relations[center]));
             for (target, key) in targets {
                 let node = input
                     .nodes
@@ -1384,7 +1797,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     for predicate in &node_predicates[target] {
                         source = source.filter(predicate.clone());
                     }
-                    node_operations.insert(target, source);
+                    node_operations.insert(target, source.materialize(relation));
                 }
             }
         }
@@ -1426,14 +1839,17 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .catalog
                     .property_column(key.referenced_key)
                     .ok_or(GraphError::MissingOutput)?;
-                let condition = Expression::equal(
-                    Expression::Column(
-                        self.stored_column(relations[holder.as_str()], holder_column)?,
-                    ),
-                    Expression::Column(
-                        self.stored_column(relations[target.as_str()], target_column)?,
-                    ),
+                let holder = Expression::Column(
+                    self.stored_column(relations[holder.as_str()], holder_column)?,
                 );
+                let target = Expression::Column(
+                    self.stored_column(relations[target.as_str()], target_column)?,
+                );
+                let condition = if star {
+                    Expression::equal(target, holder)
+                } else {
+                    Expression::equal(holder, target)
+                };
                 operation = if let Some(next) = node_operations.remove(next.as_str()) {
                     operation.join(next, condition)
                 } else {
@@ -1444,6 +1860,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         } else {
             operation = PhysicalOperation::One;
             let mut edges = Vec::new();
+            let mut filter_keys = HashMap::new();
             for (index, relationship) in input.relationships.iter().enumerate() {
                 if relationship.hops.min != 1
                     || relationship.hops.max != 1
@@ -1459,7 +1876,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 let edge = self.scan(root, table, format!("e{index}"))?;
                 self.bind_scan(edge, ScanInput::Relationship(index))?;
                 let (start, end) = relationship.direction.edge_columns();
-                let mut scan = PhysicalOperation::current(edge).filter(Expression::equal(
+                let read = if input.relationships.len() == 1 {
+                    PhysicalOperation::source(edge)
+                } else {
+                    PhysicalOperation::current(edge)
+                };
+                let mut scan = read.filter(Expression::equal(
                     Expression::Column(self.stored_column(edge, "_deleted")?),
                     Expression::Boolean(false),
                 ));
@@ -1516,6 +1938,65 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     (relationship.from.as_str(), start),
                     (relationship.to.as_str(), end),
                 ];
+                for (alias, column) in endpoints {
+                    let node = input
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == alias)
+                        .ok_or(GraphError::MissingOutput)?;
+                    if node.id_property == "id" {
+                        for predicate in
+                            Expression::identity_predicates(self.stored_column(edge, column)?, node)
+                        {
+                            scan = scan.filter(predicate);
+                        }
+                    }
+                    let ordered = input
+                        .order_by
+                        .as_ref()
+                        .is_some_and(|order| order.node == alias);
+                    let selective = !node.node_ids.is_empty()
+                        || node.id_range.is_some()
+                        || node.filters.keys().any(|property| {
+                            self.catalog
+                                .property(entity(alias).unwrap(), property)
+                                .is_some_and(|property| {
+                                    self.catalog.property_selectivity(property.id)
+                                        == ontology::FieldSelectivity::High
+                                })
+                        });
+                    if ordered && selective {
+                        let candidate = if let Some(candidate) = filter_keys.get(alias) {
+                            *candidate
+                        } else {
+                            let candidate = self.candidate(
+                                root,
+                                relations[alias],
+                                "id",
+                                &node_predicates[alias],
+                                &[],
+                                &format!("_filter_{alias}"),
+                            )?;
+                            let body = candidate.1.block;
+                            let relation = self.input_node(
+                                body,
+                                input
+                                    .nodes
+                                    .iter()
+                                    .position(|node| node.id == alias)
+                                    .unwrap(),
+                            )?;
+                            let version = self.stored_column(relation, "_version")?;
+                            let operation = self.operation_mut(body)?;
+                            *operation = std::mem::replace(operation, PhysicalOperation::One)
+                                .latest(version, None);
+                            filter_keys.insert(alias, candidate);
+                            candidate
+                        };
+                        scan =
+                            self.narrow(root, scan, self.stored_column(edge, column)?, candidate)?;
+                    }
+                }
                 if index == 0 {
                     operation = scan;
                 } else {
@@ -1586,6 +2067,26 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
         }
         for (index, relationship) in input.relationships.iter().enumerate() {
+            let edge = self.relations(root)?.find(|relation| {
+                self.relation(*relation)
+                    .is_ok_and(|relation| relation.input == Some(ScanInput::Relationship(index)))
+            });
+            if let Some(edge) = edge {
+                for (column, suffix) in [
+                    ("relationship_kind", "type"),
+                    ("source_id", "src"),
+                    ("source_kind", "src_type"),
+                    ("target_id", "dst"),
+                    ("target_kind", "dst_type"),
+                ] {
+                    self.project(
+                        root,
+                        format!("e{index}_{suffix}"),
+                        Expression::Column(self.stored_column(edge, column)?),
+                    )?;
+                }
+                continue;
+            }
             let (source, target) = if relationship.direction == Direction::Incoming {
                 (&relationship.to, &relationship.from)
             } else {
@@ -1668,13 +2169,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     ) -> Result<PhysicalOperation<'catalog>> {
         let hint = self.definition_hint(definition)?.to_owned();
         let keys = self.reference(block, definition, hint)?;
-        Ok(input.semi_join(
-            PhysicalOperation::source(keys),
-            Expression::equal(
-                Expression::Column(column),
-                Expression::Column(self.output_column(keys, output)?),
-            ),
-        ))
+        Ok(input.membership(column, self.output_column(keys, output)?))
     }
 
     pub fn lower_operations(
@@ -1729,10 +2224,13 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 kind: *kind,
                 condition: condition.clone(),
             },
-            Aggregate { input, groups } => self
-                .lower_operation(block, input)?
-                .aggregate(groups.clone()),
+            Aggregate { input, groups } => {
+                self.lower_operation(block, input)?.group_by(groups.clone())
+            }
             Expand { input, column } => self.lower_operation(block, input)?.expand(*column),
+            Materialize { input, relation } => {
+                self.lower_operation(block, input)?.materialize(*relation)
+            }
             Sort { input, keys } => self.lower_operation(block, input)?.sort(keys.clone()),
             FirstBy { input, keys } => FirstBy {
                 input: Box::new(self.lower_operation(block, input)?),
@@ -1749,7 +2247,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         Filter { input, .. } => scan = input,
                         Join {
                             left,
-                            kind: JoinKind::Semi,
+                            kind: JoinKind::Semi | JoinKind::Membership,
                             ..
                         } => scan = left,
                         _ => break,
@@ -1892,10 +2390,28 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             } => {
                 let left = self.operation_columns(block, left, used)?;
                 let right = self.operation_columns(block, right, used)?;
+                if matches!(kind, JoinKind::Membership) {
+                    let Expression::Equal(value, key) = condition else {
+                        return Err(GraphError::JoinShape);
+                    };
+                    let (Expression::Column(value), Expression::Column(key)) =
+                        (value.as_ref(), key.as_ref())
+                    else {
+                        return Err(GraphError::JoinShape);
+                    };
+                    if !left.contains(value) || !right.contains(key) {
+                        return Err(GraphError::JoinShape);
+                    }
+                    if self.column_type(*value, &mut HashSet::new())?
+                        != self.column_type(*key, &mut HashSet::new())?
+                    {
+                        return Err(GraphError::ExpressionType);
+                    }
+                }
                 let mut all = left.clone();
                 all.extend(right);
                 check(condition, &all)?;
-                Ok(if matches!(kind, JoinKind::Semi) {
+                Ok(if matches!(kind, JoinKind::Semi | JoinKind::Membership) {
                     left
                 } else {
                     all
@@ -1903,10 +2419,26 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Aggregate { input, groups } => {
                 let columns = self.operation_columns(block, input, used)?;
-                if groups.iter().any(|column| !columns.contains(column)) {
-                    return Err(GraphError::Grouping);
+                for group in groups {
+                    if group.aggregate() {
+                        return Err(GraphError::AggregatePlacement);
+                    }
+                    self.expression_type(group, &mut HashSet::new())?;
+                    group.columns(&mut |column| {
+                        if columns.contains(&column) {
+                            Ok(())
+                        } else {
+                            Err(GraphError::Grouping)
+                        }
+                    })?;
                 }
-                Ok(groups.clone())
+                Ok(groups
+                    .iter()
+                    .filter_map(|group| match group {
+                        Expression::Column(column) => Some(*column),
+                        _ => None,
+                    })
+                    .collect())
             }
             Expand { input, column } => {
                 let columns = self.operation_columns(block, input, used)?;
@@ -1918,6 +2450,13 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     ValueType::Array(_)
                 ) {
                     return Err(GraphError::ExpectedArray);
+                }
+                Ok(columns)
+            }
+            Materialize { input, relation } => {
+                let columns = self.operation_columns(block, input, used)?;
+                if !used.contains(relation) || input.aggregate_input().is_some() {
+                    return Err(GraphError::OperationVisibility);
                 }
                 Ok(columns)
             }
@@ -1946,6 +2485,40 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         visiting: &mut HashSet<OutputId>,
     ) -> Result<ValueType> {
         match expression {
+            Expression::Predicate {
+                operator,
+                value,
+                argument,
+                ..
+            } => {
+                use crate::input::FilterOp;
+                let value_type = self.expression_type(value, visiting)?;
+                if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) {
+                    if argument.is_some() {
+                        return Err(GraphError::ExpressionType);
+                    }
+                } else {
+                    let argument = argument.as_ref().ok_or(GraphError::ExpressionType)?;
+                    let argument_type = self.expression_type(argument, visiting)?;
+                    let valid = match operator {
+                        FilterOp::In => argument_type == ValueType::Array(Box::new(value_type)),
+                        FilterOp::Eq
+                        | FilterOp::Ne
+                        | FilterOp::Gt
+                        | FilterOp::Lt
+                        | FilterOp::Gte
+                        | FilterOp::Lte => value_type == argument_type,
+                        _ => {
+                            value_type == ValueType::Scalar(SqlType::String)
+                                && argument_type == value_type
+                        }
+                    };
+                    if !valid {
+                        return Err(GraphError::ExpressionType);
+                    }
+                }
+                Ok(ValueType::Scalar(SqlType::Bool))
+            }
             Expression::Integer(_) | Expression::Count => Ok(ValueType::Scalar(SqlType::Int64)),
             Expression::LatestPath {
                 path,
@@ -1971,6 +2544,16 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             Expression::ToString(value) => {
                 self.expression_type(value, visiting)?;
                 Ok(ValueType::Scalar(SqlType::String))
+            }
+            Expression::Bucket { value, .. } => {
+                let ty = self.expression_type(value, visiting)?;
+                if !matches!(
+                    ty,
+                    ValueType::Scalar(SqlType::Date | SqlType::Timestamp { .. })
+                ) {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ty)
             }
             Expression::Parameter { data_type, .. } => Ok(match data_type {
                 SqlType::Array(element) => {
@@ -2080,6 +2663,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Expression::Equal(left, right)
             | Expression::Greater(left, right)
+            | Expression::GreaterEqual(left, right)
+            | Expression::LessEqual(left, right)
             | Expression::And(left, right)
             | Expression::Or(left, right)
             | Expression::StartsWith(left, right) => {
@@ -2207,6 +2792,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 return Err(GraphError::JoinShape);
             }
             for output in outputs {
+                if operation.groups().contains(&output.value) {
+                    continue;
+                }
                 self.check_projection(&output.value, &available, aggregate_input.as_deref())?;
             }
             Ok(())
@@ -2249,7 +2837,18 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         aggregate_input: Option<&[ColumnRef<'catalog>]>,
     ) -> Result<()> {
         match expression {
-            Expression::Excerpt { value, .. } | Expression::ToString(value) => {
+            Expression::Predicate {
+                value, argument, ..
+            } => {
+                self.check_projection(value, available, aggregate_input)?;
+                if let Some(argument) = argument {
+                    self.check_projection(argument, available, aggregate_input)?;
+                }
+                Ok(())
+            }
+            Expression::Excerpt { value, .. }
+            | Expression::Bucket { value, .. }
+            | Expression::ToString(value) => {
                 self.check_projection(value, available, aggregate_input)
             }
             Expression::Count
@@ -2270,6 +2869,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             | Expression::Or(left, right)
             | Expression::In(left, right)
             | Expression::Greater(left, right)
+            | Expression::GreaterEqual(left, right)
+            | Expression::LessEqual(left, right)
             | Expression::StartsWith(left, right) => {
                 self.check_projection(left, available, aggregate_input)?;
                 self.check_projection(right, available, aggregate_input)
@@ -2358,8 +2959,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         " GROUP BY {}",
                         groups
                             .iter()
-                            .map(|column| format!("q.{}", value_name(*column)))
-                            .collect::<Vec<_>>()
+                            .map(|group| self.render_expression_at(group, true))
+                            .collect::<Result<Vec<_>>>()?
                             .join(", ")
                     ));
                 }
@@ -2413,7 +3014,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         block: BlockId,
         operation: &LoweredOperation<'catalog>,
         needed: &[ColumnRef<'catalog>],
-    ) -> Result<(String, String, Vec<ColumnRef<'catalog>>)> {
+    ) -> Result<(String, String, Vec<Expression<'catalog>>)> {
         use Relational::*;
         let columns = needed;
         let selection = |columns: &[ColumnRef<'catalog>]| {
@@ -2491,6 +3092,26 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .collect::<Vec<_>>();
                 let left = self.materialize_operation(block, left, &left_needed)?;
                 let right = self.materialize_operation(block, right, &right_needed)?;
+                if matches!(kind, JoinKind::Membership) {
+                    let Expression::Equal(value, key) = condition else {
+                        return Err(GraphError::JoinShape);
+                    };
+                    let (Expression::Column(value), Expression::Column(key)) =
+                        (value.as_ref(), key.as_ref())
+                    else {
+                        return Err(GraphError::JoinShape);
+                    };
+                    return Ok((
+                        format!(
+                            "SELECT {} FROM ({left}) AS q WHERE q.{} IN (SELECT k.{} FROM ({right}) AS k)",
+                            selection(columns),
+                            value_name(*value),
+                            value_name(*key)
+                        ),
+                        String::new(),
+                        vec![],
+                    ));
+                }
                 let projection = columns
                     .iter()
                     .map(|column| {
@@ -2525,6 +3146,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     JoinKind::Inner => "INNER JOIN",
                     JoinKind::Cross => "CROSS JOIN",
                     JoinKind::Semi => "LEFT SEMI JOIN",
+                    JoinKind::Membership => unreachable!(),
                 };
                 (
                     format!(
@@ -2591,7 +3213,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Aggregate { input, groups } => {
                 let mut required = needed.to_vec();
-                extend_columns(&mut required, groups.iter().copied());
+                for group in groups {
+                    collect_columns(group, &mut required)?;
+                }
                 (
                     self.materialize_operation(block, input, &required)?,
                     String::new(),
@@ -2659,6 +3283,11 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     vec![],
                 )
             }
+            Materialize { input, .. } => (
+                self.materialize_operation(block, input, needed)?,
+                String::new(),
+                vec![],
+            ),
             Latest { requirement, .. } => match *requirement {},
         })
     }
@@ -2692,8 +3321,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 " GROUP BY {}",
                 groups
                     .iter()
-                    .map(|column| format!("q.{}", value_name(*column)))
-                    .collect::<Vec<_>>()
+                    .map(|group| self.render_expression_at(group, true))
+                    .collect::<Result<Vec<_>>>()?
                     .join(", ")
             )
         };
@@ -2729,6 +3358,68 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::Predicate {
+                operator,
+                value,
+                argument,
+                fold_case,
+            } => {
+                use crate::input::FilterOp;
+                let value = self.render_expression_with(value, column)?;
+                let argument = argument
+                    .as_ref()
+                    .map(|argument| self.render_expression_with(argument, column))
+                    .transpose()?;
+                let comparison = match operator {
+                    FilterOp::Eq => Some("="),
+                    FilterOp::Ne => Some("!="),
+                    FilterOp::Gt => Some(">"),
+                    FilterOp::Lt => Some("<"),
+                    FilterOp::Gte => Some(">="),
+                    FilterOp::Lte => Some("<="),
+                    FilterOp::In => Some("IN"),
+                    _ => None,
+                };
+                if let Some(comparison) = comparison {
+                    format!(
+                        "({value} {comparison} {})",
+                        argument.ok_or(GraphError::ExpressionType)?
+                    )
+                } else if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) {
+                    format!(
+                        "({value} IS {}NULL)",
+                        if *operator == FilterOp::IsNotNull {
+                            "NOT "
+                        } else {
+                            ""
+                        }
+                    )
+                } else {
+                    let fold = |value: String| {
+                        if *fold_case {
+                            format!("lower({value})")
+                        } else {
+                            value
+                        }
+                    };
+                    let value = fold(value);
+                    let argument = fold(argument.ok_or(GraphError::ExpressionType)?);
+                    let function = match operator {
+                        FilterOp::Contains | FilterOp::AllTokens => "hasAllTokens",
+                        FilterOp::AnyTokens => "hasAnyTokens",
+                        FilterOp::TokenMatch => "hasToken",
+                        FilterOp::StartsWith => "startsWith",
+                        FilterOp::EndsWith => "endsWith",
+                        _ => return Err(GraphError::ExpressionType),
+                    };
+                    format!("{function}({value}, {argument})")
+                }
+            }
+            Expression::Bucket { unit, value } => format!(
+                "dateTrunc('{}', {})",
+                unit.name(),
+                self.render_expression_with(value, column)?
+            ),
             Expression::LatestPath {
                 path,
                 version,
@@ -2807,10 +3498,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             | Expression::And(left, right)
             | Expression::Or(left, right)
             | Expression::In(left, right)
-            | Expression::Greater(left, right) => {
+            | Expression::Greater(left, right)
+            | Expression::GreaterEqual(left, right)
+            | Expression::LessEqual(left, right) => {
                 let operator = match expression {
                     Expression::Equal(..) => "=",
                     Expression::Greater(..) => ">",
+                    Expression::GreaterEqual(..) => ">=",
+                    Expression::LessEqual(..) => "<=",
                     Expression::In(..) => "IN",
                     Expression::Or(..) => "OR",
                     _ => "AND",

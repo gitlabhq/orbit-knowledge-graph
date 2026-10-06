@@ -137,15 +137,19 @@ Eligibility checks fixed single hops, direction, relationship filters, point sel
 All node relations remain present in this slice, including relations needed for role checks. It does not perform endpoint elision.
 Star substitution requires a common FK holder, fixed single hops, one direction per hop, and no relationship filters.
 Multi-ID predicates use typed array membership. Incoming self-relationships retain the catalog's physical FK holder.
-`run_query_graph_foreign_keys` reuses seven existing JSON/GQL fixtures and their logical assertions.
-The fixture runner uses `compile_graph_observed`, which exposes logical, planned, and emitted stages from the compiler entry point.
+`yaml_plan_shapes` runs all existing ClickHouse fixtures through graph planning and lowering with their unchanged logical and physical assertions.
+The shared runner parses and normalizes each fixture, then checks the graph's planned and emitted explain views.
+Unsupported query families fail in this suite. There is no prototype-specific fixture list or alternative set of expectations.
 The same structural matcher checks planned and emitted graph views for FK substitution, relationship-filter guards, pinned endpoints, and cross-namespace guards.
-The fixture entry point and assertions are compile-checked only. Unsupported input forms return errors rather than silently dropping constraints.
+The fixture runner attempts every frontend/backend case and reports numbered failures before failing the suite.
+It reports totals by backend and fixture family to separate graph coverage from the existing DuckDB coverage.
+Unsupported input forms return errors rather than silently dropping constraints.
 Filtered star targets declare reusable candidate-key CTEs before the narrowed center. Pinned target IDs also constrain the holder's FK column.
 Selective centers declare key queries for unfiltered targets. Target membership and sort-key predicates precede latest-row selection; mutable predicates are rechecked afterward.
-Membership uses semi-joins with exact candidate output handles. Duplicate candidate keys cannot multiply the left input.
-The star assertions check candidate dependency order, membership placement, and deletion checks after deduplication in planned and emitted views.
-Production `IN` rendering, CTE materialization preferences, endpoint elision, cascade filtering, denormalized coverage, and execution-result equivalence remain unfinished.
+Membership uses `IN` subqueries with exact candidate output handles. Duplicate candidate keys cannot multiply the left input.
+The fixture assertions define the required plans. Ordered selective nodes reuse candidate-key CTEs with full-key latest-row selection.
+Scan materialization preserves declaration handles and creates a boundary for joined node filters. SQL rendering prunes columns by demand.
+CTE materialization preferences, endpoint elision, cascade filtering, denormalized coverage, and execution-result equivalence remain unfinished.
 
 The graph pipeline reuses parsing, validation, normalization, field restrictions, and scope preparation in their existing order.
 Response policy, result enforcement, scope application, authorization, pagination, and post-checks operate on the graph after lowering.
@@ -159,9 +163,13 @@ The result is a `CompiledQueryContext` with SQL, parameters, hydration, paginati
 The graph borrows the catalog during compilation; no graph is stored inside its catalog owner.
 
 Identity-key cursors support page readback, query binding, and seek predicates. Cursors ordered by user properties return an unsupported error.
-Scope-depth constraints and required scope guards also return errors. Real-input aggregation, neighbors, pathfinding, and hydration planners remain unfinished.
+Scope-depth constraints and required scope guards also return errors. Neighbors, pathfinding, and hydration planners remain unfinished.
+Graph planning supports single-edge conditional counts and property-grouped counts, including a joined node for grouping properties.
+Grouping accepts scalar expressions, including typed time buckets. Node and edge identity filters share range and membership construction.
+Scalar property predicates support comparisons, membership, null checks, and text matching with the existing sort-key case-folding rule.
+These aggregation plans compose shared scan, filter, latest-row, join, and aggregate operations. Broader aggregation strategies remain unfinished.
 Request-contract assertions cover parameter binding, cursor binding, excerpts, scope lookups, result metadata, and rejection of empty authorization contexts.
-The assertions and examples are compile-checked only. SQL execution and result equivalence have not been verified.
+The planner suite executes against the original fixture assertions. SQL execution and result equivalence have not been verified.
 
 ### Plan fixture assertions
 

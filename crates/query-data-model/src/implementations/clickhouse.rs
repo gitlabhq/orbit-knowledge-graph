@@ -330,6 +330,16 @@ impl ClickHouseCatalog {
             );
         }
 
+        for table in tables.values_mut() {
+            for (name, data_type) in [
+                (ontology::VERSION_COLUMN, ontology::DataType::Int),
+                (ontology::DELETED_COLUMN, ontology::DataType::Bool),
+            ] {
+                table.columns.insert(name.into());
+                table.column_types.insert(name.into(), data_type);
+            }
+        }
+
         let mut relationships = vec![None; graph.relationships().count()];
         let mut variants = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {

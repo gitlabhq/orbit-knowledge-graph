@@ -401,7 +401,26 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     (planned, emitted)
 }
 
-pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt::Debug>(
+pub(super) trait GraphPhase: std::fmt::Debug {
+    const PLANNED: bool;
+    fn version(&self) -> compiler::query_graph::ColumnRef<'_>;
+}
+
+impl GraphPhase for compiler::query_graph::LatestRows<'_> {
+    const PLANNED: bool = true;
+    fn version(&self) -> compiler::query_graph::ColumnRef<'_> {
+        self.version
+    }
+}
+
+impl GraphPhase for std::convert::Infallible {
+    const PLANNED: bool = false;
+    fn version(&self) -> compiler::query_graph::ColumnRef<'_> {
+        match *self {}
+    }
+}
+
+pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
     graph: &compiler::query_graph::QueryGraph<
         'a,
         M,
@@ -422,11 +441,83 @@ pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: s
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let tree = Tree::node(
-        Operator::Project,
-        projection,
-        vec![graph_operation(graph, graph.operation(root).unwrap())],
-    );
+    let mut operation = graph.operation(root).unwrap();
+    let limit = if let compiler::query_graph::Relational::Limit { input, count } = operation {
+        operation = input;
+        Some(*count)
+    } else {
+        None
+    };
+    let dedup = if !L::PLANNED
+        && let compiler::query_graph::Relational::FirstBy { input, keys } = operation
+    {
+        operation = input;
+        Some(keys)
+    } else {
+        None
+    };
+    let sort = if let compiler::query_graph::Relational::Sort { input, keys } = operation {
+        operation = input;
+        Some(keys)
+    } else {
+        None
+    };
+    let tree = if let compiler::query_graph::Relational::Aggregate { input, groups } = operation {
+        let groups = groups
+            .iter()
+            .map(|group| graph_expression(graph, group))
+            .collect::<Vec<_>>();
+        let head = if groups.is_empty() {
+            projection
+        } else {
+            format!("group {}, {projection}", groups.join(", "))
+        };
+        let source = graph_operation(graph, input);
+        Tree::node(
+            Operator::Aggregate,
+            head,
+            vec![if L::PLANNED {
+                Tree::node(Operator::Project, "", vec![source])
+            } else {
+                source
+            }],
+        )
+    } else {
+        Tree::node(
+            Operator::Project,
+            projection,
+            vec![graph_operation(graph, operation)],
+        )
+    };
+    let tree = if !L::PLANNED {
+        let tree = match sort {
+            Some(keys) => Tree::node(Operator::Sort, graph_order(graph, keys), vec![tree]),
+            None => tree,
+        };
+        let tree = match dedup {
+            Some(keys) => Tree::node(
+                Operator::Deduplicate,
+                format!(
+                    "LimitBy 1 BY {}",
+                    keys.iter()
+                        .map(|column| graph_expression(
+                            graph,
+                            &compiler::query_graph::Expression::Column(*column)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                vec![tree],
+            ),
+            None => tree,
+        };
+        match limit {
+            Some(count) => Tree::node(Operator::Limit, count.to_string(), vec![tree]),
+            None => tree,
+        }
+    } else {
+        tree
+    };
     let definitions = graph
         .definitions(root)
         .unwrap()
@@ -449,7 +540,28 @@ pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: s
     }
 }
 
-fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L>(
+fn graph_order<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::Relational<'a, L>,
+    >,
+    keys: &[(compiler::query_graph::ColumnRef<'a>, bool)],
+) -> String {
+    keys.iter()
+        .map(|(column, descending)| {
+            format!(
+                "{}{}",
+                graph_expression(graph, &compiler::query_graph::Expression::Column(*column)),
+                if *descending { " DESC" } else { "" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
     graph: &compiler::query_graph::QueryGraph<
         'a,
         M,
@@ -460,6 +572,89 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L>(
 ) -> String {
     use compiler::query_graph::{Expression, Port};
     match value {
+        Expression::Predicate {
+            operator,
+            value,
+            argument,
+            fold_case,
+        } => {
+            use compiler::input::FilterOp;
+            let value = graph_expression(graph, value);
+            let argument = argument
+                .as_ref()
+                .map(|argument| graph_expression(graph, argument))
+                .unwrap_or_default();
+            let comparison = match operator {
+                FilterOp::Eq => Some("="),
+                FilterOp::Ne => Some("!="),
+                FilterOp::Gt => Some(">"),
+                FilterOp::Lt => Some("<"),
+                FilterOp::Gte => Some(">="),
+                FilterOp::Lte => Some("<="),
+                FilterOp::In => Some("IN"),
+                _ => None,
+            };
+            if let Some(comparison) = comparison {
+                format!("{value} {comparison} {argument}")
+            } else if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) {
+                format!(
+                    "{value} IS {}NULL",
+                    if *operator == FilterOp::IsNotNull {
+                        "NOT "
+                    } else {
+                        ""
+                    }
+                )
+            } else if L::PLANNED {
+                format!("{}({value}, {argument})", operator.as_ref())
+            } else {
+                let fold = |value: String| {
+                    if *fold_case {
+                        format!("Lower({value})")
+                    } else {
+                        value
+                    }
+                };
+                format!("{operator:?}({}, {})", fold(value), fold(argument))
+            }
+        }
+        Expression::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| graph_expression(graph, value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Expression::Bucket { unit, value } => format!(
+            "bucket({}, {})",
+            unit.name(),
+            graph_expression(graph, value)
+        ),
+        Expression::GreaterEqual(left, right) | Expression::LessEqual(left, right) => format!(
+            "{} {} {}",
+            graph_expression(graph, left),
+            if matches!(value, Expression::GreaterEqual(..)) {
+                ">="
+            } else {
+                "<="
+            },
+            graph_expression(graph, right)
+        ),
+        Expression::Count => "COUNT()".into(),
+        Expression::CountIf(condition) => {
+            let parts = graph_conjunction(graph, condition);
+            let condition = if L::PLANNED {
+                parts.join(", ")
+            } else {
+                parts
+                    .iter()
+                    .map(|part| format!("({part})"))
+                    .collect::<Vec<_>>()
+                    .join(" AND ")
+            };
+            format!("COUNT() FILTER [{condition}]")
+        }
         Expression::Column(column) => {
             let name = match column.port() {
                 Port::Stored(name) => name,
@@ -497,7 +692,26 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L>(
     }
 }
 
-fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt::Debug>(
+fn graph_conjunction<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::Relational<'a, L>,
+    >,
+    value: &compiler::query_graph::Expression<'a>,
+) -> Vec<String> {
+    if let compiler::query_graph::Expression::And(left, right) = value {
+        graph_conjunction(graph, left)
+            .into_iter()
+            .chain(graph_conjunction(graph, right))
+            .collect()
+    } else {
+        vec![graph_expression(graph, value)]
+    }
+}
+
+fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
     graph: &compiler::query_graph::QueryGraph<
         'a,
         M,
@@ -509,6 +723,18 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt
     use compiler::query_graph::{JoinKind, ReadMode, Relational, Source};
     match operation {
         Relational::One => leaf(Operator::Scan, "One"),
+        Relational::Materialize { input, relation } => {
+            let source = graph_operation(graph, input);
+            Tree::node(
+                Operator::Bind,
+                &graph.relation(*relation).unwrap().hint,
+                vec![if L::PLANNED {
+                    source
+                } else {
+                    Tree::node(Operator::Project, "*", vec![source])
+                }],
+            )
+        }
         Relational::Source { relation, read } => {
             let declaration = graph.relation(*relation).unwrap();
             match declaration.source {
@@ -528,9 +754,39 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt
             }
         }
         Relational::Filter { input, predicate } => filter(
-            vec![graph_expression(graph, predicate)],
+            graph_conjunction(graph, predicate),
             graph_operation(graph, input),
         ),
+        Relational::Join {
+            left,
+            right,
+            kind: JoinKind::Membership,
+            condition,
+        } => {
+            let compiler::query_graph::Expression::Equal(value, key) = condition else {
+                unreachable!()
+            };
+            let membership = format!(
+                "{} IN {}",
+                graph_expression(graph, value),
+                graph_expression(graph, key)
+            );
+            let Relational::Source { relation, .. } = right.as_ref() else {
+                unreachable!()
+            };
+            if matches!(
+                graph.relation(*relation).unwrap().source,
+                Source::Definition(_)
+            ) {
+                filter(vec![membership], graph_operation(graph, left))
+            } else {
+                Tree::node(
+                    Operator::SemiJoin,
+                    format!("{} IN subquery", graph_expression(graph, value)),
+                    vec![graph_operation(graph, left), graph_operation(graph, right)],
+                )
+            }
+        }
         Relational::Join {
             left,
             right,
@@ -550,19 +806,44 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt
             format!("{groups:?}"),
             vec![graph_operation(graph, input)],
         ),
-        Relational::Latest { input, requirement } => Tree::node(
-            Operator::Deduplicate,
-            format!("Latest {requirement:?}"),
-            vec![graph_operation(graph, input)],
-        ),
+        Relational::Latest { input, requirement } => {
+            let relation = graph.relation(requirement.version().relation()).unwrap();
+            let Source::Stored(table) = relation.source else {
+                unreachable!()
+            };
+            Tree::node(
+                Operator::Deduplicate,
+                format!(
+                    "LimitBy {}",
+                    graph
+                        .catalog()
+                        .table_sort_key(table)
+                        .unwrap()
+                        .iter()
+                        .map(|name| format!("{}.{name}", relation.hint))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                vec![graph_operation(graph, input)],
+            )
+        }
         Relational::FirstBy { input, keys } => Tree::node(
             Operator::Deduplicate,
-            format!("LimitBy {keys:?}"),
+            format!(
+                "LimitBy 1 BY {}",
+                keys.iter()
+                    .map(|column| graph_expression(
+                        graph,
+                        &compiler::query_graph::Expression::Column(*column)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             vec![graph_operation(graph, input)],
         ),
         Relational::Sort { input, keys } => Tree::node(
             Operator::Sort,
-            format!("{keys:?}"),
+            graph_order(graph, keys),
             vec![graph_operation(graph, input)],
         ),
         Relational::Limit { input, count } => Tree::node(
