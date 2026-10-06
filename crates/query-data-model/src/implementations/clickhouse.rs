@@ -5,12 +5,12 @@ use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
     DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PropertyId,
-    PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    PropertyRealization, QueryBackendCatalog, RelationshipId, TableId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
 pub struct EntityLayout {
-    pub table: String,
+    pub table: TableId,
     pub has_traversal_path: bool,
     pub global: bool,
     pub default_properties: Vec<PropertyId>,
@@ -18,9 +18,9 @@ pub struct EntityLayout {
 
 #[derive(Debug)]
 pub struct ClickHouseCatalog {
-    default_edge_table: String,
+    default_edge_table: TableId,
     entities: Vec<Option<EntityLayout>>,
-    relationships: Vec<Option<String>>,
+    relationships: Vec<Option<TableId>>,
     variants: Vec<Option<ForeignKey>>,
     property_facts: Vec<PropertyBackendFacts>,
     storage: crate::storage::StorageCatalog,
@@ -34,7 +34,7 @@ impl ClickHouseCatalog {
     }
 
     pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
-        self.relationships.get(id.index())?.as_deref()
+        QueryBackendCatalog::relationship_table(self, id)
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
@@ -47,7 +47,7 @@ impl ClickHouseCatalog {
 
     pub fn table_for_entity(&self, entity: EntityId) -> Option<&TableLayout> {
         self.entity(entity)
-            .and_then(|layout| self.table(&layout.table))
+            .map(|layout| self.storage.table(layout.table))
     }
 
     pub fn tables(&self) -> impl Iterator<Item = &TableLayout> {
@@ -57,14 +57,14 @@ impl ClickHouseCatalog {
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
             .iter()
-            .filter_map(Option::as_deref)
+            .filter_map(|id| *id)
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .filter_map(|name| self.table(name))
+            .map(|id| self.storage.table(id))
     }
 
     pub fn default_edge_table(&self) -> &str {
-        &self.default_edge_table
+        &self.storage.table(self.default_edge_table).name
     }
 
     pub fn traversal_path_lookup(
@@ -84,8 +84,8 @@ impl QueryBackendCatalog for ClickHouseCatalog {
         Self::from_ontology(ontology, graph)
     }
 
-    fn entity_table(&self, entity: EntityId) -> Option<&str> {
-        self.entity(entity).map(|layout| layout.table.as_str())
+    fn entity_table_id(&self, entity: EntityId) -> Option<TableId> {
+        self.entity(entity).map(|layout| layout.table)
     }
 
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool {
@@ -121,12 +121,12 @@ impl QueryBackendCatalog for ClickHouseCatalog {
             .is_some_and(|facts| facts.has_text_index)
     }
 
-    fn default_edge_table(&self) -> &str {
-        ClickHouseCatalog::default_edge_table(self)
+    fn default_edge_table_id(&self) -> TableId {
+        self.default_edge_table
     }
 
-    fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
-        ClickHouseCatalog::relationship_table(self, relationship)
+    fn relationship_table_id(&self, relationship: RelationshipId) -> Option<TableId> {
+        *self.relationships.get(relationship.index())?
     }
 
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
@@ -177,9 +177,6 @@ impl ClickHouseCatalog {
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
     ) -> Result<Self, DataModelError> {
-        let mut entities = std::iter::repeat_with(|| None)
-            .take(graph.entities().count())
-            .collect::<Vec<_>>();
         let mut tables = HashMap::new();
 
         for node in ontology.nodes() {
@@ -190,24 +187,6 @@ impl ClickHouseCatalog {
                         kind: "entity",
                         name: node.name.clone(),
                     })?;
-            let mut default_properties = Vec::new();
-            for field in &node.fields {
-                let property_id = graph.property_id(entity_id, &field.name).ok_or_else(|| {
-                    DataModelError::UnknownReference {
-                        kind: "property",
-                        name: format!("{}.{}", node.name, field.name),
-                    }
-                })?;
-                if node.default_columns.iter().any(|name| name == &field.name) {
-                    default_properties.push(property_id);
-                }
-            }
-            entities[entity_id.index()] = Some(EntityLayout {
-                table: node.destination_table.clone(),
-                has_traversal_path: node.has_traversal_path,
-                global: node.global,
-                default_properties,
-            });
             let mut table = TableLayout::new(
                 &node.destination_table,
                 remote_node_columns(node),
@@ -249,13 +228,9 @@ impl ClickHouseCatalog {
             tables.insert(table_name.to_string(), table);
         }
 
-        let mut relationships = vec![None; graph.relationships().count()];
         let mut variants = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {
             let ontology_variants = ontology.get_edge(&relationship.name).unwrap_or_default();
-            let table = ontology
-                .edge_table_for_relationship(&relationship.name)
-                .to_string();
             for edge in ontology_variants {
                 if edge.source_kind.is_empty() || edge.target_kind.is_empty() {
                     continue;
@@ -294,7 +269,6 @@ impl ClickHouseCatalog {
                 });
                 variants[variant_id.index()] = foreign_key;
             }
-            relationships[relationship.id.index()] = Some(table);
         }
 
         let mut denormalized = HashMap::new();
@@ -350,6 +324,35 @@ impl ClickHouseCatalog {
         }
 
         let storage = crate::storage::StorageCatalog::new(tables.into_values())?;
+        let entities = graph
+            .entities()
+            .map(|entity| {
+                let node = ontology.get_node(&entity.name).expect("catalog entity");
+                Ok(Some(EntityLayout {
+                    table: storage.resolve_table(&node.destination_table)?,
+                    has_traversal_path: node.has_traversal_path,
+                    global: node.global,
+                    default_properties: entity
+                        .properties
+                        .iter()
+                        .copied()
+                        .filter(|property| {
+                            node.default_columns
+                                .contains(&graph.property(*property).name)
+                        })
+                        .collect(),
+                }))
+            })
+            .collect::<Result<_, DataModelError>>()?;
+        let relationships = graph
+            .relationships()
+            .map(|relationship| {
+                storage
+                    .resolve_table(ontology.edge_table_for_relationship(&relationship.name))
+                    .map(Some)
+            })
+            .collect::<Result<_, _>>()?;
+        let default_edge_table = storage.resolve_table(ontology.edge_table())?;
         let property_facts = derive_property_backend_facts(ontology, graph, &storage, false)?;
         let traversal_path_lookups = ontology
             .traversal_path_lookups()
@@ -366,7 +369,7 @@ impl ClickHouseCatalog {
             })
             .collect::<Result<_, DataModelError>>()?;
         Ok(ClickHouseCatalog {
-            default_edge_table: ontology.edge_table().to_string(),
+            default_edge_table,
             entities,
             relationships,
             variants,

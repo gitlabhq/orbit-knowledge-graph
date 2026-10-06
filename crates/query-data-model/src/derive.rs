@@ -18,11 +18,19 @@ mod tests {
         let contains = remote.graph().relationship_id("CONTAINS").unwrap();
 
         assert_eq!(
-            remote.backend().entity(definition).unwrap().table,
+            remote
+                .backend()
+                .storage()
+                .table(remote.backend().entity(definition).unwrap().table)
+                .name,
             "gl_definition"
         );
         assert_eq!(
-            local.backend().entity(definition).unwrap().table,
+            local
+                .backend()
+                .storage()
+                .table(local.backend().entity(definition).unwrap().table)
+                .name,
             "gl_definition"
         );
         assert_eq!(
@@ -32,6 +40,25 @@ mod tests {
         assert_eq!(
             local.backend().relationship_table(contains),
             Some("gl_edge")
+        );
+        for backend in [remote.backend().storage(), local.backend().storage()] {
+            assert!(backend.table_id("gl_definition").is_some());
+        }
+        assert_eq!(
+            remote.backend().entity_table_id(definition),
+            remote.backend().storage().table_id("gl_definition")
+        );
+        assert_eq!(
+            local.backend().entity_table_id(definition),
+            local.backend().storage().table_id("gl_definition")
+        );
+        assert_eq!(
+            remote.backend().relationship_table_id(contains),
+            remote.backend().storage().table_id("gl_edge")
+        );
+        assert_eq!(
+            local.backend().relationship_table_id(contains),
+            Some(local.backend().default_edge_table_id())
         );
     }
 

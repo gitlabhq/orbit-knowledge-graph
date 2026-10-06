@@ -112,7 +112,10 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
         Some(self.storage().table(self.storage().table_id(name)?))
     }
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError>;
-    fn entity_table(&self, entity: EntityId) -> Option<&str>;
+    fn entity_table_id(&self, entity: EntityId) -> Option<TableId>;
+    fn entity_table(&self, entity: EntityId) -> Option<&str> {
+        Some(&self.storage().table(self.entity_table_id(entity)?).name)
+    }
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
@@ -138,8 +141,19 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
         self.table(table).map(|table| table.path_columns.as_slice())
     }
-    fn default_edge_table(&self) -> &str;
-    fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
+    fn default_edge_table_id(&self) -> TableId;
+    fn default_edge_table(&self) -> &str {
+        &self.storage().table(self.default_edge_table_id()).name
+    }
+    fn relationship_table_id(&self, relationship: RelationshipId) -> Option<TableId>;
+    fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
+        Some(
+            &self
+                .storage()
+                .table(self.relationship_table_id(relationship)?)
+                .name,
+        )
+    }
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
     fn foreign_key(
         &self,
@@ -317,10 +331,10 @@ pub trait QueryDataModel {
     }
 
     fn redaction_column(&self, entity: EntityId) -> Option<crate::storage::StoredColumnRef> {
-        let table = self.query_backend().entity_table(entity)?;
+        let table = self.query_backend().entity_table_id(entity)?;
         let name = self.query_authorization().redaction_id_column(entity)?;
         let storage = self.query_backend().storage();
-        storage.column_ref(storage.table_id(table)?, name)
+        storage.column_ref(table, name)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {

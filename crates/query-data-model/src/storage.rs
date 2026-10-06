@@ -58,6 +58,14 @@ impl StorageCatalog {
         self.table_ids.get(name).copied()
     }
 
+    pub fn resolve_table(&self, name: &str) -> Result<TableId, DataModelError> {
+        self.table_id(name)
+            .ok_or_else(|| DataModelError::UnknownReference {
+                kind: "stored table",
+                name: name.to_owned(),
+            })
+    }
+
     pub fn table(&self, id: TableId) -> &TableLayout {
         &self.tables[id.index()]
     }

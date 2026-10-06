@@ -63,6 +63,7 @@ The data model assigns typed IDs to entities, properties, relationships, and rel
 Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
 Both backends expose ordered stored-column declarations through `query-data-model::storage`.
 The storage catalog assigns snapshot-local table IDs and table-local column IDs in deterministic order.
+Entity layouts and relationship routes reference those table IDs rather than copying physical table names.
 Name indexes point into these declarations. A stored-column reference carries both IDs to retain table ownership.
 Stored sort keys and path metadata reference table-local column IDs. Schema construction rejects keys or paths that name missing columns.
 ClickHouse declarations include generated system columns and retain exact storage types, defaults, and codecs.
