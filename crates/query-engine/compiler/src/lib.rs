@@ -41,6 +41,7 @@ pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
+pub mod query_graph;
 pub(crate) mod schema_limits;
 
 pub mod scope;

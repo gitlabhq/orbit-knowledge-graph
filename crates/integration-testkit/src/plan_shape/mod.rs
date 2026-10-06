@@ -225,6 +225,151 @@ impl Assertions {
     }
 }
 
+pub fn run_query_graph_foreign_keys(directory: &Path, ontology: Arc<ontology::Ontology>) {
+    use compiler::query_graph::{Expression, PhysicalOperation, QueryGraph};
+    let model = ClickHouseDataModel::derive(ontology).unwrap();
+    for (file, substituted, edge_table) in [
+        ("chain_traversal.yaml", true, "gl_ci_edge"),
+        ("chain_edge_filter_guard.yaml", false, "gl_ci_edge"),
+        ("chain_point_guard.yaml", false, "gl_ci_edge"),
+        ("cross_namespace_chain_guard.yaml", false, "gl_edge"),
+        ("star_candidate_dependencies.yaml", true, "gl_edge"),
+        ("star_target_narrowing.yaml", true, "gl_edge"),
+        ("incoming_self_relationship.yaml", true, "gl_ci_edge"),
+    ] {
+        let path = directory.join("foreign_keys").join(file);
+        let scenario: Scenario =
+            orbit_utils::yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for (language, raw) in scenario.query {
+            let label = format!("{} [{language}/query-graph]", path.display());
+            let input = match language.as_str() {
+                "json" => frontend::json_dsl::parse(&raw, model.ontology()).map(|(input, _)| input),
+                "gql" => frontend::gql::parse(&raw),
+                _ => unreachable!(),
+            }
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let input = normalize::normalize(input, &model).unwrap();
+            scenario
+                .logical
+                .check(&explain::logical(&input), &format!("{label}.logical"))
+                .unwrap();
+            let mut graph = QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(&model);
+            let root = graph
+                .traversal(&input)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let mut assertions = if file == "chain_traversal.yaml" {
+                Assertions {
+                    expect: vec![
+                        "(Join ON mr.head_pipeline_id = pipe.id (_) (_))".into(),
+                        "(Scan Table(gl_merge_request) AS mr)".into(),
+                        "(Scan Table(gl_job) AS j)".into(),
+                        "(Filter u.username = 'alice', u._deleted = false (_))".into(),
+                        "(Filter j.status = 'failed', j._deleted = false (_))".into(),
+                        "(Project u.id AS e0_src, mr.id AS e0_dst, pipe.id AS e2_src, j.id AS e2_dst, ... (_))".into(),
+                    ],
+                    reject: vec![
+                        "(Scan Table(gl_edge) ...)".into(),
+                        "(Scan Table(gl_ci_edge) ...)".into(),
+                    ],
+                    ..Default::default()
+                }
+            } else if substituted {
+                Assertions {
+                    reject: vec![format!("(Scan Table({edge_table}) ...)")],
+                    ..Default::default()
+                }
+            } else {
+                Assertions {
+                    expect: vec![
+                        format!("(Scan Table({edge_table}) AS e0)"),
+                        format!("(Scan Table({edge_table}) AS e1)"),
+                    ],
+                    ..Default::default()
+                }
+            };
+            match file {
+                "chain_edge_filter_guard.yaml" => assertions
+                    .expect
+                    .push("(Filter e0.target_id = 1, ... (_))".into()),
+                "chain_point_guard.yaml" => {
+                    assertions.expect.push("(Filter mr.id = 1, ... (_))".into())
+                }
+                "cross_namespace_chain_guard.yaml" => assertions
+                    .expect
+                    .push("(Join ON e0.target_id = e1.target_id (_) (_))".into()),
+                "star_candidate_dependencies.yaml" => assertions.expect.extend([
+                    "(Join ON mr.author_id = u.id (_) (_))".into(),
+                    "(Join ON mr.project_id = p.id (_) (_))".into(),
+                    "(Filter p.id IN [1000, 1001], ... (_))".into(),
+                ]),
+                "star_target_narrowing.yaml" => assertions.expect.extend([
+                    "(Join ON mr.project_id = p.id (_) (_))".into(),
+                    "(Filter mr.id = 1, ... (_))".into(),
+                ]),
+                "incoming_self_relationship.yaml" => {
+                    assertions.expect.extend([
+                        "(Join ON canceled.auto_canceled_by_id = canceling.id (_) (_))".into(),
+                        "(Project canceled.id AS e0_src, canceling.id AS e0_dst, ... (_))".into(),
+                    ]);
+                    assertions.reject.push(
+                        "(Join ON canceling.auto_canceled_by_id = canceled.id (_) (_))".into(),
+                    );
+                }
+                _ => {}
+            }
+            match file {
+                "star_candidate_dependencies.yaml" => {
+                    assertions.ctes = Some(CteAssertions {
+                        absent: None,
+                        exact_order: Some(vec![
+                            "_candidate_p".into(),
+                            "_candidate_u".into(),
+                            "_candidate_mr".into(),
+                        ]),
+                    });
+                    assertions.expect.extend([
+                        "(CTE _candidate_u (Project u.id AS id (_)))".into(),
+                        "(CTE _candidate_mr (Project mr.id AS id (_)))".into(),
+                        "(SemiJoin ON mr.author_id = _candidate_u.id (_) (_))".into(),
+                        "(SemiJoin ON mr.project_id = _candidate_p.id (_) (_))".into(),
+                    ]);
+                }
+                "star_target_narrowing.yaml" => {
+                    assertions.ctes = Some(CteAssertions {
+                        absent: None,
+                        exact_order: Some(vec!["_narrow_p".into()]),
+                    });
+                    assertions.expect.extend([
+                        "(CTE _narrow_p (Project mr.project_id AS id (Filter mr.id = 1, mr._deleted = false (Scan Table(gl_merge_request) AS mr))))".into(),
+                        "(SemiJoin ON p.id = _narrow_p.id (Scan Table(gl_project) AS p) (_))".into(),
+                        "(Filter p._deleted = false (Deduplicate ... (_)))".into(),
+                    ]);
+                }
+                _ => {}
+            }
+            assertions
+                .check(
+                    &explain::query_graph(&graph, root),
+                    &format!("{label}.planned"),
+                )
+                .unwrap();
+            let graph = graph.lower_operations().unwrap();
+            assertions
+                .check(
+                    &explain::query_graph(&graph, root),
+                    &format!("{label}.emitted"),
+                )
+                .unwrap();
+            graph
+                .validate_lowered(root)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            graph
+                .render(root)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+        }
+    }
+}
+
 fn check<M: QueryDataModel>(
     scenario: &Scenario,
     model: &M,

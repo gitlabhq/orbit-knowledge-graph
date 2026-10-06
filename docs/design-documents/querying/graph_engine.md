@@ -93,6 +93,59 @@ Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(..
 `...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
 These assertions check plan structure; data-correctness scenarios check execution results.
 
+### Query graph prototype
+
+`compiler::query_graph` explores a single owner for query declarations. It is separate from the production compiler pipeline.
+One block arena owns relation occurrences, CTE definitions, ordered outputs, and their computations.
+Stored ports borrow validated column names from the current data-model catalog. Derived ports reference exact output identities.
+UNION declares its own outputs and maps them positionally to its arms. It does not inherit first-arm provenance.
+Structural validation checks block ownership and CTE visibility. Each phase supplies its expression and operation checks.
+Wrapping creates a new block around an existing block. No persistent scope-parent registry needs updating.
+The consuming `lower` operation preserves declaration identities while translating expressions and operations.
+Each SELECT block contains a composable relational tree: sources, filters, joins, grouping, expansion, ordering, and limits.
+`lower_operations` replaces latest-row selection with sorting, full-key deduplication, and a subsequent deletion filter.
+Filters below latest-row selection remain before deduplication. Filters above it remain after deletion checking. Declaration identities do not change.
+Raw reads and current-row reads are distinct; ClickHouse current-row scans render with `FINAL`.
+The renderer traverses this graph directly and emits ClickHouse-style SQL, including `LIMIT 1 BY`.
+Internal SQL names derive from declaration handles. Public labels appear only at the result boundary; UNION arms map their outputs by position.
+
+`crates/query-engine/compiler/examples/query_graph.rs` constructs self-joins, CTE reuse, duplicate outputs, UNION, and a page wrapper.
+It also contains rejection assertions for foreign handles, hidden definitions, and ownership cycles.
+The example is compile-checked during prototype development; these assertions have not been executed.
+The example also compiles rendering and latest-row expansion with references from an enclosing query.
+`examples/query_families.rs` builds minimal traversal, aggregation, neighbors, pathfinding, and hydration graphs.
+These use inner joins, semi-join narrowing, grouping with count, directional UNION, and bounded two-hop expansion.
+Each example adds a keyset page wrapper after lowering, then produces planned explain, emitted explain, and SQL.
+An additional example adds a project authorization scan after lowering. Both rewrites use the lowered graph and retain existing declaration handles.
+The authorization example assumes project identifiers; it does not implement the production role and redaction policies.
+Explain includes actual operations, ordered projections, sources, and CTE references. It is not yet connected to the plan-fixture matcher.
+`validate_lowered` checks the graph independently from SQL rendering. It checks UNION compatibility, expression types, and expansion input types.
+Scalar types reuse `SqlType`. Tuple and recursive array shapes use `ValueType` in the prototype.
+Operation validation checks input visibility, duplicate source use, grouped output references, and semi-join output visibility.
+The renderer prunes source and intermediate columns from output demand while retaining predicates, join keys, grouping keys, and deduplication keys.
+Adjacent filters can be fused on the lowered graph. Scan filters render directly in the scan query; semantic boundaries remain nested.
+Pruning across shared CTE output contracts and general clause fusion remain unimplemented.
+Tuple construction, field access, conditional singleton arrays, and concatenation express fused directional neighbors with one edge scan.
+Both matching directions produce a tuple, preserving self-loop multiplicity. Conditional count and sum keep conditions within the aggregate.
+Nested aggregates and aggregates without a grouping boundary are rejected. Grouped results must be projected before further relational computation.
+Recursive definition visibility is modeled; cyclic output-type inference is rejected until explicit recursive type contracts are supported.
+Production integration, parameter binding, outer joins, implicit type coercion, and backend-specific lowering remain outside this prototype.
+The family examples demonstrate primitives, not full production optimization parity.
+
+`QueryGraph::traversal` accepts normalized traversal input and selects FK-star or FK-chain node joins, or an edge-scan fallback.
+Eligibility checks fixed single hops, direction, relationship filters, point selectivity, connectivity, and scope preservation or global endpoints.
+All node relations remain present in this slice, including relations needed for role checks. It does not perform endpoint elision.
+Star substitution requires a common FK holder, fixed single hops, one direction per hop, and no relationship filters.
+Multi-ID predicates use typed array membership. Incoming self-relationships retain the catalog's physical FK holder.
+`run_query_graph_foreign_keys` reuses seven existing JSON/GQL fixtures and their logical assertions.
+The same structural matcher checks planned and emitted graph views for FK substitution, relationship-filter guards, pinned endpoints, and cross-namespace guards.
+The fixture entry point and assertions are compile-checked only. Unsupported input forms return errors rather than silently dropping constraints.
+Filtered star targets declare reusable candidate-key CTEs before the narrowed center. Pinned target IDs also constrain the holder's FK column.
+Selective centers declare key queries for unfiltered targets. Target membership and sort-key predicates precede latest-row selection; mutable predicates are rechecked afterward.
+Membership uses semi-joins with exact candidate output handles. Duplicate candidate keys cannot multiply the left input.
+The star assertions check candidate dependency order, membership placement, and deletion checks after deduplication in planned and emitted views.
+Production `IN` rendering, CTE materialization preferences, endpoint elision, cascade filtering, denormalized coverage, and execution-result equivalence remain unfinished.
+
 ### Plan fixture assertions
 
 Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `ctes`, and `exact`.

@@ -401,6 +401,186 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     (planned, emitted)
 }
 
+pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt::Debug>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::Relational<'a, L>,
+    >,
+    root: compiler::query_graph::BlockId,
+) -> Tree {
+    let projection = graph
+        .outputs(root)
+        .unwrap()
+        .map(|output| {
+            format!(
+                "{} AS {}",
+                graph_expression(graph, &graph.projection(output).unwrap().value),
+                graph.output_label(output).unwrap()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let tree = Tree::node(
+        Operator::Project,
+        projection,
+        vec![graph_operation(graph, graph.operation(root).unwrap())],
+    );
+    let definitions = graph
+        .definitions(root)
+        .unwrap()
+        .map(|(definition, body)| {
+            Tree::node(
+                Operator::Cte,
+                graph.definition_hint(definition).unwrap(),
+                vec![query_graph(graph, body)],
+            )
+        })
+        .collect::<Vec<_>>();
+    if definitions.is_empty() {
+        tree
+    } else {
+        Tree::node(
+            Operator::With,
+            "",
+            definitions.into_iter().chain([tree]).collect(),
+        )
+    }
+}
+
+fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::Relational<'a, L>,
+    >,
+    value: &compiler::query_graph::Expression<'a>,
+) -> String {
+    use compiler::query_graph::{Expression, Port};
+    match value {
+        Expression::Column(column) => {
+            let name = match column.port() {
+                Port::Stored(name) => name,
+                Port::Output(output) => graph.output_label(output).unwrap(),
+            };
+            format!("{}.{name}", graph.relation(column.relation()).unwrap().hint)
+        }
+        Expression::Text(value) => text_literal(value),
+        Expression::Integer(value) => value.to_string(),
+        Expression::Boolean(value) => value.to_string(),
+        Expression::Integers(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Expression::In(left, right) => format!(
+            "{} IN {}",
+            graph_expression(graph, left),
+            graph_expression(graph, right)
+        ),
+        Expression::Equal(left, right) => format!(
+            "{} = {}",
+            graph_expression(graph, left),
+            graph_expression(graph, right)
+        ),
+        Expression::And(left, right) => format!(
+            "({}) AND ({})",
+            graph_expression(graph, left),
+            graph_expression(graph, right)
+        ),
+        value => format!("{value:?}"),
+    }
+}
+
+fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: std::fmt::Debug>(
+    graph: &compiler::query_graph::QueryGraph<
+        'a,
+        M,
+        compiler::query_graph::Expression<'a>,
+        compiler::query_graph::Relational<'a, L>,
+    >,
+    operation: &compiler::query_graph::Relational<'a, L>,
+) -> Tree {
+    use compiler::query_graph::{JoinKind, ReadMode, Relational, Source};
+    match operation {
+        Relational::One => leaf(Operator::Scan, "One"),
+        Relational::Source { relation, read } => {
+            let declaration = graph.relation(*relation).unwrap();
+            match declaration.source {
+                Source::Stored(table) => {
+                    scan(table, &declaration.hint, matches!(read, ReadMode::Current))
+                }
+                Source::Derived(body) => Tree::node(
+                    Operator::Bind,
+                    &declaration.hint,
+                    vec![query_graph(graph, body)],
+                ),
+                Source::Definition(definition) => scan(
+                    graph.definition_hint(definition).unwrap(),
+                    &declaration.hint,
+                    false,
+                ),
+            }
+        }
+        Relational::Filter { input, predicate } => filter(
+            vec![graph_expression(graph, predicate)],
+            graph_operation(graph, input),
+        ),
+        Relational::Join {
+            left,
+            right,
+            kind,
+            condition,
+        } => Tree::node(
+            if matches!(kind, JoinKind::Semi) {
+                Operator::SemiJoin
+            } else {
+                Operator::Join
+            },
+            format!("ON {}", graph_expression(graph, condition)),
+            vec![graph_operation(graph, left), graph_operation(graph, right)],
+        ),
+        Relational::Aggregate { input, groups } => Tree::node(
+            Operator::Aggregate,
+            format!("{groups:?}"),
+            vec![graph_operation(graph, input)],
+        ),
+        Relational::Latest { input, requirement } => Tree::node(
+            Operator::Deduplicate,
+            format!("Latest {requirement:?}"),
+            vec![graph_operation(graph, input)],
+        ),
+        Relational::FirstBy { input, keys } => Tree::node(
+            Operator::Deduplicate,
+            format!("LimitBy {keys:?}"),
+            vec![graph_operation(graph, input)],
+        ),
+        Relational::Sort { input, keys } => Tree::node(
+            Operator::Sort,
+            format!("{keys:?}"),
+            vec![graph_operation(graph, input)],
+        ),
+        Relational::Limit { input, count } => Tree::node(
+            Operator::Limit,
+            count.to_string(),
+            vec![graph_operation(graph, input)],
+        ),
+        Relational::Expand { input, column } => Tree::node(
+            Operator::Project,
+            format!(
+                "expand {}",
+                graph_expression(graph, &compiler::query_graph::Expression::Column(*column))
+            ),
+            vec![graph_operation(graph, input)],
+        ),
+    }
+}
+
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     filter(
         compiler::passes::plan::requirements::node_predicates(node)
