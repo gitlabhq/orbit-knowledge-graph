@@ -1,5 +1,7 @@
 use crate::storage::TableLayout;
+pub mod storage;
 use std::collections::HashMap;
+use storage::DuckDbColumn;
 
 use super::{PropertyBackendFacts, derive_property_backend_facts};
 use crate::{
@@ -17,7 +19,7 @@ pub struct DuckDbEntityLayout {
 #[derive(Debug)]
 pub struct DuckDbCatalog {
     edge_table: TableId,
-    storage: crate::storage::StorageCatalog,
+    storage: crate::storage::StorageCatalog<DuckDbColumn>,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationship_count: usize,
@@ -25,8 +27,21 @@ pub struct DuckDbCatalog {
 }
 
 impl QueryBackendCatalog for DuckDbCatalog {
-    fn storage(&self) -> &crate::storage::StorageCatalog {
+    type ColumnStorage = DuckDbColumn;
+    fn storage(&self) -> &crate::storage::StorageCatalog<DuckDbColumn> {
         &self.storage
+    }
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
+        let column = self
+            .storage
+            .column_ref(self.storage.table_id(table)?, column)?;
+        self.storage.column(column).storage().query_type
+    }
+    fn table_path_scopable(&self, _table: &str) -> bool {
+        false
+    }
+    fn table_path_columns(&self, table: &str) -> Option<&[crate::PathColumn]> {
+        self.storage.table_id(table).map(|_| [].as_slice())
     }
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
         Self::from_ontology(ontology, graph)
@@ -112,7 +127,7 @@ impl DuckDbCatalog {
     }
 
     pub fn edge_table(&self) -> &str {
-        &self.storage.table(self.edge_table).name
+        self.storage.table(self.edge_table).name()
     }
 }
 
@@ -125,9 +140,9 @@ impl DuckDbCatalog {
             .local_edge_table_name()
             .unwrap_or_else(|| ontology.edge_table())
             .to_string();
-        let mut tables: HashMap<_, _> = crate::storage::local_tables(ontology)?
+        let mut tables: HashMap<_, _> = storage::local_tables(ontology)?
             .into_iter()
-            .map(|table| (table.name.clone(), table))
+            .map(|table| (table.name().to_owned(), table))
             .collect();
         if !tables.contains_key(&edge_table) {
             tables.insert(
@@ -142,13 +157,6 @@ impl DuckDbCatalog {
             local_entities
         };
         for entity_name in &entity_names {
-            let entity_id =
-                graph
-                    .entity_id(entity_name)
-                    .ok_or_else(|| DataModelError::UnknownReference {
-                        kind: "local entity",
-                        name: entity_name.to_string(),
-                    })?;
             let node =
                 ontology
                     .get_node(entity_name)
@@ -159,13 +167,11 @@ impl DuckDbCatalog {
             let excluded = ontology
                 .local_entity_excludes(entity_name)
                 .unwrap_or_default();
-            let table = match tables.entry(node.destination_table.clone()) {
-                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(TableLayout::local_node(node, excluded)?)
-                }
-            };
-            table.entity = Some(entity_id);
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                tables.entry(node.destination_table.clone())
+            {
+                entry.insert(TableLayout::local_node(node, excluded)?);
+            }
         }
         let storage = crate::storage::StorageCatalog::new(tables.into_values())?;
         let entities = graph

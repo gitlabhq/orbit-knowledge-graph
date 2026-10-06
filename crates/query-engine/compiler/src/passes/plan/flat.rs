@@ -270,7 +270,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                 .model
                 .table(&hop.edge_table)
                 .is_some_and(|table| {
-                    table.row_semantics == query_data_model::storage::RowSemantics::Current
+                    *table.row_semantics() == query_data_model::storage::RowSemantics::Current
                 })
             {
                 return Ok(scan(false).filter(predicates));
@@ -297,7 +297,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     table
                         .sort_columns()
                         .take(4)
-                        .any(|column| column.name == start || column.name == end)
+                        .any(|column| column.name() == start || column.name() == end)
                 });
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {

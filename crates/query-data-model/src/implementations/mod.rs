@@ -1,6 +1,6 @@
 mod authz;
-mod clickhouse;
-mod duckdb;
+pub mod clickhouse;
+pub mod duckdb;
 
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
@@ -15,10 +15,10 @@ pub(super) struct PropertyBackendFacts {
     has_text_index: bool,
 }
 
-fn derive_property_backend_facts(
+fn derive_property_backend_facts<T>(
     ontology: &ontology::Ontology,
     graph: &GraphCatalog,
-    storage: &crate::storage::StorageCatalog,
+    storage: &crate::storage::StorageCatalog<T>,
     local: bool,
 ) -> Result<Vec<PropertyBackendFacts>, DataModelError> {
     let mut facts = vec![

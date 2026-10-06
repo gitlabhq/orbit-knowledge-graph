@@ -14,7 +14,7 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 
 #[test]
 fn catalog_schema_matches_created_duckdb_tables() {
-    use query_data_model::storage::{LocalType, StorageType};
+    use query_data_model::implementations::duckdb::storage::LocalType;
     use query_data_model::{DuckDbDataModel, QueryDataModel};
     use std::sync::Arc;
 
@@ -27,9 +27,9 @@ fn catalog_schema_matches_created_duckdb_tables() {
         .initialize_schema(include_str!("../../../../../config/graph_local.sql"))
         .unwrap();
     for table in compiler::generate_local_tables(&ontology).unwrap() {
-        let catalog = model.table(&table.name).unwrap();
-        assert_eq!(catalog.columns, table.columns);
-        let batches = database.query_arrow(&format!("SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position", table.name)).unwrap();
+        let catalog = model.table(table.name()).unwrap();
+        assert_eq!(catalog.columns(), table.columns());
+        let batches = database.query_arrow(&format!("SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position", table.name())).unwrap();
         let actual: Vec<_> = batches
             .iter()
             .flat_map(|batch| {
@@ -44,18 +44,18 @@ fn catalog_schema_matches_created_duckdb_tables() {
             })
             .collect();
         let expected: Vec<_> = catalog
-            .columns
+            .columns()
             .iter()
             .map(|column| {
-                let data_type = match &column.data_type {
-                    StorageType::DuckDb(LocalType::Int64) => "BIGINT",
-                    StorageType::DuckDb(LocalType::String) => "VARCHAR",
+                let data_type = match &column.storage().data_type {
+                    LocalType::Int64 => "BIGINT",
+                    LocalType::String => "VARCHAR",
                     other => panic!("unexpected embedded local type: {other:?}"),
                 };
-                vec![column.name.clone(), data_type.into(), "NO".into()]
+                vec![column.name().to_owned(), data_type.into(), "NO".into()]
             })
             .collect();
-        assert_eq!(actual, expected, "{}", table.name);
+        assert_eq!(actual, expected, "{}", table.name());
     }
 }
 

@@ -69,7 +69,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             .map(|table| {
                 table
                     .sort_columns()
-                    .map(|column| column.name.trim_matches('`').to_owned())
+                    .map(|column| column.name().to_owned())
                     .collect()
             })
             .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))
@@ -78,11 +78,11 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
     pub fn latest_row_key(&self, table: &str) -> Result<Vec<String>> {
         self.model
             .table(table)
-            .filter(|table| !table.sort_key.is_empty())
+            .filter(|table| !table.sort_key().is_empty())
             .map(|table| {
                 table
                     .sort_columns()
-                    .map(|column| column.name.trim_matches('`').to_owned())
+                    .map(|column| column.name().to_owned())
                     .collect()
             })
             .ok_or_else(|| {

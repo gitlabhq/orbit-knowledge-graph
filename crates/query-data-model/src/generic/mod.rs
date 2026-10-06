@@ -107,51 +107,41 @@ impl DenormalizedCatalog {
 }
 
 pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
-    fn storage(&self) -> &crate::storage::StorageCatalog;
-    fn table(&self, name: &str) -> Option<&crate::storage::TableLayout> {
+    type ColumnStorage: Send + Sync;
+    fn storage(&self) -> &crate::storage::StorageCatalog<Self::ColumnStorage>;
+    fn table(&self, name: &str) -> Option<&crate::storage::TableLayout<Self::ColumnStorage>> {
         Some(self.storage().table(self.storage().table_id(name)?))
     }
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError>;
     fn entity_table_id(&self, entity: EntityId) -> Option<TableId>;
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
-        Some(&self.storage().table(self.entity_table_id(entity)?).name)
+        Some(self.storage().table(self.entity_table_id(entity)?).name())
     }
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         match self.property_realization(property)? {
-            PropertyRealization::Stored { column } => {
-                Some(self.storage().column(*column).name.trim_matches('`'))
-            }
+            PropertyRealization::Stored { column } => Some(self.storage().column(*column).name()),
             PropertyRealization::Virtual(_) => None,
         }
     }
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization>;
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
-    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
-        let storage = self.storage();
-        let column = storage.column_ref(storage.table_id(table)?, column)?;
-        storage.column(column).query_type
-    }
+    fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
     fn has_text_index(&self, property: PropertyId) -> bool;
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.table(table).is_some_and(|table| table.path_scopable)
-    }
-    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
-        self.table(table).map(|table| table.path_columns.as_slice())
-    }
+    fn table_path_scopable(&self, table: &str) -> bool;
+    fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table_id(&self) -> TableId;
     fn default_edge_table(&self) -> &str {
-        &self.storage().table(self.default_edge_table_id()).name
+        self.storage().table(self.default_edge_table_id()).name()
     }
     fn relationship_table_id(&self, relationship: RelationshipId) -> Option<TableId>;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
         Some(
-            &self
-                .storage()
+            self.storage()
                 .table(self.relationship_table_id(relationship)?)
-                .name,
+                .name(),
         )
     }
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
@@ -279,7 +269,12 @@ pub trait QueryDataModel {
         self.query_backend().table_column_type(table, column)
     }
 
-    fn table(&self, table: &str) -> Option<&crate::storage::TableLayout> {
+    fn table(
+        &self,
+        table: &str,
+    ) -> Option<
+        &crate::storage::TableLayout<<Self::BackendCatalog as QueryBackendCatalog>::ColumnStorage>,
+    > {
         self.query_backend().table(table)
     }
 
@@ -321,13 +316,7 @@ pub trait QueryDataModel {
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
         let column = self.redaction_column(entity)?;
-        Some(
-            self.query_backend()
-                .storage()
-                .column(column)
-                .name
-                .trim_matches('`'),
-        )
+        Some(self.query_backend().storage().column(column).name())
     }
 
     fn redaction_column(&self, entity: EntityId) -> Option<crate::storage::StoredColumnRef> {
@@ -442,8 +431,8 @@ pub trait QueryDataModel {
         let lookup = self.query_backend().traversal_path_lookup(entity, kind)?;
         let storage = self.query_backend().storage();
         Some((
-            &storage.table(lookup.key.table).name,
-            storage.column(lookup.key).name.trim_matches('`'),
+            storage.table(lookup.key.table).name(),
+            storage.column(lookup.key).name(),
         ))
     }
 }

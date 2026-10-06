@@ -28,7 +28,9 @@ pub struct Table {
     pub ttl: Option<String>,
 }
 
-pub use query_data_model::storage::StoredColumn as Column;
+pub type Column = query_data_model::storage::StoredColumn<
+    query_data_model::implementations::clickhouse::storage::ClickHouseColumn,
+>;
 
 #[derive(Debug, Clone)]
 pub struct Index {
@@ -269,13 +271,13 @@ impl Table {
 fn column_definition(column: &Column) -> String {
     let mut fragments = vec![format!(
         "    {} {}",
-        quote_identifier(&column.name),
-        column.clickhouse_type(),
+        quote_identifier(column.name()),
+        column.storage().data_type,
     )];
-    if let Some(default) = &column.default {
+    if let Some(default) = &column.storage().default {
         fragments.push(format!("DEFAULT {default}"));
     }
-    if let Some(codecs) = &column.codec {
+    if let Some(codecs) = &column.storage().codec {
         fragments.push(format!("CODEC({})", codecs.join(", ")));
     }
     fragments.join(" ")
@@ -371,27 +373,27 @@ impl Dictionary {
         let key_type = self
             .attributes
             .iter()
-            .find(|attribute| attribute.name == self.key)
-            .map(Column::clickhouse_type)
+            .find(|attribute| attribute.name() == self.key)
+            .map(|column| column.storage().data_type.as_str())
             .unwrap_or("Int64");
 
         let mut column_definitions: Vec<String> =
             vec![format!("    {} {}", quote_identifier(&self.key), key_type)];
         for attribute in &self.attributes {
-            if attribute.name == self.key {
+            if attribute.name() == self.key {
                 continue;
             }
             column_definitions.push(format!(
                 "    {} {}",
-                quote_identifier(&attribute.name),
-                attribute.clickhouse_type(),
+                quote_identifier(attribute.name()),
+                attribute.storage().data_type,
             ));
         }
 
         let non_key_names: Vec<&str> = self
             .attributes
             .iter()
-            .map(|attribute| attribute.name.as_str())
+            .map(|attribute| attribute.name())
             .filter(|name| *name != self.key)
             .collect();
 
@@ -491,7 +493,7 @@ fn quote_sql_literal(value: &str) -> String {
 mod tests {
     #[test]
     fn denormalized_catalog_preserves_source_types_and_path_owners() {
-        use query_data_model::QueryDataModel;
+        use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
         let ontology = std::sync::Arc::new(
             ontology::Ontology::load_embedded()
@@ -513,23 +515,26 @@ mod tests {
             .iter()
             .find(|table| table.name == name)
             .unwrap();
-        assert_eq!(catalog.columns, generated.columns);
-        assert_eq!(catalog.columns[0].name, "traversal_path");
+        assert_eq!(catalog.columns(), generated.columns);
+        assert_eq!(catalog.columns()[0].name(), "traversal_path");
         assert_eq!(
-            catalog.column("t2_created_at").unwrap().clickhouse_type(),
+            catalog.column("t2_created_at").unwrap().storage().data_type,
             model
                 .table("gl_merge_request")
                 .unwrap()
                 .column("created_at")
                 .unwrap()
-                .clickhouse_type()
+                .storage()
+                .data_type
         );
-        let owners: Vec<_> = catalog
-            .path_columns
+        let owners: Vec<_> = model
+            .backend()
+            .table_path_columns(name)
+            .unwrap()
             .iter()
             .map(|column| {
                 (
-                    catalog.columns[column.column.index()].name.as_str(),
+                    catalog.column_by_id(column.column).name(),
                     column
                         .entity
                         .map(|entity| model.graph().entity(entity).name.as_str()),
@@ -564,27 +569,31 @@ mod tests {
             let table = schema
                 .tables
                 .iter()
-                .find(|table| table.name == catalog.name)
+                .find(|table| table.name == catalog.name())
                 .unwrap();
-            assert_eq!(catalog.columns, table.columns, "{}", table.name);
+            assert_eq!(catalog.columns(), table.columns, "{}", table.name);
             assert_eq!(
                 catalog
                     .sort_columns()
-                    .map(|column| column.name.as_str())
+                    .map(|column| column.name())
                     .collect::<Vec<_>>(),
                 table.order_by,
                 "{}",
                 table.name
             );
+            let query_data_model::storage::RowSemantics::Versioned { version, deletion } =
+                catalog.row_semantics()
+            else {
+                panic!("remote versioned storage")
+            };
+            assert_eq!(catalog.column_by_id(*version).name(), "_version");
             assert_eq!(
-                catalog.row_semantics,
-                query_data_model::storage::RowSemantics::Versioned {
-                    engine_deletes: table
-                        .engine
-                        .args
-                        .iter()
-                        .any(|argument| argument == "_deleted"),
-                }
+                deletion.as_ref().unwrap().applied_on_merge,
+                table
+                    .engine
+                    .args
+                    .iter()
+                    .any(|argument| argument == "_deleted")
             );
         }
     }

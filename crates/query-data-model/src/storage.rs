@@ -1,10 +1,6 @@
-use crate::{ColumnId, DataModelError, TableId};
-use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
-use ontology::{EdgeTableConfig, NodeEntity, StorageColumn};
 use std::collections::HashMap;
 
-mod local;
-pub use local::{LocalType, local_tables};
+use crate::{ColumnId, DataModelError, TableId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoredColumnRef {
@@ -13,18 +9,16 @@ pub struct StoredColumnRef {
 }
 
 #[derive(Debug)]
-pub struct StorageCatalog {
-    tables: Vec<TableLayout>,
+pub struct StorageCatalog<T> {
+    tables: Vec<TableLayout<T>>,
     table_ids: HashMap<String, TableId>,
-    column_ids: Vec<HashMap<String, ColumnId>>,
 }
 
-impl StorageCatalog {
-    pub fn new(tables: impl IntoIterator<Item = TableLayout>) -> Result<Self, DataModelError> {
+impl<T> StorageCatalog<T> {
+    pub fn new(tables: impl IntoIterator<Item = TableLayout<T>>) -> Result<Self, DataModelError> {
         let mut tables: Vec<_> = tables.into_iter().collect();
         tables.sort_by(|left, right| left.name.cmp(&right.name));
         let mut table_ids = HashMap::new();
-        let mut column_ids = Vec::new();
         for (index, table) in tables.iter().enumerate() {
             if table_ids
                 .insert(table.name.clone(), TableId(index))
@@ -35,23 +29,8 @@ impl StorageCatalog {
                     name: table.name.clone(),
                 });
             }
-            let mut columns = HashMap::new();
-            for (index, column) in table.columns.iter().enumerate() {
-                let name = column.name.trim_matches('`');
-                if columns.insert(name.to_owned(), ColumnId(index)).is_some() {
-                    return Err(DataModelError::Duplicate {
-                        kind: "stored column",
-                        name: format!("{}.{name}", table.name),
-                    });
-                }
-            }
-            column_ids.push(columns);
         }
-        Ok(Self {
-            tables,
-            table_ids,
-            column_ids,
-        })
+        Ok(Self { tables, table_ids })
     }
 
     pub fn table_id(&self, name: &str) -> Option<TableId> {
@@ -62,20 +41,21 @@ impl StorageCatalog {
         self.table_id(name)
             .ok_or_else(|| DataModelError::UnknownReference {
                 kind: "stored table",
-                name: name.to_owned(),
+                name: name.into(),
             })
     }
 
-    pub fn table(&self, id: TableId) -> &TableLayout {
+    pub fn table(&self, id: TableId) -> &TableLayout<T> {
         &self.tables[id.index()]
     }
 
-    pub fn tables(&self) -> impl Iterator<Item = &TableLayout> {
+    pub fn tables(&self) -> impl Iterator<Item = &TableLayout<T>> {
         self.tables.iter()
     }
 
     pub fn column_ref(&self, table: TableId, name: &str) -> Option<StoredColumnRef> {
-        self.column_ids[table.index()]
+        self.table(table)
+            .column_ids
             .get(name)
             .map(|column| StoredColumnRef {
                 table,
@@ -83,8 +63,8 @@ impl StorageCatalog {
             })
     }
 
-    pub fn column(&self, reference: StoredColumnRef) -> &StoredColumn {
-        &self.table(reference.table).columns[reference.column.index()]
+    pub fn column(&self, reference: StoredColumnRef) -> &StoredColumn<T> {
+        self.table(reference.table).column_by_id(reference.column)
     }
 
     pub fn resolve_column(
@@ -102,228 +82,137 @@ impl StorageCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StorageType {
-    ClickHouse(String),
-    DuckDb(LocalType),
+pub struct StoredColumn<T> {
+    name: String,
+    storage: T,
+}
+
+impl<T> StoredColumn<T> {
+    pub fn new(name: impl Into<String>, storage: T) -> Self {
+        Self {
+            name: name.into(),
+            storage,
+        }
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn storage(&self) -> &T {
+        &self.storage
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredColumn {
-    pub name: String,
-    pub data_type: StorageType,
-    pub default: Option<String>,
-    pub codec: Option<Vec<String>>,
-    pub query_type: Option<ontology::DataType>,
-}
-
-impl StoredColumn {
-    pub fn clickhouse_type(&self) -> &str {
-        match &self.data_type {
-            StorageType::ClickHouse(value) => value,
-            StorageType::DuckDb(_) => panic!("expected ClickHouse storage"),
-        }
-    }
-
-    pub fn auxiliary(column: &ontology::AuxiliaryColumn) -> Self {
-        let mut data_type = match column.data_type {
-            ontology::DataType::String | ontology::DataType::Uuid => "String",
-            ontology::DataType::Int => "Int64",
-            ontology::DataType::Bool => "Bool",
-            ontology::DataType::DateTime => "DateTime64(6, 'UTC')",
-            ontology::DataType::Date => "Date32",
-            _ => "String",
-        }
-        .to_owned();
-        if column.nullable {
-            data_type = format!("Nullable({data_type})");
-        }
-        Self {
-            name: column.name.clone(),
-            data_type: StorageType::ClickHouse(data_type),
-            default: column.default.clone(),
-            codec: column.codec.clone(),
-            query_type: Some(column.data_type),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowSemantics {
     Current,
-    Versioned { engine_deletes: bool },
+    Versioned {
+        version: ColumnId,
+        deletion: Option<Deletion>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deletion {
+    pub column: ColumnId,
+    pub applied_on_merge: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct TableLayout {
-    pub name: String,
-    pub columns: Vec<StoredColumn>,
-    pub sort_key: Vec<ColumnId>,
-    pub entity: Option<crate::EntityId>,
-    pub path_columns: Vec<crate::PathColumn>,
-    pub path_scopable: bool,
-    pub row_semantics: RowSemantics,
+pub struct TableLayout<T> {
+    name: String,
+    columns: Vec<StoredColumn<T>>,
+    column_ids: HashMap<String, ColumnId>,
+    sort_key: Vec<ColumnId>,
+    row_semantics: RowSemantics,
 }
 
-impl TableLayout {
+impl<T> TableLayout<T> {
     pub fn new(
         name: impl Into<String>,
-        columns: Vec<StoredColumn>,
+        columns: Vec<StoredColumn<T>>,
         sort_key: &[String],
-        row_semantics: RowSemantics,
     ) -> Result<Self, DataModelError> {
+        let name = name.into();
+        let mut column_ids = HashMap::new();
+        for (index, column) in columns.iter().enumerate() {
+            if column_ids
+                .insert(column.name.clone(), ColumnId(index))
+                .is_some()
+            {
+                return Err(DataModelError::Duplicate {
+                    kind: "stored column",
+                    name: format!("{name}.{}", column.name),
+                });
+            }
+        }
         let mut table = Self {
-            name: name.into(),
+            name,
             columns,
+            column_ids,
             sort_key: vec![],
-            entity: None,
-            path_columns: vec![],
-            path_scopable: false,
-            row_semantics,
+            row_semantics: RowSemantics::Current,
         };
         table.sort_key = sort_key
             .iter()
-            .map(|column| table.column_id(column))
+            .map(|name| table.column_id(name))
             .collect::<Result<_, _>>()?;
         Ok(table)
     }
 
+    pub fn versioned(
+        mut self,
+        version: &str,
+        deletion: Option<(&str, bool)>,
+    ) -> Result<Self, DataModelError> {
+        self.row_semantics = RowSemantics::Versioned {
+            version: self.column_id(version)?,
+            deletion: deletion
+                .map(|(name, applied_on_merge)| {
+                    self.column_id(name).map(|column| Deletion {
+                        column,
+                        applied_on_merge,
+                    })
+                })
+                .transpose()?,
+        };
+        Ok(self)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn columns(&self) -> &[StoredColumn<T>] {
+        &self.columns
+    }
+    pub fn sort_key(&self) -> &[ColumnId] {
+        &self.sort_key
+    }
+    pub fn row_semantics(&self) -> &RowSemantics {
+        &self.row_semantics
+    }
+    pub fn column_by_id(&self, id: ColumnId) -> &StoredColumn<T> {
+        &self.columns[id.index()]
+    }
+
     pub fn column_id(&self, name: &str) -> Result<ColumnId, DataModelError> {
-        self.columns
-            .iter()
-            .position(|column| column.name.trim_matches('`') == name)
-            .map(ColumnId)
+        self.column_ids
+            .get(name)
+            .copied()
             .ok_or_else(|| DataModelError::UnknownReference {
                 kind: "stored column",
                 name: format!("{}.{name}", self.name),
             })
     }
 
-    pub fn sort_columns(&self) -> impl Iterator<Item = &StoredColumn> {
+    pub fn column(&self, name: &str) -> Option<&StoredColumn<T>> {
+        self.column_ids
+            .get(name)
+            .map(|column| self.column_by_id(*column))
+    }
+
+    pub fn sort_columns(&self) -> impl Iterator<Item = &StoredColumn<T>> {
         self.sort_key
             .iter()
-            .map(|column| &self.columns[column.index()])
+            .map(|column| self.column_by_id(*column))
     }
-
-    pub fn add_path_column(
-        &mut self,
-        name: &str,
-        entity: Option<crate::EntityId>,
-    ) -> Result<(), DataModelError> {
-        self.path_columns.push(crate::PathColumn {
-            column: self.column_id(name)?,
-            entity,
-        });
-        Ok(())
-    }
-
-    pub fn column(&self, name: &str) -> Option<&StoredColumn> {
-        self.columns
-            .iter()
-            .find(|column| column.name.trim_matches('`') == name)
-    }
-}
-
-fn stored_columns(
-    columns: impl IntoIterator<Item = StorageColumn>,
-    query_type: impl Fn(&str) -> Option<ontology::DataType>,
-) -> Vec<StoredColumn> {
-    columns
-        .into_iter()
-        .map(|storage| StoredColumn {
-            query_type: query_type(storage.name.trim_matches('`')),
-            name: storage.name,
-            data_type: StorageType::ClickHouse(storage.ch_type),
-            default: storage.default,
-            codec: storage.codec,
-        })
-        .collect()
-}
-
-pub fn system_columns(version_type: Option<&str>) -> Vec<StoredColumn> {
-    let version = match version_type {
-        Some("uint64") => StoredColumn {
-            name: VERSION_COLUMN.into(),
-            data_type: StorageType::ClickHouse("UInt64".into()),
-            default: None,
-            codec: None,
-            query_type: None,
-        },
-        _ => StoredColumn {
-            name: VERSION_COLUMN.into(),
-            data_type: StorageType::ClickHouse("DateTime64(6, 'UTC')".into()),
-            default: Some("now64(6)".into()),
-            codec: Some(vec!["Delta(8)".into(), "ZSTD(1)".into()]),
-            query_type: None,
-        },
-    };
-    vec![
-        version,
-        StoredColumn {
-            name: DELETED_COLUMN.into(),
-            data_type: StorageType::ClickHouse("Bool".into()),
-            default: Some("false".into()),
-            codec: None,
-            query_type: None,
-        },
-    ]
-}
-
-pub fn remote_node_columns(node: &NodeEntity) -> Vec<StoredColumn> {
-    let mut columns = stored_columns(node.storage.columns.iter().cloned(), |name| {
-        node.fields
-            .iter()
-            .find(|field| field.name == name && field.column_name().is_some())
-            .map(|field| field.data_type)
-    });
-    columns.extend(system_columns(None));
-    columns
-}
-
-pub fn remote_edge_columns(config: &EdgeTableConfig) -> Vec<StoredColumn> {
-    let mut columns = stored_columns(
-        config
-            .storage
-            .columns
-            .iter()
-            .chain(&config.storage.denormalized_columns)
-            .cloned(),
-        |name| {
-            config
-                .columns
-                .iter()
-                .find(|column| column.name.trim_matches('`') == name)
-                .map(|column| column.data_type)
-        },
-    );
-    columns.extend(system_columns(None));
-    columns
-}
-
-pub fn denormalized_columns<'a>(
-    join: &'a ontology::denormalized::DenormalizedJoin,
-    source: impl Fn(usize) -> &'a [StoredColumn],
-) -> Vec<StoredColumn> {
-    let anchor = join.anchor_table();
-    let mut columns: Vec<_> = source(anchor)
-        .iter()
-        .filter(|column| column.name == ontology::TRAVERSAL_PATH_COLUMN)
-        .cloned()
-        .collect();
-    for index in 0..join.tables.len() {
-        columns.extend(
-            source(index)
-                .iter()
-                .filter(|column| {
-                    ontology::denormalized::copies(&column.name)
-                        && !(index == anchor && column.name == ontology::TRAVERSAL_PATH_COLUMN)
-                })
-                .map(|column| {
-                    let mut column = column.clone();
-                    column.name = join.column_for(index, &column.name);
-                    column
-                }),
-        );
-    }
-    columns.extend(system_columns(None));
-    columns
 }

@@ -1,4 +1,5 @@
-use query_data_model::storage::{LocalType, StorageType, TableLayout};
+use query_data_model::implementations::duckdb::storage::{DuckDbColumn, LocalType};
+use query_data_model::storage::TableLayout;
 
 fn emit_column_type(data_type: &LocalType) -> String {
     match data_type {
@@ -30,22 +31,20 @@ pub fn generate_local_ddl(
     Ok(ddl)
 }
 
-pub fn emit_create_table(table: &TableLayout) -> String {
+pub fn emit_create_table(table: &TableLayout<DuckDbColumn>) -> String {
     let columns = table
-        .columns
+        .columns()
         .iter()
         .map(|column| {
-            let StorageType::DuckDb(data_type) = &column.data_type else {
-                panic!("local DDL requires a DuckDB table schema");
-            };
+            let data_type = &column.storage().data_type;
             let nullable = matches!(data_type, LocalType::Nullable(_));
             let mut sql = format!(
                 "    {} {}{}",
-                column.name,
+                column.name(),
                 emit_column_type(data_type),
                 if nullable { "" } else { " NOT NULL" }
             );
-            if let Some(default) = &column.default {
+            if let Some(default) = &column.storage().default {
                 sql.push_str(&format!(" DEFAULT {default}"));
             }
             sql
@@ -53,7 +52,7 @@ pub fn emit_create_table(table: &TableLayout) -> String {
         .collect::<Vec<_>>();
     format!(
         "CREATE TABLE IF NOT EXISTS {} (\n{}\n)",
-        table.name,
+        table.name(),
         columns.join(",\n")
     )
 }
@@ -73,7 +72,7 @@ mod tests {
             assert!(
                 committed.contains(&sql),
                 "{} differs from committed DDL:\n{sql}",
-                table.name
+                table.name()
             );
         }
     }

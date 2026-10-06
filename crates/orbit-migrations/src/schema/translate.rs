@@ -1,3 +1,4 @@
+use query_data_model::implementations::clickhouse::storage;
 use std::collections::BTreeMap;
 
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
@@ -58,7 +59,7 @@ pub fn build_dictionaries(ontology: &Ontology) -> Vec<Dictionary> {
         .auxiliary_dictionaries()
         .iter()
         .map(|dictionary_definition| {
-            let key_column = Column::auxiliary(&AuxiliaryColumn {
+            let key_column = storage::auxiliary(&AuxiliaryColumn {
                 name: dictionary_definition.key.clone(),
                 data_type: *dictionary_definition
                     .key_type
@@ -74,7 +75,7 @@ pub fn build_dictionaries(ontology: &Ontology) -> Vec<Dictionary> {
                 dictionary_definition
                     .attributes
                     .iter()
-                    .map(Column::auxiliary),
+                    .map(storage::auxiliary),
             );
 
             Dictionary {
@@ -166,7 +167,7 @@ pub fn collect_all_table_names(ontology: &Ontology) -> Vec<String> {
 }
 
 fn table_from_node(node: &ontology::NodeEntity) -> Table {
-    let columns = query_data_model::storage::remote_node_columns(node);
+    let columns = storage::node_columns(node);
 
     let engine = if node.storage.version_only_engine {
         Engine::replacing_merge_tree_version_only()
@@ -202,7 +203,7 @@ fn table_from_node(node: &ontology::NodeEntity) -> Table {
 }
 
 fn table_from_edge(name: &str, config: &ontology::EdgeTableConfig) -> Table {
-    let columns = query_data_model::storage::remote_edge_columns(config);
+    let columns = storage::edge_columns(config);
 
     let mut indexes: Vec<Index> = config
         .storage
@@ -248,10 +249,10 @@ fn table_from_auxiliary(auxiliary_table: &AuxiliaryTable) -> Table {
     let mut columns: Vec<Column> = auxiliary_table
         .columns
         .iter()
-        .map(Column::auxiliary)
+        .map(storage::auxiliary)
         .collect();
     if auxiliary_table.include_system_columns {
-        columns.extend(query_data_model::storage::system_columns(
+        columns.extend(storage::system_columns(
             auxiliary_table.version_type.as_deref(),
         ));
     }
@@ -302,8 +303,7 @@ fn denormalized_table_from_join(
             .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
     };
 
-    let columns =
-        query_data_model::storage::denormalized_columns(join, |index| &find_source(index).columns);
+    let columns = storage::denormalized_columns(join, |index| &find_source(index).columns);
 
     let mut indexes = Vec::new();
     let mut explicit_settings: BTreeMap<String, String> = BTreeMap::new();
@@ -421,14 +421,14 @@ fn denormalized_select_projection(
                 .columns
                 .iter()
                 .filter(|column| {
-                    copies(&column.name) && !(is_anchor && column.name == TRAVERSAL_PATH_COLUMN)
+                    copies(column.name()) && !(is_anchor && column.name() == TRAVERSAL_PATH_COLUMN)
                 })
                 .map(|column| {
                     format!(
                         "{}.{} AS {}",
                         alias(table_index),
-                        column.name,
-                        join.column_for(table_index, &column.name)
+                        column.name(),
+                        join.column_for(table_index, column.name())
                     )
                 }),
         );

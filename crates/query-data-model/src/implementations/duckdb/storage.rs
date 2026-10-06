@@ -1,4 +1,4 @@
-use super::{RowSemantics, StorageType, StoredColumn, TableLayout};
+use crate::storage::{StoredColumn, TableLayout};
 use ontology::{DataType, EdgeColumn, NodeEntity};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +11,13 @@ pub enum LocalType {
     Timestamp,
     Nullable(Box<Self>),
     Array(Box<Self>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuckDbColumn {
+    pub data_type: LocalType,
+    pub default: Option<String>,
+    pub query_type: Option<DataType>,
 }
 
 impl LocalType {
@@ -41,7 +48,7 @@ impl LocalType {
     }
 }
 
-impl TableLayout {
+impl TableLayout<DuckDbColumn> {
     pub fn local_node(
         node: &NodeEntity,
         excluded: &[String],
@@ -51,20 +58,25 @@ impl TableLayout {
             .columns
             .iter()
             .filter(|column| !excluded.contains(&column.name))
-            .map(|column| StoredColumn {
-                name: column.name.clone(),
-                data_type: StorageType::DuckDb(LocalType::from_storage(&column.ch_type)),
-                codec: None,
-                default: column
-                    .default
-                    .as_ref()
-                    .filter(|value| literal_default(value))
-                    .cloned(),
-                query_type: node
-                    .fields
-                    .iter()
-                    .find(|field| field.name == column.name && field.column_name().is_some())
-                    .map(|field| field.data_type),
+            .map(|column| {
+                StoredColumn::new(
+                    column.name.trim_matches('`'),
+                    DuckDbColumn {
+                        data_type: LocalType::from_storage(&column.ch_type),
+                        default: column
+                            .default
+                            .as_ref()
+                            .filter(|value| literal_default(value))
+                            .cloned(),
+                        query_type: node
+                            .fields
+                            .iter()
+                            .find(|field| {
+                                field.name == column.name && field.column_name().is_some()
+                            })
+                            .map(|field| field.data_type),
+                    },
+                )
             })
             .collect();
         let sort_key = node
@@ -73,12 +85,7 @@ impl TableLayout {
             .filter(|key| !excluded.contains(key))
             .cloned()
             .collect::<Vec<_>>();
-        Self::new(
-            &node.destination_table,
-            columns,
-            &sort_key,
-            RowSemantics::Current,
-        )
+        Self::new(&node.destination_table, columns, &sort_key)
     }
 
     pub fn local_edge(name: &str, columns: &[EdgeColumn]) -> Result<Self, crate::DataModelError> {
@@ -88,27 +95,30 @@ impl TableLayout {
             .collect::<Vec<_>>();
         let columns = columns
             .iter()
-            .map(|column| StoredColumn {
-                name: column.name.clone(),
-                data_type: StorageType::DuckDb(match column.data_type {
-                    DataType::Int => LocalType::Int64,
-                    DataType::Bool => LocalType::Bool,
-                    DataType::DateTime => LocalType::Timestamp,
-                    DataType::Date => LocalType::Date,
-                    _ => LocalType::String,
-                }),
-                codec: None,
-                default: None,
-                query_type: Some(column.data_type),
+            .map(|column| {
+                StoredColumn::new(
+                    &column.name,
+                    DuckDbColumn {
+                        data_type: match column.data_type {
+                            DataType::Int => LocalType::Int64,
+                            DataType::Bool => LocalType::Bool,
+                            DataType::DateTime => LocalType::Timestamp,
+                            DataType::Date => LocalType::Date,
+                            _ => LocalType::String,
+                        },
+                        default: None,
+                        query_type: Some(column.data_type),
+                    },
+                )
             })
             .collect();
-        Self::new(name, columns, &sort_key, RowSemantics::Current)
+        Self::new(name, columns, &sort_key)
     }
 }
 
 pub fn local_tables(
     ontology: &ontology::Ontology,
-) -> Result<Vec<TableLayout>, crate::DataModelError> {
+) -> Result<Vec<TableLayout<DuckDbColumn>>, crate::DataModelError> {
     ontology
         .local_entity_names()
         .into_iter()

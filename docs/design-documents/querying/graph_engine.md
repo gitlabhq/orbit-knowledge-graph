@@ -61,15 +61,18 @@ Schema calls have no state in the shared compiler contexts. `compiler::compile` 
 Each active schema snapshot derives one immutable query data model from its loaded ontology.
 The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
 Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
-Both backends expose ordered stored-column declarations through `query-data-model::storage`.
+Both backends expose ordered stored-column declarations through the generic `StorageCatalog<T>` in `query-data-model::storage`.
+The backend catalog supplies its column storage type through an associated type. Shared storage contains no dialect types, codecs, or graph authorization policy.
+Table and column declarations are immutable after checked construction. Each table owns its column name index.
 The storage catalog assigns snapshot-local table IDs and table-local column IDs in deterministic order.
 Entity layouts and relationship routes reference those table IDs rather than copying physical table names.
 Name indexes point into these declarations. A stored-column reference carries both IDs to retain table ownership.
-Stored sort keys and path metadata reference table-local column IDs. Schema construction rejects keys or paths that name missing columns.
+Stored sort keys reference table-local column IDs. Backend scope metadata references those same IDs and retains entity provenance separately.
+Construction rejects keys, version columns, deletion columns, or scope paths that name missing columns.
 ClickHouse declarations include generated system columns and retain exact storage types, defaults, and codecs.
 DuckDB declarations contain effective local types and literal defaults after column exclusions and wrapper conversion.
 The local DDL renderer consumes those same declarations directly. Remote DDL and the catalog share column derivation, including denormalized tables.
-Stored-row metadata distinguishes current rows from versioned rows and records whether the merge engine applies deletion flags.
+Stored-row metadata distinguishes current rows from versioned rows and binds version and deletion columns. It records whether merges apply deletion flags.
 Its authorization catalog resolves GitLab redaction and scope metadata.
 Each stored property realization contains a table-and-column reference into the storage catalog.
 Derivation rejects missing stored columns and keeps extraction-source names separate from destination columns.
