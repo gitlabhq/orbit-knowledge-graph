@@ -147,8 +147,8 @@ fn run_scenario(scenario: &Scenario) {
     }
     for kind in &scenario.sources {
         assert!(
-            scenario.changed.is_none() || *kind == SourceKind::Changed,
-            "changed requires Changed"
+            scenario.changeset.is_none() || *kind == SourceKind::Changeset,
+            "changeset paths require the changeset source"
         );
         for file in &scenario.fixtures {
             assert!(
@@ -156,7 +156,7 @@ fn run_scenario(scenario: &Scenario) {
                     || (file.content.is_empty()
                         && matches!(
                             kind,
-                            SourceKind::Checkout | SourceKind::Changed | SourceKind::Archive
+                            SourceKind::Directory | SourceKind::Changeset | SourceKind::Archive
                         )),
                 "links require a filesystem source and cannot have content"
             );
@@ -262,11 +262,17 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
                 ),
                 Step::Usage { expect } => check_usage(&vfs, expect),
                 Step::Write { path, content } => {
-                    assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
+                    assert!(matches!(
+                        kind,
+                        SourceKind::Directory | SourceKind::Changeset
+                    ));
                     sources::write(root.path(), &path, content.as_bytes());
                 }
                 Step::Remove { path } => {
-                    assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
+                    assert!(matches!(
+                        kind,
+                        SourceKind::Directory | SourceKind::Changeset
+                    ));
                     std::fs::remove_file(sources::disk_path(root.path(), &path)).unwrap();
                 }
             }

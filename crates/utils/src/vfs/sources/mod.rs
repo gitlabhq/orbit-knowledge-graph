@@ -1,10 +1,10 @@
 //! Where files come from. Every source uses only `Loading::put`.
 
 mod archive;
-mod checkout;
+mod directory;
 
 pub use archive::Archive;
-pub use checkout::{Changed, Checkout};
+pub use directory::{Changeset, Directory};
 
 use super::{Loading, Put, SourceError, Tag};
 

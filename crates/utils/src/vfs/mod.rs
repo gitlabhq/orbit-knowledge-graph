@@ -10,9 +10,9 @@
 //!
 //! Decisions are policy and belong to a [`Pass`]; where bytes live, when they
 //! are read and what a path resolves to is mechanism and belongs to the store.
-//! Virtual paths resolve lexically under `/`. Checkout sources keep host paths separate
+//! Virtual paths resolve lexically under `/`. Directory sources keep host paths separate
 //! and reject symlink traversal during disk reads. Custom sources select trusted host paths.
-//! Disk-linked contents are live, not snapshots; callers must provide a stable checkout
+//! Disk-linked contents are live, not snapshots; callers must provide a stable directory
 //! when they need one revision. Repeated reads can perform I/O again.
 //!
 //! Cancellation is cooperative between files, not an interrupt for blocked source I/O.

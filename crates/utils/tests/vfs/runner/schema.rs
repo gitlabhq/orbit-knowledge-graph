@@ -22,7 +22,7 @@ pub struct Scenario {
     pub load_error: Option<String>,
     #[serde(default)]
     pub tests: Vec<Test>,
-    pub changed: Option<Vec<String>>,
+    pub changeset: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -30,8 +30,8 @@ pub struct Scenario {
 pub enum SourceKind {
     Memory,
     Lazy,
-    Checkout,
-    Changed,
+    Directory,
+    Changeset,
     Archive,
 }
 

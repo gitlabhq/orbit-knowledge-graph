@@ -1,5 +1,5 @@
 - name: File policy controls content access and inventory
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: main.rs
       content: code
@@ -34,7 +34,7 @@
         - {op: usage, expect: {files: 4, bytes: 21, kept: 10}}
 
 - name: A later pass can refine an earlier decision
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: a.png
       content: image
@@ -50,7 +50,7 @@
         - {op: read, path: a.png, expect: {error: Unsupported}}
 
 - name: Pending content decisions settle to the default tag
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: file
       content: data
@@ -64,7 +64,7 @@
         - {op: files, expect: [{path: file, size: 4, decision: {kind: keep, value: input}}]}
 
 - name: Content policy can remove a file during loading
-  sources: [memory, lazy, checkout, changed, archive]
+  sources: [memory, lazy, directory, changeset, archive]
   fixtures:
     - path: file
       content: drop
@@ -78,7 +78,7 @@
         - {op: stat, path: file, expect: {error: NotFound}}
 
 - name: A linked file receives its content decision on first read
-  sources: [checkout, changed]
+  sources: [directory, changeset]
   fixtures:
     - path: blob.rs
       content: "x\0y"
@@ -94,7 +94,7 @@
         - {op: usage, expect: {resident: 0, kept: 0}}
 
 - name: A late drop refuses reads but retains the frozen tree
-  sources: [checkout, changed]
+  sources: [directory, changeset]
   fixtures:
     - path: file
       content: drop
