@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use toml_edit::{Array, DocumentMut, Item, Table, value};
+use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, value};
 
 use super::json;
 use super::{
@@ -10,7 +10,9 @@ use super::{
     remove_file_and_empty_parents, write_file, write_unless_unchanged,
 };
 use crate::commands::setup::Target;
-use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpFormat};
+use crate::commands::setup::spec::{self, Agent, DIRECT_LAUNCHER, McpEntry, McpFormat};
+
+const CODING_AGENT_ENV: &str = "AI_AGENT";
 
 pub(super) struct McpServer;
 
@@ -28,9 +30,9 @@ impl Installer for McpServer {
         for entry in agents.iter().filter_map(|agent| agent.mcp.as_ref()) {
             let (path, label) = target.resolve(&entry.file)?;
             match entry.format {
-                McpFormat::Codex => install_toml(&path, &label, &server, report)?,
+                McpFormat::Codex => install_toml(&path, &label, entry, &server, report)?,
                 McpFormat::Claude | McpFormat::Opencode => {
-                    install_json(&path, &label, entry.format, &server, report)?
+                    install_json(&path, &label, entry, &server, report)?
                 }
             }
         }
@@ -72,16 +74,17 @@ fn servers_key(format: McpFormat) -> &'static str {
     }
 }
 
-fn server_json_entry(format: McpFormat, server: &spec::McpServer) -> Value {
-    match format {
+fn server_json_entry(entry: &McpEntry, server: &spec::McpServer) -> Value {
+    let env = json!({CODING_AGENT_ENV: entry.coding_agent});
+    match entry.format {
         McpFormat::Opencode => {
             let command: Vec<&str> = std::iter::once(server.command.as_str())
                 .chain(server.args.iter().map(String::as_str))
                 .collect();
-            json!({"type": "local", "command": command, "enabled": true})
+            json!({"type": "local", "command": command, "enabled": true, "environment": env})
         }
         McpFormat::Claude | McpFormat::Codex => {
-            json!({"type": "stdio", "command": server.command, "args": server.args})
+            json!({"type": "stdio", "command": server.command, "args": server.args, "env": env})
         }
     }
 }
@@ -89,12 +92,12 @@ fn server_json_entry(format: McpFormat, server: &spec::McpServer) -> Value {
 fn install_json(
     path: &Path,
     label: &str,
-    format: McpFormat,
+    mcp: &McpEntry,
     server: &spec::McpServer,
     report: &mut Report,
 ) -> Result<()> {
-    let key = servers_key(format);
-    let entry = server_json_entry(format, server);
+    let key = servers_key(mcp.format);
+    let entry = server_json_entry(mcp, server);
     refuse_commented_sibling(path, key, server.name, &entry)?;
 
     let mut root = json::read_object(path)?;
@@ -164,6 +167,7 @@ fn remove_json(
 fn install_toml(
     path: &Path,
     label: &str,
+    mcp: &McpEntry,
     server: &spec::McpServer,
     report: &mut Report,
 ) -> Result<()> {
@@ -187,6 +191,9 @@ fn install_toml(
     let mut entry = Table::new();
     entry["command"] = value(server.command.as_str());
     entry["args"] = value(server.args.iter().map(String::as_str).collect::<Array>());
+    let mut env = InlineTable::new();
+    env.insert(CODING_AGENT_ENV, mcp.coding_agent.as_str().into());
+    entry["env"] = value(env);
     servers.insert(server.name, Item::Table(entry));
 
     let registered = format!("mcp server {} registered", server.name);
