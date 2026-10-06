@@ -38,11 +38,11 @@ You ask an AI agent a question in plain language.
 The agent turns that question into one or more GitLab Orbit queries, runs them, and explains the
 results.
 
-The first prompt in each example starts with `Using GitLab Orbit`.
-That phrase tells the agent to consult the graph instead of searching your repository directly.
-The exact wording is not required, but a prompt that does not mention GitLab Orbit might be
-answered from another source.
-Later steps continue in the same conversation, so they do not repeat the phrase.
+To instruct the agent to search the graph instead of
+your repository, start the first prompt with something like `Using GitLab Orbit, ...`.
+That exact phrase is not required, but if you don't mention `GitLab Orbit` in the prompt, the agent might use
+another source to answer the question.
+Later steps continue in the same conversation, so you don't need to repeat the phrase.
 
 Where you type the prompt depends on your agent:
 

@@ -136,7 +136,7 @@ and the code definitions inside those files, that keep changing.
 Expected outcome: The merge requests behind the worst failures, and the files and definitions
 that keep changing inside them.
 
-Find the merge requests generating the most repeated failures.
+Find the merge requests that generate the most repeated failures.
 Filter `source` to `merge_request_event` so you do not also count the downstream child pipelines
 those pipelines triggered.
 
