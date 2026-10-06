@@ -646,6 +646,12 @@ fn index_repo(
         orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
     );
+    let text_files: Vec<String> = file_inventory
+        .loaded()
+        .chain(file_inventory.parseable())
+        .filter(|entry| duckdb_client::search::is_indexed_text_file(&entry.path, entry.size))
+        .map(|entry| entry.path.clone())
+        .collect();
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
@@ -725,6 +731,14 @@ fn index_repo(
             &[],
         )
         .context("failed to build the search index")?;
+    duckdb_client::search::populate_text_lines(
+        &client,
+        &duckdb_client::search::text_line_table(git.project_id),
+        &git.repo_path,
+        &git.commit_sha,
+        &text_files,
+    )
+    .context("failed to index config, template, and doc files")?;
     workspace::set_status(
         &client,
         &key,

@@ -168,7 +168,14 @@ fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
         "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
         &[git.project_id.into(), git.commit_sha.clone().into()],
     )?;
-    Ok(duckdb_client::scalar_i64(&files) == 0)
+    if duckdb_client::scalar_i64(&files) == 0 {
+        return Ok(true);
+    }
+    let text_table = client.query_arrow_json(
+        "SELECT COUNT(*) AS n FROM duckdb_tables() WHERE table_name = ?1",
+        &[duckdb_client::search::text_line_table(git.project_id).into()],
+    )?;
+    Ok(duckdb_client::scalar_i64(&text_table) == 0)
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
