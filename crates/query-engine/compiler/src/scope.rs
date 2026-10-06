@@ -23,8 +23,12 @@ impl QueryScope {
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
+use crate::ast::{Expr, Function, Op, Query, SqlType, TableRef};
+use crate::config::BindingNames;
+use crate::error::{QueryError, Result};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
+use query_data_model::QueryDataModel;
+use query_data_model::bindings::{ColumnRef, QueryBindings, ScopeId};
 
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
@@ -69,10 +73,23 @@ impl ScopeProof {
     }
 }
 
-pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
-    let values: Vec<Expr> = proof.sources.iter().map(scope_value_expr).collect();
+pub fn scope_predicate(
+    proof: &ScopeProof,
+    column: ColumnRef,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<Expr> {
+    let scope = bindings
+        .relation_scope(column.relation())
+        .map_err(|error| QueryError::Lowering(error.to_string()))?;
+    let values = proof
+        .sources
+        .iter()
+        .map(|source| scope_value_expr(source, scope, model, bindings, names))
+        .collect::<Result<Vec<_>>>()?;
     let matches = values.iter().map(|path| {
-        let column = Expr::col(alias, TRAVERSAL_PATH_COLUMN);
+        let column = Expr::Column(column);
         Some(match proof.depth {
             Some((0, 0)) => Expr::eq(column, path.clone()),
             Some((min, max)) => Expr::and(
@@ -85,18 +102,28 @@ pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
     let unresolved = values
         .iter()
         .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
-    Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
+    Ok(Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source"))
 }
 
-pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
-    Expr::and_all(proof.sources.iter().map(|source| {
-        Some(Expr::binary(
-            Op::Ne,
-            scope_value_expr(source),
-            Expr::string(UNRESOLVED_PATH),
-        ))
-    }))
-    .expect("scope proof has at least one source")
+pub fn resolved_scope_guard(
+    proof: &ScopeProof,
+    scope: ScopeId,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<Expr> {
+    let predicates = proof
+        .sources
+        .iter()
+        .map(|source| {
+            Ok(Expr::binary(
+                Op::Ne,
+                scope_value_expr(source, scope, model, bindings, names)?,
+                Expr::string(UNRESOLVED_PATH),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Expr::conjoin(predicates).expect("scope proof has at least one source"))
 }
 
 fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
@@ -111,14 +138,28 @@ fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
     )
 }
 
-fn scope_value_expr(source: &ScopeSource) -> Expr {
+fn scope_value_expr(
+    source: &ScopeSource,
+    scope: ScopeId,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<Expr> {
     match source {
-        ScopeSource::Literal(path) => Expr::string(path),
+        ScopeSource::Literal(path) => Ok(Expr::string(path)),
         ScopeSource::Lookup {
             source_table,
             key_column,
             value,
-        } => lookup_expr(source_table, key_column, value),
+        } => lookup_expr(
+            source_table,
+            key_column,
+            value,
+            scope,
+            model,
+            bindings,
+            names,
+        ),
     }
 }
 
@@ -217,25 +258,37 @@ fn propagate_scope_proofs(
     result
 }
 
-fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
-    let (key, from) = match value {
-        PathScopeId::Numeric(id) => (
-            Expr::param(SqlType::Int64, *id),
-            TableRef::scan(source_table, LOOKUP_ALIAS),
-        ),
-        PathScopeId::Text(text) => (
-            Expr::param(SqlType::String, text.clone()),
-            TableRef::scan_final(source_table, LOOKUP_ALIAS),
-        ),
+fn lookup_expr(
+    source_table: &str,
+    key_column: &str,
+    value: &PathScopeId,
+    parent: ScopeId,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<Expr> {
+    let scope = bindings
+        .scope(parent)
+        .map_err(|error| QueryError::Lowering(error.to_string()))?;
+    let (_, relation) = crate::passes::lower::context::LoweringContext {
+        model,
+        bindings,
+        names,
+    }
+    .scan(scope, source_table, LOOKUP_ALIAS, false)?;
+    let key = match value {
+        PathScopeId::Numeric(id) => Expr::param(SqlType::Int64, *id),
+        PathScopeId::Text(text) => Expr::param(SqlType::String, text.clone()),
     };
-    let latest = |column: &str| {
-        Expr::func(
+    let column = |name: &str| {
+        crate::passes::lower::context::stored_column(model, bindings, scope, relation, name)
+            .map(Expr::Column)
+    };
+    let latest = |name: &str| -> Result<Expr> {
+        Ok(Expr::func(
             Function::ArgMaxOrNull,
-            vec![
-                Expr::col(LOOKUP_ALIAS, column),
-                Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
-            ],
-        )
+            vec![column(name)?, column(VERSION_COLUMN)?],
+        ))
     };
     let path = Expr::func(
         Function::Coalesce,
@@ -243,20 +296,32 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
             Expr::func(
                 Function::If,
                 vec![
-                    latest(DELETED_COLUMN),
+                    latest(DELETED_COLUMN)?,
                     Expr::Literal(serde_json::Value::Null),
-                    latest(TRAVERSAL_PATH_COLUMN),
+                    latest(TRAVERSAL_PATH_COLUMN)?,
                 ],
             ),
             Expr::string(UNRESOLVED_PATH),
         ],
     );
-    Expr::Scalar(Box::new(Query {
-        select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
-        from,
-        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
-        ..Default::default()
-    }))
+    let predicate = Expr::eq(column(key_column)?, key);
+    let mut query = Query::new(
+        scope,
+        TableRef::Scan {
+            relation,
+            final_: matches!(value, PathScopeId::Text(_)),
+            relationship: None,
+        },
+    );
+    query.select = vec![crate::passes::lower::context::select(
+        bindings,
+        names,
+        scope,
+        path,
+        TRAVERSAL_PATH_COLUMN,
+    )?];
+    query.where_clause = Some(predicate);
+    Ok(Expr::Scalar(Box::new(query)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

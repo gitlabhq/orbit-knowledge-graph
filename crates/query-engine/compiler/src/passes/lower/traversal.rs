@@ -2,19 +2,35 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::EmitOutput;
-pub fn emit_traversal(input: &Input, output: EmitOutput) -> Result<Node> {
+pub fn emit_traversal(
+    input: &Input,
+    mut output: Query,
+    nodes: &std::collections::HashMap<String, super::NodeBinding>,
+    bindings: &query_data_model::bindings::QueryBindings,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+) -> Result<Node> {
     let order_by = input
         .order_by
         .as_ref()
-        .map(|ob| {
-            vec![if matches!(ob.direction, OrderDirection::Desc) {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+        .map(|ob| -> Result<Vec<OrderExpr>> {
+            let value = nodes
+                .get(&ob.node)
+                .ok_or_else(|| {
+                    crate::error::QueryError::Lowering(format!(
+                        "sort node '{}' has no binding",
+                        ob.node
+                    ))
+                })?
+                .property(output.scope, bindings, model, &ob.property)?;
+            Ok(vec![if matches!(ob.direction, OrderDirection::Desc) {
+                OrderExpr::desc(value)
             } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }]
+                OrderExpr::asc(value)
+            }])
         })
+        .transpose()?
         .unwrap_or_default();
-    let q = output.into_query(vec![], vec![], order_by, input.limit);
-    Ok(Node::Query(Box::new(q)))
+    output.order_by = order_by;
+    output.limit = Some(input.limit);
+    Ok(Node::Query(Box::new(output)))
 }

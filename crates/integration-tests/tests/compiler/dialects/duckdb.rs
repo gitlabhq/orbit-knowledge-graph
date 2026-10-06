@@ -83,8 +83,17 @@ fn hydration_reads_current_local_rows_without_version_columns() {
     second.id = "other_file".into();
     second.node_ids = vec![2];
     input.nodes.push(second);
-    let planned =
-        plan::plan_duckdb(&input, &model, Default::default(), &Default::default()).unwrap();
+    let mut bindings = query_data_model::bindings::QueryBindings::new();
+    let mut names = compiler::config::BindingNames::default();
+    let mut planned = plan::plan_duckdb(
+        &input,
+        &model,
+        Default::default(),
+        &Default::default(),
+        &mut bindings,
+        &mut names,
+    )
+    .unwrap();
     let plan::QueryPlan::Hydration(hydration) = &planned else {
         panic!("expected hydration");
     };
@@ -103,13 +112,25 @@ fn hydration_reads_current_local_rows_without_version_columns() {
         })
         .collect();
     assert_ne!(relations[0], relations[1]);
-    assert_eq!(
-        hydration.bindings.source(relations[0]).unwrap(),
-        hydration.bindings.source(relations[1]).unwrap()
+    assert_ne!(
+        hydration.operation.nodes[0].scope,
+        hydration.operation.nodes[1].scope
     );
-    let lowered = lower::emit(&planned, &input, &model).unwrap();
-    let query =
-        compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default()).unwrap();
+    for (node, relation) in hydration.operation.nodes.iter().zip(&relations) {
+        assert_eq!(bindings.relation_scope(*relation).unwrap(), node.scope);
+    }
+    assert_eq!(
+        bindings.source(relations[0]).unwrap(),
+        bindings.source(relations[1]).unwrap()
+    );
+    let lowered = lower::emit(&planned, &input, &model, &mut bindings, &mut names).unwrap();
+    let query = compiler::passes::codegen::duckdb::codegen(
+        &lowered.ast,
+        &bindings,
+        &names,
+        Default::default(),
+    )
+    .unwrap();
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("hydration.duckdb")).unwrap();
@@ -130,6 +151,21 @@ fn hydration_reads_current_local_rows_without_version_columns() {
         .collect();
     paths.sort();
     assert_eq!(paths, ["other.rs", "src/main.rs"]);
+    let plan::QueryPlan::Hydration(hydration) = &mut planned else {
+        unreachable!()
+    };
+    let plan::physical::PhysicalSource::Filter { input: source, .. } =
+        &mut hydration.operation.nodes[1].source
+    else {
+        unreachable!()
+    };
+    let plan::physical::PhysicalSource::Scan { relation, .. } = source.as_mut() else {
+        unreachable!()
+    };
+    *relation = relations[0];
+    assert!(
+        matches!(lower::emit(&planned, &input, &model, &mut bindings, &mut names), Err(compiler::QueryError::Lowering(message)) if message.contains("outside its query scope"))
+    );
 }
 
 #[test]

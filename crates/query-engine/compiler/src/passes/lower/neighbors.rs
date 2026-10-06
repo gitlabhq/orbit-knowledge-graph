@@ -1,388 +1,455 @@
-//! Neighbors emits its own redaction columns directly (rather than relying on
-//! the enforce pass's _gkg_* injection) since the center edge column differs
-//! per direction arm.
-
 use ontology::constants::*;
+use query_data_model::bindings::{QueryBindings, RelationId, ScopeId};
+use query_data_model::{DenormalizedDirection, QueryDataModel};
 
 use super::NodeBinding;
-use crate::ast::*;
-use crate::constants::*;
-use crate::error::Result;
-use crate::input::*;
-
+use super::context::LoweringContext;
 use super::sql::{
-    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate, rel_kind_filter,
 };
-use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
+use crate::ast::*;
+use crate::config::BindingNames;
+use crate::constants::*;
+use crate::error::{QueryError, Result};
+use crate::input::*;
+use crate::passes::plan::{Neighbors, Plan};
 
-pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
-    let Neighbors {
-        center: center_alias,
-        direction,
-        edge,
-        has_non_denorm,
-        center_tp_lookup,
-        fused_table,
-    } = &plan.operation;
-    let direction = *direction;
-    let has_non_denorm = *has_non_denorm;
-    let center_tp_lookup = center_tp_lookup.as_ref();
-    let cnp = &plan.nodes[center_alias];
-    let center_id = center_alias.to_string();
-    let center_entity = cnp.entity.clone().unwrap_or_default();
-    let center_table = cnp.table.clone().unwrap_or_default();
-    let center_uses_default_pk = cnp.uses_default_pk();
-    let center_redaction_col = cnp.redaction_id_column.clone();
-    let center_has_tp = cnp.has_traversal_path;
-    let center_node_ids = cnp.node_ids.clone();
-    let center_filters = cnp.filters.clone();
-    let center_id_range = cnp.id_range.clone();
-    let edge_alias = "e";
-
-    fn build_center_dedup(
-        alias: &str,
-        table: &str,
-        filters: &[(String, crate::passes::plan::BoundFilter)],
-        node_ids: &[i64],
-        id_range: Option<&InputIdRange>,
-        extra_select: &[&str],
-    ) -> (TableRef, Expr) {
-        let mut scan_where = Vec::new();
-        for (prop, filter) in filters {
-            scan_where.push(filter_to_expr(alias, prop, filter));
-        }
-        if !node_ids.is_empty() {
-            scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, node_ids));
-        }
-        if let Some(range) = id_range {
-            scan_where.push(id_range_predicate(alias, range));
-        }
-        let mut select = vec![
-            SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
-            SelectExpr::col(alias, DELETED_COLUMN),
-        ];
-        for col in extra_select {
-            select.push(SelectExpr::col(alias, *col));
-        }
-        dedup_subquery(alias, table, select, scan_where)
-    }
-
-    let order_by = match &input.order_by {
-        Some(ob) => vec![if ob.direction == OrderDirection::Desc {
-            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-        } else {
-            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-        }],
-        None => vec![],
+pub fn emit_neighbors(
+    plan: &Plan<Neighbors>,
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<(Node, NodeBinding, Vec<OrderExpr>)> {
+    let root = bindings.root();
+    let mut context = LoweringContext {
+        model,
+        bindings,
+        names,
     };
-
-    let build_arm = |dir: Direction| -> Query {
-        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
-        {
-            Direction::Outgoing => (
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                1i64,
-            ),
-            Direction::Incoming => (
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                0i64,
-            ),
-            Direction::Both => unreachable!(),
-        };
-
-        let denorm_direction = if dir == Direction::Outgoing {
-            query_data_model::DenormalizedDirection::Source
-        } else {
-            query_data_model::DenormalizedDirection::Target
-        };
-
-        let arm_where = |a: &str| -> Vec<Expr> {
-            let mut wp = vec![Expr::eq(
-                Expr::col(a, center_kind_col),
-                Expr::string(&center_entity),
-            )];
-            if !center_node_ids.is_empty() {
-                wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
-            }
-            if let Some(ref types) = edge.rel_type_filter
-                && let Some(f) = rel_kind_filter(a, types)
-            {
-                wp.push(f);
-            }
-            // Incoming edges to a namespace center sit at the center's own tp; pin to the resolved paths for a leading-PK point lookup.
-            if dir == Direction::Incoming
-                && !center_node_ids.is_empty()
-                && let Some((src, key_col)) = center_tp_lookup
-            {
-                wp.push(Expr::InSelect {
-                    expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
-                    query: Box::new(Query {
-                        select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-                        from: TableRef::scan(src.as_str(), "_tpd"),
-                        where_clause: Expr::conjoin(vec![
-                            id_list_predicate("_tpd", key_col, &center_node_ids),
-                            deleted_false("_tpd"),
-                        ]),
-                        ..Default::default()
-                    }),
-                });
-            }
-            wp.push(deleted_false(a));
-            wp
-        };
-
-        let mut where_parts: Vec<Expr> = Vec::new();
-        // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
-        for (_, filter) in &center_filters {
-            let Some(property) = filter.property else {
-                continue;
-            };
-            let key = query_data_model::DenormalizedKey {
-                property,
-                direction: denorm_direction,
-            };
-            if let Some(facts) = plan.denormalized.get(&key)
-                && let Some(expr) = denorm_tag_expr(
-                    edge_alias,
-                    &facts.edge_column,
-                    &facts.tag_key,
-                    &filter.filter,
-                )
-            {
-                where_parts.push(expr);
-            }
-        }
-
-        let mut select = vec![
-            SelectExpr::new(Expr::col(edge_alias, neighbor_id), neighbor_id_column()),
-            SelectExpr::new(Expr::col(edge_alias, neighbor_type), neighbor_type_column()),
-            SelectExpr::new(
-                Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                relationship_type_column(),
-            ),
-            SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
-        ];
-
-        let arm_tables = if dir == Direction::Outgoing {
-            &edge.outgoing_tables
-        } else {
-            &edge.incoming_tables
-        };
-        let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
-        where_parts.extend(outer_pushed);
-        let needs_center_table = !center_uses_default_pk;
-
-        if has_non_denorm {
-            let redaction_col = center_redaction_col.as_str();
-            let extra: Vec<&str> = if needs_center_table {
-                vec![redaction_col]
-            } else {
-                Vec::new()
-            };
-            let (center_subq, deleted_filter) = build_center_dedup(
-                &center_id,
-                &center_table,
-                &center_filters,
-                &center_node_ids,
-                center_id_range.as_ref(),
-                &extra,
-            );
-            from = TableRef::join(
-                JoinType::Inner,
-                from,
-                center_subq,
-                Expr::eq(
-                    Expr::col(edge_alias, center_edge_col),
-                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                ),
-            );
-            where_parts.push(deleted_filter);
-        }
-
-        if center_uses_default_pk {
-            select.push(SelectExpr::new(
-                Expr::col(edge_alias, center_edge_col),
-                redaction_id_column(&center_id),
-            ));
-        } else {
-            if !has_non_denorm {
-                from = TableRef::join(
-                    JoinType::Inner,
-                    from,
-                    TableRef::scan_final(&center_table, &center_id),
-                    Expr::eq(
-                        Expr::col(edge_alias, center_edge_col),
-                        Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                    ),
-                );
-                where_parts.push(deleted_false(&center_id));
-            }
-            select.push(SelectExpr::new(
-                Expr::col(&center_id, &center_redaction_col),
-                redaction_id_column(&center_id),
-            ));
-            select.push(SelectExpr::new(
-                Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                primary_key_column(&center_id),
-            ));
-        }
-        select.push(SelectExpr::new(
-            Expr::string(&center_entity),
-            redaction_type_column(&center_id),
-        ));
-
-        if center_has_tp {
-            select.push(SelectExpr::new(
-                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-                traversal_path_column(&center_id),
-            ));
-        }
-
-        Query {
-            select,
-            from,
-            where_clause: Expr::conjoin(where_parts),
-            ..Default::default()
-        }
-    };
-
-    let query = if let Some(table) = fused_table {
-        let mut q = build_fused_both_arm(
-            &center_id,
-            &center_entity,
-            center_has_tp,
-            &center_node_ids,
-            &center_filters,
-            plan,
-            edge,
-            table,
-            edge_alias,
-        );
-        q.order_by = order_by;
-        q.limit = Some(input.limit);
-        q
-    } else if direction == Direction::Both {
-        let mut outgoing = build_arm(Direction::Outgoing);
-        outgoing.union_all = vec![build_arm(Direction::Incoming)];
-        outgoing.order_by = order_by;
-        outgoing.limit = Some(input.limit);
-        outgoing
-    } else {
-        let mut arm = build_arm(direction);
-        arm.order_by = order_by;
-        arm.limit = Some(input.limit);
-        arm
-    };
-    let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
-        query
+    let mut query = if let Some(table) = &plan.operation.fused_table {
+        fused(&mut context, root, plan, table)?
+    } else if plan.operation.direction == Direction::Both {
+        let outgoing = context.scope(root)?;
+        let incoming = context.scope(root)?;
+        let outgoing = directional(&mut context, outgoing, plan, Direction::Outgoing)?;
+        let incoming = directional(&mut context, incoming, plan, Direction::Incoming)?;
+        let outputs = outgoing
             .select
             .iter()
-            .find(|select| {
-                select.alias.as_ref().map(|export| export.name())
-                    == Some(redaction_id_column(center_alias).as_str())
+            .filter_map(|select| select.alias)
+            .collect::<Vec<_>>();
+        let (from, relation) = context.union(root, vec![outgoing, incoming], "_neighbors")?;
+        let mut query = Query::new(root, from);
+        for export in outputs {
+            let column = context
+                .bindings
+                .column(root, relation, export)
+                .map_err(|error| QueryError::Lowering(error.to_string()))?;
+            let name = context.names.exports[&export].clone();
+            query
+                .select
+                .push(context.select(root, Expr::Column(column), &name)?);
+        }
+        query
+    } else {
+        directional(&mut context, root, plan, plan.operation.direction)?
+    };
+    if let Some(order) = &input.order_by {
+        let export = query
+            .select
+            .iter()
+            .filter_map(|select| select.alias)
+            .find(|export| {
+                context.names.exports[export] == order.property
+                    || context.names.exports[export] == format!("{}_{}", order.node, order.property)
             })
-            .expect("neighbors emits its center identity")
-            .expr
-            .clone()
-    });
+            .ok_or_else(|| {
+                QueryError::Lowering("neighbors order has no projected output".into())
+            })?;
+        query.order_by.push(OrderExpr {
+            expr: Expr::Output(export),
+            desc: order.direction == OrderDirection::Desc,
+        });
+    }
+    query.limit = Some(input.limit);
+    let center = &plan.nodes[&plan.operation.center];
+    let role_identity = if !plan.operation.has_non_denorm && center.uses_default_pk() {
+        Some(query.select[4].expr.clone())
+    } else {
+        None
+    };
+    let order = match plan.operation.direction {
+        Direction::Incoming => vec![0, 4, 2],
+        Direction::Outgoing => vec![4, 0, 2],
+        Direction::Both => vec![4, 0, 2, 3],
+    };
+    let stable_order = order
+        .into_iter()
+        .map(|index| {
+            OrderExpr::asc(Expr::Output(
+                query.select[index].alias.expect("neighbor output"),
+            ))
+        })
+        .collect();
     Ok((
         Node::Query(Box::new(query)),
         NodeBinding::Projected { role_identity },
+        stable_order,
     ))
 }
 
-/// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
-///
-/// Inner query: scan the edge once with `WHERE (source side) OR (target side)`,
-/// projecting `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each
-/// row yields one entry per matched arm. Outer query: project the `_gkg_*`
-/// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
-/// semantics: when both arms match the same edge, both rows are emitted.
-#[allow(clippy::too_many_arguments)]
-fn build_fused_both_arm(
-    center_id: &str,
-    center_entity: &str,
-    center_has_tp: bool,
-    center_node_ids: &[i64],
-    center_filters: &[(String, crate::passes::plan::BoundFilter)],
+fn center_scan<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    parent: ScopeId,
     plan: &Plan<Neighbors>,
-    edge: &EdgeTableConfig,
-    edge_table: &str,
-    edge_alias: &str,
-) -> Query {
-    let arm_predicate = |kind_col: &str,
-                         id_col: &str,
-                         direction: query_data_model::DenormalizedDirection|
-     -> Expr {
-        let mut parts = vec![Expr::eq(
-            Expr::col(edge_alias, kind_col),
-            Expr::string(center_entity),
-        )];
-        if !center_node_ids.is_empty() {
-            parts.push(id_list_predicate(edge_alias, id_col, center_node_ids));
-        }
-        for (_, filter) in center_filters {
-            let Some(property) = filter.property else {
-                continue;
-            };
-            let key = query_data_model::DenormalizedKey {
-                property,
-                direction,
-            };
-            if let Some(facts) = plan.denormalized.get(&key)
-                && let Some(expr) = denorm_tag_expr(
-                    edge_alias,
-                    &facts.edge_column,
-                    &facts.tag_key,
-                    &filter.filter,
-                )
-            {
-                parts.push(expr);
-            }
-        }
-        Expr::conjoin(parts).expect("fused arm predicate always has the center-kind conjunct")
+) -> Result<(TableRef, RelationId, Option<Expr>)> {
+    let center = &plan.nodes[&plan.operation.center];
+    let body = context.scope(parent)?;
+    let (from, relation) = context.scan(
+        body,
+        center.table.as_deref().unwrap_or(""),
+        &center.alias,
+        true,
+    )?;
+    let id = context.column(body, relation, DEFAULT_PRIMARY_KEY)?;
+    let mut predicates = Vec::new();
+    for (name, filter) in &center.filters {
+        predicates.push(filter_to_expr(
+            context.column(body, relation, name)?,
+            filter
+                .filter
+                .rhs_column
+                .as_ref()
+                .map(|(_, name)| context.column(body, relation, name))
+                .transpose()?,
+            filter,
+        ));
+    }
+    if !center.node_ids.is_empty() {
+        predicates.push(id_list_predicate(id, &center.node_ids));
+    }
+    if let Some(range) = &center.id_range {
+        predicates.push(id_range_predicate(id, range));
+    }
+    let deletion = context.deletion(body, relation)?;
+    let mut query = Query::new(body, from);
+    context.project(
+        &mut query,
+        relation,
+        DEFAULT_PRIMARY_KEY,
+        DEFAULT_PRIMARY_KEY,
+    )?;
+    if !center.uses_default_pk() {
+        context.project(
+            &mut query,
+            relation,
+            &center.redaction_id_column,
+            &center.redaction_id_column,
+        )?;
+    }
+    let deleted_export = if let Some(Expr::BinaryOp { left, .. }) = deletion {
+        let select = context.select(body, *left, "_deleted")?;
+        let export = select.alias;
+        query.select.push(select);
+        export
+    } else {
+        None
     };
+    query.where_clause = Expr::conjoin(predicates);
+    let (from, relation) = context.derived(parent, query, &center.alias)?;
+    let deletion = deleted_export
+        .map(|export| {
+            context
+                .bindings
+                .column(parent, relation, export)
+                .map(super::sql::deleted_false)
+                .map_err(|error| QueryError::Lowering(error.to_string()))
+        })
+        .transpose()?;
+    Ok((from, relation, deletion))
+}
 
-    let source_arm = arm_predicate(
-        SOURCE_KIND_COLUMN,
-        SOURCE_ID_COLUMN,
-        query_data_model::DenormalizedDirection::Source,
-    );
-    let target_arm = arm_predicate(
-        TARGET_KIND_COLUMN,
-        TARGET_ID_COLUMN,
-        query_data_model::DenormalizedDirection::Target,
-    );
+fn edge_predicates<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    scope: ScopeId,
+    relation: RelationId,
+    plan: &Plan<Neighbors>,
+    direction: Direction,
+) -> Result<Vec<Expr>> {
+    let center = &plan.nodes[&plan.operation.center];
+    let (id, kind) = if direction == Direction::Outgoing {
+        (SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
+    } else {
+        (TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
+    };
+    let mut predicates = vec![Expr::eq(
+        Expr::Column(context.column(scope, relation, kind)?),
+        Expr::string(center.entity.as_deref().unwrap_or("")),
+    )];
+    if !center.node_ids.is_empty() {
+        predicates.push(id_list_predicate(
+            context.column(scope, relation, id)?,
+            &center.node_ids,
+        ));
+    }
+    if let Some(types) = &plan.operation.edge.rel_type_filter {
+        predicates.extend(rel_kind_filter(
+            context.column(scope, relation, RELATIONSHIP_KIND_COLUMN)?,
+            types,
+        ));
+    }
+    if direction == Direction::Incoming
+        && !center.node_ids.is_empty()
+        && let Some((table, key)) = &plan.operation.center_tp_lookup
+    {
+        let body = context.scope(scope)?;
+        let (from, lookup) = context.scan(body, table, "_tpd", false)?;
+        let mut query = Query::new(body, from);
+        context.project(
+            &mut query,
+            lookup,
+            TRAVERSAL_PATH_COLUMN,
+            TRAVERSAL_PATH_COLUMN,
+        )?;
+        query.where_clause = Expr::and_all([
+            Some(id_list_predicate(
+                context.column(body, lookup, key)?,
+                &center.node_ids,
+            )),
+            context.deletion(body, lookup)?,
+        ]);
+        predicates.push(Expr::InSelect {
+            expr: Box::new(Expr::Column(context.column(
+                scope,
+                relation,
+                TRAVERSAL_PATH_COLUMN,
+            )?)),
+            query: Box::new(query),
+        });
+    }
+    predicates.extend(context.deletion(scope, relation)?);
+    Ok(predicates)
+}
 
-    // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
-    let out_tuple = Expr::func(
+fn denormalized_predicates<M: QueryDataModel + ?Sized>(
+    context: &LoweringContext<'_, M>,
+    scope: ScopeId,
+    relation: RelationId,
+    plan: &Plan<Neighbors>,
+    direction: DenormalizedDirection,
+) -> Result<Vec<Expr>> {
+    let mut predicates = Vec::new();
+    for (_, filter) in &plan.nodes[&plan.operation.center].filters {
+        let Some(property) = filter.property else {
+            continue;
+        };
+        if let Some(facts) = plan.denormalized.get(&query_data_model::DenormalizedKey {
+            property,
+            direction,
+        }) {
+            predicates.extend(denorm_tag_expr(
+                context.column(scope, relation, &facts.edge_column)?,
+                &facts.tag_key,
+                &filter.filter,
+            ));
+        }
+    }
+    Ok(predicates)
+}
+
+fn directional<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    scope: ScopeId,
+    plan: &Plan<Neighbors>,
+    direction: Direction,
+) -> Result<Query> {
+    let center = &plan.nodes[&plan.operation.center];
+    let outgoing = direction == Direction::Outgoing;
+    let (center_id, neighbor_id, neighbor_kind) = if outgoing {
+        (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
+    } else {
+        (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
+    };
+    let tables = if outgoing {
+        &plan.operation.edge.outgoing_tables
+    } else {
+        &plan.operation.edge.incoming_tables
+    };
+    let (mut from, relation, mut predicates) = if let [table] = tables.as_slice() {
+        let (from, relation) = context.scan(scope, table, "e", false)?;
+        let predicates = edge_predicates(context, scope, relation, plan, direction)?;
+        (from, relation, predicates)
+    } else {
+        let mut arms = Vec::new();
+        for table in tables {
+            let body = context.scope(scope)?;
+            let (from, relation) = context.scan(body, table, "_e", false)?;
+            let mut query = Query::new(body, from);
+            for name in EDGE_RESERVED_COLUMNS {
+                context.project(&mut query, relation, name, name)?;
+            }
+            query.where_clause =
+                Expr::conjoin(edge_predicates(context, body, relation, plan, direction)?);
+            arms.push(query);
+        }
+        let (from, relation) = context.union(scope, arms, "e")?;
+        (from, relation, vec![])
+    };
+    predicates.extend(denormalized_predicates(
+        context,
+        scope,
+        relation,
+        plan,
+        if outgoing {
+            DenormalizedDirection::Source
+        } else {
+            DenormalizedDirection::Target
+        },
+    )?);
+    let identity = Expr::Column(context.column(scope, relation, center_id)?);
+    let center_relation = if plan.operation.has_non_denorm {
+        let (scan, center_relation, deletion) = center_scan(context, scope, plan)?;
+        from = TableRef::join(
+            JoinType::Inner,
+            from,
+            scan,
+            Expr::eq(
+                identity.clone(),
+                Expr::Column(context.column(scope, center_relation, DEFAULT_PRIMARY_KEY)?),
+            ),
+        );
+        predicates.extend(deletion);
+        Some(center_relation)
+    } else if !center.uses_default_pk() {
+        let (scan, center_relation) = context.scan(
+            scope,
+            center.table.as_deref().unwrap_or(""),
+            &center.alias,
+            true,
+        )?;
+        from = TableRef::join(
+            JoinType::Inner,
+            from,
+            scan,
+            Expr::eq(
+                identity.clone(),
+                Expr::Column(context.column(scope, center_relation, DEFAULT_PRIMARY_KEY)?),
+            ),
+        );
+        predicates.extend(context.deletion(scope, center_relation)?);
+        Some(center_relation)
+    } else {
+        None
+    };
+    let mut query = Query::new(scope, from);
+    for (column, name) in [
+        (neighbor_id, neighbor_id_column()),
+        (neighbor_kind, neighbor_type_column()),
+        (RELATIONSHIP_KIND_COLUMN, relationship_type_column()),
+    ] {
+        context.project(&mut query, relation, column, name)?;
+    }
+    query.select.push(context.select(
+        scope,
+        Expr::int(i64::from(outgoing)),
+        neighbor_is_outgoing_column(),
+    )?);
+    if center.uses_default_pk() {
+        query
+            .select
+            .push(context.select(scope, identity, &redaction_id_column(&center.alias))?);
+    } else {
+        let center_relation = center_relation.expect("redaction table constructed");
+        context.project(
+            &mut query,
+            center_relation,
+            &center.redaction_id_column,
+            &redaction_id_column(&center.alias),
+        )?;
+        context.project(
+            &mut query,
+            center_relation,
+            DEFAULT_PRIMARY_KEY,
+            &primary_key_column(&center.alias),
+        )?;
+    }
+    query.select.push(context.select(
+        scope,
+        Expr::string(center.entity.as_deref().unwrap_or("")),
+        &redaction_type_column(&center.alias),
+    )?);
+    if center.has_traversal_path {
+        context.project(
+            &mut query,
+            relation,
+            TRAVERSAL_PATH_COLUMN,
+            &traversal_path_column(&center.alias),
+        )?;
+    }
+    query.where_clause = Expr::conjoin(predicates);
+    Ok(query)
+}
+
+fn fused<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    scope: ScopeId,
+    plan: &Plan<Neighbors>,
+    table: &str,
+) -> Result<Query> {
+    let center = &plan.nodes[&plan.operation.center];
+    let body = context.scope(scope)?;
+    let (from, edge) = context.scan(body, table, "e", false)?;
+    let mut arms = Vec::new();
+    for (kind, id, direction) in [
+        (
+            SOURCE_KIND_COLUMN,
+            SOURCE_ID_COLUMN,
+            DenormalizedDirection::Source,
+        ),
+        (
+            TARGET_KIND_COLUMN,
+            TARGET_ID_COLUMN,
+            DenormalizedDirection::Target,
+        ),
+    ] {
+        let mut predicates = vec![Expr::eq(
+            Expr::Column(context.column(body, edge, kind)?),
+            Expr::string(center.entity.as_deref().unwrap_or("")),
+        )];
+        if !center.node_ids.is_empty() {
+            predicates.push(id_list_predicate(
+                context.column(body, edge, id)?,
+                &center.node_ids,
+            ));
+        }
+        predicates.extend(denormalized_predicates(
+            context, body, edge, plan, direction,
+        )?);
+        arms.push(Expr::conjoin(predicates).unwrap());
+    }
+    let col = |name| context.column(body, edge, name).map(Expr::Column);
+    let outgoing = Expr::func(
         Function::Tuple,
         vec![
-            source_arm.clone(),
+            arms[0].clone(),
             Expr::int(1),
-            Expr::col(edge_alias, TARGET_ID_COLUMN),
-            Expr::col(edge_alias, TARGET_KIND_COLUMN),
-            Expr::col(edge_alias, SOURCE_ID_COLUMN),
+            col(TARGET_ID_COLUMN)?,
+            col(TARGET_KIND_COLUMN)?,
+            col(SOURCE_ID_COLUMN)?,
         ],
     );
-    let in_tuple = Expr::func(
+    let incoming = Expr::func(
         Function::Tuple,
         vec![
-            target_arm.clone(),
+            arms[1].clone(),
             Expr::int(0),
-            Expr::col(edge_alias, SOURCE_ID_COLUMN),
-            Expr::col(edge_alias, SOURCE_KIND_COLUMN),
-            Expr::col(edge_alias, TARGET_ID_COLUMN),
+            col(SOURCE_ID_COLUMN)?,
+            col(SOURCE_KIND_COLUMN)?,
+            col(TARGET_ID_COLUMN)?,
         ],
     );
-    let matched_only = Expr::func(
+    let matched = Expr::func(
         Function::ArrayFilter,
         vec![
             Expr::lambda(
@@ -392,71 +459,85 @@ fn build_fused_both_arm(
                     vec![Expr::ident("_gkg_arm"), Expr::int(1)],
                 ),
             ),
-            Expr::func(Function::Array, vec![out_tuple, in_tuple]),
+            Expr::func(Function::Array, vec![outgoing, incoming]),
         ],
     );
-    let dir_row = Expr::func(Function::Unnest, vec![matched_only]);
-
-    const ROW_COL: &str = "_gkg_arm_row";
-    let rel_col = relationship_type_column();
-    let tp_col = traversal_path_column(center_id);
-    let mut inner_select = vec![
-        SelectExpr::new(dir_row, ROW_COL),
-        SelectExpr::new(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN), rel_col),
-    ];
-    if center_has_tp {
-        inner_select.push(SelectExpr::new(
-            Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-            tp_col.clone(),
+    let mut inner = Query::new(body, from);
+    inner.select.push(context.select(
+        body,
+        Expr::func(Function::Unnest, vec![matched]),
+        "_gkg_arm_row",
+    )?);
+    context.project(
+        &mut inner,
+        edge,
+        RELATIONSHIP_KIND_COLUMN,
+        relationship_type_column(),
+    )?;
+    if center.has_traversal_path {
+        context.project(
+            &mut inner,
+            edge,
+            TRAVERSAL_PATH_COLUMN,
+            &traversal_path_column(&center.alias),
+        )?;
+    }
+    let mut predicates = vec![Expr::binary(Op::Or, arms.remove(0), arms.remove(0))];
+    if let Some(types) = &plan.operation.edge.rel_type_filter {
+        predicates.extend(rel_kind_filter(
+            context.column(body, edge, RELATIONSHIP_KIND_COLUMN)?,
+            types,
         ));
     }
-
-    let mut where_parts = vec![Expr::binary(Op::Or, source_arm, target_arm)];
-    if let Some(ref types) = edge.rel_type_filter
-        && let Some(f) = rel_kind_filter(edge_alias, types)
-    {
-        where_parts.push(f);
+    predicates.extend(context.deletion(body, edge)?);
+    inner.where_clause = Expr::conjoin(predicates);
+    let exports = inner
+        .select
+        .iter()
+        .map(|select| select.alias.expect("fused output"))
+        .collect::<Vec<_>>();
+    let (from, relation) = context.derived(scope, inner, "_gkg_fused")?;
+    let row = Expr::Column(
+        context
+            .bindings
+            .column(scope, relation, exports[0])
+            .map_err(|error| QueryError::Lowering(error.to_string()))?,
+    );
+    let element = |index| Expr::func(Function::TupleElement, vec![row.clone(), Expr::int(index)]);
+    let mut query = Query::new(scope, from);
+    query
+        .select
+        .push(context.select(scope, element(3), neighbor_id_column())?);
+    query
+        .select
+        .push(context.select(scope, element(4), neighbor_type_column())?);
+    let kind = context
+        .bindings
+        .column(scope, relation, exports[1])
+        .map_err(|error| QueryError::Lowering(error.to_string()))?;
+    query
+        .select
+        .push(context.select(scope, Expr::Column(kind), relationship_type_column())?);
+    query
+        .select
+        .push(context.select(scope, element(2), neighbor_is_outgoing_column())?);
+    query
+        .select
+        .push(context.select(scope, element(5), &redaction_id_column(&center.alias))?);
+    query.select.push(context.select(
+        scope,
+        Expr::string(center.entity.as_deref().unwrap_or("")),
+        &redaction_type_column(&center.alias),
+    )?);
+    if center.has_traversal_path {
+        let name = traversal_path_column(&center.alias);
+        let path = context
+            .bindings
+            .column(scope, relation, exports[2])
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        query
+            .select
+            .push(context.select(scope, Expr::Column(path), &name)?);
     }
-    where_parts.push(deleted_false(edge_alias));
-
-    let inner = Query {
-        select: inner_select,
-        from: TableRef::scan(edge_table, edge_alias),
-        where_clause: Expr::conjoin(where_parts),
-        ..Default::default()
-    };
-
-    let inner_alias = "_gkg_fused";
-    let te = |n: i64| {
-        Expr::func(
-            Function::TupleElement,
-            vec![Expr::col(inner_alias, ROW_COL), Expr::int(n)],
-        )
-    };
-    let mut select = vec![
-        SelectExpr::new(te(3), neighbor_id_column()),
-        SelectExpr::new(te(4), neighbor_type_column()),
-        SelectExpr::new(Expr::col(inner_alias, rel_col), rel_col),
-        SelectExpr::new(te(2), neighbor_is_outgoing_column()),
-        SelectExpr::new(te(5), redaction_id_column(center_id)),
-        SelectExpr::new(
-            Expr::string(center_entity),
-            redaction_type_column(center_id),
-        ),
-    ];
-    if center_has_tp {
-        select.push(SelectExpr::new(
-            Expr::col(inner_alias, &tp_col),
-            tp_col.clone(),
-        ));
-    }
-
-    Query {
-        select,
-        from: TableRef::Subquery {
-            query: Box::new(inner),
-            alias: inner_alias.to_string(),
-        },
-        ..Default::default()
-    }
+    Ok(query)
 }

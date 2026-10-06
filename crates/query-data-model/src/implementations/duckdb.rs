@@ -139,10 +139,12 @@ impl DuckDbCatalog {
             storage::local_tables(ontology)?
         };
         if !tables.iter().any(|table| table.name() == edge_table) {
-            tables.push(TableLayout::local_edge(
-                edge_table,
-                ontology.local_edge_columns(),
-            )?);
+            let columns = if ontology.local_edge_table_name().is_some() {
+                ontology.local_edge_columns()
+            } else {
+                ontology.edge_columns()
+            };
+            tables.push(TableLayout::local_edge(edge_table, columns)?);
         }
         let storage = crate::storage::StorageCatalog::new(tables)?;
         let entities = graph

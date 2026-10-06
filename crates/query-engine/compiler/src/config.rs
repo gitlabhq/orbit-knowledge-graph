@@ -28,6 +28,84 @@ use crate::passes::{
 };
 use crate::types::SecurityContext;
 use query_data_model::QueryDataModel;
+use query_data_model::bindings::{
+    ColumnRef, DefinitionId, ExportId, QueryBindings, RelationId, RelationSource,
+};
+use std::collections::HashMap;
+
+#[derive(Default)]
+pub struct BindingNames {
+    pub tables: HashMap<query_data_model::TableId, String>,
+    pub relations: HashMap<RelationId, String>,
+    pub exports: HashMap<ExportId, String>,
+    pub definitions: HashMap<DefinitionId, String>,
+}
+
+impl BindingNames {
+    pub fn relation_name(
+        &mut self,
+        bindings: &QueryBindings,
+        relation: RelationId,
+        hint: &str,
+    ) -> Result<()> {
+        let scope = bindings
+            .relation_scope(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let mut name = hint.to_owned();
+        let mut suffix = 1;
+        while self.relations.iter().any(|(other, used)| {
+            *other != relation && used == &name && bindings.relation_scope(*other) == Ok(scope)
+        }) {
+            name = format!("{hint}_{suffix}");
+            suffix += 1;
+        }
+        self.relations.insert(relation, name);
+        Ok(())
+    }
+
+    pub fn definition_name(&mut self, definition: DefinitionId, hint: &str) {
+        let mut name = hint.to_owned();
+        let mut suffix = 1;
+        while self
+            .definitions
+            .values()
+            .chain(self.tables.values())
+            .any(|used| used == &name)
+        {
+            name = format!("{hint}_{suffix}");
+            suffix += 1;
+        }
+        self.definitions.insert(definition, name);
+    }
+
+    pub fn selects(&self, query: &crate::ast::Query, name: &str) -> bool {
+        query
+            .select
+            .iter()
+            .filter_map(|select| select.alias)
+            .any(|export| self.exports[&export] == name)
+    }
+
+    pub fn source(&self, bindings: &QueryBindings, relation: RelationId) -> Result<&str> {
+        match bindings
+            .source(relation)
+            .map_err(|error| QueryError::Codegen(error.to_string()))?
+        {
+            RelationSource::Scan(table) => Ok(&self.tables[table]),
+            RelationSource::Definition(definition) => Ok(&self.definitions[definition]),
+            _ => Err(QueryError::Codegen(
+                "expected stored table or definition".into(),
+            )),
+        }
+    }
+
+    pub fn column(&self, column: ColumnRef) -> (&str, &str) {
+        (
+            &self.relations[&column.relation()],
+            &self.exports[&column.export()],
+        )
+    }
+}
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
@@ -45,6 +123,8 @@ compiler_pipeline_macros::define_compiler_ctx! {
         pub scope_proofs: crate::scope::QueryScope,
         pub hydration_options: HydrationCompileOptions,
         pub query_plan: QueryPlan,
+        pub bindings: query_data_model::bindings::QueryBindings,
+        pub binding_names: BindingNames,
         pub node: Node,
         pub lowered_metadata: LoweredMetadata,
         pub result_ctx: ResultContext,
@@ -84,65 +164,65 @@ compiler_pipeline_macros::define_compiler_ctx! {
         plan_clickhouse {
             reads_env: [data_model]
             reads_state: [scope_proofs, hydration_options]
-            mutates: [input, query_plan]
+            mutates: [input, query_plan, bindings, binding_names]
         }
         plan_duckdb {
             reads_env: [data_model]
             reads_state: [scope_proofs, hydration_options]
-            mutates: [input, query_plan]
+            mutates: [input, query_plan, bindings, binding_names]
         }
         lower {
             reads_env: [data_model]
-            reads_state: [input]
-            mutates: [query_plan, node, lowered_metadata]
+            reads_state: [input, query_plan]
+            mutates: [bindings, binding_names, node, lowered_metadata]
         }
         scope_requirements {
             reads_env: [data_model]
             reads_state: [scope_proofs]
-            mutates: [node]
+            mutates: [node, bindings, binding_names]
         }
         response_policy {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [input, bindings]
             mutates: [node]
         }
         enforce {
             reads_env: [data_model]
             reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
+            mutates: [node, lowered_metadata, result_ctx, bindings, binding_names]
         }
         enforce_local {
             reads_env: [data_model]
             reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
+            mutates: [node, lowered_metadata, result_ctx, bindings, binding_names]
         }
         security {
             reads_env: [security_ctx, data_model]
-            mutates: [node]
+            mutates: [node, bindings, binding_names]
         }
         cursor {
             reads_state: [lowered_metadata]
-            mutates: [input, pagination, node]
+            mutates: [input, pagination, node, bindings, binding_names]
         }
         check {
             reads_env: [security_ctx, data_model]
-            reads_state: [node]
+            reads_state: [node, bindings, binding_names]
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
-            reads_state: [input, node]
+            reads_state: [input, node, binding_names]
             mutates: [hydration_plan]
         }
         settings {
-            reads_state: [input, node, pagination]
-            mutates: [query_plan, query_config]
+            reads_state: [input, node, pagination, query_plan]
+            mutates: [query_config]
         }
         codegen {
-            reads_state: [node, input, pagination]
+            reads_state: [node, input, pagination, bindings, binding_names]
             mutates: [result_ctx, query_config, hydration_plan, pagination, output]
         }
         duckdb_codegen {
-            reads_state: [node, input, pagination]
+            reads_state: [node, input, pagination, bindings, binding_names]
             mutates: [result_ctx, hydration_plan, pagination, output]
         }
     }
@@ -151,31 +231,31 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse_json_dsl {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, bindings, binding_names, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, bindings, binding_names, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, lower, response_policy, enforce, scope_requirements, security, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
-            state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
+            state: [input, pagination, scope_proofs, hydration_options, query_plan, bindings, binding_names, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, bindings, binding_names, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
-            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
+            state: [raw, input, pagination, scope_proofs, hydration_options, query_plan, bindings, binding_names, node, lowered_metadata, result_ctx, hydration_plan, output]
             phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, enforce_local, cursor, duckdb_codegen]
         }
         validate_normalize_gql {
@@ -295,6 +375,8 @@ fn plan_with<C>(
         &C::Model,
         HydrationCompileOptions,
         &std::collections::HashSet<String>,
+        &mut query_data_model::bindings::QueryBindings,
+        &mut BindingNames,
     ) -> Result<QueryPlan>,
 ) -> Result<()>
 where
@@ -311,17 +393,37 @@ where
         .scope_proofs()
         .as_ref()
         .map_or(&no_table_scans, crate::scope::QueryScope::table_scans);
-    let query_plan = build(&input, ctx.data_model(), hydration_options, table_scans)?;
+    let mut bindings = query_data_model::bindings::QueryBindings::new();
+    let mut names = BindingNames::default();
+    let query_plan = build(
+        &input,
+        ctx.data_model(),
+        hydration_options,
+        table_scans,
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
+    let query_plan = require(ctx.query_plan().as_ref(), "query_plan")?;
     let input = require(ctx.input().clone(), "input")?;
-    let lowered = lower::emit(&query_plan, &input, ctx.data_model())?;
-    ctx.set_query_plan(query_plan);
+    let lowered = lower::emit(
+        query_plan,
+        &input,
+        ctx.data_model(),
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_node(lowered.ast);
     ctx.set_lowered_metadata(lowered.metadata);
     Ok(())
@@ -329,17 +431,28 @@ fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn scope_requirements(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut node = require(ctx.take_node(), "node")?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
     if let Some(scope) = ctx.scope_proofs() {
-        crate::scope::apply(&mut node, scope, ctx.data_model())?;
+        crate::scope::apply(
+            &mut node,
+            scope,
+            ctx.data_model(),
+            &mut bindings,
+            &mut names,
+        )?;
     }
     ctx.set_node(node);
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     Ok(())
 }
 
 fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().clone(), "input")?;
     let mut node = require(ctx.take_node(), "node")?;
-    response_policy::apply_text_excerpts(&mut node, &input, ctx.data_model());
+    let bindings = require(ctx.bindings().as_ref(), "bindings")?;
+    response_policy::apply_text_excerpts(&mut node, &input, ctx.data_model(), bindings);
     ctx.set_node(node);
     Ok(())
 }
@@ -352,9 +465,26 @@ where
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model())?;
-    let result_context =
-        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
+    enforce::enforce_role_scans(
+        &mut node,
+        &input,
+        &metadata,
+        ctx.data_model(),
+        &mut bindings,
+        &mut names,
+    )?;
+    let result_context = enforce::enforce_lowered_return(
+        &mut node,
+        &input,
+        &metadata,
+        ctx.data_model(),
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
@@ -369,8 +499,18 @@ where
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let result_context =
-        enforce::enforce_local_return(&mut node, &input, &metadata, ctx.data_model())?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
+    let result_context = enforce::enforce_local_return(
+        &mut node,
+        &input,
+        &metadata,
+        ctx.data_model(),
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
@@ -384,7 +524,17 @@ where
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut node = require(ctx.take_node(), "node")?;
-    security::apply_security_context(&mut node, &security_ctx, ctx.data_model())?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
+    security::apply_security_context(
+        &mut node,
+        &security_ctx,
+        ctx.data_model(),
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_node(node);
     Ok(())
 }
@@ -394,7 +544,18 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut node = require(ctx.take_node(), "node")?;
     let metadata = require(ctx.lowered_metadata().clone(), "lowered_metadata")?;
     let mut pagination = ctx.take_pagination().unwrap_or_default();
-    pagination.key_count = cursor::apply(&mut node, &input, &metadata, pagination.query_hash)?;
+    let mut bindings = require(ctx.take_bindings(), "bindings")?;
+    let mut names = require(ctx.take_binding_names(), "binding_names")?;
+    pagination.key_count = cursor::apply(
+        &mut node,
+        &input,
+        &metadata,
+        pagination.query_hash,
+        &mut bindings,
+        &mut names,
+    )?;
+    ctx.set_bindings(bindings);
+    ctx.set_binding_names(names);
     ctx.set_input(input);
     ctx.set_pagination(pagination);
     ctx.set_node(node);
@@ -407,7 +568,13 @@ where
     C::Model: query_data_model::QueryDataModel,
 {
     let node = require(ctx.node().clone(), "node")?;
-    check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
+    check::check_ast(
+        &node,
+        ctx.security_ctx(),
+        ctx.data_model(),
+        require(ctx.bindings().as_ref(), "bindings")?,
+        require(ctx.binding_names().as_ref(), "binding_names")?,
+    )
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
@@ -417,8 +584,14 @@ where
 {
     let input = require(ctx.input().as_ref(), "input")?;
     let emitted = require(ctx.node().as_ref(), "node")?;
-    let plan =
-        hydrate::generate_hydration_plan(input, emitted, ctx.data_model(), ctx.security_ctx());
+    let names = require(ctx.binding_names().as_ref(), "binding_names")?;
+    let plan = hydrate::generate_hydration_plan(
+        input,
+        emitted,
+        ctx.data_model(),
+        ctx.security_ctx(),
+        names,
+    );
     ctx.set_hydration_plan(plan);
     Ok(())
 }
@@ -445,7 +618,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
         })?;
     }
 
-    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let query_plan = require(ctx.query_plan().as_ref(), "query_plan")?;
     if query_plan.hops().len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
@@ -464,7 +637,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
             config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
         }
     }
-    ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);
     Ok(())
 }
@@ -476,7 +648,13 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
-    let base = codegen::codegen(&node, result_context, query_config)?;
+    let base = codegen::codegen(
+        &node,
+        require(ctx.bindings().as_ref(), "bindings")?,
+        require(ctx.binding_names().as_ref(), "binding_names")?,
+        result_context,
+        query_config,
+    )?;
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
@@ -496,7 +674,12 @@ fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
-    let base = codegen::duckdb::codegen(&node, result_context)?;
+    let base = codegen::duckdb::codegen(
+        &node,
+        require(ctx.bindings().as_ref(), "bindings")?,
+        require(ctx.binding_names().as_ref(), "binding_names")?,
+        result_context,
+    )?;
     let query_type = input.query_type;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {

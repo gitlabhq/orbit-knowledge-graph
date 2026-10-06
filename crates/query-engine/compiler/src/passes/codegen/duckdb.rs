@@ -49,8 +49,13 @@ pub(super) fn render_literal(parameter: &ParamValue) -> String {
     }
 }
 
-pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new(ast)?;
+pub fn codegen(
+    ast: &Node,
+    bindings: &query_data_model::bindings::QueryBindings,
+    names: &crate::config::BindingNames,
+    result_context: ResultContext,
+) -> Result<ParameterizedQuery> {
+    let mut ctx = Context::new(bindings, names);
     let sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -67,21 +72,26 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
     })
 }
 
-struct Context {
-    definitions: super::DefinitionNames,
+struct Context<'a> {
+    bindings: &'a query_data_model::bindings::QueryBindings,
+    names: &'a crate::config::BindingNames,
     params: HashMap<String, ParamValue>,
     param_counter: usize,
     error: Option<String>,
 }
 
-impl Context {
-    fn new(node: &Node) -> Result<Self> {
-        Ok(Self {
-            definitions: super::DefinitionNames::new(node)?,
+impl<'a> Context<'a> {
+    fn new(
+        bindings: &'a query_data_model::bindings::QueryBindings,
+        names: &'a crate::config::BindingNames,
+    ) -> Self {
+        Self {
+            bindings,
+            names,
             params: HashMap::new(),
             param_counter: 0,
             error: None,
-        })
+        }
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
@@ -132,8 +142,7 @@ impl Context {
                 let inner = self.emit_query_with_limit(&cte.query, !cte.recursive)?;
                 Ok(format!(
                     "{} AS ({})",
-                    self.definitions.name(&cte.name),
-                    inner
+                    self.names.definitions[&cte.name], inner
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -147,11 +156,10 @@ impl Context {
         let select_items: Vec<_> = q
             .select
             .iter()
-            .filter(|sel| !is_dedup_column(&sel.expr))
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
-                    Some(alias) => format!("{expr} AS {}", alias.name()),
+                    Some(alias) => format!("{expr} AS {}", self.names.exports[alias]),
                     None => expr,
                 }
             })
@@ -167,10 +175,7 @@ impl Context {
         parts.push(format!("FROM {from}"));
 
         if let Some(w) = &q.where_clause {
-            let stripped = strip_deleted_predicates(w);
-            if let Some(w) = stripped {
-                parts.push(format!("WHERE {}", self.emit_expr(&w)));
-            }
+            parts.push(format!("WHERE {}", self.emit_expr(w)));
         }
 
         if !q.group_by.is_empty() {
@@ -191,12 +196,9 @@ impl Context {
             });
         }
 
-        // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
-        // has no _version column and no LIMIT 1 BY).
         let orders: Vec<_> = q
             .order_by
             .iter()
-            .filter(|o| !matches!(&o.expr, Expr::Column { column, .. } if column == "_version"))
             .map(|o| {
                 let dir = if o.desc { "DESC" } else { "ASC" };
                 format!("{} {dir}", self.emit_expr(&o.expr))
@@ -214,12 +216,12 @@ impl Context {
     }
 
     fn emit_expr(&mut self, e: &Expr) -> String {
-        if is_deleted_predicate(e) {
-            return "true".to_string();
-        }
         match e {
-            Expr::Column { table, column } => format!("{table}.{column}"),
-            Expr::Output(export) => export.name().to_owned(),
+            Expr::Column(reference) => {
+                let (table, column) = self.names.column(*reference);
+                format!("{table}.{column}")
+            }
+            Expr::Output(export) => self.names.exports[export].clone(),
             Expr::Identifier(name) => name.clone(),
             Expr::EmptyTupleArray(fields) => {
                 let fields = fields
@@ -329,8 +331,7 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!(
                     "{e} IN (SELECT {} FROM {})",
-                    column.name(),
-                    self.definitions.name(cte_name)
+                    self.names.exports[column], self.names.definitions[cte_name]
                 )
             }
             Expr::InSelect { expr, query } => {
@@ -513,10 +514,16 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Cte { definition, alias } => {
-                Ok(format!("{} AS {alias}", self.definitions.name(definition)))
-            }
-            TableRef::Scan { table, alias, .. } => Ok(format!("{table} AS {alias}")),
+            TableRef::Cte { relation } => Ok(format!(
+                "{} AS {}",
+                self.names.source(self.bindings, *relation)?,
+                self.names.relations[relation]
+            )),
+            TableRef::Scan { relation, .. } => Ok(format!(
+                "{} AS {}",
+                self.names.source(self.bindings, *relation)?,
+                self.names.relations[relation]
+            )),
             TableRef::Join {
                 join_type,
                 left,
@@ -534,57 +541,20 @@ impl Context {
                     ))
                 }
             }
-            TableRef::Union { queries, alias } => {
+            TableRef::Union { queries, relation } => {
+                let alias = &self.names.relations[relation];
                 let union_parts: Vec<String> = queries
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
                 Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
-            TableRef::Subquery { query, alias } => {
+            TableRef::Subquery { query, relation } => {
+                let alias = &self.names.relations[relation];
                 let inner_sql = self.emit_query(query)?;
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
-    }
-}
-
-/// True if the expression is a reference to `_version` or `_deleted`.
-fn is_dedup_column(expr: &Expr) -> bool {
-    matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
-}
-
-fn is_deleted_predicate(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::BinaryOp { op: Op::Eq, left, .. } if is_dedup_column(left)
-    )
-}
-
-/// Strip `_deleted = false` predicates from a WHERE clause.
-/// Returns None if the entire clause was just a deleted check.
-fn strip_deleted_predicates(expr: &Expr) -> Option<Expr> {
-    match expr {
-        // _deleted = false → remove
-        Expr::BinaryOp {
-            op: Op::Eq, left, ..
-        } if is_dedup_column(left) => None,
-        // (A AND B) → strip deleted from both sides
-        Expr::BinaryOp {
-            op: Op::And,
-            left,
-            right,
-        } => {
-            let l = strip_deleted_predicates(left);
-            let r = strip_deleted_predicates(right);
-            match (l, r) {
-                (Some(l), Some(r)) => Some(Expr::and(l, r)),
-                (Some(l), None) => Some(l),
-                (None, Some(r)) => Some(r),
-                (None, None) => None,
-            }
-        }
-        other => Some(other.clone()),
     }
 }
 

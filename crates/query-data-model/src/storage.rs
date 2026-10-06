@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{ColumnId, DataModelError, TableId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StoredColumnRef {
     pub table: TableId,
     pub column: ColumnId,

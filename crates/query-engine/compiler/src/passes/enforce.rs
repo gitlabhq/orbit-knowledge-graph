@@ -1,15 +1,19 @@
-use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, JoinType, Node, Query, TableRef};
+use crate::config::BindingNames;
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
+use crate::passes::lower::context::LoweringContext;
+use crate::passes::lower::context::{select, stored_column};
 use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
+use query_data_model::{QueryBackendCatalog, bindings::QueryBindings};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,15 +112,28 @@ pub fn enforce_lowered_return(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    arena: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
-        model
-            .redaction_id_column(entity)
-            .unwrap_or(DEFAULT_PRIMARY_KEY)
-            .to_string()
-    })?;
+    enforce_lowered_return_with(
+        node,
+        input,
+        metadata,
+        &mut LoweringContext {
+            model,
+            bindings: arena,
+            names,
+        },
+        &mut ctx,
+        |entity| {
+            model
+                .redaction_id_column(entity)
+                .unwrap_or(DEFAULT_PRIMARY_KEY)
+                .to_string()
+        },
+    )?;
     Ok(ctx)
 }
 
@@ -125,11 +142,22 @@ pub fn enforce_local_return(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    arena: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
-        DEFAULT_PRIMARY_KEY.to_string()
-    })?;
+    enforce_lowered_return_with(
+        node,
+        input,
+        metadata,
+        &mut LoweringContext {
+            model,
+            bindings: arena,
+            names,
+        },
+        &mut ctx,
+        |_| DEFAULT_PRIMARY_KEY.to_string(),
+    )?;
     Ok(ctx)
 }
 
@@ -137,7 +165,7 @@ fn enforce_lowered_return_with(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    context: &mut LoweringContext<'_, impl query_data_model::QueryDataModel + ?Sized>,
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
@@ -157,7 +185,7 @@ fn enforce_lowered_return_with(
             &selectable_nodes,
             ctx,
             &metadata.nodes,
-            model,
+            context,
             redaction_column,
         )?,
         Node::Insert(_) => return Ok(()),
@@ -195,6 +223,8 @@ pub fn enforce_role_scans(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    arena: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -219,19 +249,31 @@ pub fn enforce_role_scans(
             QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
         })?;
         let role_alias = format!("_role_{}", input_node.id);
+        let (scan, relation) = LoweringContext {
+            model,
+            bindings: arena,
+            names,
+        }
+        .scan(query.scope, table, &role_alias, true)?;
+        let left = std::mem::replace(&mut query.from, scan.clone());
         query.from = TableRef::join(
             JoinType::Inner,
-            std::mem::replace(&mut query.from, TableRef::scan("_placeholder", "_")),
-            TableRef::scan_final(table, &role_alias),
+            left,
+            scan,
             Expr::eq(
                 identity.clone(),
-                Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
+                Expr::Column(stored_column(
+                    model,
+                    arena,
+                    query.scope,
+                    relation,
+                    DEFAULT_PRIMARY_KEY,
+                )?),
             ),
         );
-        query.where_clause = Some(match query.where_clause.take() {
-            Some(existing) => Expr::and(existing, deleted_false(&role_alias)),
-            None => deleted_false(&role_alias),
-        });
+        if let Some(deleted) = deletion_filter(query.scope, relation, model, arena, names)? {
+            query.where_clause = Expr::and_all([query.where_clause.take(), Some(deleted)]);
+        }
     }
     Ok(())
 }
@@ -249,9 +291,12 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    context: &mut LoweringContext<'_, impl query_data_model::QueryDataModel + ?Sized>,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
+    let model = context.model;
+    let arena = &mut *context.bindings;
+    let names = &mut *context.names;
     let select_len_before = q.select.len();
     for node in &input.nodes {
         let Some(entity) = &node.entity else {
@@ -277,7 +322,7 @@ fn enforce_return_columns(
         }
         let NodeBinding::Values {
             identity,
-            table_alias,
+            relation,
             traversal_path,
         } = binding
         else {
@@ -286,16 +331,32 @@ fn enforce_return_columns(
         let redaction_column = redaction_column(entity_id);
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
-            if table_alias.is_none() {
+            let relation = if let Some(relation) = relation {
+                *relation
+            } else {
                 let table = model.entity_table(entity).ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "node '{}' has no authorization table",
                         node.id
                     ))
                 })?;
-                let scan = if node.filters.is_empty() {
-                    TableRef::scan_final(table, &node.id)
+                let (scan, relation) = if node.filters.is_empty() {
+                    LoweringContext {
+                        model,
+                        bindings: arena,
+                        names,
+                    }
+                    .scan(q.scope, table, &node.id, true)?
                 } else {
+                    let body = arena
+                        .scope(q.scope)
+                        .map_err(|error| QueryError::Enforcement(error.to_string()))?;
+                    let (from, relation) = LoweringContext {
+                        model,
+                        bindings: arena,
+                        names,
+                    }
+                    .scan(body, table, &node.id, true)?;
                     let mut predicates = Vec::new();
                     for (property, filters) in &node.filters {
                         let data_type = model
@@ -303,8 +364,14 @@ fn enforce_return_columns(
                             .map(|property| property.data_type);
                         for filter in filters {
                             predicates.push(filter_to_expr(
-                                &node.id,
-                                property,
+                                stored_column(model, arena, body, relation, property)?,
+                                filter
+                                    .rhs_column
+                                    .as_ref()
+                                    .map(|(_, name)| {
+                                        stored_column(model, arena, body, relation, name)
+                                    })
+                                    .transpose()?,
                                 &crate::passes::plan::BoundFilter {
                                     filter: filter.clone(),
                                     property: None,
@@ -316,57 +383,97 @@ fn enforce_return_columns(
                     }
                     if !node.node_ids.is_empty() {
                         predicates.push(id_list_predicate(
-                            &node.id,
-                            DEFAULT_PRIMARY_KEY,
+                            stored_column(model, arena, body, relation, DEFAULT_PRIMARY_KEY)?,
                             &node.node_ids,
                         ));
                     }
                     if let Some(range) = &node.id_range {
-                        predicates.push(id_range_predicate(&node.id, range));
+                        predicates.push(id_range_predicate(
+                            stored_column(model, arena, body, relation, DEFAULT_PRIMARY_KEY)?,
+                            range,
+                        ));
                     }
-                    predicates.push(deleted_false(&node.id));
-                    TableRef::subquery(
-                        Query {
-                            select: vec![SelectExpr::star()],
-                            from: TableRef::scan_final(table, &node.id),
-                            where_clause: Expr::conjoin(predicates),
-                            ..Default::default()
-                        },
-                        &node.id,
-                    )
+                    predicates.extend(deletion_filter(body, relation, model, arena, names)?);
+                    let mut query = Query::new(body, from);
+                    for export in arena
+                        .exports(relation)
+                        .map_err(|error| QueryError::Enforcement(error.to_string()))?
+                        .to_vec()
+                    {
+                        let column = arena
+                            .column(body, relation, export)
+                            .map_err(|error| QueryError::Enforcement(error.to_string()))?;
+                        query.select.push(select(
+                            arena,
+                            names,
+                            body,
+                            Expr::Column(column),
+                            names.exports[&export].clone(),
+                        )?);
+                    }
+                    query.where_clause = Expr::conjoin(predicates);
+                    LoweringContext {
+                        model,
+                        bindings: arena,
+                        names,
+                    }
+                    .derived(q.scope, query, &node.id)?
                 };
+                let left = std::mem::replace(&mut q.from, scan.clone());
                 q.from = TableRef::join(
                     JoinType::Inner,
-                    std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
+                    left,
                     scan,
-                    Expr::eq(identity.clone(), Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
+                    Expr::eq(
+                        identity.clone(),
+                        Expr::Column(stored_column(
+                            model,
+                            arena,
+                            q.scope,
+                            relation,
+                            DEFAULT_PRIMARY_KEY,
+                        )?),
+                    ),
                 );
                 if node.filters.is_empty() {
-                    q.where_clause = Some(match q.where_clause.take() {
-                        Some(existing) => Expr::and(existing, deleted_false(&node.id)),
-                        None => deleted_false(&node.id),
-                    });
+                    q.where_clause = Expr::and_all([
+                        q.where_clause.take(),
+                        deletion_filter(q.scope, relation, model, arena, names)?,
+                    ]);
                 }
-            }
-            Expr::col(table_alias.as_deref().unwrap_or(&node.id), redaction_column)
+                relation
+            };
+            Expr::Column(stored_column(
+                model,
+                arena,
+                q.scope,
+                relation,
+                &redaction_column,
+            )?)
         } else {
             identity.clone()
         };
 
         if needs_separate_pk {
             let name = primary_key_column(&node.id);
-            if !q.selects_alias(&name) {
-                q.select.push(SelectExpr::new(identity.clone(), name));
+            if !names.selects(q, &name) {
+                q.select
+                    .push(select(arena, names, q.scope, identity.clone(), name)?);
             }
             ensure_in_group_by(q, input.query_type, identity.clone());
         }
-        if !q.selects_alias(&id_col) {
-            q.select
-                .push(SelectExpr::new(authorization_id.clone(), &id_col));
+        if !names.selects(q, &id_col) {
+            q.select.push(select(
+                arena,
+                names,
+                q.scope,
+                authorization_id.clone(),
+                &id_col,
+            )?);
         }
         ensure_in_group_by(q, input.query_type, authorization_id);
         let type_col = redaction_type_column(&node.id);
-        if !q.selects_alias(&type_col) {
+        if !names.selects(q, &type_col) {
             let position = q
                 .select
                 .iter()
@@ -374,19 +481,22 @@ fn enforce_return_columns(
                     select
                         .alias
                         .as_ref()
-                        .is_some_and(|export| export.name() == id_col)
+                        .is_some_and(|export| names.exports[export] == id_col)
                 })
                 .map_or(q.select.len(), |index| index + 1);
-            q.select
-                .insert(position, SelectExpr::new(Expr::string(entity), type_col));
+            q.select.insert(
+                position,
+                select(arena, names, q.scope, Expr::string(entity), type_col)?,
+            );
         }
         if input.query_type != QueryType::Aggregation
             && model.entity_has_traversal_path(entity)
             && let Some(path) = traversal_path
         {
             let name = traversal_path_column(&node.id);
-            if !q.selects_alias(&name) {
-                q.select.push(SelectExpr::new(path.clone(), name));
+            if !names.selects(q, &name) {
+                q.select
+                    .push(select(arena, names, q.scope, path.clone(), name)?);
             }
         }
     }
@@ -395,8 +505,8 @@ fn enforce_return_columns(
         for arm in &mut q.union_all {
             for select in &added {
                 if !arm.select.iter().any(|existing| {
-                    existing.alias.as_ref().map(|export| export.name())
-                        == select.alias.as_ref().map(|export| export.name())
+                    existing.alias.as_ref().map(|export| &names.exports[export])
+                        == select.alias.as_ref().map(|export| &names.exports[export])
                 }) {
                     arm.select.push(select.clone());
                 }
@@ -404,4 +514,36 @@ fn enforce_return_columns(
         }
     }
     Ok(())
+}
+
+fn deletion_filter(
+    scope: query_data_model::bindings::ScopeId,
+    relation: query_data_model::bindings::RelationId,
+    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &QueryBindings,
+    names: &BindingNames,
+) -> Result<Option<Expr>> {
+    let table = names.source(bindings, relation)?;
+    let storage = model.query_backend().storage();
+    let table = storage
+        .resolve_table(table)
+        .map_err(|error| QueryError::Enforcement(error.to_string()))?;
+    let query_data_model::storage::RowSemantics::Versioned {
+        deletion: Some(deletion),
+        ..
+    } = storage.table(table).row_semantics()
+    else {
+        return Ok(None);
+    };
+    bindings
+        .stored_column(
+            scope,
+            relation,
+            query_data_model::storage::StoredColumnRef {
+                table,
+                column: deletion.column,
+            },
+        )
+        .map(|column| Some(deleted_false(column)))
+        .map_err(|error| QueryError::Enforcement(error.to_string()))
 }

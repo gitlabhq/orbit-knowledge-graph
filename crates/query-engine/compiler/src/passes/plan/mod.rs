@@ -31,12 +31,23 @@ pub struct BoundFilter {
 }
 
 pub struct Plan<T> {
-    pub bindings: query_data_model::bindings::QueryBindings,
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
-    pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     pub operation: T,
+}
+
+#[derive(Clone)]
+pub enum NodeBinding<Value, Path = Value> {
+    Filtered,
+    Values {
+        identity: Value,
+        relation: Option<query_data_model::bindings::RelationId>,
+        traversal_path: Option<Path>,
+    },
+    Projected {
+        role_identity: Option<Value>,
+    },
 }
 
 pub enum QueryPlan {
@@ -48,16 +59,6 @@ pub enum QueryPlan {
 }
 
 impl QueryPlan {
-    pub fn bindings(&self) -> &query_data_model::bindings::QueryBindings {
-        match self {
-            Self::Traversal(plan) => &plan.bindings,
-            Self::Aggregation(plan) => &plan.bindings,
-            Self::Neighbors(plan) => &plan.bindings,
-            Self::PathFinding(plan) => &plan.bindings,
-            Self::Hydration(plan) => &plan.bindings,
-        }
-    }
-
     pub fn hops(&self) -> &[Hop] {
         match self {
             Self::Traversal(plan) => &plan.hops,
@@ -193,8 +194,18 @@ pub fn plan_clickhouse(
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
+    bindings: &mut query_data_model::bindings::QueryBindings,
+    names: &mut crate::config::BindingNames,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
+    plan(
+        input,
+        model,
+        hydration_options,
+        true,
+        table_scans,
+        bindings,
+        names,
+    )
 }
 
 pub fn plan_duckdb(
@@ -202,8 +213,18 @@ pub fn plan_duckdb(
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
     table_scans: &HashSet<String>,
+    bindings: &mut query_data_model::bindings::QueryBindings,
+    names: &mut crate::config::BindingNames,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
+    plan(
+        input,
+        model,
+        hydration_options,
+        false,
+        table_scans,
+        bindings,
+        names,
+    )
 }
 
 fn plan<M>(
@@ -212,18 +233,21 @@ fn plan<M>(
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
     table_scans: &HashSet<String>,
+    bindings: &mut query_data_model::bindings::QueryBindings,
+    names: &mut crate::config::BindingNames,
 ) -> Result<QueryPlan>
 where
     M: QueryDataModel + ?Sized,
 {
     let context = context::PlanningContext {
-        bindings: query_data_model::bindings::QueryBindings::new(),
+        names,
+        node_relations: Default::default(),
+        bindings,
         input,
         model,
         nodes: HashMap::new(),
         hops: Vec::new(),
         denormalized: HashMap::new(),
-        node_edge_mappings: HashMap::new(),
     };
     match input.query_type {
         QueryType::Traversal | QueryType::Aggregation => {

@@ -16,45 +16,6 @@ use std::sync::LazyLock;
 
 pub use clickhouse::codegen;
 
-#[derive(Default)]
-struct DefinitionNames {
-    names: HashMap<crate::bindings::Definition, String>,
-    used: std::collections::HashSet<String>,
-}
-
-impl DefinitionNames {
-    fn new(node: &crate::ast::Node) -> crate::error::Result<Self> {
-        crate::ast::bindings::validate_definitions(node)?;
-        let mut names = Self::default();
-        if let crate::ast::Node::Query(query) = node {
-            crate::ast::visit::visit_queries(query, &mut |query| {
-                crate::ast::visit::visit_relations(&query.from, &mut |table| {
-                    if let crate::ast::TableRef::Scan { table, .. } = table {
-                        names.used.insert(table.clone());
-                    }
-                });
-                Ok(())
-            })?;
-        }
-        Ok(names)
-    }
-
-    fn name(&mut self, definition: &crate::bindings::Definition) -> String {
-        if let Some(name) = self.names.get(definition) {
-            return name.clone();
-        }
-        let hint = definition.hint();
-        let mut name = hint.to_owned();
-        let mut suffix = 1;
-        while !self.used.insert(name.clone()) {
-            name = format!("{hint}_{suffix}");
-            suffix += 1;
-        }
-        self.names.insert(definition.clone(), name.clone());
-        name
-    }
-}
-
 fn validate_aggregate(
     function: crate::input::AggFunction,
     argument: Option<&crate::ast::Expr>,

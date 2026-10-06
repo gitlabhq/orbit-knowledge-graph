@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use crate::ast::{Expr, Function, Node, Op, SelectExpr};
+use crate::ast::{Expr, Function, Node, Op};
 use crate::input::{ColumnSelection, Input};
 use ontology::DataType;
 
@@ -12,12 +12,13 @@ pub fn apply_text_excerpts(
     node: &mut Node,
     input: &Input,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &query_data_model::bindings::QueryBindings,
 ) {
     let Node::Query(query) = node else { return };
     let max_chars = (WORKHORSE_GRPC_MESSAGE_CAP_BYTES
         / MAX_UTF8_BYTES_PER_CHAR
         / u64::from(input.fetch_limit().max(1))) as u32;
-    let columns: HashMap<String, HashSet<String>> = input
+    let columns: HashSet<_> = input
         .nodes
         .iter()
         .filter_map(|node| {
@@ -47,33 +48,39 @@ pub fn apply_text_excerpts(
                 }
             }
             excerpted.retain(|column| requested.contains(column));
-            Some((node.id.clone(), excerpted))
+            Some(
+                excerpted
+                    .into_iter()
+                    .filter_map(|property| {
+                        match model.property_realization(
+                            model.graph().property_id(entity.id, &property)?,
+                        )? {
+                            query_data_model::PropertyRealization::Stored { column } => {
+                                Some(*column)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
         .collect();
 
     for select in &mut query.select {
-        rewrite_select(select, &columns, max_chars);
+        let Expr::Column(column) = select.expr else {
+            continue;
+        };
+        if let Ok(query_data_model::bindings::ExportOrigin::Stored(stored)) =
+            bindings.origin(column.export())
+            && columns.contains(&stored)
+        {
+            select.expr = excerpt(Expr::Column(column), max_chars);
+        }
     }
 }
 
-fn rewrite_select(
-    select: &mut SelectExpr,
-    columns: &HashMap<String, HashSet<String>>,
-    max_chars: u32,
-) {
-    let Expr::Column { table, column } = &select.expr else {
-        return;
-    };
-    if columns
-        .get(table)
-        .is_some_and(|values| values.contains(column))
-    {
-        select.expr = excerpt(table, column, max_chars);
-    }
-}
-
-fn excerpt(alias: &str, column: &str, max_chars: u32) -> Expr {
-    let value = Expr::col(alias, column);
+fn excerpt(value: Expr, max_chars: u32) -> Expr {
     let excerpt = Expr::func(
         Function::Substring,
         vec![value.clone(), Expr::lit(1), Expr::lit(max_chars)],

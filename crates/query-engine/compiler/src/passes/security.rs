@@ -28,12 +28,14 @@ use serde_json::Value;
 
 use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Function, Node, Query, TableRef};
+use crate::config::BindingNames;
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
 use orbit_utils::traversal_path::{TraversalPath, TraversalPathTrie};
+use query_data_model::bindings::{ColumnRef, QueryBindings, RelationId};
 
 static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 
@@ -43,6 +45,8 @@ pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -61,7 +65,9 @@ pub fn apply_security_context(
         ));
     }
     match node {
-        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
+        Node::Query(q) => visit_queries_mut(q, &mut |query| {
+            apply_to_query(query, ctx, model, bindings, names)
+        }),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -70,22 +76,36 @@ fn apply_to_query(
     q: &mut Query,
     ctx: &SecurityContext,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from, model);
+    let aliased_tables = collect_aliased_tables(&q.from, model, bindings, names)?;
     if !aliased_tables.is_empty() {
-        let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = model.table_minimum_access_level(table);
-            let eligible = ctx.paths_at_least(min_role);
-            let broad = build_path_filter(alias, &eligible);
-            match ctx.scope_proofs.get(alias) {
-                Some(scope) if model.table_path_scopable(table) => {
-                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
-                }
-                _ => broad,
-            }
-        });
+        let security_conds = aliased_tables
+            .iter()
+            .map(|(relation, table)| {
+                let min_role = model.table_minimum_access_level(table);
+                let eligible = ctx.paths_at_least(min_role);
+                let column = super::lower::context::stored_column(
+                    model,
+                    bindings,
+                    q.scope,
+                    *relation,
+                    TRAVERSAL_PATH_COLUMN,
+                )?;
+                let broad = build_path_filter(column, &eligible);
+                Ok(match ctx.scope_proofs.get(&names.relations[relation]) {
+                    Some(scope) if model.table_path_scopable(table) => Expr::and(
+                        broad,
+                        crate::scope::scope_predicate(scope, column, model, bindings, names)?,
+                    ),
+                    _ => broad,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         q.where_clause = Expr::and_all(
             security_conds
+                .into_iter()
                 .map(Some)
                 .chain(std::iter::once(q.where_clause.take())),
         );
@@ -94,29 +114,26 @@ fn apply_to_query(
     Ok(())
 }
 
-fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
+fn build_path_filter(column: ColumnRef, paths: &[&TraversalPath]) -> Expr {
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
-        1 => starts_with_expr(alias, paths[0].as_str()),
+        1 => starts_with_expr(column, paths[0].as_str()),
         _ => {
             let collapsed = TraversalPathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
-                return starts_with_expr(alias, collapsed[0].as_str());
+                return starts_with_expr(column, collapsed[0].as_str());
             }
-            path_or_filter(alias, &collapsed)
+            path_or_filter(column, &collapsed)
         }
     }
 }
 
-fn starts_with_expr(alias: &str, path: &str) -> Expr {
-    starts_with_value_expr(alias, Expr::string(path))
+fn starts_with_expr(column: ColumnRef, path: &str) -> Expr {
+    starts_with_value_expr(column, Expr::string(path))
 }
 
-fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
-    Expr::func(
-        Function::StartsWith,
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
-    )
+fn starts_with_value_expr(column: ColumnRef, path: Expr) -> Expr {
+    Expr::func(Function::StartsWith, vec![Expr::Column(column), path])
 }
 
 /// OR chain of `startsWith(alias.traversal_path, path)` for each path.
@@ -125,20 +142,10 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
-fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
+fn path_or_filter(column: ColumnRef, paths: &[TraversalPath]) -> Expr {
+    let mut iter = paths.iter().map(|p| starts_with_expr(column, p.as_str()));
     let first = iter.next().expect("paths is non-empty (caller checks)");
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
-}
-
-pub(crate) fn collect_node_aliases(
-    table_ref: &TableRef,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<String> {
-    collect_aliased_tables(table_ref, model)
-        .into_iter()
-        .map(|(a, _)| a)
-        .collect()
 }
 
 /// Collect `(alias, table)` pairs for every scan that should receive a
@@ -147,16 +154,23 @@ pub(crate) fn collect_node_aliases(
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Vec<(String, String)> {
+    bindings: &QueryBindings,
+    names: &BindingNames,
+) -> Result<Vec<(RelationId, String)>> {
     let mut aliases = Vec::new();
     visit_relations(table_ref, &mut |relation| {
-        if let TableRef::Scan { table, alias, .. } = relation
-            && should_apply_security_filter(table, model)
-        {
-            aliases.push((alias.clone(), table.clone()));
+        if let TableRef::Scan { relation, .. } = relation {
+            aliases.push(*relation);
         }
     });
     aliases
+        .into_iter()
+        .map(|relation| {
+            let table = names.source(bindings, relation)?;
+            Ok(should_apply_security_filter(table, model).then(|| (relation, table.to_owned())))
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(|tables| tables.into_iter().flatten().collect())
 }
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed

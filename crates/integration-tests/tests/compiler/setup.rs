@@ -37,6 +37,14 @@ pub fn test_ontology() -> Arc<Ontology> {
                 ],
             )
             .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_edge_columns([
+                ("traversal_path", DataType::String, "String"),
+                ("relationship_kind", DataType::String, "String"),
+                ("source_id", DataType::Int, "Int64"),
+                ("source_kind", DataType::String, "String"),
+                ("target_id", DataType::Int, "Int64"),
+                ("target_kind", DataType::String, "String"),
+            ])
             .with_fields(
                 "User",
                 [

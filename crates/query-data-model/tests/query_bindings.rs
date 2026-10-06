@@ -31,9 +31,20 @@ fn scans_and_derived_outputs_have_distinct_scoped_bindings() {
     let child = bindings.scope(root).unwrap();
     let scan = bindings.scan(&storage, child, stored.table).unwrap();
     let inner = bindings.stored_column(child, scan, stored).unwrap();
-    let projected = bindings.project(child).unwrap();
+    let projected = bindings.project_column(child, inner).unwrap();
     let derived = bindings.derived(root, child).unwrap();
     assert!(bindings.column(root, derived, projected).is_ok());
+    assert_eq!(
+        bindings
+            .stored_column(root, derived, stored)
+            .unwrap()
+            .export(),
+        projected
+    );
+    assert_eq!(
+        bindings.project_column(root, inner),
+        Err(BindingError::OutsideScope)
+    );
     assert_eq!(
         bindings.column(root, derived, inner.export()),
         Err(BindingError::MissingExport)

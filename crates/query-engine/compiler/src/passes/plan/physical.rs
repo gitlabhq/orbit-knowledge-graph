@@ -1,54 +1,35 @@
-use super::requirements::{
-    Column, OutputValue, Predicate, Projection, id_list, node_outputs, node_predicates,
-    property_filter,
-};
+use super::requirements::{Column, OutputValue, Predicate, Projection, id_list};
 use crate::error::{QueryError, Result};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::bindings::{ColumnRef, RelationId, RelationSource};
+use query_data_model::bindings::{ColumnRef, DefinitionId, RelationId, RelationSource, ScopeId};
+use query_data_model::storage::StoredColumnRef;
 use query_data_model::{QueryBackendCatalog, QueryDataModel};
 
+use super::NodePlan;
 use super::context::PlanningContext;
-use super::{Hop, NodePlan};
 
 pub struct ExecutionPlan {
     pub source: PhysicalSource,
-    pub definitions: Vec<(crate::bindings::Definition, PhysicalPlan)>,
+    pub definitions: Vec<(DefinitionId, PhysicalPlan)>,
     pub outputs: Vec<Projection>,
-    pub bindings: Vec<BindingSource>,
+    pub bindings: std::collections::HashMap<String, super::NodeBinding<NodeIdentity, Column>>,
 }
 
-pub struct BindingSource {
-    pub node: String,
-    pub alias: String,
-    pub column: String,
-    pub joined: bool,
+#[derive(Clone)]
+pub enum KeyConstraint {
+    Ids(StoredColumnRef, Vec<i64>),
+    Membership(StoredColumnRef, DefinitionId),
 }
 
-impl BindingSource {
-    pub(super) fn table(alias: &str) -> Self {
-        Self {
-            node: alias.into(),
-            alias: alias.into(),
-            column: DEFAULT_PRIMARY_KEY.into(),
-            joined: true,
-        }
-    }
-}
-
-pub(super) fn key_membership(
-    alias: &str,
-    column: &str,
-    name: crate::bindings::Definition,
-) -> Predicate {
-    Predicate::Membership {
-        column: Column::new(alias, column),
-        key: name.exports()[0].clone(),
-        definition: name,
-    }
+#[derive(Clone)]
+pub enum NodeIdentity {
+    Column(Column),
+    Pinned(i64),
 }
 
 #[derive(Clone)]
 pub struct PhysicalPlan {
+    pub scope: ScopeId,
     pub source: PhysicalSource,
     pub outputs: Vec<Projection>,
 }
@@ -61,13 +42,12 @@ pub enum PhysicalSource {
         input: Box<Self>,
     },
     Union {
-        alias: String,
+        relation: RelationId,
         arms: Vec<PhysicalPlan>,
         relationship: usize,
     },
     Scan {
         relation: RelationId,
-        alias: String,
         final_: bool,
         relationship: Option<usize>,
     },
@@ -76,7 +56,7 @@ pub enum PhysicalSource {
         input: Box<Self>,
     },
     Scope {
-        alias: String,
+        relation: RelationId,
         input: Box<PhysicalPlan>,
     },
     Join {
@@ -86,16 +66,203 @@ pub enum PhysicalSource {
         right: Box<Self>,
     },
     Latest {
+        version: Column,
+        relation: RelationId,
+        scope: ScopeId,
         sort_key: Vec<ColumnRef>,
-        alias: String,
         aggregate_condition: Vec<Predicate>,
         input: Box<Self>,
     },
 }
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+    pub fn node_binding(
+        &self,
+        node: &str,
+        identity: Column,
+        relation: Option<RelationId>,
+    ) -> Result<(String, super::NodeBinding<NodeIdentity, Column>)> {
+        Ok((
+            node.into(),
+            super::NodeBinding::Values {
+                identity: NodeIdentity::Column(identity),
+                relation,
+                traversal_path: self
+                    .optional_column(identity.relation(), ontology::TRAVERSAL_PATH_COLUMN)?,
+            },
+        ))
+    }
+    pub fn projection(
+        &mut self,
+        scope: ScopeId,
+        value: OutputValue,
+        name: impl Into<String>,
+    ) -> Result<Projection> {
+        let export = match value {
+            OutputValue::Column(column) => self.bindings.project_column(scope, column),
+            _ => self.bindings.project(scope),
+        }
+        .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.names.exports.insert(export, name.into());
+        Ok(Projection {
+            value,
+            name: export,
+        })
+    }
+
+    pub fn define(
+        &mut self,
+        parent: ScopeId,
+        hint: impl Into<String>,
+        plan: PhysicalPlan,
+    ) -> Result<(DefinitionId, PhysicalPlan)> {
+        let definition = self
+            .bindings
+            .define(parent, plan.scope)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.names.definition_name(definition, &hint.into());
+        Ok((definition, plan))
+    }
+
+    pub fn key_membership(
+        &mut self,
+        column: Column,
+        definition: DefinitionId,
+    ) -> Result<Predicate> {
+        let scope = self
+            .bindings
+            .relation_scope(column.relation())
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let relation = self
+            .bindings
+            .reference(scope, definition)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let key = *self
+            .bindings
+            .exports(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?
+            .first()
+            .ok_or_else(|| QueryError::Lowering("membership definition has no output".into()))?;
+        Ok(Predicate::Membership {
+            column,
+            definition,
+            key,
+        })
+    }
+    pub fn deletion_column(&self, relation: RelationId, table: &str) -> Result<Option<Column>> {
+        let storage = self.model.query_backend().storage();
+        let table_id = storage
+            .resolve_table(table)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let layout = storage.table(table_id);
+        let query_data_model::storage::RowSemantics::Versioned {
+            deletion: Some(deletion),
+            ..
+        } = layout.row_semantics()
+        else {
+            return Ok(None);
+        };
+        self.stored_column(
+            relation,
+            StoredColumnRef {
+                table: table_id,
+                column: deletion.column,
+            },
+        )
+        .map(Some)
+    }
+
+    pub fn stored_column(&self, relation: RelationId, column: StoredColumnRef) -> Result<Column> {
+        let scope = self
+            .bindings
+            .relation_scope(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.bindings
+            .stored_column(scope, relation, column)
+            .map_err(|error| QueryError::Lowering(error.to_string()))
+    }
+
+    pub fn optional_column(&self, relation: RelationId, name: &str) -> Result<Option<Column>> {
+        let scope = self
+            .bindings
+            .relation_scope(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        let storage = self.model.query_backend().storage();
+        let export = self.bindings.exports(relation).map_err(|error| QueryError::Lowering(error.to_string()))?.iter()
+            .find(|export| matches!(self.bindings.origin(**export), Ok(query_data_model::bindings::ExportOrigin::Stored(column)) if storage.column(column).name() == name));
+        export
+            .map(|export| {
+                self.bindings
+                    .column(scope, relation, *export)
+                    .map_err(|error| QueryError::Lowering(error.to_string()))
+            })
+            .transpose()
+    }
+
+    pub fn column(&self, relation: RelationId, name: &str) -> Result<Column> {
+        self.optional_column(relation, name)?
+            .ok_or_else(|| QueryError::Lowering(format!("relation has no column '{name}'")))
+    }
+
+    pub(super) fn publish(
+        &mut self,
+        parent: ScopeId,
+        body: ScopeId,
+        source: RelationId,
+    ) -> Result<RelationId> {
+        let exports = self
+            .bindings
+            .exports(source)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?
+            .to_vec();
+        for source_export in exports {
+            let column = self
+                .bindings
+                .column(body, source, source_export)
+                .map_err(|error| QueryError::Lowering(error.to_string()))?;
+            self.projection(
+                body,
+                OutputValue::Column(column),
+                self.names.exports[&source_export].clone(),
+            )?;
+        }
+        let relation = self
+            .bindings
+            .derived(parent, body)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.names.relation_name(
+            self.bindings,
+            relation,
+            &self.names.relations[&source].clone(),
+        )?;
+        Ok(relation)
+    }
+
+    pub fn scoped(
+        &mut self,
+        parent: ScopeId,
+        body: ScopeId,
+        source: PhysicalSource,
+    ) -> Result<PhysicalSource> {
+        let relation = self.publish(parent, body, source.relation())?;
+        Ok(PhysicalSource::Scope {
+            relation,
+            input: Box::new(PhysicalPlan {
+                scope: body,
+                source,
+                outputs: vec![],
+            }),
+        })
+    }
+    pub fn child_scope(&mut self, parent: ScopeId) -> Result<ScopeId> {
+        self.bindings
+            .scope(parent)
+            .map_err(|error| QueryError::Lowering(error.to_string()))
+    }
+
     pub fn scan(
         &mut self,
+        scope: ScopeId,
         table: &str,
         alias: &str,
         final_: bool,
@@ -107,11 +274,23 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             .map_err(|error| QueryError::Lowering(error.to_string()))?;
         let relation = self
             .bindings
-            .scan(storage, self.bindings.root(), table)
+            .scan(storage, scope, table)
             .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.names
+            .tables
+            .insert(table, storage.table(table).name().into());
+        self.names.relation_name(self.bindings, relation, alias)?;
+        for (export, column) in self
+            .bindings
+            .exports(relation)
+            .expect("scan exports")
+            .iter()
+            .zip(storage.table(table).columns())
+        {
+            self.names.exports.insert(*export, column.name().into());
+        }
         Ok(PhysicalSource::Scan {
             relation,
-            alias: alias.into(),
             final_,
             relationship,
         })
@@ -119,39 +298,65 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
 
     pub fn current_rows(
         &mut self,
+        scope: ScopeId,
+        scan: PhysicalSource,
         table: &str,
         alias: &str,
         columns: &[String],
         predicates: Vec<Predicate>,
     ) -> Result<PhysicalSource> {
-        let scan = self.scan(table, alias, false, None)?;
-        let table = self.model.table(table).expect("bound scan table");
+        let table = self
+            .model
+            .table(table)
+            .ok_or_else(|| QueryError::Lowering(format!("unknown table '{table}'")))?;
         if *table.row_semantics() == query_data_model::storage::RowSemantics::Current {
             return Ok(scan.filter(predicates));
         }
+        let body = self
+            .bindings
+            .relation_scope(scan.relation())
+            .expect("scan scope");
         let mut outputs = Vec::new();
+        let deletion = self.deletion_column(scan.relation(), table.name())?;
+        let deletion_name = deletion.map(|column| self.names.exports[&column.export()].clone());
         for name in columns
             .first()
             .map(String::as_str)
             .into_iter()
-            .chain([ontology::DELETED_COLUMN])
+            .chain(deletion_name.as_deref())
             .chain(columns.iter().skip(1).map(String::as_str))
         {
             if !outputs
                 .iter()
-                .any(|projection: &Projection| projection.name.name() == name)
+                .any(|projection: &Projection| self.names.exports[&projection.name] == name)
             {
-                outputs.push(Projection::col(alias, name));
+                outputs.push(self.projection(
+                    body,
+                    OutputValue::Column(self.column(scan.relation(), name)?),
+                    name,
+                )?);
             }
         }
+        let relation = self
+            .bindings
+            .derived(scope, body)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
+        self.names.relation_name(self.bindings, relation, alias)?;
+        let live = self
+            .deletion_column(relation, table.name())?
+            .map(super::requirements::live)
+            .into_iter()
+            .collect();
+        let source = self.latest(scan, predicates, vec![])?;
         Ok(PhysicalSource::Scope {
-            alias: alias.into(),
+            relation,
             input: Box::new(PhysicalPlan {
-                source: self.latest(scan, predicates, vec![])?,
+                scope: body,
+                source,
                 outputs,
             }),
         }
-        .filter(vec![super::requirements::live(alias)]))
+        .filter(live))
     }
 
     pub(super) fn latest(
@@ -168,12 +373,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             existing.extend(predicates);
             return self.latest(*input, existing, aggregate_condition);
         }
-        let PhysicalSource::Scan {
-            relation,
-            ref alias,
-            ..
-        } = source
-        else {
+        let PhysicalSource::Scan { relation, .. } = source else {
             return Err(QueryError::Lowering(
                 "latest-row selection requires a stored scan".into(),
             ));
@@ -188,6 +388,13 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             ));
         };
         let layout = self.model.query_backend().storage().table(*table);
+        if *layout.row_semantics() == query_data_model::storage::RowSemantics::Current {
+            return Ok(source.filter(predicates).filter(aggregate_condition));
+        }
+        let scope = self
+            .bindings
+            .relation_scope(relation)
+            .map_err(|error| QueryError::Lowering(error.to_string()))?;
         if layout.sort_key().is_empty() {
             return Err(QueryError::Lowering(format!(
                 "table '{}' has no latest-row key",
@@ -200,7 +407,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             .map(|column| {
                 self.bindings
                     .stored_column(
-                        self.bindings.root(),
+                        scope,
                         relation,
                         query_data_model::storage::StoredColumnRef {
                             table: *table,
@@ -210,9 +417,25 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     .map_err(|error| QueryError::Lowering(error.to_string()))
             })
             .collect::<Result<Vec<_>>>()?;
+        let query_data_model::storage::RowSemantics::Versioned { version, .. } =
+            layout.row_semantics()
+        else {
+            return Err(QueryError::Lowering(
+                "latest-row selection requires versioned storage".into(),
+            ));
+        };
+        let version = self.stored_column(
+            relation,
+            StoredColumnRef {
+                table: *table,
+                column: *version,
+            },
+        )?;
         Ok(PhysicalSource::Latest {
+            version,
+            relation,
+            scope,
             sort_key,
-            alias: alias.clone(),
             aggregate_condition,
             input: Box::new(source.filter(predicates)),
         })
@@ -220,13 +443,14 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
 }
 
 impl PhysicalSource {
-    pub fn scoped(self, alias: &str) -> Self {
-        Self::Scope {
-            alias: alias.into(),
-            input: Box::new(PhysicalPlan {
-                source: self,
-                outputs: vec![],
-            }),
+    pub fn relation(&self) -> RelationId {
+        match self {
+            Self::Scan { relation, .. }
+            | Self::Scope { relation, .. }
+            | Self::Union { relation, .. }
+            | Self::Latest { relation, .. } => *relation,
+            Self::Filter { input, .. } | Self::KeyFilter { input, .. } => input.relation(),
+            Self::Join { .. } => panic!("join has multiple relations"),
         }
     }
     pub(super) fn inner_join(self, right: Self, endpoints: (Column, Column)) -> Self {
@@ -249,13 +473,10 @@ impl PhysicalSource {
         }
     }
 
-    pub(super) fn cascade(self, hop: &Hop, alias: &str, upstream: Option<&PhysicalPlan>) -> Self {
+    pub(super) fn cascade(self, value: Column, upstream: Option<&PhysicalPlan>) -> Self {
         match upstream {
             Some(keys) => Self::KeyFilter {
-                value: Column::new(
-                    alias,
-                    &hop.join_prev.as_ref().expect("cascade join").curr_col,
-                ),
+                value,
                 keys: Box::new(keys.clone()),
                 input: Box::new(self),
             },
@@ -271,32 +492,44 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
     }
 
-    fn node_source(&mut self, alias: &str, final_: bool) -> Result<PhysicalSource> {
+    pub(super) fn node_source(
+        &mut self,
+        scope: ScopeId,
+        alias: &str,
+        final_: bool,
+    ) -> Result<PhysicalSource> {
         let table = self
             .node(alias)?
             .table
             .as_deref()
             .and_then(|table| self.model.table(table))
             .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
-        self.scan(table.name(), alias, final_, None)
+        self.scan(scope, table.name(), alias, final_, None)
     }
 
-    pub(super) fn edge_keys(
-        &mut self,
+    pub(super) fn cascade(
+        &self,
+        source: PhysicalSource,
         index: usize,
-        alias: &str,
-        predicates: Vec<Predicate>,
         upstream: Option<&PhysicalPlan>,
     ) -> Result<PhysicalSource> {
-        let source = PhysicalSource::Filter {
-            predicates,
-            input: Box::new(self.edge_scan(index, alias, false)?),
-        };
-        Ok(source.cascade(&self.hops[index], alias, upstream))
+        if upstream.is_none() {
+            return Ok(source);
+        }
+        let column = self.column(
+            source.relation(),
+            &self.hops[index]
+                .join_prev
+                .as_ref()
+                .expect("cascade join")
+                .curr_col,
+        )?;
+        Ok(source.cascade(column, upstream))
     }
 
     pub(super) fn edge_scan(
         &mut self,
+        scope: ScopeId,
         index: usize,
         alias: &str,
         final_: bool,
@@ -305,14 +538,14 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         let table = self.model.table(&hop.edge_table).ok_or_else(|| {
             QueryError::Lowering(format!("unknown edge table '{}'", hop.edge_table))
         })?;
-        self.scan(table.name(), alias, final_, Some(hop.input_index))
+        self.scan(scope, table.name(), alias, final_, Some(hop.input_index))
     }
 
     pub fn candidate_keys(
         &mut self,
         alias: &str,
         column: &str,
-        extra: Vec<Predicate>,
+        extra: Vec<KeyConstraint>,
     ) -> Result<PhysicalPlan> {
         self.keys(alias, column, false, extra)
     }
@@ -326,28 +559,67 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         alias: &str,
         column: &str,
         final_: bool,
-        extra: Vec<Predicate>,
+        extra: Vec<KeyConstraint>,
     ) -> Result<PhysicalPlan> {
-        let mut predicates = node_predicates(self.node(alias)?);
-        predicates.extend(extra);
+        let scope = self.child_scope(self.bindings.root())?;
+        let source = self.node_source(scope, alias, final_)?;
+        let relation = source.relation();
+        let mut predicates = self.node_predicates(relation, self.node(alias)?)?;
+        for constraint in extra {
+            predicates.push(match constraint {
+                KeyConstraint::Ids(column, values) => {
+                    id_list(self.stored_column(relation, column)?, &values)
+                }
+                KeyConstraint::Membership(column, definition) => {
+                    self.key_membership(self.stored_column(relation, column)?, definition)?
+                }
+            });
+        }
         Ok(PhysicalPlan {
-            source: self.node_source(alias, final_)?.filter(predicates),
-            outputs: vec![Projection::new(
-                OutputValue::Column(Column::new(alias, column)),
+            scope,
+            source: source.filter(predicates),
+            outputs: vec![self.projection(
+                scope,
+                OutputValue::Column(self.column(relation, column)?),
                 DEFAULT_PRIMARY_KEY,
-            )],
+            )?],
         })
     }
 
-    pub fn node_scan(&mut self, alias: &str, narrowing: Option<Predicate>) -> Result<PhysicalPlan> {
-        let mut source = self.node_source(alias, narrowing.is_none())?;
+    pub fn node_scan(
+        &mut self,
+        alias: &str,
+        narrowing: Option<(&str, DefinitionId)>,
+    ) -> Result<PhysicalPlan> {
+        let scope = self.bindings.root();
+        let body = self.child_scope(scope)?;
+        let versioned = self
+            .node(alias)?
+            .table
+            .as_deref()
+            .and_then(|table| self.model.table(table))
+            .is_some_and(|table| {
+                matches!(
+                    table.row_semantics(),
+                    query_data_model::storage::RowSemantics::Versioned { .. }
+                )
+            });
+        let scan_scope = if narrowing.is_some() && versioned {
+            self.child_scope(body)?
+        } else {
+            body
+        };
+        let mut source = self.node_source(scan_scope, alias, narrowing.is_none())?;
+        let relation = source.relation();
         let node = self.node(alias)?;
-        if let Some(narrowing) = narrowing {
+        if let Some((column, definition)) = narrowing {
             let table = self
                 .model
                 .table(node.table.as_deref().expect("bound node table"))
                 .expect("bound node table");
-            let mut predicates = vec![narrowing];
+            let mut predicates =
+                vec![self.key_membership(self.column(relation, column)?, definition)?];
+            let node = self.node(alias)?;
             predicates.extend(
                 node.filters
                     .iter()
@@ -357,18 +629,24 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                             .is_ok_and(|column| table.sort_key().contains(&column))
                             && filter.filter.rhs_column.is_none()
                     })
-                    .map(|(column, filter)| property_filter(&node.alias, column, filter)),
+                    .map(|(column, filter)| {
+                        self.property_filter(self.column(relation, column)?, filter)
+                    })
+                    .collect::<Result<Vec<_>>>()?,
             );
             if table
                 .column_id(DEFAULT_PRIMARY_KEY)
                 .is_ok_and(|column| table.sort_key().contains(&column))
             {
                 if !node.node_ids.is_empty() {
-                    predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
+                    predicates.push(id_list(
+                        self.column(relation, DEFAULT_PRIMARY_KEY)?,
+                        &node.node_ids,
+                    ));
                 }
                 if let Some(range) = &node.id_range {
                     predicates.push(Predicate::IdRange {
-                        column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                        column: self.column(relation, DEFAULT_PRIMARY_KEY)?,
                         start: range.start,
                         end: range.end,
                     });
@@ -376,31 +654,36 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             }
             source = self.latest(source, predicates, vec![])?;
         }
+        let relation = if scan_scope != body {
+            self.publish(body, scan_scope, relation)?
+        } else {
+            relation
+        };
+        if let PhysicalSource::Latest {
+            relation: output, ..
+        } = &mut source
+        {
+            *output = relation;
+        }
+        let predicates = self.node_predicates(relation, self.node(alias)?)?;
+        let source = self.scoped(scope, body, source.filter(predicates))?;
+        let outputs = self.node_outputs(source.relation(), alias)?;
+        self.node_relations.insert(alias.into(), source.relation());
         Ok(PhysicalPlan {
-            source: source.filter(node_predicates(node)).scoped(&node.alias),
-            outputs: node_outputs(node),
+            scope,
+            source,
+            outputs,
         })
     }
 
-    pub fn node_plan(&mut self, alias: &str) -> Result<PhysicalPlan> {
-        let source = self.node_source(alias, true)?;
-        let node = self.node(alias)?;
+    pub fn node_plan(&mut self, scope: ScopeId, alias: &str) -> Result<PhysicalPlan> {
+        let source = self.node_source(scope, alias, true)?;
+        self.node_relations.insert(alias.into(), source.relation());
+        let predicates = self.node_predicates(source.relation(), self.node(alias)?)?;
         Ok(PhysicalPlan {
-            outputs: node_outputs(node),
-            source: source.filter(node_predicates(node)),
+            scope,
+            outputs: self.node_outputs(source.relation(), alias)?,
+            source: source.filter(predicates),
         })
-    }
-}
-
-impl PhysicalPlan {
-    pub fn define(self, hint: impl Into<String>) -> (crate::bindings::Definition, Self) {
-        let definition = crate::bindings::Definition::new(
-            hint,
-            self.outputs
-                .iter()
-                .map(|output| output.name.clone())
-                .collect(),
-        );
-        (definition, self)
     }
 }

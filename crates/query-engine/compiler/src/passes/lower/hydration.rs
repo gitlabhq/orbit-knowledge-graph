@@ -2,12 +2,8 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::physical::PhysicalPlan;
 
-pub(super) fn emit_hydration<T>(
-    nodes: &[PhysicalPlan],
-    limit: u32,
-    lowerer: &super::physical::PhysicalLowerer<'_, T>,
-) -> Result<Node> {
-    let mut arms = nodes.iter().map(|node| lowerer.query(node));
+pub(super) fn emit_hydration(nodes: &[PhysicalPlan], limit: u32) -> Result<Node> {
+    let mut arms = nodes.iter().map(super::physical::physical_query);
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))?;
@@ -80,6 +76,8 @@ mod tests {
             limit,
             ..Default::default()
         };
+        let mut bindings = query_data_model::bindings::QueryBindings::new();
+        let mut names = crate::config::BindingNames::default();
         let plan = plan_clickhouse(
             &input,
             &model,
@@ -88,9 +86,13 @@ mod tests {
                 path_segment_budget: None,
             },
             &Default::default(),
+            &mut bindings,
+            &mut names,
         )
         .unwrap();
-        super::super::emit(&plan, &input, &model).unwrap().ast
+        super::super::emit(&plan, &input, &model, &mut bindings, &mut names)
+            .unwrap()
+            .ast
     }
 
     #[test]

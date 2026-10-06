@@ -8,11 +8,13 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::*;
+use crate::config::BindingNames;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
 use crate::passes::lower::LoweredMetadata;
 use orbit_utils::query_types::SqlType;
+use query_data_model::bindings::QueryBindings;
 
 pub fn cursor_column(i: usize) -> String {
     format!("{}cursor_{i}", internal_column_prefix())
@@ -93,6 +95,8 @@ pub fn apply(
     input: &Input,
     metadata: &LoweredMetadata,
     query_hash: u64,
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
 ) -> Result<usize> {
     let Node::Query(q) = node else {
         return Ok(0);
@@ -113,7 +117,7 @@ pub fn apply(
         return Ok(0);
     }
 
-    append_readback_columns(q, &order_by);
+    append_readback_columns(q, &order_by, bindings, names)?;
 
     let Some(after) = &cursor.after else {
         return Ok(order_by.len());
@@ -131,14 +135,19 @@ pub fn apply(
     if !q.group_by.is_empty() {
         place_seek_in_having(q, &order_by, &values, &nullable);
     } else if !q.union_all.is_empty() || alias_scoped {
-        hoist_page_subquery(q, &order_by, &values, &nullable);
+        hoist_page_subquery(q, &order_by, &values, &nullable, bindings, names)?;
     } else {
         merge_seek_into_where(q, &order_by, &values, &nullable);
     }
     Ok(order_by.len())
 }
 
-fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
+fn append_readback_columns(
+    q: &mut Query,
+    order_by: &[OrderExpr],
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<()> {
     for (i, o) in order_by.iter().enumerate() {
         let expression = match &o.expr {
             Expr::Output(export) => q
@@ -150,14 +159,49 @@ fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
                 .clone(),
             expression => expression.clone(),
         };
-        let hidden = SelectExpr::new(
+        let output_index = q.select.iter().position(|select| select.expr == expression);
+        let hidden = super::lower::context::select(
+            bindings,
+            names,
+            q.scope,
             Expr::func(crate::ast::Function::ToString, vec![expression]),
             cursor_column(i),
-        );
+        )?;
         for arm in &mut q.union_all {
-            arm.select.push(hidden.clone());
+            let index = output_index.ok_or_else(|| {
+                QueryError::PaginationError(
+                    "UNION ordering must reference a projected value".into(),
+                )
+            })?;
+            let expression = arm
+                .select
+                .get(index)
+                .ok_or_else(|| QueryError::PaginationError("UNION output shape mismatch".into()))?
+                .expr
+                .clone();
+            arm.select.push(super::lower::context::select(
+                bindings,
+                names,
+                arm.scope,
+                Expr::func(Function::ToString, vec![expression]),
+                cursor_column(i),
+            )?);
         }
         q.select.push(hidden);
+    }
+    Ok(())
+}
+
+fn expression_for_order(query: &Query, expression: &Expr) -> Expr {
+    match expression {
+        Expr::Output(export) => query
+            .select
+            .iter()
+            .find(|select| select.alias == Some(*export))
+            .expect("ordering output belongs to query")
+            .expr
+            .clone(),
+        expression => expression.clone(),
     }
 }
 
@@ -216,20 +260,68 @@ fn hoist_page_subquery(
     order_by: &[OrderExpr],
     values: &[Option<String>],
     nullable: &[bool],
-) {
-    let outer_order = inner_order_as_outer(order_by);
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<()> {
+    let mut exports = Vec::new();
+    for order in order_by {
+        let expression = expression_for_order(q, &order.expr);
+        let export = q
+            .select
+            .iter()
+            .find(|select| select.expr == expression)
+            .and_then(|select| select.alias)
+            .ok_or_else(|| {
+                QueryError::PaginationError("page ordering must reference a projected value".into())
+            })?;
+        exports.push(export);
+    }
+    let scope = bindings
+        .enclosing_scope(q.scope)
+        .map_err(|error| QueryError::PaginationError(error.to_string()))?;
+    let relation = bindings
+        .derived(scope, q.scope)
+        .map_err(|error| QueryError::PaginationError(error.to_string()))?;
+    names.relation_name(bindings, relation, "_page")?;
+    let outer_order = order_by
+        .iter()
+        .zip(exports)
+        .map(|(order, export)| {
+            bindings
+                .column(scope, relation, export)
+                .map(|column| OrderExpr {
+                    expr: Expr::Column(column),
+                    desc: order.desc,
+                })
+                .map_err(|error| QueryError::PaginationError(error.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let seek = seek_predicate(&outer_order, values, nullable);
-    let mut inner = std::mem::take(q);
+    let mut inner = std::mem::replace(q, Query::new(scope, q.from.clone()));
     let limit = inner.limit.take();
     inner.order_by = vec![];
-    *q = Query {
-        select: vec![SelectExpr::star()],
-        from: TableRef::subquery(inner, "_page"),
-        where_clause: Some(seek),
-        order_by: outer_order,
-        limit,
-        ..Default::default()
-    };
+    let outputs = inner
+        .select
+        .iter()
+        .filter_map(|select| select.alias)
+        .collect::<Vec<_>>();
+    *q = Query::new(scope, TableRef::subquery(inner, relation));
+    for export in outputs {
+        let column = bindings
+            .column(scope, relation, export)
+            .map_err(|error| QueryError::PaginationError(error.to_string()))?;
+        q.select.push(super::lower::context::select(
+            bindings,
+            names,
+            scope,
+            Expr::Column(column),
+            names.exports[&export].clone(),
+        )?);
+    }
+    q.where_clause = Some(seek);
+    q.order_by = outer_order;
+    q.limit = limit;
+    Ok(())
 }
 
 fn merge_seek_into_where(
@@ -243,20 +335,6 @@ fn merge_seek_into_where(
         Some(w) => Expr::and(w, seek),
         None => seek,
     });
-}
-
-/// Column refs lose their table alias once hoisted above the `_page` subquery.
-fn inner_order_as_outer(order_by: &[OrderExpr]) -> Vec<OrderExpr> {
-    order_by
-        .iter()
-        .map(|o| OrderExpr {
-            expr: match &o.expr {
-                Expr::Column { column, .. } => Expr::ident(column.clone()),
-                other => other.clone(),
-            },
-            desc: o.desc,
-        })
-        .collect()
 }
 
 /// `(k0 > v0) OR (k0 = v0 AND k1 > v1) OR ...` with `<` on DESC keys. Values

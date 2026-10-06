@@ -5,7 +5,7 @@ use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::requirements::{Column, OutputValue, Predicate, PrefixPaths, Projection};
 
 pub(super) fn column(value: &Column) -> Expr {
-    Expr::col(&value.source, &value.name)
+    Expr::Column(*value)
 }
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
@@ -39,13 +39,14 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
         },
         Predicate::Property {
             column: value,
+            rhs,
             filter,
             data_type,
-        } => sql::filter_expression(&value.source, &value.name, filter, data_type.as_ref()),
+        } => sql::filter_expression(*value, *rhs, filter, data_type.as_ref()),
         Predicate::Ids {
             column: value,
             values,
-        } => sql::id_list_predicate(&value.source, &value.name, values),
+        } => sql::id_list_predicate(*value, values),
         Predicate::IdRange {
             column: value,
             start,
@@ -54,26 +55,27 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Ge, column(value), Expr::int(*start)),
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
-        Predicate::Live { alias } => sql::deleted_false(alias),
+        Predicate::Live { column: value } => Expr::eq(column(value), Expr::lit(false)),
         Predicate::EntityKind {
             column: value,
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
-        Predicate::RelationshipKinds { alias, kinds } => {
-            sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))
-        }
+        Predicate::RelationshipKinds {
+            column: value,
+            kinds,
+        } => sql::rel_kind_filter(*value, kinds).unwrap_or_else(|| Expr::lit(true)),
         Predicate::Tags {
             column: value,
             values,
-        } => sql::tag_membership(&value.source, &value.name, values),
+        } => sql::tag_membership(*value, values),
         Predicate::Membership {
             column: value,
             definition,
             key,
         } => Expr::InSubquery {
             expr: Box::new(column(value)),
-            cte_name: definition.clone(),
-            column: key.clone(),
+            cte_name: *definition,
+            column: *key,
         },
     }
 }
@@ -90,9 +92,9 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                         Function::Object,
                         columns
                             .iter()
-                            .flat_map(|value| {
+                            .flat_map(|(name, value)| {
                                 [
-                                    Expr::string(&value.name),
+                                    Expr::string(name),
                                     Expr::func(Function::ToString, vec![column(value)]),
                                 ]
                             })
@@ -114,7 +116,7 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
             };
             SelectExpr {
                 expr: expression,
-                alias: Some(value.name.clone()),
+                alias: Some(value.name),
             }
         })
         .collect()
@@ -149,9 +151,9 @@ fn group(value: &Group) -> Expr {
     }
 }
 
-pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, limit: u32) -> Node {
+pub(super) fn aggregation(plan: &AggregationPlan, mut output: Query, limit: u32) -> Node {
     let condition = Expr::conjoin(plan.condition.iter().map(predicate).collect());
-    let select = plan
+    let mut select: Vec<_> = plan
         .group_outputs
         .iter()
         .map(|(value, name)| SelectExpr::exporting(group(value), name))
@@ -174,7 +176,7 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
         .order
         .iter()
         .map(|(export, direction)| {
-            let value = Expr::Output(export.clone());
+            let value = Expr::Output(*export);
             if *direction == OrderDirection::Desc {
                 OrderExpr::desc(value)
             } else {
@@ -182,10 +184,10 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
             }
         })
         .collect();
-    Node::Query(Box::new(output.into_query(
-        select,
-        plan.groups.iter().map(group).collect(),
-        order,
-        limit,
-    )))
+    select.append(&mut output.select);
+    output.select = select;
+    output.group_by = plan.groups.iter().map(group).collect();
+    output.order_by = order;
+    output.limit = Some(limit);
+    Node::Query(Box::new(output))
 }

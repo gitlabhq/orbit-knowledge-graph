@@ -28,5 +28,5 @@ physical:
     planned:
       exact: |
         (Project f.id AS f_id, f.path AS f_path
-          (Filter f.language = 'rust', f._deleted = false
+          (Filter f.language = 'rust'
             (Deduplicate Final (Scan Table(gl_file) AS f))))

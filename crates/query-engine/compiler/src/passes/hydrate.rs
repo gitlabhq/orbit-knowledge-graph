@@ -104,6 +104,7 @@ pub fn generate_hydration_plan(
     emitted: &Node,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
     security_ctx: &SecurityContext,
+    names: &crate::config::BindingNames,
 ) -> HydrationPlan {
     match input.query_type {
         QueryType::Hydration => HydrationPlan::None,
@@ -111,7 +112,7 @@ pub fn generate_hydration_plan(
             HydrationPlan::Dynamic(build_dynamic_specs(input, model, security_ctx))
         }
         QueryType::Aggregation | QueryType::Traversal => {
-            let mut templates = build_static_templates(input, emitted, model);
+            let mut templates = build_static_templates(input, emitted, model, names);
 
             // Aggregation builds its own SELECT, so no {alias}_{col} alias exists to match.
             if input.query_type == QueryType::Aggregation {
@@ -131,8 +132,9 @@ fn build_static_templates(
     input: &Input,
     emitted: &Node,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    names: &crate::config::BindingNames,
 ) -> Vec<HydrationTemplate> {
-    let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
+    let projected = |alias: &str| matches!(emitted, Node::Query(q) if names.selects(q, alias));
     input
         .nodes
         .iter()

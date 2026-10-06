@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 
-use crate::bindings::{Definition, Export};
+use query_data_model::bindings::{ColumnRef, DefinitionId, ExportId, RelationId, ScopeId};
 use regex::Regex;
 use serde_json::Value;
 
@@ -13,11 +13,8 @@ pub use orbit_utils::query_types::{ScalarType, SqlType, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Output(Export),
-    Column {
-        table: String,
-        column: String,
-    },
+    Output(ExportId),
+    Column(ColumnRef),
     /// Bare SQL identifier, used for lambda parameters.
     Identifier(String),
     /// Constant value, type inferred from Value.
@@ -63,8 +60,8 @@ pub enum Expr {
     /// multiple tables against the same set.
     InSubquery {
         expr: Box<Expr>,
-        cte_name: Definition,
-        column: Export,
+        cte_name: DefinitionId,
+        column: ExportId,
     },
     /// Like InSubquery but embeds the query directly instead of referencing
     /// a CTE. Used for narrowing when CTE references would trigger
@@ -169,12 +166,10 @@ pub enum Op {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
     Cte {
-        definition: Definition,
-        alias: String,
+        relation: RelationId,
     },
     Scan {
-        table: String,
-        alias: String,
+        relation: RelationId,
         final_: bool,
         relationship: Option<usize>,
     },
@@ -185,9 +180,15 @@ pub enum TableRef {
         on: Expr,
     },
     /// Used for multi-hop traversals with unrolled joins.
-    Union { queries: Vec<Query>, alias: String },
+    Union {
+        queries: Vec<Query>,
+        relation: RelationId,
+    },
     /// Used internally for deduplication of aggregation queries.
-    Subquery { query: Box<Query>, alias: String },
+    Subquery {
+        query: Box<Query>,
+        relation: RelationId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -201,28 +202,16 @@ pub enum JoinType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectExpr {
     pub expr: Expr,
-    pub alias: Option<Export>,
+    pub alias: Option<ExportId>,
 }
 
 impl SelectExpr {
-    pub fn exporting(expr: Expr, export: &Export) -> Self {
+    pub fn exporting(expr: Expr, export: &ExportId) -> Self {
         Self {
             expr,
-            alias: Some(export.clone()),
+            alias: Some(*export),
         }
     }
-    pub fn new(expr: Expr, alias: impl Into<String>) -> Self {
-        Self {
-            expr,
-            alias: Some(Export::new(alias)),
-        }
-    }
-
-    pub fn col(alias: impl Into<String>, col: impl Into<String>) -> Self {
-        let col = col.into();
-        Self::new(Expr::col(alias, &col), col)
-    }
-
     pub fn star() -> Self {
         Self {
             expr: Expr::Star,
@@ -249,7 +238,7 @@ impl OrderExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cte {
-    pub name: Definition,
+    pub name: DefinitionId,
     pub query: Box<Query>,
     pub recursive: bool,
     /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
@@ -260,20 +249,9 @@ pub struct Cte {
 }
 
 impl Cte {
-    pub fn define(hint: impl Into<String>, query: Query) -> Self {
-        let definition = Definition::new(
-            hint,
-            query
-                .select
-                .iter()
-                .filter_map(|select| select.alias.clone())
-                .collect(),
-        );
-        Self::new(&definition, query)
-    }
-    pub fn new(name: &Definition, query: Query) -> Self {
+    pub fn new(name: &DefinitionId, query: Query) -> Self {
         Self {
-            name: name.clone(),
+            name: *name,
             query: Box::new(query),
             recursive: false,
             materialized: false,
@@ -290,6 +268,7 @@ impl Cte {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
+    pub scope: ScopeId,
     pub ctes: Vec<Cte>,
     pub distinct: bool,
     pub select: Vec<SelectExpr>,
@@ -306,27 +285,13 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn selects_alias(&self, alias: &str) -> bool {
-        self.select.iter().any(|s| {
-            s.alias
-                .as_ref()
-                .is_some_and(|export| export.name() == alias)
-        })
-    }
-}
-
-impl Default for Query {
-    fn default() -> Self {
+    pub fn new(scope: ScopeId, from: TableRef) -> Self {
         Self {
+            scope,
+            from,
             ctes: vec![],
             distinct: false,
             select: vec![],
-            from: TableRef::Scan {
-                table: String::new(),
-                alias: String::new(),
-                final_: false,
-                relationship: None,
-            },
             where_clause: None,
             group_by: vec![],
             having: None,
@@ -391,13 +356,6 @@ pub enum Node {
 }
 
 impl Expr {
-    pub fn col(table: impl Into<String>, column: impl Into<String>) -> Self {
-        Expr::Column {
-            table: table.into(),
-            column: column.into(),
-        }
-    }
-
     pub fn ident(name: impl Into<String>) -> Self {
         Expr::Identifier(name.into())
     }
@@ -495,16 +453,11 @@ impl Expr {
 
     /// Match a column against a set of values.
     /// 0 values → None, 1 value → Eq, N values → IN.
-    pub fn col_in(
-        table: impl Into<String>,
-        column: impl Into<String>,
-        data_type: SqlType,
-        values: Vec<Value>,
-    ) -> Option<Self> {
+    pub fn col_in(column: ColumnRef, data_type: SqlType, values: Vec<Value>) -> Option<Self> {
         match values.len() {
             0 => None,
             1 => Some(Expr::eq(
-                Expr::col(table, column),
+                Expr::Column(column),
                 Expr::Param {
                     data_type,
                     value: values.into_iter().next().unwrap(),
@@ -512,7 +465,7 @@ impl Expr {
             )),
             _ => Some(Expr::binary(
                 Op::In,
-                Expr::col(table, column),
+                Expr::Column(column),
                 Expr::Param {
                     data_type: data_type.to_array(),
                     value: Value::Array(values),
@@ -533,12 +486,6 @@ impl Expr {
 }
 
 impl TableRef {
-    pub fn cte(definition: &Definition, alias: impl Into<String>) -> Self {
-        Self::Cte {
-            definition: definition.clone(),
-            alias: alias.into(),
-        }
-    }
     pub fn with_relationship(mut self, index: usize) -> Self {
         self.set_relationship(index);
         self
@@ -561,24 +508,6 @@ impl TableRef {
         }
     }
 
-    pub fn scan(table: impl Into<String>, alias: impl Into<String>) -> Self {
-        TableRef::Scan {
-            table: table.into(),
-            alias: alias.into(),
-            final_: false,
-            relationship: None,
-        }
-    }
-
-    pub fn scan_final(table: impl Into<String>, alias: impl Into<String>) -> Self {
-        TableRef::Scan {
-            table: table.into(),
-            alias: alias.into(),
-            final_: true,
-            relationship: None,
-        }
-    }
-
     pub fn join(join_type: JoinType, left: TableRef, right: TableRef, on: Expr) -> Self {
         TableRef::Join {
             join_type,
@@ -588,17 +517,14 @@ impl TableRef {
         }
     }
 
-    pub fn union_all(queries: Vec<Query>, alias: impl Into<String>) -> Self {
-        TableRef::Union {
-            queries,
-            alias: alias.into(),
-        }
+    pub fn union_all(queries: Vec<Query>, relation: RelationId) -> Self {
+        TableRef::Union { queries, relation }
     }
 
-    pub fn subquery(query: Query, alias: impl Into<String>) -> Self {
+    pub fn subquery(query: Query, relation: RelationId) -> Self {
         TableRef::Subquery {
             query: Box::new(query),
-            alias: alias.into(),
+            relation,
         }
     }
 }

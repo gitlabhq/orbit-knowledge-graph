@@ -230,7 +230,12 @@ fn check<M: QueryDataModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    build: impl Fn(
+        &Input,
+        plan::HydrationCompileOptions,
+        &mut query_data_model::bindings::QueryBindings,
+        &mut compiler::config::BindingNames,
+    ) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -271,10 +276,13 @@ fn check<M: QueryDataModel>(
             .logical
             .check(&explain::logical(&input), &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered =
-            lower::emit(&plan, &input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let (planned, emitted) = explain::physical(&plan, &lowered.ast, model);
+        let mut bindings = query_data_model::bindings::QueryBindings::new();
+        let mut names = compiler::config::BindingNames::default();
+        let plan = build(&input, options, &mut bindings, &mut names)
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        let lowered = lower::emit(&plan, &input, model, &mut bindings, &mut names)
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        let (planned, emitted) = explain::physical(&plan, &lowered.ast, model, &bindings, &names);
         let assertions = &scenario.physical[backend];
         assert!(
             assertions.planned.is_some() || assertions.emitted.is_some(),
@@ -292,11 +300,16 @@ fn check<M: QueryDataModel>(
         }
         match backend {
             "clickhouse" => {
-                compiler::emit_simple_query(&lowered.ast).unwrap();
+                compiler::emit_simple_query(&lowered.ast, &bindings, &names).unwrap();
             }
             "duckdb" => {
-                compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                    .unwrap();
+                compiler::passes::codegen::duckdb::codegen(
+                    &lowered.ast,
+                    &bindings,
+                    &names,
+                    Default::default(),
+                )
+                .unwrap();
             }
             _ => unreachable!(),
         }
@@ -324,12 +337,31 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, &remote, options, &HashSet::new())
-                }),
-                "duckdb" => check(&scenario, &local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, &local, options, &HashSet::new())
-                }),
+                "clickhouse" => check(
+                    &scenario,
+                    &remote,
+                    backend,
+                    path,
+                    |input, options, bindings, names| {
+                        plan::plan_clickhouse(
+                            input,
+                            &remote,
+                            options,
+                            &HashSet::new(),
+                            bindings,
+                            names,
+                        )
+                    },
+                ),
+                "duckdb" => check(
+                    &scenario,
+                    &local,
+                    backend,
+                    path,
+                    |input, options, bindings, names| {
+                        plan::plan_duckdb(input, &local, options, &HashSet::new(), bindings, names)
+                    },
+                ),
                 _ => panic!("unknown backend {backend}"),
             }
         }
@@ -658,6 +690,8 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             }],
             ..Default::default()
         };
+        let mut bindings = query_data_model::bindings::QueryBindings::new();
+        let mut names = compiler::config::BindingNames::default();
         let plan = plan::plan_clickhouse(
             &input,
             &model,
@@ -666,16 +700,18 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 path_segment_budget: budget,
             },
             &HashSet::new(),
+            &mut bindings,
+            &mut names,
         )
         .unwrap();
-        let lowered = lower::emit(&plan, &input, &model).unwrap();
-        let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
+        let lowered = lower::emit(&plan, &input, &model, &mut bindings, &mut names).unwrap();
+        let (sql, _) = compiler::emit_simple_query(&lowered.ast, &bindings, &names).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
             sql.matches("startsWith").count(),
             if set { 1 } else { expected_paths }
         );
-        let (planned, _) = explain::physical(&plan, &lowered.ast, &model);
+        let (planned, _) = explain::physical(&plan, &lowered.ast, &model, &bindings, &names);
         let mode = if set { "SET" } else { "UNION" };
         Assertions {
             expect: vec![format!(

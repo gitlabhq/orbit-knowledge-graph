@@ -1,23 +1,12 @@
 use ontology::constants::*;
 
+use super::context::PlanningContext;
 use super::helpers::{denorm_tag_values, requested_columns};
 use super::{BoundFilter, NodePlan};
+use crate::error::Result;
 use crate::input::InputFilter;
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct Column {
-    pub source: String,
-    pub name: String,
-}
-
-impl Column {
-    pub fn new(source: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            source: source.into(),
-            name: name.into(),
-        }
-    }
-}
+pub use query_data_model::bindings::ColumnRef as Column;
+use query_data_model::{QueryDataModel, bindings::RelationId};
 
 #[derive(Clone)]
 pub enum Predicate {
@@ -27,6 +16,7 @@ pub enum Predicate {
     },
     Property {
         column: Column,
+        rhs: Option<Column>,
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
     },
@@ -40,14 +30,14 @@ pub enum Predicate {
         end: i64,
     },
     Live {
-        alias: String,
+        column: Column,
     },
     EntityKind {
         column: Column,
         entity: String,
     },
     RelationshipKinds {
-        alias: String,
+        column: Column,
         kinds: Vec<String>,
     },
     Tags {
@@ -56,9 +46,31 @@ pub enum Predicate {
     },
     Membership {
         column: Column,
-        definition: crate::bindings::Definition,
-        key: crate::bindings::Export,
+        definition: query_data_model::bindings::DefinitionId,
+        key: query_data_model::bindings::ExportId,
     },
+}
+
+impl Predicate {
+    pub fn map_columns(&self, mut map: impl FnMut(Column) -> Result<Column>) -> Result<Self> {
+        let mut predicate = self.clone();
+        let column = match &mut predicate {
+            Self::Property { column, rhs, .. } => {
+                *rhs = rhs.map(&mut map).transpose()?;
+                column
+            }
+            Self::PathPrefixes { column, .. }
+            | Self::Ids { column, .. }
+            | Self::IdRange { column, .. }
+            | Self::Live { column }
+            | Self::EntityKind { column, .. }
+            | Self::RelationshipKinds { column, .. }
+            | Self::Tags { column, .. }
+            | Self::Membership { column, .. } => column,
+        };
+        *column = map(*column)?;
+        Ok(predicate)
+    }
 }
 
 #[derive(Clone)]
@@ -69,7 +81,7 @@ pub enum PrefixPaths {
 
 #[derive(Clone)]
 pub enum OutputValue {
-    Properties(Vec<Column>),
+    Properties(Vec<(String, Column)>),
     Column(Column),
     Text(String),
     Depth(u32),
@@ -79,89 +91,96 @@ pub enum OutputValue {
 #[derive(Clone)]
 pub struct Projection {
     pub value: OutputValue,
-    pub name: crate::bindings::Export,
+    pub name: query_data_model::bindings::ExportId,
 }
 
-impl Projection {
-    pub fn new(value: OutputValue, name: impl Into<String>) -> Self {
-        Self {
-            value,
-            name: crate::bindings::Export::new(name),
-        }
-    }
-    pub fn col(alias: &str, column: &str) -> Self {
-        Self::new(OutputValue::Column(Column::new(alias, column)), column)
-    }
-}
-
-pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
-    Predicate::Property {
-        column: Column::new(alias, property),
-        filter: bound.filter.clone(),
-        data_type: bound.data_type,
-    }
-}
-
-pub fn id_list(alias: &str, column: &str, ids: &[i64]) -> Predicate {
+pub fn id_list(column: Column, ids: &[i64]) -> Predicate {
     Predicate::Ids {
-        column: Column::new(alias, column),
+        column,
         values: ids.to_vec(),
     }
 }
 
-pub fn live(alias: &str) -> Predicate {
-    Predicate::Live {
-        alias: alias.into(),
-    }
+pub fn live(column: Column) -> Predicate {
+    Predicate::Live { column }
 }
 
-pub fn relationship_kinds(alias: &str, kinds: &[String]) -> Option<Predicate> {
+pub fn relationship_kinds(column: Column, kinds: &[String]) -> Option<Predicate> {
     (!crate::passes::normalize::is_wildcard(kinds) && !kinds.is_empty()).then(|| {
         Predicate::RelationshipKinds {
-            alias: alias.into(),
+            column,
             kinds: kinds.to_vec(),
         }
     })
 }
 
-pub fn tag_filter(alias: &str, column: &str, key: &str, filter: &InputFilter) -> Option<Predicate> {
-    denorm_tag_values(key, filter).map(|values| Predicate::Tags {
-        column: Column::new(alias, column),
-        values,
-    })
+pub fn tag_filter(column: Column, key: &str, filter: &InputFilter) -> Option<Predicate> {
+    denorm_tag_values(key, filter).map(|values| Predicate::Tags { column, values })
 }
 
-pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
-    let mut predicates: Vec<_> = node
-        .filters
-        .iter()
-        .map(|(property, filter)| property_filter(&node.alias, property, filter))
-        .collect();
-    if !node.node_ids.is_empty() {
-        predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
-    }
-    if let Some(range) = &node.id_range {
-        predicates.push(Predicate::IdRange {
-            column: Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-            start: range.start,
-            end: range.end,
-        });
-    }
-    predicates.push(live(&node.alias));
-    predicates
-}
-
-pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
-    if !node.emit_select {
-        return vec![];
-    }
-    requested_columns(&node.columns)
-        .into_iter()
-        .map(|column| {
-            Projection::new(
-                OutputValue::Column(Column::new(&node.alias, &column)),
-                format!("{}_{column}", node.alias),
-            )
+impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+    pub fn property_filter(&self, column: Column, bound: &BoundFilter) -> Result<Predicate> {
+        let rhs = bound
+            .filter
+            .rhs_column
+            .as_ref()
+            .map(|(_, property)| self.column(column.relation(), property))
+            .transpose()?;
+        Ok(Predicate::Property {
+            column,
+            rhs,
+            filter: bound.filter.clone(),
+            data_type: bound.data_type,
         })
-        .collect()
+    }
+    pub fn node_predicates(&self, relation: RelationId, node: &NodePlan) -> Result<Vec<Predicate>> {
+        let mut predicates: Vec<_> = node
+            .filters
+            .iter()
+            .map(|(property, filter)| {
+                self.property_filter(self.column(relation, property)?, filter)
+            })
+            .collect::<Result<_>>()?;
+        if !node.node_ids.is_empty() {
+            predicates.push(id_list(
+                self.column(relation, DEFAULT_PRIMARY_KEY)?,
+                &node.node_ids,
+            ));
+        }
+        if let Some(range) = &node.id_range {
+            predicates.push(Predicate::IdRange {
+                column: self.column(relation, DEFAULT_PRIMARY_KEY)?,
+                start: range.start,
+                end: range.end,
+            });
+        }
+        if let Some(column) =
+            self.deletion_column(relation, node.table.as_deref().expect("bound node table"))?
+        {
+            predicates.push(live(column));
+        }
+        Ok(predicates)
+    }
+
+    pub fn node_outputs(&mut self, relation: RelationId, alias: &str) -> Result<Vec<Projection>> {
+        let node = self.node(alias)?;
+        if !node.emit_select {
+            return Ok(vec![]);
+        }
+        let columns = requested_columns(&node.columns);
+        let scope = self
+            .bindings
+            .relation_scope(relation)
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+        columns
+            .into_iter()
+            .map(|column| {
+                self.projection(
+                    scope,
+                    OutputValue::Column(self.column(relation, &column)?),
+                    format!("{alias}_{column}"),
+                )
+            })
+            .collect()
+    }
 }

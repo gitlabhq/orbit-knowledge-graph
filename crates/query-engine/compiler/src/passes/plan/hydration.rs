@@ -4,7 +4,7 @@ use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
 use super::physical::PhysicalPlan;
-use super::requirements::{Column, OutputValue, Predicate, PrefixPaths, Projection, id_list};
+use super::requirements::{OutputValue, Predicate, PrefixPaths, id_list};
 use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
 
@@ -73,38 +73,58 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
                 _ => vec![],
             };
             let alias = &node.id;
+            let scope = context.child_scope(context.bindings.root())?;
+            let scan_scope = if model.table(table).is_some_and(|table| {
+                *table.row_semantics() == query_data_model::storage::RowSemantics::Current
+            }) {
+                scope
+            } else {
+                context.child_scope(scope)?
+            };
+            let scan = context.scan(scan_scope, table, alias, false, None)?;
+            let relation = scan.relation();
             let mut predicates = Vec::new();
             if let Some(paths) = path_filter(&node.traversal_paths, options) {
                 predicates.push(Predicate::PathPrefixes {
-                    column: Column::new(alias, ontology::TRAVERSAL_PATH_COLUMN),
+                    column: context.column(relation, ontology::TRAVERSAL_PATH_COLUMN)?,
                     paths,
                 });
             }
             if !node.node_ids.is_empty() {
-                predicates.push(id_list(alias, &node.id_property, &node.node_ids));
+                predicates.push(id_list(
+                    context.column(relation, &node.id_property)?,
+                    &node.node_ids,
+                ));
             }
+            let projected_columns = std::iter::once(node.id_property.clone())
+                .chain(columns.iter().cloned())
+                .collect::<Vec<_>>();
+            let source =
+                context.current_rows(scope, scan, table, alias, &projected_columns, predicates)?;
+            let relation = source.relation();
             let properties = columns
                 .iter()
-                .map(|name| Column::new(alias, name))
-                .collect();
-            let projected_columns = std::iter::once(node.id_property.clone())
-                .chain(columns)
-                .collect::<Vec<_>>();
+                .map(|name| Ok((name.clone(), context.column(relation, name)?)))
+                .collect::<Result<_>>()?;
             Ok(PhysicalPlan {
-                source: context.current_rows(table, alias, &projected_columns, predicates)?,
+                scope,
+                source,
                 outputs: vec![
-                    Projection::new(
-                        OutputValue::Column(Column::new(alias, &node.id_property)),
+                    context.projection(
+                        scope,
+                        OutputValue::Column(context.column(relation, &node.id_property)?),
                         format!("{alias}_{}", node.id_property),
-                    ),
-                    Projection::new(
+                    )?,
+                    context.projection(
+                        scope,
                         OutputValue::Text(entity.clone()),
                         format!("{alias}_entity_type"),
-                    ),
-                    Projection::new(
+                    )?,
+                    context.projection(
+                        scope,
                         OutputValue::Properties(properties),
                         format!("{alias}_props"),
-                    ),
+                    )?,
                 ],
             })
         })

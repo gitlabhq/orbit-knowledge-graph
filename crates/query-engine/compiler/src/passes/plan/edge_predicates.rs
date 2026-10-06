@@ -2,41 +2,47 @@ use std::collections::HashSet;
 
 use ontology::constants::*;
 
-use super::requirements::{
-    Column, Predicate, id_list, live, property_filter, relationship_kinds, tag_filter,
-};
+use super::requirements::{Predicate, id_list, live, relationship_kinds, tag_filter};
 
 use super::context::PlanningContext;
 use super::{DenormalizedKey, Hop};
+use crate::error::Result;
 use query_data_model::QueryDataModel;
+use query_data_model::bindings::RelationId;
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
     pub(super) fn filtered_edge_predicates(
         &self,
-        alias: &str,
+        relation: RelationId,
         hop: &Hop,
         tagged: &mut HashSet<(String, String)>,
-    ) -> Vec<Predicate> {
-        let mut predicates = self.edge_predicates(alias, hop, false);
+    ) -> Result<Vec<Predicate>> {
+        let mut predicates = self.edge_predicates(relation, hop, false)?;
         predicates.extend(
             hop.filters
                 .iter()
-                .map(|(property, filter)| property_filter(alias, property, filter)),
+                .map(|(property, filter)| {
+                    self.property_filter(self.column(relation, property)?, filter)
+                })
+                .collect::<Result<Vec<_>>>()?,
         );
-        self.push_denorm_tags(&mut predicates, hop, alias, tagged);
-        predicates.extend(self.node_id_predicates(alias, hop));
-        predicates
+        self.push_denorm_tags(&mut predicates, hop, relation, tagged)?;
+        predicates.extend(self.node_id_predicates(relation, hop)?);
+        Ok(predicates)
     }
 
     pub(super) fn edge_predicates(
         &self,
-        alias: &str,
+        relation: RelationId,
         hop: &Hop,
         skip_deleted: bool,
-    ) -> Vec<Predicate> {
+    ) -> Result<Vec<Predicate>> {
         let mut predicates = Vec::new();
         let (start, end) = hop.direction.edge_columns();
-        if let Some(filter) = relationship_kinds(alias, &hop.rel_types) {
+        if let Some(filter) = relationship_kinds(
+            self.column(relation, RELATIONSHIP_KIND_COLUMN)?,
+            &hop.rel_types,
+        ) {
             predicates.push(filter);
         }
         for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
@@ -49,13 +55,13 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     TARGET_KIND_COLUMN
                 };
                 predicates.push(Predicate::EntityKind {
-                    column: Column::new(alias, kind),
+                    column: self.column(relation, kind)?,
                     entity: entity.clone(),
                 });
             }
         }
-        if !skip_deleted {
-            predicates.push(live(alias));
+        if !skip_deleted && let Some(column) = self.deletion_column(relation, &hop.edge_table)? {
+            predicates.push(live(column));
         }
         if let Some(table) = self.model.table(&hop.edge_table) {
             let mut seen = HashSet::new();
@@ -66,24 +72,26 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                             && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                             && seen.insert(property)
                         {
-                            predicates.push(property_filter(alias, property, filter));
+                            predicates.push(
+                                self.property_filter(self.column(relation, property)?, filter)?,
+                            );
                         }
                     }
                 }
             }
         }
-        predicates
+        Ok(predicates)
     }
 
     pub(super) fn push_denorm_tags(
         &self,
         predicates: &mut Vec<Predicate>,
         hop: &Hop,
-        alias: &str,
+        relation: RelationId,
         tagged: &mut HashSet<(String, String)>,
-    ) {
+    ) -> Result<()> {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
-            return;
+            return Ok(());
         }
         let (start, end) = hop.direction.edge_columns();
         for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
@@ -112,17 +120,25 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                         .relationships
                         .iter()
                         .any(|relationship| facts.relationships.contains(relationship))
-                    && let Some(predicate) =
-                        tag_filter(alias, &facts.edge_column, &facts.tag_key, &filter.filter)
+                    && let Some(predicate) = tag_filter(
+                        self.column(relation, &facts.edge_column)?,
+                        &facts.tag_key,
+                        &filter.filter,
+                    )
                 {
                     predicates.push(predicate);
                     tagged.insert(tag);
                 }
             }
         }
+        Ok(())
     }
 
-    pub(super) fn node_id_predicates(&self, alias: &str, hop: &Hop) -> Vec<Predicate> {
+    pub(super) fn node_id_predicates(
+        &self,
+        relation: RelationId,
+        hop: &Hop,
+    ) -> Result<Vec<Predicate>> {
         let (start, end) = hop.direction.edge_columns();
         let mut predicates = Vec::new();
         for (node_alias, column) in [(&hop.from_node, start), (&hop.to_node, end)] {
@@ -131,15 +147,15 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             };
             if let Some(range) = &node.id_range {
                 predicates.push(Predicate::IdRange {
-                    column: Column::new(alias, column),
+                    column: self.column(relation, column)?,
                     start: range.start,
                     end: range.end,
                 });
             }
             if !node.node_ids.is_empty() {
-                predicates.push(id_list(alias, column, &node.node_ids));
+                predicates.push(id_list(self.column(relation, column)?, &node.node_ids));
             }
         }
-        predicates
+        Ok(predicates)
     }
 }

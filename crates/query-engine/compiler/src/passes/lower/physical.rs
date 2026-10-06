@@ -1,204 +1,132 @@
 use crate::ast::{Cte, Expr, OrderExpr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
+use query_data_model::bindings::{ColumnRef, ScopeId};
 
 use super::requirements::{column, predicate, projections};
-use super::{EmitOutput, NodeBinding};
-use query_data_model::bindings::{QueryBindings, RelationSource};
-use query_data_model::storage::StorageCatalog;
 
-pub(super) struct PhysicalLowerer<'a, T> {
-    pub bindings: &'a QueryBindings,
-    pub storage: &'a StorageCatalog<T>,
+pub(super) fn execute(scope: ScopeId, plan: &ExecutionPlan) -> Query {
+    let mut query = source(scope, &plan.source);
+    query.select = projections(&plan.outputs);
+    query.ctes = plan
+        .definitions
+        .iter()
+        .map(|(name, body)| Cte::new(name, physical_query(body)))
+        .collect();
+    query
 }
 
-impl<T> PhysicalLowerer<'_, T> {
-    fn latest_row_dedup(
-        &self,
-        alias: &str,
-        keys: &[query_data_model::bindings::ColumnRef],
-    ) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
-        let keys: Vec<_> = keys
-            .iter()
-            .map(|key| {
-                let query_data_model::bindings::ExportOrigin::Stored(column) = self
-                    .bindings
-                    .origin(key.export())
-                    .expect("planned key export")
-                else {
-                    unreachable!("latest-row key must be stored")
-                };
-                Expr::col(alias, self.storage.column(column).name())
-            })
-            .collect();
-        let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
-        order.push(OrderExpr::desc(Expr::col(alias, ontology::VERSION_COLUMN)));
-        (order, Some((1, keys)))
-    }
-    pub(super) fn execute(&self, plan: &ExecutionPlan) -> EmitOutput {
-        let source = self.emit_source(&plan.source);
-        EmitOutput {
-            from: source.from,
-            where_parts: source.predicates,
-            select: projections(&plan.outputs),
-            ctes: plan
-                .definitions
-                .iter()
-                .map(|(name, keys)| Cte::new(name, self.query(keys)))
-                .collect(),
-            nodes: plan
-                .bindings
-                .iter()
-                .map(|binding| {
-                    (
-                        binding.node.clone(),
-                        NodeBinding::source(
-                            &binding.alias,
-                            &binding.column,
-                            binding.joined.then(|| binding.node.clone()),
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
+pub(super) fn physical_query(plan: &PhysicalPlan) -> Query {
+    let mut query = match &plan.source {
+        PhysicalSource::Latest {
+            scope,
+            input,
+            sort_key,
+            version,
+            aggregate_condition,
+            ..
+        } => latest_query(*scope, input, sort_key, *version, aggregate_condition),
+        input => source(plan.scope, input),
+    };
+    query.select = if plan.outputs.is_empty() {
+        vec![SelectExpr::star()]
+    } else {
+        projections(&plan.outputs)
+    };
+    query
+}
 
-    pub(super) fn query(&self, plan: &PhysicalPlan) -> Query {
-        let (source, order_by, limit_by, condition) = match &plan.source {
-            PhysicalSource::Latest {
-                alias,
-                sort_key,
-                input,
-                aggregate_condition,
-            } => {
-                let (order_by, limit_by) = self.latest_row_dedup(alias, sort_key);
-                (
-                    input.as_ref(),
-                    order_by,
-                    limit_by,
-                    aggregate_condition.as_slice(),
-                )
-            }
-            source => (source, vec![], None, [].as_slice()),
-        };
-        let mut output = self.emit_source(source);
-        output.predicates.extend(condition.iter().map(predicate));
-        Query {
-            select: if plan.outputs.is_empty() {
-                vec![SelectExpr::star()]
-            } else {
-                projections(&plan.outputs)
-            },
-            from: output.from,
-            where_clause: Expr::conjoin(output.predicates),
-            order_by,
-            limit_by,
-            ..Default::default()
-        }
-    }
+fn latest_query(
+    scope: ScopeId,
+    input: &PhysicalSource,
+    keys: &[ColumnRef],
+    version: ColumnRef,
+    condition: &[crate::passes::plan::requirements::Predicate],
+) -> Query {
+    let mut query = source(scope, input);
+    query.where_clause = Expr::and_all(
+        std::iter::once(query.where_clause.take())
+            .chain(condition.iter().map(|value| Some(predicate(value)))),
+    );
+    let keys: Vec<_> = keys.iter().map(column).collect();
+    query.select = vec![SelectExpr::star()];
+    query.order_by = keys.iter().cloned().map(OrderExpr::asc).collect();
+    query.order_by.push(OrderExpr::desc(Expr::Column(version)));
+    query.limit_by = Some((1, keys));
+    query
+}
 
-    fn emit_source(&self, plan: &PhysicalSource) -> SourceOutput {
-        match plan {
-            PhysicalSource::Union {
-                alias,
-                arms,
-                relationship,
-            } => {
-                let queries = arms.iter().map(|arm| self.query(arm)).collect();
-                SourceOutput {
-                    from: TableRef::union_all(queries, alias).with_relationship(*relationship),
-                    predicates: vec![],
-                }
-            }
-            PhysicalSource::Scan {
-                relation,
-                alias,
-                final_,
-                relationship,
-            } => SourceOutput {
-                from: TableRef::Scan {
-                    table: {
-                        let RelationSource::Scan(table) = self
-                            .bindings
-                            .source(*relation)
-                            .expect("planned scan binding")
-                        else {
-                            unreachable!("scan source must reference a stored table")
-                        };
-                        self.storage.table(*table).name().to_owned()
-                    },
-                    alias: alias.clone(),
-                    final_: *final_,
-                    relationship: *relationship,
-                },
-                predicates: vec![],
-            },
-            PhysicalSource::Filter { predicates, input } => {
-                let mut output = self.emit_source(input);
-                output.predicates.extend(predicates.iter().map(predicate));
-                output
-            }
-            PhysicalSource::KeyFilter { value, keys, input } => {
-                let mut output = self.emit_source(input);
-                output.predicates.push(Expr::InSelect {
-                    expr: Box::new(column(value)),
-                    query: Box::new(self.query(keys)),
-                });
-                output
-            }
-            PhysicalSource::Scope { alias, input } => SourceOutput {
-                from: TableRef::subquery(self.query(input), alias),
-                predicates: vec![],
-            },
-            PhysicalSource::Latest {
-                alias,
-                input,
-                sort_key,
-                aggregate_condition,
-            } => {
-                let mut output = self.emit_source(input);
-                output
-                    .predicates
-                    .extend(aggregate_condition.iter().map(predicate));
-                let (order_by, limit_by) = self.latest_row_dedup(alias, sort_key);
-                output.from = TableRef::subquery(
-                    Query {
-                        select: vec![SelectExpr::star()],
-                        from: output.from,
-                        where_clause: Expr::conjoin(std::mem::take(&mut output.predicates)),
-                        order_by,
-                        limit_by,
-                        ..Default::default()
-                    },
-                    alias,
-                );
-                output
-            }
-            PhysicalSource::Join {
-                endpoints,
-                predicates,
-                left,
-                right,
-            } => {
-                let mut left = self.emit_source(left);
-                let right = self.emit_source(right);
-                let condition = predicates.iter().map(predicate).fold(
-                    Expr::eq(column(&endpoints.0), column(&endpoints.1)),
-                    Expr::and,
-                );
-                left.from = TableRef::join(
+fn source(scope: ScopeId, plan: &PhysicalSource) -> Query {
+    let from = match plan {
+        PhysicalSource::Scan {
+            relation,
+            final_,
+            relationship,
+        } => TableRef::Scan {
+            relation: *relation,
+            final_: *final_,
+            relationship: *relationship,
+        },
+        PhysicalSource::Union {
+            relation,
+            arms,
+            relationship,
+        } => TableRef::union_all(arms.iter().map(physical_query).collect(), *relation)
+            .with_relationship(*relationship),
+        PhysicalSource::Filter { predicates, input } => {
+            let mut query = source(scope, input);
+            query.where_clause = Expr::and_all(
+                std::iter::once(query.where_clause.take())
+                    .chain(predicates.iter().map(|value| Some(predicate(value)))),
+            );
+            return query;
+        }
+        PhysicalSource::KeyFilter { value, keys, input } => {
+            let mut query = source(scope, input);
+            let filter = Expr::InSelect {
+                expr: Box::new(column(value)),
+                query: Box::new(physical_query(keys)),
+            };
+            query.where_clause = Expr::and_all([query.where_clause.take(), Some(filter)]);
+            return query;
+        }
+        PhysicalSource::Scope { relation, input } => {
+            TableRef::subquery(physical_query(input), *relation)
+        }
+        PhysicalSource::Latest {
+            relation,
+            scope: body,
+            input,
+            sort_key,
+            version,
+            aggregate_condition,
+        } => TableRef::subquery(
+            latest_query(*body, input, sort_key, *version, aggregate_condition),
+            *relation,
+        ),
+        PhysicalSource::Join {
+            endpoints,
+            predicates,
+            left,
+            right,
+        } => {
+            let left = source(scope, left);
+            let right = source(scope, right);
+            let condition = predicates.iter().map(predicate).fold(
+                Expr::eq(column(&endpoints.0), column(&endpoints.1)),
+                Expr::and,
+            );
+            let mut query = Query::new(
+                scope,
+                TableRef::join(
                     crate::ast::JoinType::Inner,
                     left.from,
                     right.from,
                     condition,
-                );
-                left.predicates.extend(right.predicates);
-                left
-            }
+                ),
+            );
+            query.where_clause = Expr::and_all([left.where_clause, right.where_clause]);
+            return query;
         }
-    }
-}
-
-struct SourceOutput {
-    from: TableRef,
-    predicates: Vec<Expr>,
+    };
+    Query::new(scope, from)
 }

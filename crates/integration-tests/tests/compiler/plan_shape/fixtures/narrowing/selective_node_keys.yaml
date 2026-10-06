@@ -31,5 +31,5 @@ physical:
   duckdb:
     planned:
       expect:
-        - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_definition) AS a)))))
+        - (CTE _filter_a (Project a.id AS id (Filter ... (Scan Table(gl_definition) AS a))))
         - (Filter e0.source_id IN _filter_a.id, ... (_))

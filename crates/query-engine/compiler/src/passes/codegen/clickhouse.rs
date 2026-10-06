@@ -15,10 +15,12 @@ use orbit_utils::query_types::ParamBindings;
 
 pub fn codegen(
     ast: &Node,
+    bindings: &query_data_model::bindings::QueryBindings,
+    names: &crate::config::BindingNames,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new(ast)?;
+    let mut ctx = Context::new(bindings, names);
     let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -58,8 +60,12 @@ pub fn codegen(
 /// `check_ast`, `enforce_return`). It must only be used for trusted, internally
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
-pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
-    let mut ctx = Context::new(node)?;
+pub fn emit_simple_query(
+    node: &Node,
+    bindings: &query_data_model::bindings::QueryBindings,
+    names: &crate::config::BindingNames,
+) -> Result<(String, HashMap<String, ParamValue>)> {
+    let mut ctx = Context::new(bindings, names);
     let sql = match node {
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
@@ -70,19 +76,24 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
     Ok((sql, ctx.params.into_map()))
 }
 
-struct Context {
-    definitions: super::DefinitionNames,
+struct Context<'a> {
+    bindings: &'a query_data_model::bindings::QueryBindings,
+    names: &'a crate::config::BindingNames,
     params: ParamBindings,
     error: Option<String>,
 }
 
-impl Context {
-    fn new(node: &Node) -> Result<Self> {
-        Ok(Self {
-            definitions: super::DefinitionNames::new(node)?,
+impl<'a> Context<'a> {
+    fn new(
+        bindings: &'a query_data_model::bindings::QueryBindings,
+        names: &'a crate::config::BindingNames,
+    ) -> Self {
+        Self {
+            bindings,
+            names,
             params: ParamBindings::default(),
             error: None,
-        })
+        }
     }
 
     fn emit_insert(&mut self, ins: &Insert) -> String {
@@ -130,14 +141,12 @@ impl Context {
                 if cte.materialized {
                     Ok(format!(
                         "{} AS MATERIALIZED ({})",
-                        self.definitions.name(&cte.name),
-                        inner
+                        self.names.definitions[&cte.name], inner
                     ))
                 } else {
                     Ok(format!(
                         "{} AS ({})",
-                        self.definitions.name(&cte.name),
-                        inner
+                        self.names.definitions[&cte.name], inner
                     ))
                 }
             })
@@ -155,7 +164,7 @@ impl Context {
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
-                    Some(alias) => format!("{expr} AS {}", alias.name()),
+                    Some(alias) => format!("{expr} AS {}", self.names.exports[alias]),
                     None => expr,
                 }
             })
@@ -228,8 +237,11 @@ impl Context {
 
     fn emit_expr(&mut self, e: &Expr) -> String {
         match e {
-            Expr::Column { table, column } => format!("{table}.{column}"),
-            Expr::Output(export) => export.name().to_owned(),
+            Expr::Column(reference) => {
+                let (table, column) = self.names.column(*reference);
+                format!("{table}.{column}")
+            }
+            Expr::Output(export) => self.names.exports[export].clone(),
             Expr::Identifier(name) => name.clone(),
             Expr::EmptyTupleArray(fields) => format!(
                 "CAST([], 'Array(Tuple({}))')",
@@ -346,8 +358,7 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!(
                     "{e} IN (SELECT {} FROM {})",
-                    column.name(),
-                    self.definitions.name(cte_name)
+                    self.names.exports[column], self.names.definitions[cte_name]
                 )
             }
             Expr::InSelect { expr, query } => {
@@ -408,15 +419,16 @@ impl Context {
 
     fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
         match t {
-            TableRef::Cte { definition, alias } => {
-                Ok(format!("{} AS {alias}", self.definitions.name(definition)))
-            }
+            TableRef::Cte { relation } => Ok(format!(
+                "{} AS {}",
+                self.names.source(self.bindings, *relation)?,
+                self.names.relations[relation]
+            )),
             TableRef::Scan {
-                table,
-                alias,
-                final_,
-                ..
+                relation, final_, ..
             } => {
+                let table = self.names.source(self.bindings, *relation)?;
+                let alias = &self.names.relations[relation];
                 if *final_ {
                     Ok(format!("{table} AS {alias} FINAL"))
                 } else {
@@ -440,14 +452,16 @@ impl Context {
                     ))
                 }
             }
-            TableRef::Union { queries, alias } => {
+            TableRef::Union { queries, relation } => {
+                let alias = &self.names.relations[relation];
                 let union_parts: Vec<String> = queries
                     .iter()
                     .map(|q| self.emit_query(q))
                     .collect::<Result<_>>()?;
                 Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
             }
-            TableRef::Subquery { query, alias } => {
+            TableRef::Subquery { query, relation } => {
+                let alias = &self.names.relations[relation];
                 let inner_sql = self.emit_query(query)?;
                 Ok(format!("({inner_sql}) AS {alias}"))
             }

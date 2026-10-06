@@ -10,19 +10,25 @@ use serde_json::Value;
 
 use crate::ast::visit::visit_queries;
 use crate::ast::{Expr, Function, Node, Op, Query};
+use crate::config::BindingNames;
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::passes::security::{SecurityContext, collect_node_aliases};
+use crate::passes::security::{SecurityContext, collect_aliased_tables};
 #[cfg(test)]
 use ontology::Ontology;
+use query_data_model::bindings::{ColumnRef, QueryBindings};
 
 pub fn check_ast(
     node: &Node,
     ctx: &SecurityContext,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &QueryBindings,
+    names: &BindingNames,
 ) -> Result<()> {
     match node {
-        Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
+        Node::Query(q) => visit_queries(q, &mut |query| {
+            check_query(query, ctx, model, bindings, names)
+        }),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -31,12 +37,21 @@ fn check_query(
     q: &Query,
     ctx: &SecurityContext,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
+    bindings: &QueryBindings,
+    names: &BindingNames,
 ) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from, model);
-    for alias in &aliases {
-        if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
+    let tables = collect_aliased_tables(&q.from, model, bindings, names)?;
+    for (relation, _) in tables {
+        let column = super::lower::context::stored_column(
+            model,
+            bindings,
+            q.scope,
+            relation,
+            TRAVERSAL_PATH_COLUMN,
+        )?;
+        if !has_valid_path_filter(q.where_clause.as_ref(), column, ctx) {
             return Err(QueryError::Security(format!(
-                "post-check failed: alias '{alias}' missing valid traversal_path filter"
+                "post-check failed: relation {relation:?} missing valid traversal_path filter"
             )));
         }
     }
@@ -44,7 +59,7 @@ fn check_query(
     Ok(())
 }
 
-fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
+fn has_valid_path_filter(expr: Option<&Expr>, column: ColumnRef, ctx: &SecurityContext) -> bool {
     let Some(expr) = expr else { return false };
     match expr {
         Expr::Literal(Value::Bool(false))
@@ -57,25 +72,25 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                || has_valid_path_filter(Some(right), alias, ctx)
+            has_valid_path_filter(Some(left), column, ctx)
+                || has_valid_path_filter(Some(right), column, ctx)
         }
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                && has_valid_path_filter(Some(right), alias, ctx)
+            has_valid_path_filter(Some(left), column, ctx)
+                && has_valid_path_filter(Some(right), column, ctx)
         }
         Expr::FuncCall {
             name: Function::StartsWith,
             args,
         } => {
-            let [Expr::Column { table, column }, path] = args.as_slice() else {
+            let [Expr::Column(reference), path] = args.as_slice() else {
                 return false;
             };
-            if table != alias || column != TRAVERSAL_PATH_COLUMN {
+            if *reference != column {
                 return false;
             }
             match path {

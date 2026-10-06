@@ -1,3 +1,4 @@
+use crate::error::{QueryError, Result};
 use query_data_model::QueryDataModel;
 
 use super::helpers::requested_columns;
@@ -19,27 +20,52 @@ pub struct Group {
 pub struct Measure {
     pub function: AggFunction,
     pub argument: Option<Column>,
-    pub name: crate::bindings::Export,
+    pub name: query_data_model::bindings::ExportId,
 }
 
 pub struct AggregationPlan {
     pub groups: Vec<Group>,
-    pub group_outputs: Vec<(Group, crate::bindings::Export)>,
+    pub group_outputs: Vec<(Group, query_data_model::bindings::ExportId)>,
     pub measures: Vec<Measure>,
     pub condition: Vec<Predicate>,
-    pub order: Option<(crate::bindings::Export, OrderDirection)>,
+    pub order: Option<(query_data_model::bindings::ExportId, OrderDirection)>,
 }
 
 impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
-    pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
+    pub fn aggregation(&mut self, execution: &ExecutionPlan) -> Result<AggregationPlan> {
+        let column = |context: &Self, node: &str, property: &str| {
+            let relation = context.node_relations.get(node).ok_or_else(|| {
+                QueryError::Lowering(format!("node '{node}' has no visible relation"))
+            })?;
+            context.column(*relation, property)
+        };
         let aggregation = &self.input.aggregation;
         let mut source = &execution.source;
         let condition = loop {
             match source {
                 PhysicalSource::Latest {
                     aggregate_condition,
+                    relation,
                     ..
-                } => break aggregate_condition.clone(),
+                } => {
+                    break aggregate_condition
+                        .iter()
+                        .map(|predicate| {
+                            predicate.map_columns(|column| {
+                                let query_data_model::bindings::ExportOrigin::Stored(stored) = self
+                                    .bindings
+                                    .origin(column.export())
+                                    .map_err(|error| QueryError::Lowering(error.to_string()))?
+                                else {
+                                    return Err(QueryError::Lowering(
+                                        "latest-row condition requires stored columns".into(),
+                                    ));
+                                };
+                                self.stored_column(*relation, stored)
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                }
                 PhysicalSource::Join { left, .. } => source = left,
                 PhysicalSource::Scope { input, .. } => source = &input.source,
                 PhysicalSource::Filter { input, .. } | PhysicalSource::KeyFilter { input, .. } => {
@@ -68,20 +94,24 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                     ..
                 } => {
                     let group = Group {
-                        column: Column::new(node, property),
+                        column: column(self, node, property)?,
                         truncate: *truncate,
                     };
-                    plan.group_outputs
-                        .push((group.clone(), crate::bindings::Export::new(alias)));
+                    let export = self
+                        .bindings
+                        .project(self.bindings.root())
+                        .map_err(|error| QueryError::Lowering(error.to_string()))?;
+                    self.names.exports.insert(export, alias);
+                    plan.group_outputs.push((group.clone(), export));
                     if !plan.groups.contains(&group) {
                         plan.groups.push(group);
                     }
                 }
                 InputGroupByKey::Node { node, .. } => {
                     if let Some(metadata) = self.nodes.get(node.as_str()) {
-                        for column in requested_columns(&metadata.columns) {
+                        for property in requested_columns(&metadata.columns) {
                             let group = Group {
-                                column: Column::new(node, column),
+                                column: column(self, node, &property)?,
                                 truncate: None,
                             };
                             if !plan.groups.contains(&group) {
@@ -103,19 +133,25 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                             .get(&target.node)
                             .is_some_and(|node| node.hydration == HydrationStrategy::Skip)
                     })
-                    .map(|property| Column::new(&target.node, property)),
+                    .map(|property| column(self, &target.node, property))
+                    .transpose()?,
                 AggExpr::Sum(property)
                 | AggExpr::Avg(property)
                 | AggExpr::Min(property)
                 | AggExpr::Max(property)
                 | AggExpr::Collect(property) => {
-                    Some(Column::new(&property.node, &property.property))
+                    Some(column(self, &property.node, &property.property)?)
                 }
             };
+            let export = self
+                .bindings
+                .project(self.bindings.root())
+                .map_err(|error| QueryError::Lowering(error.to_string()))?;
+            self.names.exports.insert(export, metric.output_name());
             plan.measures.push(Measure {
                 function: metric.expr.function(),
                 argument,
-                name: crate::bindings::Export::new(metric.output_name()),
+                name: export,
             });
         }
         plan.order = aggregation.sort.as_ref().map(|sort| {
@@ -124,10 +160,10 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
                 .iter()
                 .map(|(_, export)| export)
                 .chain(plan.measures.iter().map(|measure| &measure.name))
-                .find(|export| export.name() == sort.column)
+                .find(|export| self.names.exports[export] == sort.column)
                 .expect("validated aggregate output");
-            (export.clone(), sort.direction)
+            (*export, sort.direction)
         });
-        plan
+        Ok(plan)
     }
 }

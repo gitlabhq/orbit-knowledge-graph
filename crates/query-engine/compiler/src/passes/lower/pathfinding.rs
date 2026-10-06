@@ -1,566 +1,581 @@
-//! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
-//! then combines via direct (depth-1) + intersection (forward meets backward).
-//! Dedup is baked into anchor CTEs.
-
-use std::collections::HashMap;
-
 use ontology::constants::*;
-use serde_json::Value;
+use query_data_model::bindings::{ColumnRef, DefinitionId, QueryBindings, ScopeId};
+use query_data_model::{DenormalizedDirection, QueryDataModel};
 
+use super::context::LoweringContext;
+use super::sql::{
+    denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate, rel_kind_filter,
+};
 use crate::ast::*;
-use crate::bindings::Definition;
+use crate::config::BindingNames;
 use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
-
-use super::sql::{
-    dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
-};
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
-    let pf = &plan.operation;
-    let start_np = &plan.nodes[&pf.start];
-    let end_np = &plan.nodes[&pf.end];
-
-    let mut anchor_ctes: Vec<Cte> = Vec::new();
-    let start_anchor = build_anchor(
-        start_np,
-        SOURCE_ID_COLUMN,
-        &mut anchor_ctes,
-        pf.scoped_by_tp,
-    );
-    let end_anchor = build_anchor(end_np, TARGET_ID_COLUMN, &mut anchor_ctes, pf.scoped_by_tp);
-    let path_scope_cte = build_scope_cte(&start_anchor, &end_anchor);
-
-    let start_entity = start_np.entity.as_deref().unwrap_or("");
-    let end_entity = end_np.entity.as_deref().unwrap_or("");
-
-    let start_denorm = build_denorm_tags(
-        query_data_model::DenormalizedDirection::Source,
-        "e1",
-        &start_np.filters,
-        &plan.denormalized,
-    );
-    let end_denorm = build_denorm_tags(
-        query_data_model::DenormalizedDirection::Target,
-        "e1",
-        &end_np.filters,
-        &plan.denormalized,
-    );
-
-    let frontier_opts = FrontierOpts {
-        rel_type_filter: &pf.edge.rel_type_filter,
-        first_hop_filter: &pf.forward_first_hop_filter,
-        anchor_entity: Some(start_entity),
-        edge_tables: &pf.edge.tables,
-        scope_cte: path_scope_cte.as_ref().map(|c| &c.name),
-        include_tp: pf.scoped_by_tp,
-        anchor_denorm_tags: start_denorm,
+pub fn emit_pathfinding(
+    plan: &Plan<PathFinding>,
+    input: &Input,
+    model: &(impl QueryDataModel + ?Sized),
+    bindings: &mut QueryBindings,
+    names: &mut BindingNames,
+) -> Result<(Node, Vec<OrderExpr>)> {
+    let root = bindings.root();
+    let mut context = LoweringContext {
+        model,
+        bindings,
+        names,
     };
-
-    let forward_cte = Cte::define(
-        FORWARD_CTE,
-        build_frontier(
-            start_anchor.edge_filter,
-            pf.forward_depth,
-            FDir::Forward,
-            &frontier_opts,
-        ),
-    );
-    let backward_cte = if pf.backward_depth > 0 {
-        Some(Cte::define(
-            BACKWARD_CTE,
-            build_frontier(
-                end_anchor.edge_filter.clone(),
-                pf.backward_depth,
-                FDir::Backward,
-                &FrontierOpts {
-                    first_hop_filter: &pf.backward_first_hop_filter,
-                    anchor_entity: Some(end_entity),
-                    anchor_denorm_tags: end_denorm,
-                    ..frontier_opts.clone()
-                },
-            ),
-        ))
+    let operation = &plan.operation;
+    let start = &plan.nodes[&operation.start];
+    let end = &plan.nodes[&operation.end];
+    let start_entity = start.entity.as_deref().unwrap_or("");
+    let end_entity = end.entity.as_deref().unwrap_or("");
+    let mut ctes = Vec::new();
+    let start_anchor = anchor(&mut context, root, start, operation.scoped_by_tp, &mut ctes)?;
+    let end_anchor = anchor(&mut context, root, end, operation.scoped_by_tp, &mut ctes)?;
+    let path_scope = scope_definition(&mut context, root, start, end, start_anchor, end_anchor)?;
+    let scope_definition = path_scope.as_ref().map(|cte| cte.name);
+    ctes.extend(path_scope);
+    let forward = frontier(
+        &mut context,
+        root,
+        plan,
+        start,
+        start_anchor,
+        scope_definition,
+        false,
+    )?;
+    let forward_id = forward.name;
+    let forward_outputs: Vec<_> = forward
+        .query
+        .select
+        .iter()
+        .map(|select| select.alias.expect("frontier output"))
+        .collect();
+    ctes.push(forward);
+    let backward_id = if operation.backward_depth > 0 {
+        let backward = frontier(
+            &mut context,
+            root,
+            plan,
+            end,
+            end_anchor,
+            scope_definition,
+            true,
+        )?;
+        let definition = backward.name;
+        ctes.push(backward);
+        let outputs = ctes
+            .last()
+            .unwrap()
+            .query
+            .select
+            .iter()
+            .map(|select| select.alias.expect("frontier output"))
+            .collect::<Vec<_>>();
+        Some((definition, outputs))
     } else {
         None
     };
 
-    let start_tuple = |t: &str| {
-        Expr::func(
-            Function::Tuple,
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(start_entity)],
-        )
+    let direct_scope = context.scope(root)?;
+    let (from, forward) = context.reference(direct_scope, forward_id, FORWARD_ALIAS)?;
+    let col = |index| {
+        context
+            .bindings
+            .column(direct_scope, forward, forward_outputs[index])
+            .map(Expr::Column)
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))
     };
-    let end_tuple = |t: &str| {
-        Expr::func(
-            Function::Tuple,
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(end_entity)],
-        )
-    };
-
-    let direct_query = Query {
-        select: vec![
-            SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-            SelectExpr::new(
-                Expr::func(
-                    Function::ArrayConcat,
-                    vec![
-                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
-                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
-                    ],
-                ),
-                path_column(),
-            ),
-            SelectExpr::new(
-                Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
-                edge_kinds_column(),
-            ),
-        ],
-        from: TableRef::cte(&forward_cte.name, FORWARD_ALIAS),
-        where_clause: Expr::and_all([
-            Some(Expr::binary(
-                Op::Eq,
-                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-                Expr::int(1),
-            )),
-            Some(Expr::eq(
-                Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
-                Expr::string(end_entity),
-            )),
-            endpoint_filter(end_np, &end_anchor, FORWARD_ALIAS, END_ID_COLUMN),
-        ]),
-        ..Default::default()
-    };
-
-    let intersection_query = backward_cte.as_ref().map(|backward_cte| Query {
-        select: vec![
-            SelectExpr::new(
-                Expr::binary(
-                    Op::Add,
-                    Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-                    Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
-                ),
-                DEPTH_COLUMN,
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    Function::ArrayConcat,
-                    vec![
-                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
-                        Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
-                        Expr::func(
-                            Function::ArrayReverse,
-                            vec![Expr::col(BACKWARD_ALIAS, PATH_NODES_COLUMN)],
-                        ),
-                        Expr::func(Function::Array, vec![end_tuple(BACKWARD_ALIAS)]),
-                    ],
-                ),
-                path_column(),
-            ),
-            SelectExpr::new(
-                Expr::func(
-                    Function::ArrayConcat,
-                    vec![
-                        Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
-                        Expr::func(
-                            Function::ArrayReverse,
-                            vec![Expr::col(BACKWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN)],
-                        ),
-                    ],
-                ),
-                edge_kinds_column(),
-            ),
-        ],
-        from: {
-            let mut join_cond = Expr::eq(
-                Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
-                Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
-            );
-            if pf.scoped_by_tp {
-                join_cond = Expr::and(
-                    join_cond,
-                    Expr::eq(
-                        Expr::col(FORWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
-                        Expr::col(BACKWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
-                    ),
-                );
-            }
-            TableRef::join(
-                JoinType::Inner,
-                TableRef::cte(&forward_cte.name, FORWARD_ALIAS),
-                TableRef::cte(&backward_cte.name, BACKWARD_ALIAS),
-                join_cond,
-            )
-        },
-        where_clause: Some(Expr::binary(
-            Op::Le,
-            Expr::binary(
-                Op::Add,
-                Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
-                Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
-            ),
-            Expr::int(pf.max_depth as i64),
-        )),
-        ..Default::default()
-    });
-
-    let paths_union = if let Some(intersection) = intersection_query {
-        TableRef::union_all(vec![direct_query, intersection], PATHS_ALIAS)
-    } else {
-        TableRef::subquery(direct_query, PATHS_ALIAS)
-    };
-
-    let order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
-    Ok(Node::Query(Box::new(Query {
-        ctes: {
-            let mut ctes = anchor_ctes;
-            if let Some(scope) = path_scope_cte {
-                ctes.push(scope);
-            }
-            ctes.push(forward_cte);
-            if let Some(bc) = backward_cte {
-                ctes.push(bc);
-            }
-            ctes
-        },
-        select: vec![
-            SelectExpr::col(PATHS_ALIAS, path_column()),
-            SelectExpr::col(PATHS_ALIAS, edge_kinds_column()),
-            SelectExpr::col(PATHS_ALIAS, DEPTH_COLUMN),
-        ],
-        from: paths_union,
-        order_by,
-        limit: Some(input.limit),
-        ..Default::default()
-    })))
-}
-
-#[derive(Clone)]
-struct Anchor {
-    edge_filter: Option<Expr>,
-    cte_name: Option<Definition>,
-    has_tp: bool,
-}
-
-fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: bool) -> Anchor {
-    let alias = &np.alias;
-    let table = np.table.as_deref().unwrap_or("");
-    let has_tp = np.has_traversal_path;
-
-    if !force_cte && !np.node_ids.is_empty() {
-        return Anchor {
-            edge_filter: Expr::col_in(
-                "e1",
-                edge_col,
-                SqlType::Int64,
-                np.node_ids.iter().map(|id| Value::from(*id)).collect(),
-            ),
-            cte_name: None,
-            has_tp: false,
-        };
-    }
-
-    let has_conds = !np.node_ids.is_empty() || !np.filters.is_empty() || np.id_range.is_some();
-    if !has_conds {
-        return Anchor {
-            edge_filter: None,
-            cte_name: None,
-            has_tp: false,
-        };
-    }
-
-    let mut scan_where = Vec::new();
-    for (prop, filter) in &np.filters {
-        scan_where.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        scan_where.push(id_range_predicate(alias, range));
-    }
-
-    let mut select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
-    if has_tp {
-        select.push(SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN));
-    }
-    select.push(SelectExpr::col(alias, DELETED_COLUMN));
-
-    let dedup_scan = dedup_query(alias, table, select, scan_where);
-
-    let mut outer_select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
-    if has_tp {
-        outer_select.push(SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN));
-    }
-
-    let cte_query = Query {
-        select: outer_select,
-        from: TableRef::Subquery {
-            query: Box::new(dedup_scan),
-            alias: alias.to_string(),
-        },
-        where_clause: Some(deleted_false(alias)),
-        limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
-        ..Default::default()
-    };
-    let definition = Cte::define(node_filter_cte(alias), cte_query);
-    let cte_name = definition.name.clone();
-    ctes.push(definition);
-
-    Anchor {
-        edge_filter: Some(Expr::InSubquery {
-            expr: Box::new(Expr::col("e1", edge_col)),
-            cte_name: cte_name.clone(),
-            column: cte_name.exports()[0].clone(),
-        }),
-        cte_name: Some(cte_name),
-        has_tp,
-    }
-}
-
-fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
-    let start_cte = start.cte_name.as_ref()?;
-    let end_cte = end.cte_name.as_ref()?;
-    if !start.has_tp || !end.has_tp {
-        return None;
-    }
-    // UNION, not intersect: endpoints at different namespace depths are linked
-    // by edges carrying only the deeper tp, so equality yields an empty scope.
-    let arm = |cte: &Definition, alias: &str| Query {
-        select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::cte(cte, alias),
-        group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
-        ..Default::default()
-    };
-    Some(Cte::define(
-        PATH_SCOPE_CTE,
-        Query {
-            union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
-            ..arm(start_cte, PATH_SCOPE_START_ALIAS)
-        },
-    ))
-}
-
-const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
-const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
-const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
-
-fn endpoint_filter(np: &NodePlan, anchor: &Anchor, alias: &str, col: &str) -> Option<Expr> {
-    if !np.node_ids.is_empty() {
-        return Expr::col_in(
-            alias,
-            col,
-            SqlType::Int64,
-            np.node_ids.iter().map(|id| Value::from(*id)).collect(),
-        );
-    }
-    if !np.filters.is_empty() || np.id_range.is_some() {
-        let cte_name = anchor
-            .cte_name
-            .clone()
-            .expect("filtered endpoint has an anchor definition");
-        return Some(Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, col)),
-            column: cte_name.exports()[0].clone(),
-            cte_name,
-        });
-    }
-    None
-}
-
-fn scope_filter(alias: &str, cte_name: &Definition) -> Expr {
-    Expr::InSubquery {
-        expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
-        cte_name: cte_name.clone(),
-        column: cte_name.exports()[0].clone(),
-    }
-}
-
-#[derive(Clone, Copy)]
-enum FDir {
-    Forward,
-    Backward,
-}
-
-#[derive(Clone)]
-struct FrontierOpts<'a> {
-    rel_type_filter: &'a Option<Vec<String>>,
-    first_hop_filter: &'a Option<Vec<String>>,
-    anchor_entity: Option<&'a str>,
-    edge_tables: &'a [String],
-    scope_cte: Option<&'a Definition>,
-    include_tp: bool,
-    anchor_denorm_tags: Vec<Expr>,
-}
-
-fn build_frontier(
-    anchor_cond: Option<Expr>,
-    max_depth: u32,
-    direction: FDir,
-    opts: &FrontierOpts<'_>,
-) -> Query {
-    let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| build_frontier_arm(anchor_cond.clone(), depth, direction, opts))
-        .collect();
-    if arms.len() == 1 {
-        arms.into_iter().next().unwrap()
-    } else {
-        let mut first = arms.into_iter();
-        let base = first.next().unwrap();
-        Query {
-            union_all: first.collect(),
-            ..base
-        }
-    }
-}
-
-fn build_frontier_arm(
-    anchor_cond: Option<Expr>,
-    depth: u32,
-    direction: FDir,
-    opts: &FrontierOpts<'_>,
-) -> Query {
-    let (anchor_col, next_col, next_kind_col) = match direction {
-        FDir::Forward => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
-        FDir::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
-    };
-
-    let last = format!("e{depth}");
-
-    let mut from = edge_table_scan(opts.edge_tables, "e1");
-    // Use specific first-hop filter if provided, otherwise fall back to
-    // the general rel_type_filter so e1 isn't left unfiltered.
-    let effective_first = if opts.first_hop_filter.is_some() {
-        opts.first_hop_filter
-    } else {
-        opts.rel_type_filter
-    };
-    let mut first_type_cond = type_cond_for("e1", effective_first);
-    for i in 2..=depth {
-        let prev = format!("e{}", i - 1);
-        let curr = format!("e{i}");
-        let edge_tbl = edge_table_scan(opts.edge_tables, &curr);
-        let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
-        if opts.include_tp {
-            join_cond = Expr::and(
-                join_cond,
-                Expr::eq(
-                    Expr::col(&prev, TRAVERSAL_PATH_COLUMN),
-                    Expr::col(&curr, TRAVERSAL_PATH_COLUMN),
-                ),
-            );
-        }
-        if let Some(tc) = type_cond_for(&curr, opts.rel_type_filter) {
-            join_cond = Expr::and(join_cond, tc);
-        }
-        if let Some(sc) = opts.scope_cte {
-            join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
-        }
-        join_cond = Expr::and(join_cond, deleted_false(&curr));
-        from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
-    }
-
-    let path_range = match direction {
-        FDir::Forward => 1..=depth,
-        FDir::Backward => 1..=depth.saturating_sub(1),
-    };
-    let tuples: Vec<Expr> = path_range
-        .map(|i| {
-            let a = format!("e{i}");
-            Expr::func(
-                Function::Tuple,
-                vec![Expr::col(&a, next_col), Expr::col(&a, next_kind_col)],
-            )
-        })
-        .collect();
-    let path_nodes = if tuples.is_empty() {
-        Expr::EmptyTupleArray(vec![SqlType::Int64, SqlType::String])
-    } else {
-        Expr::func(Function::Array, tuples)
-    };
-
-    let edge_kinds = Expr::func(
-        Function::Array,
-        (1..=depth)
-            .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
-            .collect(),
+    let start_tuple = Expr::func(Function::Tuple, vec![col(0)?, Expr::string(start_entity)]);
+    let direct_path = Expr::func(
+        Function::ArrayConcat,
+        vec![Expr::func(Function::Array, vec![start_tuple]), col(3)?],
     );
-
-    let anchor_kind_col = match direction {
-        FDir::Forward => SOURCE_KIND_COLUMN,
-        FDir::Backward => TARGET_KIND_COLUMN,
-    };
-    let anchor_kind_cond = opts
-        .anchor_entity
-        .map(|e| Expr::eq(Expr::col("e1", anchor_kind_col), Expr::string(e)));
-    let scope_cond = opts.scope_cte.map(|sc| scope_filter("e1", sc));
-
-    let mut select = vec![
-        SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
-        SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
-        SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
-        SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-        SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
-        SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+    let kinds = col(4)?;
+    let depth = col(5)?;
+    let end_kind = col(2)?;
+    let end_column = context
+        .bindings
+        .column(direct_scope, forward, forward_outputs[1])
+        .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+    let endpoint = endpoint_filter(&mut context, direct_scope, end_column, end, end_anchor)?;
+    let mut direct = Query::new(direct_scope, from);
+    direct.select = vec![
+        context.select(direct_scope, depth.clone(), DEPTH_COLUMN)?,
+        context.select(direct_scope, direct_path, path_column())?,
+        context.select(direct_scope, kinds, edge_kinds_column())?,
     ];
-    if opts.include_tp {
-        select.push(SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN));
-    }
-
-    let deleted_cond = Some(deleted_false("e1"));
-
-    let mut all_conds = vec![
-        anchor_cond,
-        first_type_cond.take(),
-        anchor_kind_cond,
-        scope_cond,
-        deleted_cond,
-    ];
-    all_conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
-
-    Query {
-        select,
-        from,
-        where_clause: Expr::and_all(all_conds),
-        ..Default::default()
-    }
-}
-
-fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {
-    rel_kind_filter(alias, type_filter.as_deref().unwrap_or(&[]))
-}
-
-fn build_denorm_tags(
-    direction: query_data_model::DenormalizedDirection,
-    edge_alias: &str,
-    filters: &[(String, crate::passes::plan::BoundFilter)],
-    denormalized: &HashMap<
-        query_data_model::DenormalizedKey,
-        query_data_model::DenormalizedProperty,
-    >,
-) -> Vec<Expr> {
-    let mut exprs = Vec::new();
-    for (_, filter) in filters {
-        let Some(property) = filter.property else {
-            continue;
+    direct.where_clause = Expr::and_all([
+        Some(Expr::eq(depth, Expr::int(1))),
+        Some(Expr::eq(end_kind, Expr::string(end_entity))),
+        endpoint,
+    ]);
+    let path_outputs = direct
+        .select
+        .iter()
+        .map(|select| select.alias.expect("path output"))
+        .collect::<Vec<_>>();
+    let mut paths = vec![direct];
+    if let Some((backward_id, backward_outputs)) = backward_id {
+        let scope = context.scope(root)?;
+        let (left, forward) = context.reference(scope, forward_id, FORWARD_ALIAS)?;
+        let (right, backward) = context.reference(scope, backward_id, BACKWARD_ALIAS)?;
+        let col = |relation, index| {
+            let exports = if relation == forward {
+                &forward_outputs
+            } else {
+                &backward_outputs
+            };
+            context
+                .bindings
+                .column(scope, relation, exports[index])
+                .map(Expr::Column)
+                .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))
         };
-        let key = query_data_model::DenormalizedKey {
-            property,
-            direction,
-        };
-        if let Some(facts) = denormalized.get(&key)
-            && let Some(expr) = denorm_tag_expr(
-                edge_alias,
-                &facts.edge_column,
-                &facts.tag_key,
-                &filter.filter,
-            )
-        {
-            exprs.push(expr);
+        let depth = Expr::binary(Op::Add, col(forward, 5)?, col(backward, 5)?);
+        let mut on = Expr::eq(col(forward, 1)?, col(backward, 1)?);
+        if operation.scoped_by_tp {
+            on = Expr::and(on, Expr::eq(col(forward, 6)?, col(backward, 6)?));
         }
+        let start_tuple = Expr::func(
+            Function::Tuple,
+            vec![col(forward, 0)?, Expr::string(start_entity)],
+        );
+        let end_tuple = Expr::func(
+            Function::Tuple,
+            vec![col(backward, 0)?, Expr::string(end_entity)],
+        );
+        let path = Expr::func(
+            Function::ArrayConcat,
+            vec![
+                Expr::func(Function::Array, vec![start_tuple]),
+                col(forward, 3)?,
+                Expr::func(Function::ArrayReverse, vec![col(backward, 3)?]),
+                Expr::func(Function::Array, vec![end_tuple]),
+            ],
+        );
+        let kinds = Expr::func(
+            Function::ArrayConcat,
+            vec![
+                col(forward, 4)?,
+                Expr::func(Function::ArrayReverse, vec![col(backward, 4)?]),
+            ],
+        );
+        let mut intersection = Query::new(scope, TableRef::join(JoinType::Inner, left, right, on));
+        intersection.select = vec![
+            context.select(scope, depth.clone(), DEPTH_COLUMN)?,
+            context.select(scope, path, path_column())?,
+            context.select(scope, kinds, edge_kinds_column())?,
+        ];
+        intersection.where_clause = Some(Expr::binary(
+            Op::Le,
+            depth,
+            Expr::int(operation.max_depth as i64),
+        ));
+        paths.push(intersection);
     }
-    exprs
+    let (from, relation) = if paths.len() == 1 {
+        context.derived(root, paths.pop().unwrap(), PATHS_ALIAS)?
+    } else {
+        context.union(root, paths, PATHS_ALIAS)?
+    };
+    let mut query = Query::new(root, from);
+    query.ctes = ctes;
+    for (index, name) in [
+        (1, path_column()),
+        (2, edge_kinds_column()),
+        (0, DEPTH_COLUMN),
+    ] {
+        let column = context
+            .bindings
+            .column(root, relation, path_outputs[index])
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+        query
+            .select
+            .push(context.select(root, Expr::Column(column), name)?);
+    }
+    query.order_by = vec![OrderExpr::asc(Expr::Column(
+        context
+            .bindings
+            .column(root, relation, path_outputs[0])
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?,
+    ))];
+    query.limit = Some(input.limit);
+    let stable_order = [path_outputs[1], path_outputs[2]]
+        .into_iter()
+        .map(|export| {
+            let column = context
+                .bindings
+                .column(root, relation, export)
+                .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+            Ok(OrderExpr::asc(Expr::func(
+                Function::ToString,
+                vec![Expr::Column(column)],
+            )))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((Node::Query(Box::new(query)), stable_order))
+}
+
+fn anchor<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    root: ScopeId,
+    node: &NodePlan,
+    force: bool,
+    ctes: &mut Vec<Cte>,
+) -> Result<Option<DefinitionId>> {
+    if (!force && !node.node_ids.is_empty())
+        || (node.node_ids.is_empty() && node.filters.is_empty() && node.id_range.is_none())
+    {
+        return Ok(None);
+    }
+    let body = context.scope(root)?;
+    let scan_scope = context.scope(body)?;
+    let (from, scan) = context.scan(
+        scan_scope,
+        node.table.as_deref().unwrap_or(""),
+        &node.alias,
+        true,
+    )?;
+    let mut predicates = Vec::new();
+    for (name, filter) in &node.filters {
+        predicates.push(filter_to_expr(
+            context.column(scan_scope, scan, name)?,
+            filter
+                .filter
+                .rhs_column
+                .as_ref()
+                .map(|(_, name)| context.column(scan_scope, scan, name))
+                .transpose()?,
+            filter,
+        ));
+    }
+    let id = context.column(scan_scope, scan, DEFAULT_PRIMARY_KEY)?;
+    if !node.node_ids.is_empty() {
+        predicates.push(id_list_predicate(id, &node.node_ids));
+    }
+    if let Some(range) = &node.id_range {
+        predicates.push(id_range_predicate(id, range));
+    }
+    let deletion = context.deletion(scan_scope, scan)?;
+    let mut inner = Query::new(scan_scope, from);
+    let mut columns = vec![DEFAULT_PRIMARY_KEY];
+    if node.has_traversal_path {
+        columns.push(TRAVERSAL_PATH_COLUMN);
+    }
+    for name in &columns {
+        context.project(&mut inner, scan, name, name)?;
+    }
+    let deleted_export = if let Some(Expr::BinaryOp { left, .. }) = deletion {
+        let Expr::Column(column) = *left else {
+            unreachable!()
+        };
+        let name = context.names.exports[&column.export()].clone();
+        let select = context.select(scan_scope, Expr::Column(column), &name)?;
+        let export = select.alias.unwrap();
+        inner.select.push(select);
+        Some(export)
+    } else {
+        None
+    };
+    inner.where_clause = Expr::conjoin(predicates);
+    let (from, relation) = context.derived(body, inner, &node.alias)?;
+    let mut query = Query::new(body, from);
+    for name in columns {
+        context.project(&mut query, relation, name, name)?;
+    }
+    if let Some(export) = deleted_export {
+        let column = context
+            .bindings
+            .column(body, relation, export)
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+        query.where_clause = Some(super::sql::deleted_false(column));
+    }
+    query.limit = Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32);
+    let cte = context.define(root, query, &node_filter_cte(&node.alias))?;
+    let definition = cte.name;
+    ctes.push(cte);
+    Ok(Some(definition))
+}
+
+fn scope_definition<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    root: ScopeId,
+    start: &NodePlan,
+    end: &NodePlan,
+    start_anchor: Option<DefinitionId>,
+    end_anchor: Option<DefinitionId>,
+) -> Result<Option<Cte>> {
+    let (Some(start_anchor), Some(end_anchor)) = (start_anchor, end_anchor) else {
+        return Ok(None);
+    };
+    if !start.has_traversal_path || !end.has_traversal_path {
+        return Ok(None);
+    }
+    let body = context.scope(root)?;
+    let mut arms = Vec::new();
+    for (definition, hint) in [
+        (start_anchor, "_path_scope_start"),
+        (end_anchor, "_path_scope_end"),
+    ] {
+        let scope = context.scope(body)?;
+        let (from, relation) = context.reference(scope, definition, hint)?;
+        let mut arm = Query::new(scope, from);
+        context.project(
+            &mut arm,
+            relation,
+            TRAVERSAL_PATH_COLUMN,
+            TRAVERSAL_PATH_COLUMN,
+        )?;
+        arm.group_by = vec![Expr::Column(context.column(
+            scope,
+            relation,
+            TRAVERSAL_PATH_COLUMN,
+        )?)];
+        arms.push(arm);
+    }
+    let (from, relation) = context.union(body, arms, "_path_scope")?;
+    let mut query = Query::new(body, from);
+    context.project(
+        &mut query,
+        relation,
+        TRAVERSAL_PATH_COLUMN,
+        TRAVERSAL_PATH_COLUMN,
+    )?;
+    context
+        .define(root, query, "_path_scope_traversal_paths")
+        .map(Some)
+}
+
+fn endpoint_filter<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    scope: ScopeId,
+    column: ColumnRef,
+    node: &NodePlan,
+    anchor: Option<DefinitionId>,
+) -> Result<Option<Expr>> {
+    if !node.node_ids.is_empty() {
+        return Ok(Some(id_list_predicate(column, &node.node_ids)));
+    }
+    anchor
+        .map(|definition| context.membership(scope, column, definition))
+        .transpose()
+}
+
+fn frontier<M: QueryDataModel + ?Sized>(
+    context: &mut LoweringContext<'_, M>,
+    root: ScopeId,
+    plan: &Plan<PathFinding>,
+    node: &NodePlan,
+    anchor: Option<DefinitionId>,
+    path_scope: Option<DefinitionId>,
+    backward: bool,
+) -> Result<Cte> {
+    let body = context.scope(root)?;
+    let operation = &plan.operation;
+    let max_depth = if backward {
+        operation.backward_depth
+    } else {
+        operation.forward_depth
+    };
+    let mut arms = Vec::new();
+    for depth in 1..=max_depth {
+        let scope = context.scope(body)?;
+        let (anchor_col, next_col, kind_col, anchor_kind) = if backward {
+            (
+                TARGET_ID_COLUMN,
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                TARGET_KIND_COLUMN,
+            )
+        } else {
+            (
+                SOURCE_ID_COLUMN,
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                SOURCE_KIND_COLUMN,
+            )
+        };
+        let (mut from, first) = context.edge_scan(scope, &operation.edge.tables, "e1")?;
+        let mut scans = vec![first];
+        let first_filter = if backward {
+            &operation.backward_first_hop_filter
+        } else {
+            &operation.forward_first_hop_filter
+        };
+        let types = first_filter
+            .as_ref()
+            .or(operation.edge.rel_type_filter.as_ref());
+        let mut predicates = Vec::new();
+        if let Some(types) = types {
+            predicates.extend(rel_kind_filter(
+                context.column(scope, first, RELATIONSHIP_KIND_COLUMN)?,
+                types,
+            ));
+        }
+        let anchor_column = context.column(scope, first, anchor_col)?;
+        if let Some(definition) = anchor {
+            predicates.push(context.membership(scope, anchor_column, definition)?);
+        } else if !node.node_ids.is_empty() {
+            predicates.push(id_list_predicate(anchor_column, &node.node_ids));
+        }
+        predicates.push(Expr::eq(
+            Expr::Column(context.column(scope, first, anchor_kind)?),
+            Expr::string(node.entity.as_deref().unwrap_or("")),
+        ));
+        if let Some(definition) = path_scope {
+            predicates.push(context.membership(
+                scope,
+                context.column(scope, first, TRAVERSAL_PATH_COLUMN)?,
+                definition,
+            )?);
+        }
+        if operation.edge.tables.len() == 1 {
+            predicates.extend(context.deletion(scope, first)?);
+        }
+        let direction = if backward {
+            DenormalizedDirection::Target
+        } else {
+            DenormalizedDirection::Source
+        };
+        for (_, filter) in &node.filters {
+            let Some(property) = filter.property else {
+                continue;
+            };
+            if let Some(facts) = plan.denormalized.get(&query_data_model::DenormalizedKey {
+                property,
+                direction,
+            }) {
+                predicates.extend(denorm_tag_expr(
+                    context.column(scope, first, &facts.edge_column)?,
+                    &facts.tag_key,
+                    &filter.filter,
+                ));
+            }
+        }
+        for step in 2..=depth {
+            let (right, relation) =
+                context.edge_scan(scope, &operation.edge.tables, &format!("e{step}"))?;
+            let previous = *scans.last().unwrap();
+            let mut conditions = vec![Expr::eq(
+                Expr::Column(context.column(scope, previous, next_col)?),
+                Expr::Column(context.column(scope, relation, anchor_col)?),
+            )];
+            if operation.scoped_by_tp {
+                conditions.push(Expr::eq(
+                    Expr::Column(context.column(scope, previous, TRAVERSAL_PATH_COLUMN)?),
+                    Expr::Column(context.column(scope, relation, TRAVERSAL_PATH_COLUMN)?),
+                ));
+            }
+            if let Some(types) = &operation.edge.rel_type_filter {
+                conditions.extend(rel_kind_filter(
+                    context.column(scope, relation, RELATIONSHIP_KIND_COLUMN)?,
+                    types,
+                ));
+            }
+            if let Some(definition) = path_scope {
+                conditions.push(context.membership(
+                    scope,
+                    context.column(scope, relation, TRAVERSAL_PATH_COLUMN)?,
+                    definition,
+                )?);
+            }
+            if operation.edge.tables.len() == 1 {
+                conditions.extend(context.deletion(scope, relation)?);
+            }
+            from = TableRef::join(
+                JoinType::Inner,
+                from,
+                right,
+                Expr::conjoin(conditions).unwrap(),
+            );
+            scans.push(relation);
+        }
+        let last = *scans.last().unwrap();
+        let count = if backward {
+            scans.len() - 1
+        } else {
+            scans.len()
+        };
+        let tuples = scans
+            .iter()
+            .take(count)
+            .map(|relation| {
+                Ok(Expr::func(
+                    Function::Tuple,
+                    vec![
+                        Expr::Column(context.column(scope, *relation, next_col)?),
+                        Expr::Column(context.column(scope, *relation, kind_col)?),
+                    ],
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let path = if tuples.is_empty() {
+            Expr::EmptyTupleArray(vec![SqlType::Int64, SqlType::String])
+        } else {
+            Expr::func(Function::Array, tuples)
+        };
+        let kinds = Expr::func(
+            Function::Array,
+            scans
+                .iter()
+                .map(|relation| {
+                    context
+                        .column(scope, *relation, RELATIONSHIP_KIND_COLUMN)
+                        .map(Expr::Column)
+                })
+                .collect::<Result<_>>()?,
+        );
+        let mut query = Query::new(scope, from);
+        for (relation, column, name) in [
+            (first, anchor_col, ANCHOR_ID_COLUMN),
+            (last, next_col, END_ID_COLUMN),
+            (last, kind_col, END_KIND_COLUMN),
+        ] {
+            context.project(&mut query, relation, column, name)?;
+        }
+        query
+            .select
+            .push(context.select(scope, path, PATH_NODES_COLUMN)?);
+        query
+            .select
+            .push(context.select(scope, kinds, FRONTIER_EDGE_KINDS_COLUMN)?);
+        query
+            .select
+            .push(context.select(scope, Expr::int(depth as i64), DEPTH_COLUMN)?);
+        if operation.scoped_by_tp {
+            context.project(
+                &mut query,
+                first,
+                TRAVERSAL_PATH_COLUMN,
+                TRAVERSAL_PATH_COLUMN,
+            )?;
+        }
+        query.where_clause = Expr::conjoin(predicates);
+        arms.push(query);
+    }
+    let exports = arms[0]
+        .select
+        .iter()
+        .map(|select| select.alias.expect("frontier export"))
+        .collect::<Vec<_>>();
+    let (from, relation) = context.union(body, arms, "_frontier")?;
+    let mut query = Query::new(body, from);
+    for export in exports {
+        let column = context
+            .bindings
+            .column(body, relation, export)
+            .map_err(|error| crate::error::QueryError::Lowering(error.to_string()))?;
+        let name = context.names.exports[&export].clone();
+        query
+            .select
+            .push(context.select(body, Expr::Column(column), &name)?);
+    }
+    context.define(
+        root,
+        query,
+        if backward { BACKWARD_CTE } else { FORWARD_CTE },
+    )
 }

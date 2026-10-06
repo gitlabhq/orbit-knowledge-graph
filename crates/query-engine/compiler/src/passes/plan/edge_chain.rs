@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use ontology::constants::*;
 
 use super::context::PlanningContext;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use super::{
@@ -241,7 +241,7 @@ where
     context.hops = hops;
     context.nodes = nodes;
     context.denormalized = denormalized;
-    let execution = if context.hops.is_empty() {
+    let mut execution = if context.hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&mut context, &center)?
@@ -250,26 +250,52 @@ where
     } else {
         super::flat::plan(&mut context)?
     };
-    if !context.hops.is_empty() {
-        context.node_edge_mappings = execution
-            .bindings
-            .iter()
-            .map(|binding| {
-                (
-                    binding.node.clone(),
-                    (binding.alias.clone(), binding.column.clone()),
-                )
-            })
-            .collect();
-    }
     for (target, holder, column) in elided_fks {
-        context
-            .node_edge_mappings
-            .entry(target)
-            .or_insert((holder, column));
+        use super::NodeBinding;
+        use super::physical::NodeIdentity;
+        if execution.bindings.contains_key(&target) {
+            continue;
+        }
+        let relation = match execution.bindings.get(&holder) {
+            Some(NodeBinding::Values { relation, .. }) => *relation,
+            _ => None,
+        };
+        let node = input
+            .nodes
+            .iter()
+            .find(|node| node.id == target)
+            .expect("elided input node");
+        let binding = if let Some(relation) = relation {
+            context.node_binding(&target, context.column(relation, &column)?, None)?
+        } else {
+            let binding = match node.node_ids.as_slice() {
+                [id] => NodeBinding::Values {
+                    identity: NodeIdentity::Pinned(*id),
+                    relation: None,
+                    traversal_path: None,
+                },
+                _ if context.aggregate()
+                    && context
+                        .nodes
+                        .get(&holder)
+                        .is_some_and(|node| node.hydration == HydrationStrategy::FilterOnly)
+                    && !crate::input::node_group_ids(&input.aggregation.group_by)
+                        .any(|alias| alias == target) =>
+                {
+                    NodeBinding::Filtered
+                }
+                _ => {
+                    return Err(QueryError::Lowering(format!(
+                        "node '{target}' has no emitted identity"
+                    )));
+                }
+            };
+            (target, binding)
+        };
+        execution.bindings.extend([binding]);
     }
     Ok(if input.query_type == QueryType::Aggregation {
-        let result = context.aggregation(&execution);
+        let result = context.aggregation(&execution)?;
         QueryPlan::Aggregation(context.finish(Aggregation { execution, result }))
     } else {
         QueryPlan::Traversal(context.finish(Traversal { execution }))

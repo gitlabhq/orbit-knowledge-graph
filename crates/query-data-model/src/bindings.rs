@@ -122,6 +122,21 @@ impl QueryBindings {
         Ok(id)
     }
 
+    pub fn enclosing_scope(&mut self, body: ScopeId) -> Result<ScopeId, BindingError> {
+        self.check(body.query)?;
+        let parent = ScopeId {
+            query: self.query,
+            index: self.scopes.len(),
+        };
+        self.scopes.push(Scope {
+            parent: self.scopes[body.index].parent,
+            outputs: vec![],
+            sealed: false,
+        });
+        self.scopes[body.index].parent = Some(parent);
+        Ok(parent)
+    }
+
     pub fn project(&mut self, scope: ScopeId) -> Result<ExportId, BindingError> {
         self.check(scope.query)?;
         if self.scopes[scope.index].sealed {
@@ -135,6 +150,18 @@ impl QueryBindings {
     pub fn outputs(&self, scope: ScopeId) -> Result<&[ExportId], BindingError> {
         self.check(scope.query)?;
         Ok(&self.scopes[scope.index].outputs)
+    }
+
+    pub fn project_column(
+        &mut self,
+        scope: ScopeId,
+        column: ColumnRef,
+    ) -> Result<ExportId, BindingError> {
+        self.column(scope, column.relation, column.export)?;
+        let origin = self.origin(column.export)?;
+        let export = self.project(scope)?;
+        self.exports[export.index] = origin;
+        Ok(export)
     }
 
     pub fn scan<T>(
@@ -163,14 +190,18 @@ impl QueryBindings {
     ) -> Result<ColumnRef, BindingError> {
         self.check(relation.query)?;
         let source = &self.relations[relation.index];
-        if source.source != RelationSource::Scan(column.table) {
-            return Err(BindingError::MissingExport);
+        let export = match source.source {
+            RelationSource::Scan(table) if table == column.table => {
+                source.exports.get(column.column.index()).copied()
+            }
+            RelationSource::Scan(_) => None,
+            _ => source
+                .exports
+                .iter()
+                .find(|export| self.exports[export.index] == ExportOrigin::Stored(column))
+                .copied(),
         }
-        let export = source
-            .exports
-            .get(column.column.index())
-            .copied()
-            .ok_or(BindingError::MissingExport)?;
+        .ok_or(BindingError::MissingExport)?;
         self.column(scope, relation, export)
     }
 
@@ -266,6 +297,11 @@ impl QueryBindings {
     pub fn source(&self, relation: RelationId) -> Result<&RelationSource, BindingError> {
         self.check(relation.query)?;
         Ok(&self.relations[relation.index].source)
+    }
+
+    pub fn relation_scope(&self, relation: RelationId) -> Result<ScopeId, BindingError> {
+        self.check(relation.query)?;
+        Ok(self.relations[relation.index].scope)
     }
 
     pub fn exports(&self, relation: RelationId) -> Result<&[ExportId], BindingError> {

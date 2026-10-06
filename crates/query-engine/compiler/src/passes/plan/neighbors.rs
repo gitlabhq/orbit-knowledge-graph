@@ -1,5 +1,3 @@
-use ontology::constants::*;
-
 use crate::error::Result;
 use crate::input::*;
 
@@ -76,10 +74,6 @@ where
         }
     }
 
-    context.node_edge_mappings.insert(
-        center_alias.clone(),
-        ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
-    );
     let mut tables = edge.outgoing_tables.clone();
     tables.extend(edge.incoming_tables.iter().cloned());
     tables.sort();
