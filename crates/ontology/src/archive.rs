@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use flate2::{Compression, GzBuilder};
-use orbit_utils::vfs::{CapExceeded, Limits, Loading, Put, Source, SourceError, Tag, Vfs};
+use orbit_utils::vfs::{CapExceeded, Limits, Put, Source, SourceError, Tag, Vfs};
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
@@ -230,7 +230,7 @@ impl ReadOntologyFile for OntologyArchive {
 struct OntologySource<'a>(&'a [u8]);
 
 impl Source for OntologySource<'_> {
-    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+    fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
         let mut archive = tar::Archive::new(GzDecoder::new(self.0));
         for entry in archive.entries()? {
             let mut entry = entry?;

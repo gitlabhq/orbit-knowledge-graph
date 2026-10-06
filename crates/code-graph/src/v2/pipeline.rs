@@ -1739,7 +1739,7 @@ pub(crate) mod testing {
 
     use super::*;
     use orbit_utils::vfs::{
-        File, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag,
+        File, Limits, Options, Pass, Put, Source, SourceError, Tag,
         sources::{Checkout, Memory},
     };
 
@@ -1783,7 +1783,7 @@ pub(crate) mod testing {
     ) -> PipelineResult {
         struct Inputs<'a>(&'a Path, &'a [Input]);
         impl Source for Inputs<'_> {
-            fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            fn fill<T: Tag>(self, into: &mut Vfs<T>) -> Result<(), SourceError> {
                 for file in self.1.iter() {
                     let path = self.0.canonicalize()?.join(&file.path);
                     let size =
