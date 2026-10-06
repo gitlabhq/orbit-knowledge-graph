@@ -388,7 +388,8 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                     _ if skipped.contains_key(file.path.as_ref()) => {
                         timeout(skipped[file.path.as_ref()])
                     }
-                    _ if candidates.contains(file.path.as_ref())
+                    _ if matches!(file.decision(), Decision::Pending)
+                        || candidates.contains(file.path.as_ref())
                         || unread_manifests.contains(file.path.as_ref()) =>
                     {
                         FileReason::Fault(FileFault::FileRead)
