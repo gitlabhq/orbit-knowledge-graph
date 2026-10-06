@@ -5,6 +5,7 @@ pub mod clickhouse;
 pub mod fs;
 pub mod fs_walk;
 pub mod observability;
+pub mod safe_fs;
 pub mod strings;
 pub mod traversal_path;
 pub mod version;

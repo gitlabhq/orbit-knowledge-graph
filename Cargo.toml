@@ -77,6 +77,7 @@ mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
 globset = "0.4"
+libc = "0.2"
 memchr = "2.8.3"
 rust-lapper = "1.2.0"
 rkyv = { version = "0.8.18", features = ["alloc"] }
