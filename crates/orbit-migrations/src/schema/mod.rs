@@ -2,6 +2,7 @@ pub(crate) mod translate;
 
 use ontology::Ontology;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use orbit_utils::clickhouse::quote_sql_literal;
 
 pub use translate::render_refreshable_view_select;
 
@@ -505,10 +506,6 @@ fn quote_identifier(name: &str) -> String {
     } else {
         bare
     }
-}
-
-fn quote_sql_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[cfg(test)]
