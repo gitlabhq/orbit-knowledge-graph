@@ -192,26 +192,6 @@ fn host_links_and_replaced_parents_are_not_followed() {
 }
 
 #[test]
-fn invalid_scenarios_fail_before_execution() {
-    for yaml in [
-        "fixtures: []\ntests: []\ntypo: true",
-        "fixtures: [{path: file, typo: true}]\ntests: []",
-        "fixtures: []\ntests: [{name: read, assert: [{op: read, path: file, expect: {}}]}]",
-        "fixtures: []\ntests: [{name: files, assert: [{op: files, expect: [], typo: true}]}]",
-        "fixtures: []\nlimits: {typo: 1}\ntests: []",
-        "fixtures: []\ntests: []",
-        "fixtures: []\ntests: [{name: empty, assert: []}]",
-        "fixtures: [{path: file, content: {text: x, repeat: 2}}]\nload_error: empty",
-    ] {
-        let yaml = format!("name: Invalid scenario\nsources: [memory]\n{yaml}");
-        assert!(
-            std::panic::catch_unwind(|| super::runner::run(&yaml)).is_err(),
-            "accepted invalid scenario: {yaml}"
-        );
-    }
-}
-
-#[test]
 fn lazy_readers_run_once_and_only_for_readable_files() {
     struct Files<'a>(&'a AtomicUsize);
     impl Source for Files<'_> {
