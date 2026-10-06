@@ -16,6 +16,7 @@
       "type": "array",
       "maxItems": 32,
       "items": {
+        "description": "Agent name",
         "type": "string",
         "maxLength": 32
       }
@@ -25,6 +26,7 @@
       "type": "array",
       "maxItems": 32,
       "items": {
+        "description": "Agent name",
         "type": "string",
         "maxLength": 32
       }
@@ -34,6 +36,7 @@
       "type": "array",
       "maxItems": 8,
       "items": {
+        "description": "Component name",
         "type": "string",
         "enum": ["instructions", "hooks", "skill", "mcp"]
       }
