@@ -7,7 +7,7 @@ use code_graph_incremental::pipeline::{
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State};
-use orbit_utils::vfs::sources::Checkout;
+use orbit_utils::vfs::sources::Directory;
 mod common;
 
 const MAIN: &str = "\
@@ -30,7 +30,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn link_repo(env: &Env, root: &Path) -> DirtyGraph {
-    let sources = common::repo(Checkout(root));
+    let sources = common::repo(Directory(root));
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()
@@ -175,7 +175,7 @@ fn late_content_rejections_and_missing_files_keep_distinct_reasons() {
             ("tsconfig.json", b"{}"),
         ],
     );
-    let sources = common::repo(Checkout(root.path()));
+    let sources = common::repo(Directory(root.path()));
     std::fs::remove_file(root.path().join("missing.ts")).unwrap();
     std::fs::remove_file(root.path().join("tsconfig.json")).unwrap();
     let env = Env::with_limits(SupportLang::TypeScript, Limits::UNLIMITED).unwrap();

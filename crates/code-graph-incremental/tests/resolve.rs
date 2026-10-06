@@ -7,7 +7,7 @@ use code_graph_incremental::pipeline::{
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Killed, Limits, Pipeline, State};
-use orbit_utils::vfs::sources::Checkout;
+use orbit_utils::vfs::sources::Directory;
 mod common;
 
 const UTILS: &str = "\
@@ -40,7 +40,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let sources = common::repo(Checkout(root));
+    let sources = common::repo(Directory(root));
     let (context, resolved) = Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()

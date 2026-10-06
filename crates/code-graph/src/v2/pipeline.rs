@@ -1740,7 +1740,7 @@ pub(crate) mod testing {
     use super::*;
     use orbit_utils::vfs::{
         File, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag,
-        sources::{Checkout, Memory},
+        sources::{Directory, Memory},
     };
 
     pub struct Keep;
@@ -1756,7 +1756,7 @@ pub(crate) mod testing {
     }
 
     pub fn checkout(root: &Path) -> Arc<Vfs<Role>> {
-        Arc::new(Vfs::load(Checkout(root), Keep, Limits::default(), Options::default()).unwrap())
+        Arc::new(Vfs::load(Directory(root), Keep, Limits::default(), Options::default()).unwrap())
     }
 
     pub fn context(root: &Path) -> Arc<PipelineContext> {

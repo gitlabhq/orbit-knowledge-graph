@@ -5,7 +5,7 @@ use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, State, templates};
-use orbit_utils::vfs::sources::{Changed, Checkout};
+use orbit_utils::vfs::sources::{Changeset, Directory};
 mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
@@ -23,7 +23,7 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    let inventory = common::repo(Checkout(repo));
+    let inventory = common::repo(Directory(repo));
     templates::index(Context::new(env), inventory)
         .unwrap()
         .into_value()
@@ -35,7 +35,7 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         std::fs::remove_file(repo.join(path)).unwrap();
     }
     let changes = Changes {
-        changed: common::repo(Changed {
+        changed: common::repo(Changeset {
             root: repo,
             paths: changed,
         }),

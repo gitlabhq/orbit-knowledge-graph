@@ -4,7 +4,7 @@ use code_graph_incremental::pipeline::{Each, Parse, Parsed, Prepare, Sources, Wo
 use code_graph_incremental::tree::Tree;
 use code_graph_incremental::treesitter::{SupportLang, all_languages};
 use code_graph_incremental::{Context, Env, Limits, Pipeline};
-use orbit_utils::vfs::sources::{Changed, Checkout};
+use orbit_utils::vfs::sources::{Changeset, Directory};
 mod common;
 use code_graph::v2::config::Role;
 use orbit_utils::vfs::Decision;
@@ -18,7 +18,7 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 }
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
-    let sources = common::repo(Checkout(root));
+    let sources = common::repo(Directory(root));
     Pipeline::new(Context::new(env), sources)
         .then(Prepare)
         .unwrap()
@@ -44,7 +44,7 @@ fn every_configured_language_parses_when_classified_for_parsing() {
         let path = format!("a.{}", entry.extensions()[0]);
         write_all(repo.path(), &[(&path, b"x")]);
         let env = Env::with_limits(lang, Limits::UNLIMITED).unwrap();
-        let classified = common::repo(Checkout(repo.path()))
+        let classified = common::repo(Directory(repo.path()))
             .files()
             .next()
             .unwrap()
@@ -120,9 +120,9 @@ fn classify_agrees_with_walk() {
     write_all(repo.path(), &files);
     std::os::unix::fs::symlink("src/main.rs", repo.path().join("link.rs")).unwrap();
 
-    let walked = common::repo(Checkout(repo.path()));
-    let paths = walked.files().map(|e| e.path.clone()).collect();
-    let classified = common::repo(Changed {
+    let walked = common::repo(Directory(repo.path()));
+    let paths = walked.files().map(|e| e.path.to_string()).collect();
+    let classified = common::repo(Changeset {
         root: repo.path(),
         paths,
     });
@@ -134,7 +134,7 @@ fn classify_agrees_with_walk() {
 fn strip(entries: &Sources) -> Vec<(String, u64, Decision<Role>)> {
     entries
         .files()
-        .map(|e| (e.path.clone(), e.size, e.decision()))
+        .map(|e| (e.path.to_string(), e.size, e.decision()))
         .collect()
 }
 

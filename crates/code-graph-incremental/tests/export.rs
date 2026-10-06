@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{Display, Emit, Export, Exported};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
-use orbit_utils::vfs::sources::Checkout;
+use orbit_utils::vfs::sources::Directory;
 mod common;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;
@@ -46,7 +46,7 @@ fn envelope() -> Envelope<'static> {
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let inventory = common::repo(Checkout(root));
+    let inventory = common::repo(Directory(root));
     templates::index(Context::new(&env), inventory)
         .unwrap()
         .then(Display)
@@ -241,7 +241,7 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let inventory = common::repo(Checkout(repo.path()));
+    let inventory = common::repo(Directory(repo.path()));
     let mut seen: Vec<(String, usize)> = Vec::new();
 
     let displayed = templates::index(Context::new(&env), inventory)

@@ -53,7 +53,7 @@ pub fn run_incremental_suite(yaml: &str) {
 
     let inventory = Arc::new(
         orbit_utils::vfs::Vfs::load(
-            orbit_utils::vfs::sources::Checkout(repo.path()),
+            orbit_utils::vfs::sources::Directory(repo.path()),
             code_graph::v2::config::CodeFilter::new(
                 code_graph::v2::config::detect_language_from_path,
             ),
@@ -86,7 +86,7 @@ pub fn run_incremental_suite(yaml: &str) {
         let changes = Changes {
             changed: Arc::new(
                 orbit_utils::vfs::Vfs::load(
-                    orbit_utils::vfs::sources::Changed {
+                    orbit_utils::vfs::sources::Changeset {
                         root: repo.path(),
                         paths: changed,
                     },

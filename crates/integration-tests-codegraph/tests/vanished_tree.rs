@@ -4,7 +4,7 @@ use code_graph::v2::config::{CodeFilter, Role, detect_language_from_path};
 use code_graph::v2::{GraphConverter, OnBatch, Pipeline, PipelineConfig, PipelineResult};
 use orbit_utils::vfs::{
     Vfs,
-    sources::{Checkout, Memory},
+    sources::{Directory, Memory},
 };
 
 struct NoopConverter;
@@ -65,7 +65,7 @@ fn missing_js_file_still_faults_while_tree_exists() {
     std::fs::write(root.join("present.js"), "export const x = 1;\n").expect("write fixture");
     std::fs::write(root.join("absent.js"), "export const y = 2;\n").expect("write fixture");
     let vfs = Vfs::load(
-        Checkout(&root),
+        Directory(&root),
         CodeFilter::new(detect_language_from_path),
         Default::default(),
         Default::default(),
@@ -91,7 +91,7 @@ fn content_rejected_on_first_read_is_a_skip_not_a_fault() {
         std::fs::write(root.path().join(name), b"\0not source").unwrap();
     }
     let vfs = Vfs::load(
-        Checkout(root.path()),
+        Directory(root.path()),
         CodeFilter::new(detect_language_from_path),
         Default::default(),
         Default::default(),
