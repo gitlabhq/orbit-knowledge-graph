@@ -17,7 +17,7 @@ query:
 
 expect:
   hydration: none
-  sql_contains: ["AS u_username", "AS mr_title", "AS mr_state"]
+  sql_contains: ['AS "u_username"', 'AS "mr_title"', 'AS "mr_state"']
   node_count: 7
   referential_integrity: true
   edge_exists:

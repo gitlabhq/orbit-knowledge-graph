@@ -5,7 +5,30 @@ impl<'catalog, M: QueryDataModel + ?Sized>
 {
     pub(super) fn aggregation(&mut self, input: &crate::input::Input) -> Result<BlockId> {
         use crate::input::{AggExpr, Direction, InputGroupByKey, group_by_output_names};
-        let shared_access = input.relationships.len() > 1
+        let shared_access = input
+            .nodes
+            .iter()
+            .any(|node| node.existence == crate::input::NodeExistence::CurrentRow)
+            || input.relationships.len() > 1
+            || input
+                .relationships
+                .iter()
+                .any(|relationship| relationship.hops.max > 1)
+            || input
+                .aggregation
+                .group_by
+                .iter()
+                .any(|group| matches!(group, InputGroupByKey::Node { .. }))
+            || !input.join_predicates.is_empty()
+            || input
+                .nodes
+                .iter()
+                .any(|node| !node.filters.is_empty() || node.id_range.is_some())
+                && !input.relationships.is_empty()
+            || input
+                .relationships
+                .iter()
+                .any(|relationship| relationship.types.len() != 1)
             || input.relationships.iter().any(|relationship| {
                 let entity = |alias: &str| {
                     input
@@ -27,11 +50,6 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .foreign_key(&relationship.types, source, target)
                     .is_some()
             });
-        if !input.join_predicates.is_empty() || input.aggregation.sort.is_some() {
-            return Err(GraphError::UnsupportedInput(
-                "aggregation joins or ordering".into(),
-            ));
-        }
         let root = if shared_access {
             self.access(input)?
         } else {
@@ -126,6 +144,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .group_by
                 .iter()
                 .filter_map(|group| match group {
+                    InputGroupByKey::Node { node: alias, .. } if alias == &node.id => Some("id"),
                     InputGroupByKey::Property {
                         node: alias,
                         property,
@@ -216,29 +235,55 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
         }
         let mut groups = Vec::new();
+        for alias in crate::input::node_group_ids(&input.aggregation.group_by) {
+            let (index, node) = input
+                .nodes
+                .iter()
+                .enumerate()
+                .find(|(_, node)| node.id == alias)
+                .ok_or(GraphError::MissingOutput)?;
+            let relation = self.input_node(root, index)?;
+            let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
+            if let Some(crate::input::ColumnSelection::List(properties)) = &node.columns {
+                for property in properties {
+                    let Some(column) = self.catalog.property_column_named(entity, property) else {
+                        continue;
+                    };
+                    let value = Expression::Column(self.column(relation, column)?);
+                    if !groups.contains(&value) {
+                        groups.push(value.clone());
+                    }
+                    let label = format!("{alias}_{property}");
+                    if !self.outputs(root)?.any(|output| {
+                        self.output_label(output)
+                            .is_ok_and(|existing| existing == label)
+                    }) {
+                        self.project(root, label, value)?;
+                    }
+                }
+            }
+        }
         for (group, label) in input
             .aggregation
             .group_by
             .iter()
             .zip(group_by_output_names(&input.aggregation.group_by))
         {
-            let InputGroupByKey::Property {
-                node,
-                property,
-                truncate,
-                ..
-            } = group
-            else {
-                return Err(GraphError::UnsupportedInput(
-                    "aggregation node group".into(),
-                ));
+            let (node, property, truncate) = match group {
+                InputGroupByKey::Property {
+                    node,
+                    property,
+                    truncate,
+                    ..
+                } => (node, property.as_str(), *truncate),
+                InputGroupByKey::Node { node, .. } => (node, "id", None),
             };
             let column = *columns
-                .get(&(node.clone(), property.clone()))
+                .get(&(node.clone(), property.into()))
                 .ok_or(GraphError::MissingOutput)?;
             let value = match truncate {
                 Some(unit) => Expression::Bucket {
-                    unit: *unit,
+                    unit,
                     value: Box::new(Expression::Column(column)),
                 },
                 None => Expression::Column(column),
@@ -263,7 +308,20 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     )),
                     condition: condition.clone().map(Box::new),
                 },
-                _ => return Err(GraphError::UnsupportedInput("aggregation measure".into())),
+                expression => Expression::Aggregate {
+                    function: expression.function(),
+                    value: Box::new(Expression::Column(
+                        *columns
+                            .get(&(
+                                expression.node().into(),
+                                expression
+                                    .property()
+                                    .ok_or(GraphError::MissingOutput)?
+                                    .into(),
+                            ))
+                            .ok_or(GraphError::MissingOutput)?,
+                    )),
+                },
             };
             self.project(root, metric.output_name(), value)?;
         }

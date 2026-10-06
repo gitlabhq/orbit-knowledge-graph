@@ -122,18 +122,7 @@ pub fn compile_model(
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
-        }
-    }
+    config::compile_graph(raw, fe, data_model, ctx).count_err()
 }
 
 /// Compile a graph query into DuckDB SQL for local execution.
@@ -217,16 +206,27 @@ pub fn compile_input_model(
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ChHydrationCtx::new(ctx.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
-    ctx.set_hydration_options(options);
-    config::run_ch_hydration(&mut ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-        .count_err()
+    use query_graph::{Expression, PhysicalOperation, QueryGraph};
+    let mut input = input;
+    passes::restrict::restrict(&mut input, data_model.as_ref(), ctx)?;
+    let mut graph =
+        QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(data_model.as_ref());
+    let root = graph.plan_with_options(&input, options)?;
+    let graph = graph.lower_operations()?;
+    let base = passes::codegen::clickhouse::codegen_graph(
+        graph,
+        root,
+        ResultContext::new().with_query_type(input.query_type),
+        passes::settings::resolve(input.query_type.into()),
+    )?;
+    Ok(CompiledQueryContext {
+        query_type: input.query_type,
+        base,
+        hydration: HydrationPlan::None,
+        input,
+        pagination: Default::default(),
+        has_virtual_columns: false,
+    })
 }
 
 #[cfg(test)]

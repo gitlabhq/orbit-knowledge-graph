@@ -19,7 +19,7 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ICE' RETURN u.username LIMIT 10
 
 expect:
-  sql_contains: ["endsWith(lower(u.username), lower('ICE'))"]
+  sql_matches: ['endsWith\(lower\(q\."[^"]+"\), lower\(''ICE''\)\)']
   indexes_used: [idx_username_ngram]
   node_count: 1
   nodes:

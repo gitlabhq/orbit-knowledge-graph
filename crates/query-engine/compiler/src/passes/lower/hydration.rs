@@ -232,7 +232,6 @@ mod tests {
                 dynamic,
                 path_segment_budget: None,
             },
-            &Default::default(),
         )
         .unwrap();
         super::super::emit(&plan, &input).unwrap().ast

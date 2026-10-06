@@ -16,7 +16,7 @@ query:
 
 expect:
   hydration: none
-  sql_contains: ["AS n_confidential", "AS n_created_at", "AS u_username"]
+  sql_contains: ['AS "n_confidential"', 'AS "n_created_at"', 'AS "u_username"']
   node_count: 2
   edge_exists:
     AUTHORED:

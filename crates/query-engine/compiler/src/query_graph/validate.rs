@@ -90,15 +90,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let check = |expression: &Expression<'catalog>,
                      columns: &[ColumnRef<'catalog>],
                      used: &mut HashSet<RelationId>| {
-            expression.columns(&mut |column| {
+            expression.references(&mut |column, subquery| {
                 self.check_column(block, column)?;
-                if columns.contains(&column) {
-                    Ok(())
-                } else if matches!(
-                    self.relation(column.relation)?.source,
-                    crate::query_graph::Source::Definition(_)
-                ) {
+                if subquery {
                     used.insert(column.relation);
+                    Ok(())
+                } else if columns.contains(&column) {
                     Ok(())
                 } else {
                     Err(GraphError::OperationVisibility)
@@ -241,6 +238,44 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         visiting: &mut HashSet<OutputId>,
     ) -> Result<ValueType> {
         match expression {
+            Expression::ScalarQuery(column) => {
+                let Source::Derived(body) = self.relation(column.relation)?.source else {
+                    return Err(GraphError::ExpressionType);
+                };
+                let operation = self.operation(body)?;
+                if operation.aggregate_input().is_none() || !operation.groups().is_empty() {
+                    return Err(GraphError::AggregatePlacement);
+                }
+                self.column_type(*column, visiting)
+            }
+            Expression::PathDepth(value) => {
+                if self.expression_type(value, visiting)? != ValueType::Scalar(SqlType::String) {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(ValueType::Scalar(SqlType::Int64))
+            }
+            Expression::Aggregate { function, value } => {
+                use crate::input::AggFunction;
+                if value.aggregate() {
+                    return Err(GraphError::AggregatePlacement);
+                }
+                let value_type = self.expression_type(value, visiting)?;
+                if matches!(function, AggFunction::Avg | AggFunction::Sum)
+                    && !matches!(
+                        value_type,
+                        ValueType::Scalar(SqlType::Int64 | SqlType::UInt32 | SqlType::Float64)
+                    )
+                {
+                    return Err(GraphError::ExpressionType);
+                }
+                Ok(match function {
+                    AggFunction::Count => ValueType::Scalar(SqlType::Int64),
+                    AggFunction::Avg => ValueType::Scalar(SqlType::Float64),
+                    AggFunction::Collect => ValueType::Array(Box::new(value_type)),
+                    _ => value_type,
+                })
+            }
+            Expression::Literal { data_type, .. } => Ok(ValueType::Scalar(*data_type)),
             Expression::EmptyArray(element) => Ok(ValueType::Array(Box::new(element.clone()))),
             Expression::InQuery { value, key } => {
                 if !matches!(self.relation(key.relation)?.source, Source::Definition(_)) {
@@ -499,7 +534,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         }
     }
 
-    pub(super) fn column_type(
+    pub(crate) fn column_type(
         &self,
         column: ColumnRef<'catalog>,
         visiting: &mut HashSet<OutputId>,
@@ -598,7 +633,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             for output in outputs {
                 output
                     .value
-                    .columns(&mut |column| self.check_column(block, column))?;
+                    .references(&mut |column, _| self.check_column(block, column))?;
                 self.expression_type(&output.value, &mut HashSet::new())?;
             }
             let mut used = HashSet::new();
@@ -615,11 +650,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     continue;
                 }
                 self.check_projection(&output.value, &available, aggregate_input.as_deref())?;
-                output.value.columns(&mut |column| {
-                    if matches!(
-                        self.relation(column.relation)?.source,
-                        Source::Definition(_)
-                    ) {
+                output.value.references(&mut |column, subquery| {
+                    if subquery {
                         used.insert(column.relation);
                     }
                     Ok(())
@@ -640,6 +672,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         aggregate_input: Option<&[ColumnRef<'catalog>]>,
     ) -> Result<()> {
         match expression {
+            Expression::ScalarQuery(_) => Ok(()),
+            Expression::PathDepth(value) => {
+                self.check_projection(value, available, aggregate_input)
+            }
             Expression::InQuery { value, .. } => {
                 self.check_projection(value, available, aggregate_input)
             }
@@ -658,6 +694,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 self.check_projection(value, available, aggregate_input)
             }
             Expression::Count
+            | Expression::Aggregate { .. }
             | Expression::CountIf(_)
             | Expression::Sum { .. }
             | Expression::LatestPath { .. } => {

@@ -12,7 +12,6 @@ pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
     requirements: Vec<ScopeProof>,
-    table_scans: HashSet<String>,
 }
 
 impl QueryScope {
@@ -21,9 +20,6 @@ impl QueryScope {
             nodes,
             ..Self::default()
         }
-    }
-    pub fn table_scans(&self) -> &HashSet<String> {
-        &self.table_scans
     }
 }
 

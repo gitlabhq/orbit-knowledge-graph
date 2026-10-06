@@ -6,6 +6,10 @@ pub enum Expression<'catalog> {
     Integer(i64),
     Boolean(bool),
     Text(String),
+    Literal {
+        data_type: SqlType,
+        value: serde_json::Value,
+    },
     Strings(Vec<String>),
     JsonObject(Vec<(String, Self)>),
     Prefixes {
@@ -18,6 +22,8 @@ pub enum Expression<'catalog> {
         value: Box<Self>,
         key: ColumnRef<'catalog>,
     },
+    ScalarQuery(ColumnRef<'catalog>),
+    PathDepth(Box<Self>),
     Add(Box<Self>, Box<Self>),
     Reverse(Box<Self>),
     EmptyArray(ValueType),
@@ -30,6 +36,10 @@ pub enum Expression<'catalog> {
     Sum {
         value: Box<Self>,
         condition: Option<Box<Self>>,
+    },
+    Aggregate {
+        function: crate::input::AggFunction,
+        value: Box<Self>,
     },
     Integers(Vec<i64>),
     Tuple(Vec<Self>),
@@ -109,6 +119,7 @@ impl<'catalog> Expression<'catalog> {
         bindings: &mut orbit_utils::query_types::ParamBindings,
     ) {
         let literal = match self {
+            Self::Literal { data_type, value } => Some((*data_type, value.clone())),
             Self::InQuery { value, .. } => {
                 value.bind_parameters(bindings);
                 None
@@ -175,6 +186,8 @@ impl<'catalog> Expression<'catalog> {
                 None
             }
             Self::Excerpt { value, .. }
+            | Self::PathDepth(value)
+            | Self::Aggregate { value, .. }
             | Self::Bucket { value, .. }
             | Self::ToString(value)
             | Self::CountIf(value)
@@ -194,9 +207,11 @@ impl<'catalog> Expression<'catalog> {
                 }
                 None
             }
-            Self::Column(_) | Self::Count | Self::LatestPath { .. } | Self::Parameter { .. } => {
-                None
-            }
+            Self::Column(_)
+            | Self::ScalarQuery(_)
+            | Self::Count
+            | Self::LatestPath { .. }
+            | Self::Parameter { .. } => None,
         };
         if let Some((data_type, value)) = literal {
             *self = Self::Parameter {
@@ -271,7 +286,11 @@ impl<'catalog> Expression<'catalog> {
             Self::StartsWith(left, right) => {
                 Self::StartsWith(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
             }
-            Self::Integer(_) | Self::Boolean(_) | Self::Text(_) | Self::Integers(_) => self.clone(),
+            Self::Integer(_)
+            | Self::Boolean(_)
+            | Self::Text(_)
+            | Self::Integers(_)
+            | Self::Literal { .. } => self.clone(),
             _ => {
                 return Err(GraphError::UnsupportedInput(
                     "non-scalar candidate predicate".into(),
@@ -284,34 +303,45 @@ impl<'catalog> Expression<'catalog> {
         &self,
         visit: &mut impl FnMut(ColumnRef<'catalog>) -> Result<()>,
     ) -> Result<()> {
+        self.references(&mut |column, subquery| {
+            if subquery { Ok(()) } else { visit(column) }
+        })
+    }
+
+    pub(super) fn references(
+        &self,
+        visit: &mut impl FnMut(ColumnRef<'catalog>, bool) -> Result<()>,
+    ) -> Result<()> {
         match self {
             Self::Predicate {
                 value, argument, ..
             } => {
-                value.columns(visit)?;
+                value.references(visit)?;
                 if let Some(argument) = argument {
-                    argument.columns(visit)?;
+                    argument.references(visit)?;
                 }
                 Ok(())
             }
-            Self::Column(column) => visit(*column),
+            Self::Column(column) => visit(*column, false),
+            Self::ScalarQuery(column) => visit(*column, true),
+            Self::PathDepth(value) => value.references(visit),
             Self::InQuery { value, key } => {
-                value.columns(visit)?;
-                visit(*key)
+                value.references(visit)?;
+                visit(*key, true)
             }
             Self::EmptyArray(_) => Ok(()),
             Self::Add(left, right) => {
-                left.columns(visit)?;
-                right.columns(visit)
+                left.references(visit)?;
+                right.references(visit)
             }
-            Self::Reverse(value) => value.columns(visit),
+            Self::Reverse(value) => value.references(visit),
             Self::Prefixes { value, paths, .. } => {
-                value.columns(visit)?;
-                paths.columns(visit)
+                value.references(visit)?;
+                paths.references(visit)
             }
             Self::JsonObject(fields) => {
                 for (_, value) in fields {
-                    value.columns(visit)?;
+                    value.references(visit)?;
                 }
                 Ok(())
             }
@@ -320,31 +350,32 @@ impl<'catalog> Expression<'catalog> {
                 version,
                 deletion,
             } => {
-                visit(*path)?;
-                visit(*version)?;
-                visit(*deletion)
+                visit(*path, false)?;
+                visit(*version, false)?;
+                visit(*deletion, false)
             }
             Self::Excerpt { value, .. } | Self::Bucket { value, .. } | Self::ToString(value) => {
-                value.columns(visit)
+                value.references(visit)
             }
-            Self::CountIf(condition) => condition.columns(visit),
+            Self::Aggregate { value, .. } => value.references(visit),
+            Self::CountIf(condition) => condition.references(visit),
             Self::Sum { value, condition } => {
-                value.columns(visit)?;
+                value.references(visit)?;
                 if let Some(condition) = condition {
-                    condition.columns(visit)?;
+                    condition.references(visit)?;
                 }
                 Ok(())
             }
             Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
                 for value in values {
-                    value.columns(visit)?;
+                    value.references(visit)?;
                 }
                 Ok(())
             }
-            Self::Field { tuple, .. } => tuple.columns(visit),
+            Self::Field { tuple, .. } => tuple.references(visit),
             Self::Keep { condition, value } => {
-                condition.columns(visit)?;
-                value.columns(visit)
+                condition.references(visit)?;
+                value.references(visit)
             }
             Self::Equal(left, right)
             | Self::And(left, right)
@@ -355,8 +386,8 @@ impl<'catalog> Expression<'catalog> {
             | Self::GreaterEqual(left, right)
             | Self::LessEqual(left, right)
             | Self::StartsWith(left, right) => {
-                left.columns(visit)?;
-                right.columns(visit)
+                left.references(visit)?;
+                right.references(visit)
             }
             _ => Ok(()),
         }
@@ -365,6 +396,7 @@ impl<'catalog> Expression<'catalog> {
     pub(super) fn aggregate(&self) -> bool {
         match self {
             Self::InQuery { value, .. } => value.aggregate(),
+            Self::PathDepth(value) => value.aggregate(),
             Self::Add(left, right) => left.aggregate() || right.aggregate(),
             Self::Reverse(value) => value.aggregate(),
             Self::Prefixes { value, paths, .. } => value.aggregate() || paths.aggregate(),
@@ -377,7 +409,11 @@ impl<'catalog> Expression<'catalog> {
                         .as_ref()
                         .is_some_and(|argument| argument.aggregate())
             }
-            Self::Count | Self::CountIf(_) | Self::Sum { .. } | Self::LatestPath { .. } => true,
+            Self::Count
+            | Self::CountIf(_)
+            | Self::Sum { .. }
+            | Self::Aggregate { .. }
+            | Self::LatestPath { .. } => true,
             Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
                 values.iter().any(Self::aggregate)
             }

@@ -25,10 +25,10 @@ query:
     RETURN mr.title LIMIT 10
 
 expect:
-  sql_contains:
-    - "hasToken(lower(mr.title), lower('FIX'))"
-    - "hasAllTokens(lower(mr.title), lower('LOGIN Crash'))"
-    - "hasAnyTokens(lower(mr.title), lower('URGENT ios'))"
+  sql_matches:
+    - 'hasToken\(lower\(q\."[^"]+"\), lower\(''FIX''\)\)'
+    - 'hasAllTokens\(lower\(q\."[^"]+"\), lower\(''LOGIN Crash''\)\)'
+    - 'hasAnyTokens\(lower\(q\."[^"]+"\), lower\(''URGENT ios''\)\)'
   indexes_used: [idx_title]
   skip_requirements: ["filter:title"]
   node_count: 1

@@ -4063,6 +4063,7 @@ dependencies = [
  "orbit-versions",
  "query-data-model",
  "query-engine",
+ "regex",
  "reqwest 0.13.4",
  "rustls",
  "serde",

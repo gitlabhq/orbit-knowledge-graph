@@ -12,7 +12,7 @@ pub mod pathfinding;
 pub mod physical;
 pub mod requirements;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -182,18 +182,16 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
+    plan(input, model, hydration_options, true)
 }
 
 pub fn plan_duckdb(
     input: &Input,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
+    plan(input, model, hydration_options, false)
 }
 
 fn plan<M>(
@@ -201,7 +199,6 @@ fn plan<M>(
     model: &M,
     hydration_options: HydrationCompileOptions,
     use_fk_elision: bool,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
     M: QueryDataModel + ?Sized,
@@ -215,9 +212,7 @@ where
         node_edge_mappings: HashMap::new(),
     };
     match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => {
-            edge_chain::plan(context, use_fk_elision, table_scans)
-        }
+        QueryType::Traversal | QueryType::Aggregation => edge_chain::plan(context, use_fk_elision),
         QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
         QueryType::PathFinding => {
             pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)

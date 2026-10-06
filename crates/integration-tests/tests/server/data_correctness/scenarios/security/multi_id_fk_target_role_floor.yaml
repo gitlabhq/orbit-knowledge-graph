@@ -31,5 +31,6 @@ query:
 expect:
   row_count: 1
   row_values: [{n: 0}]
-  sql_contains: ["HAS_FINDING", "gl_vulnerability_occurrence AS _role_f FINAL", "false"]
+  sql_contains: ["HAS_FINDING"]
+  sql_matches: ['FROM "[^"]*gl_vulnerability_occurrence" AS \w+ FINAL WHERE false']
   skip_requirements: [node_ids]

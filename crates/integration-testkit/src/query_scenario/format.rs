@@ -117,6 +117,10 @@ pub struct QueryExpect {
     #[serde(default)]
     pub sql_contains: Vec<String>,
     #[serde(default)]
+    pub sql_matches: Vec<String>,
+    #[serde(default)]
+    pub sql_not_matches: Vec<String>,
+    #[serde(default)]
     pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,

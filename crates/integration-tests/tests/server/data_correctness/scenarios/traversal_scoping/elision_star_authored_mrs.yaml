@@ -54,8 +54,8 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c, count(p.id) AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g700'", "countSubstrings(p.traversal_path, '/')"]
-  sql_not_contains: ["gl_group AS g"]
+  sql_matches: ['FROM "[^"]*gl_group" AS \w+ FINAL WHERE', '\(q\."[^"]+" = ''g700''\)', 'countSubstrings\(q\."[^"]+", ''/''\)']
+  sql_contains: ["argMaxOrNull"]
   skip_requirements: ["filter:full_path"]
   groups:
     u:

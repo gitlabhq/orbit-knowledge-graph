@@ -24,6 +24,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let mut filter_keys = HashMap::new();
         let mut key_scans = Vec::new();
         let mut tagged = HashSet::new();
+        let variable = input
+            .relationships
+            .iter()
+            .any(|relationship| relationship.hops.max > 1);
         let mut order = (0..input.relationships.len()).collect::<Vec<_>>();
         let selectivity = |alias: &str| {
             input
@@ -39,10 +43,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         }
         for (index, input_index) in order.into_iter().enumerate() {
             let relationship = &input.relationships[input_index];
-            if relationship.hops.min != 1
-                || relationship.hops.max != 1
-                || relationship.direction == Direction::Both
-            {
+            if relationship.direction == Direction::Both {
                 return Err(GraphError::UnsupportedInput(
                     "variable or bidirectional traversal".into(),
                 ));
@@ -50,16 +51,20 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             let table = self
                 .catalog
                 .relationship_table_for_query(&relationship.types);
-            let edge = self.scan(root, table, format!("e{index}"))?;
+            let edge = if relationship.hops.max > 1 {
+                self.hop_relation(root, relationship, input_index)?
+            } else {
+                self.scan(root, table, format!("e{index}"))?
+            };
             self.bind_scan(edge, ScanInput::Relationship(input_index))?;
             let (start, end) = relationship.direction.edge_columns();
-            let read = if input.relationships.len() == 1 {
+            let read = if input.relationships.len() == 1 || relationship.hops.max > 1 {
                 PhysicalOperation::source(edge)
             } else {
                 PhysicalOperation::current(edge)
             };
             let mut scan = read.filter(Expression::equal(
-                Expression::Column(self.stored_column(edge, "_deleted")?),
+                Expression::Column(self.column(edge, "_deleted")?),
                 Expression::Boolean(false),
             ));
             for (column, kind) in [
@@ -81,18 +86,20 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 ),
             ] {
                 scan = scan.filter(Expression::equal(
-                    Expression::Column(self.stored_column(edge, column)?),
+                    Expression::Column(self.column(edge, column)?),
                     Expression::Text(kind.into()),
                 ));
             }
-            if let [kind] = relationship.types.as_slice() {
+            if crate::passes::normalize::is_wildcard(&relationship.types) {
+            } else if let [kind] = relationship.types.as_slice() {
                 scan = scan.filter(Expression::equal(
-                    Expression::Column(self.stored_column(edge, "relationship_kind")?),
+                    Expression::Column(self.column(edge, "relationship_kind")?),
                     Expression::Text(kind.clone()),
                 ));
             } else {
-                return Err(GraphError::UnsupportedInput(
-                    "multiple relationship kinds".into(),
+                scan = scan.filter(Expression::In(
+                    Box::new(Expression::Column(self.column(edge, "relationship_kind")?)),
+                    Box::new(Expression::Strings(relationship.types.clone())),
                 ));
             }
             for (column, filters) in &relationship.filters {
@@ -100,15 +107,30 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     let value = filter
                         .value
                         .as_ref()
-                        .and_then(serde_json::Value::as_i64)
                         .ok_or_else(|| GraphError::UnsupportedInput("edge predicate".into()))?;
-                    if filter.op.unwrap_or(FilterOp::Eq) != FilterOp::Eq {
-                        return Err(GraphError::UnsupportedInput("edge operator".into()));
-                    }
-                    scan = scan.filter(Expression::equal(
-                        Expression::Column(self.stored_column(edge, column)?),
-                        Expression::Integer(value),
-                    ));
+                    let value = match value {
+                        serde_json::Value::String(value) => Expression::Text(value.clone()),
+                        serde_json::Value::Number(value) if value.as_i64().is_some() => {
+                            Expression::Integer(value.as_i64().unwrap())
+                        }
+                        _ => {
+                            return Err(GraphError::UnsupportedInput(
+                                "edge predicate value".into(),
+                            ));
+                        }
+                    };
+                    let column = Expression::Column(self.column(edge, column)?);
+                    let operator = filter.op.unwrap_or(FilterOp::Eq);
+                    scan = scan.filter(if operator == FilterOp::Eq {
+                        Expression::equal(column, value)
+                    } else {
+                        Expression::Predicate {
+                            operator,
+                            value: Box::new(column),
+                            argument: Some(Box::new(value)),
+                            fold_case: false,
+                        }
+                    });
                 }
             }
             let endpoints = [
@@ -138,7 +160,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                                 Expression::Boolean(false)
                             } else {
                                 Expression::HasAny(
-                                    Box::new(Expression::Column(self.stored_column(edge, column)?)),
+                                    Box::new(Expression::Column(self.column(edge, column)?)),
                                     Box::new(Expression::Array(
                                         values.into_iter().map(Expression::Text).collect(),
                                     )),
@@ -175,7 +197,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         continue;
                     }
                     let name = names[0];
-                    let predicate = predicate.rebind(&|_| self.stored_column(edge, name))?;
+                    let predicate = predicate.rebind(&|_| self.column(edge, name))?;
                     if !pushed.contains(&predicate) {
                         pushed.push(predicate.clone());
                         scan = scan.filter(predicate);
@@ -190,7 +212,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .ok_or(GraphError::MissingOutput)?;
                 if node.id_property == "id" {
                     for predicate in
-                        Expression::identity_predicates(self.stored_column(edge, column)?, node)
+                        Expression::identity_predicates(self.column(edge, column)?, node)
                     {
                         scan = scan.filter(predicate);
                     }
@@ -225,7 +247,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                                     == ontology::FieldSelectivity::High
                             })
                     });
-                if needs_values && selective || filter_only {
+                if !variable && (needs_values && selective || filter_only) {
                     let first = !filter_keys.contains_key(alias);
                     let candidate = if let Some(candidate) = filter_keys.get(alias) {
                         *candidate
@@ -335,7 +357,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .map(|(name, key, _)| (*name, *key))
                     .collect(),
             });
-            if input.relationships.len() > 1 {
+            if input.relationships.len() > 1 && !variable {
                 let deletion = Expression::equal(
                     Expression::Column(self.stored_column(edge, "_deleted")?),
                     Expression::Boolean(false),
@@ -426,8 +448,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 operation = operation.join(
                     scan,
                     Expression::equal(
-                        Expression::Column(self.stored_column(previous, previous_column)?),
-                        Expression::Column(self.stored_column(edge, current_column)?),
+                        Expression::Column(self.column(previous, previous_column)?),
+                        Expression::Column(self.column(edge, current_column)?),
                     ),
                 );
             }
@@ -470,7 +492,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .filter(|relationship| relationship.to == node.id)
                 .count()
                 > 1;
-            if needs_values
+            if !variable
+                && needs_values
                 && !convergent
                 && !filter_keys.is_empty()
                 && !filter_keys.contains_key(node.id.as_str())
@@ -510,7 +533,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 source,
                 Expression::equal(
                     Expression::Column(identity),
-                    Expression::Column(self.stored_column(edge, column)?),
+                    Expression::Column(self.column(edge, column)?),
                 ),
             );
         }

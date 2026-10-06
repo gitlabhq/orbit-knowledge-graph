@@ -4,7 +4,7 @@ mod syntax;
 
 use std::sync::Arc;
 
-use crate::config::{self, CompilerCtx as _};
+use crate::config;
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use ontology::introspection::{
@@ -115,9 +115,7 @@ pub fn compile_query_model(
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
-    crate::finish(&mut ctx, config::run_clickhouse_gql)
+    config::compile_graph_input(input, data_model, security_context).count_err()
 }
 
 fn resolve_schema(

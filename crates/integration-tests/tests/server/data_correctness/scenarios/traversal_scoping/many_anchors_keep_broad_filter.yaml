@@ -12,5 +12,5 @@ query:
 
 expect:
   compile_only: true
-  sql_contains: ["startsWith(p.traversal_path, '1/')"]
-  sql_not_contains: ["AS _scope"]
+  sql_matches: ['startsWith\(\w+\."traversal_path", ''1/''\)']
+  sql_not_contains: ["argMaxOrNull"]

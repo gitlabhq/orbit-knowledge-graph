@@ -148,7 +148,26 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
     let model = graph.catalog();
     let mut context = ResultContext::new().with_query_type(input.query_type);
     context.entity_auth.clone_from(model.entity_auth());
+    if matches!(
+        input.query_type,
+        QueryType::Hydration | QueryType::PathFinding
+    ) {
+        return Ok(context);
+    }
+    if input.query_type == QueryType::Neighbors {
+        for node in &input.nodes {
+            if let Some(entity) = &node.entity {
+                context.add_node(&node.id, entity);
+            }
+        }
+        return Ok(context);
+    }
+    let grouped_nodes: HashSet<_> =
+        crate::input::node_group_ids(&input.aggregation.group_by).collect();
     for (index, node) in input.nodes.iter().enumerate() {
+        if input.query_type == QueryType::Aggregation && !grouped_nodes.contains(node.id.as_str()) {
+            continue;
+        }
         let mut relation = graph.input_node(root, index).ok();
         let entity_name = node
             .entity
@@ -207,6 +226,26 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
             ));
         }
         for (label, column) in columns {
+            if input.query_type == QueryType::Aggregation {
+                let mut operation = graph.operation_mut(root)?;
+                loop {
+                    match operation {
+                        crate::query_graph::Relational::Aggregate { groups, .. } => {
+                            let value = Expression::Column(column);
+                            if !groups.contains(&value) {
+                                groups.push(value);
+                            }
+                            break;
+                        }
+                        crate::query_graph::Relational::Limit { input, .. } => operation = input,
+                        _ => {
+                            return Err(QueryError::Enforcement(
+                                "grouped result has no aggregate".into(),
+                            ));
+                        }
+                    }
+                }
+            }
             graph.project(root, label, Expression::Column(column))?;
         }
         graph.project(
@@ -217,11 +256,9 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
         context.add_node(&node.id, entity_name);
     }
     for (index, relationship) in input.relationships.iter().enumerate() {
-        let [kind] = relationship.types.as_slice() else {
-            return Err(QueryError::Enforcement(
-                "graph edge identity requires one relationship kind".into(),
-            ));
-        };
+        if input.query_type == QueryType::Aggregation {
+            continue;
+        }
         let (source, target) = if relationship.direction == crate::input::Direction::Incoming {
             (&relationship.to, &relationship.from)
         } else {
@@ -241,7 +278,14 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
             format!("e{index}_")
         };
         for (suffix, value) in [
-            ("type", kind.as_str()),
+            (
+                "type",
+                relationship
+                    .types
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("*"),
+            ),
             ("src_type", entity(source)?),
             ("dst_type", entity(target)?),
         ] {

@@ -64,6 +64,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let mut properties = node.filters.iter().collect::<Vec<_>>();
         properties.sort_by_key(|(name, _)| *name);
         for (name, filters) in properties {
+            if self.catalog.virtual_source(entity, name).is_some() {
+                continue;
+            }
             let column = self
                 .catalog
                 .property_column_named(entity, name)
@@ -74,7 +77,32 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         "nonliteral equality filter".into(),
                     ));
                 }
+                let stored = self.stored_column(relation, column)?;
+                let Port::Stored(property) = stored.port else {
+                    return Err(GraphError::MissingOutput);
+                };
                 let literal = |value: &serde_json::Value| match value {
+                    _ if matches!(
+                        property.data_type(),
+                        Some(
+                            ontology::DataType::Date
+                                | ontology::DataType::DateTime
+                                | ontology::DataType::Float
+                        )
+                    ) =>
+                    {
+                        Ok(Expression::Literal {
+                            data_type: match property.data_type() {
+                                Some(ontology::DataType::Date) => SqlType::Date,
+                                Some(ontology::DataType::DateTime) => SqlType::Timestamp {
+                                    precision: 6,
+                                    timezone: None,
+                                },
+                                _ => SqlType::Float64,
+                            },
+                            value: value.clone(),
+                        })
+                    }
                     serde_json::Value::String(value) => Ok(Expression::Text(value.clone())),
                     serde_json::Value::Bool(value) => Ok(Expression::Boolean(*value)),
                     serde_json::Value::Number(value) if value.as_i64().is_some() => {

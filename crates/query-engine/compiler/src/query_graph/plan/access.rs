@@ -144,11 +144,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .catalog
                 .entity_table(entity)
                 .ok_or_else(|| GraphError::UnknownStored(entity.into()))?;
-            let needed = input
-                .aggregation
-                .group_by
-                .iter()
-                .any(|group| group.node() == node.id)
+            let needed = node.existence == crate::input::NodeExistence::CurrentRow
+                || input
+                    .aggregation
+                    .group_by
+                    .iter()
+                    .any(|group| group.node() == node.id)
                 || input.aggregation.metrics.iter().any(|metric| {
                     metric.expr.node() == node.id && metric.expr.property().is_some()
                 })
@@ -357,6 +358,11 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .is_ok_and(|relation| relation.input == Some(ScanInput::Relationship(index)))
             });
             if let Some(edge) = edge {
+                let prefix = if relationship.hops.max > 1 {
+                    format!("hop_e{index}_")
+                } else {
+                    format!("e{index}_")
+                };
                 for (column, suffix) in [
                     ("relationship_kind", "type"),
                     ("source_id", "src"),
@@ -366,8 +372,15 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 ] {
                     self.project(
                         root,
-                        format!("e{index}_{suffix}"),
-                        Expression::Column(self.stored_column(edge, column)?),
+                        format!("{prefix}{suffix}"),
+                        Expression::Column(self.column(edge, column)?),
+                    )?;
+                }
+                if relationship.hops.max > 1 {
+                    self.project(
+                        root,
+                        format!("{prefix}path_nodes"),
+                        Expression::Column(self.column(edge, "path_nodes")?),
                     )?;
                 }
                 continue;

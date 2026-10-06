@@ -16,7 +16,7 @@ query:
 
 expect:
   hydration: static
-  sql_not_contains: ["AS n_created_at"]
+  sql_not_contains: ['AS "n_created_at"']
   node_count: 4
   edge_exists:
     HAS_NOTE:

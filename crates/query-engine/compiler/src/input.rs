@@ -157,6 +157,15 @@ pub struct InputNode {
     /// queries, pruning granules through the primary key.
     #[serde(skip)]
     pub traversal_paths: Vec<TraversalPath>,
+    #[serde(skip)]
+    pub existence: NodeExistence,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NodeExistence {
+    #[default]
+    Referenced,
+    CurrentRow,
 }
 
 impl Default for InputNode {
@@ -170,6 +179,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             traversal_paths: Vec::new(),
+            existence: NodeExistence::Referenced,
         }
     }
 }

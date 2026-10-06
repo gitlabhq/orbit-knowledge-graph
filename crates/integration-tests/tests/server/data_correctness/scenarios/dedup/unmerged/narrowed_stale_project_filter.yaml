@@ -17,7 +17,8 @@ query:
     MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)
     RETURN p.name, count(mr) AS c LIMIT 10
 expect:
-  sql_contains: ["_candidate_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE"]
+  sql_contains: ['WITH ', ' IN (SELECT ']
+  sql_matches: ['LIMIT 1 BY q\."[^"]+", q\."[^"]+"\) AS q WHERE']
   sql_not_contains: ["gl_edge"]
   skip_requirements: ["node_ids", "filter:star_count"]
   row_count: 0

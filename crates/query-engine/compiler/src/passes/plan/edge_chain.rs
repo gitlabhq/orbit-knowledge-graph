@@ -186,7 +186,6 @@ pub enum HydrationStrategy {
 pub(super) fn plan<M>(
     mut context: PlanningContext<'_, M>,
     use_fk_elision: bool,
-    table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
     M: QueryDataModel + ?Sized,
@@ -214,7 +213,10 @@ where
                 input,
                 &hops,
                 &denormalized,
-                table_scans.contains(&node_plan.alias),
+                input.nodes.iter().any(|node| {
+                    node.id == node_plan.alias
+                        && node.existence == crate::input::NodeExistence::CurrentRow
+                }),
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;

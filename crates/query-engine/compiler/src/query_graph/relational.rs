@@ -256,7 +256,7 @@ impl<'a, L> Relational<'a, L> {
         }
     }
 
-    pub(super) fn groups(&self) -> &[Expression<'a>] {
+    pub(crate) fn groups(&self) -> &[Expression<'a>] {
         match self {
             Self::Aggregate { groups, .. } => groups,
             Self::Sort { input, .. } | Self::Limit { input, .. } => input.groups(),

@@ -13,5 +13,5 @@ query:
 expect:
   compile_only: true
   hydration: static
-  sql_contains: ["AS f_name"]
-  sql_not_contains: ["f_content", "f.content"]
+  sql_contains: ['AS "f_name"']
+  sql_not_contains: ['AS "f_content"', '."content"']

@@ -24,7 +24,8 @@ query:
     MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
 
 expect:
-  sql_contains: ["gl_definition AS _scope WHERE"]
+  sql_matches: ['FROM "[^"]*gl_definition" AS \w+ WHERE']
+  sql_contains: ["argMaxOrNull"]
   node_count: 2
   nodes:
     Definition:

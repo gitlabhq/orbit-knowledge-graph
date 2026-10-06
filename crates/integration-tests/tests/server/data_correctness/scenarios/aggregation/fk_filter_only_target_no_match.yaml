@@ -19,6 +19,7 @@ query:
 expect:
   row_count: 1
   row_values: [{c: 0}]
-  sql_contains: ["_filter_p", "mr.project_id IN"]
+  sql_contains: ['."project_id"', ' IN (SELECT ', 'WITH ']
+  sql_matches: ['FROM "[^"]*gl_project" AS \w+ FINAL']
   sql_not_contains: ["gl_edge"]
   skip_requirements: ["filter:name"]

@@ -24,6 +24,7 @@ query:
     MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
     WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
 expect:
-  sql_contains: ["_narrow_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)"]
+  sql_matches: ['FROM "[^"]*gl_project" AS \w+ FINAL']
+  sql_contains: ['."_deleted"', ' IN (SELECT ']
   skip_requirements: ["node_ids", "filter:title"]
   row_count: 0

@@ -161,13 +161,8 @@ pub fn apply_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
     root: crate::query_graph::BlockId,
     input: &Input,
     query_hash: u64,
-) -> Result<usize> {
+) -> Result<(crate::query_graph::BlockId, usize)> {
     use crate::query_graph::{Expression as E, Relational};
-    if input.cursor.is_some() && input.order_by.is_some() {
-        return Err(QueryError::PaginationError(
-            "graph cursors with nullable property ordering are not implemented".into(),
-        ));
-    }
     let operation = graph.operation_mut(root)?;
     let Relational::Limit { count, .. } = operation else {
         return Err(QueryError::PipelineInvariant(
@@ -175,70 +170,225 @@ pub fn apply_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
         ));
     };
     *count = input.fetch_limit();
-    let Some(cursor) = &input.cursor else {
-        return Ok(0);
-    };
-    let mut keys = Vec::new();
-    for index in 0..input.nodes.len() {
-        keys.push((graph.input_identity(root, input, index)?, false));
+    if input.cursor.is_none() && input.aggregation.sort.is_none() {
+        return Ok((root, 0));
     }
+    let mut keys = Vec::new();
+    if let Some(order) = &input.order_by {
+        let index = input
+            .nodes
+            .iter()
+            .position(|node| node.id == order.node)
+            .ok_or_else(|| QueryError::PaginationError("sort node missing".into()))?;
+        let relation = graph.input_node(root, index)?;
+        keys.push((
+            graph.column(relation, &order.property)?,
+            order.direction == crate::input::OrderDirection::Desc,
+        ));
+    }
+    let mut keys = keys
+        .into_iter()
+        .map(|(column, descending)| (E::Column(column), descending))
+        .collect::<Vec<_>>();
+    match input.query_type {
+        QueryType::Traversal => {
+            for index in 0..input.nodes.len() {
+                let identity = E::Column(graph.input_identity(root, input, index)?);
+                if !keys.iter().any(|(value, _)| *value == identity) {
+                    keys.push((identity, false));
+                }
+            }
+            for output in graph.outputs(root)? {
+                if graph.output_label(output)?.ends_with("_path_nodes") {
+                    keys.push((
+                        E::ToString(Box::new(graph.projection(output)?.value.clone())),
+                        false,
+                    ));
+                }
+            }
+        }
+        QueryType::Aggregation => {
+            if let Some(sort) = &input.aggregation.sort {
+                let output = graph
+                    .outputs(root)?
+                    .find(|output| {
+                        graph
+                            .output_label(*output)
+                            .is_ok_and(|label| label == sort.column)
+                    })
+                    .ok_or_else(|| {
+                        QueryError::PaginationError("aggregate sort output missing".into())
+                    })?;
+                keys.push((
+                    graph.projection(output)?.value.clone(),
+                    sort.direction == crate::input::OrderDirection::Desc,
+                ));
+            }
+            if input.cursor.is_some() {
+                for group in graph.operation(root)?.groups() {
+                    if !keys.iter().any(|(value, _)| value == group) {
+                        keys.push((group.clone(), false));
+                    }
+                }
+            }
+        }
+        QueryType::Neighbors | QueryType::PathFinding => {
+            let names = if input.query_type == QueryType::Neighbors {
+                vec![
+                    crate::constants::redaction_id_column(&input.nodes[0].id),
+                    crate::constants::neighbor_id_column().into(),
+                    crate::constants::neighbor_type_column().into(),
+                    crate::constants::relationship_type_column().into(),
+                    crate::constants::neighbor_is_outgoing_column().into(),
+                ]
+            } else {
+                vec![
+                    "depth".into(),
+                    crate::constants::path_column().into(),
+                    crate::constants::edge_kinds_column().into(),
+                ]
+            };
+            for name in names {
+                let output = graph
+                    .outputs(root)?
+                    .find(|output| graph.output_label(*output).is_ok_and(|label| label == name))
+                    .ok_or_else(|| {
+                        QueryError::PaginationError(format!("missing cursor output {name}"))
+                    })?;
+                let mut value = graph.projection(output)?.value.clone();
+                if input.query_type == QueryType::PathFinding && name != "depth" {
+                    value = E::ToString(Box::new(value));
+                }
+                keys.push((value, false));
+            }
+        }
+        QueryType::Hydration => {}
+    }
+    let operation = std::mem::replace(graph.operation_mut(root)?, Relational::One);
+    let Relational::Limit { input: source, .. } = operation else {
+        unreachable!()
+    };
+    *graph.operation_mut(root)? = match *source {
+        Relational::Sort { input, .. } => *input,
+        operation => operation,
+    };
+    let outputs = graph.outputs(root)?.collect::<Vec<_>>();
+    let page = graph.select(Relational::One);
+    let relation = graph.derive(page, root, "page")?;
+    for output in outputs {
+        graph.project(
+            page,
+            graph.output_label(output)?.to_owned(),
+            E::Column(graph.output_column(relation, output)?),
+        )?;
+    }
+    let mut page_keys = Vec::new();
+    for (index, (value, descending)) in keys.into_iter().enumerate() {
+        let output = graph.project(root, cursor_column(index), value)?;
+        page_keys.push((graph.output_column(relation, output)?, descending));
+    }
+    let root = page;
+    let keys = page_keys;
+    *graph.operation_mut(root)? = Relational::source(relation).limit(input.fetch_limit());
     let mut predicate = None;
-    if let Some(after) = &cursor.after {
+    if let Some(after) = input
+        .cursor
+        .as_ref()
+        .and_then(|cursor| cursor.after.as_ref())
+    {
         let values = decode(after, query_hash)?;
         if values.len() != keys.len() {
             return Err(QueryError::PaginationError(
                 "cursor key count mismatch".into(),
             ));
         }
-        let values = values
-            .iter()
-            .map(|value| {
-                value
-                    .as_ref()
-                    .and_then(|value| value.parse::<i64>().ok())
-                    .ok_or_else(|| {
-                        QueryError::PaginationError(
-                            "graph cursor requires integer identity keys".into(),
-                        )
-                    })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let nullable = nullable_flags(input, keys.len());
         let mut prefix: Option<E<'a>> = None;
-        for ((key, _), value) in keys.iter().zip(values) {
+        for (index, ((key, descending), value)) in keys.iter().zip(values).enumerate() {
             let column = E::Column(*key);
-            let advance = E::Greater(Box::new(column.clone()), Box::new(E::Integer(value)));
-            let advance = match &prefix {
-                Some(prefix) => E::And(Box::new(prefix.clone()), Box::new(advance)),
-                None => advance,
+            let test = |operator, argument| E::Predicate {
+                operator,
+                value: Box::new(column.clone()),
+                argument,
+                fold_case: false,
             };
-            predicate = Some(match predicate {
-                Some(previous) => E::Or(Box::new(previous), Box::new(advance)),
-                None => advance,
-            });
-            let equal = E::equal(column, E::Integer(value));
+            let equal = if let Some(value) = value {
+                let crate::query_graph::ValueType::Scalar(data_type) =
+                    graph.column_type(*key, &mut Default::default())?
+                else {
+                    return Err(QueryError::PaginationError(
+                        "cursor requires scalar keys".into(),
+                    ));
+                };
+                let value = if matches!(
+                    data_type,
+                    SqlType::Int64 | SqlType::UInt32 | SqlType::Float64 | SqlType::Bool
+                ) {
+                    serde_json::from_str(&value)
+                        .map_err(|_| QueryError::PaginationError("invalid cursor value".into()))?
+                } else {
+                    serde_json::Value::String(value)
+                };
+                let value = E::Literal { data_type, value };
+                let mut advance = test(
+                    if *descending {
+                        crate::input::FilterOp::Lt
+                    } else {
+                        crate::input::FilterOp::Gt
+                    },
+                    Some(Box::new(value.clone())),
+                );
+                if nullable[index] {
+                    advance = E::Or(
+                        Box::new(advance),
+                        Box::new(test(crate::input::FilterOp::IsNull, None)),
+                    );
+                }
+                let advance = match &prefix {
+                    Some(prefix) => E::And(Box::new(prefix.clone()), Box::new(advance)),
+                    None => advance,
+                };
+                predicate = Some(match predicate {
+                    Some(previous) => E::Or(Box::new(previous), Box::new(advance)),
+                    None => advance,
+                });
+                E::equal(column, value)
+            } else {
+                test(crate::input::FilterOp::IsNull, None)
+            };
             prefix = Some(match prefix {
                 Some(prefix) => E::And(Box::new(prefix), Box::new(equal)),
                 None => equal,
             });
         }
+        predicate.get_or_insert(E::Boolean(false));
     }
-    for (index, (key, _)) in keys.iter().enumerate() {
-        graph.project(
-            root,
-            cursor_column(index),
-            E::ToString(Box::new(E::Column(*key))),
-        )?;
+    if input.cursor.is_some() {
+        for (index, (key, _)) in keys.iter().enumerate() {
+            graph.project(
+                root,
+                cursor_column(index),
+                E::ToString(Box::new(E::Column(*key))),
+            )?;
+        }
     }
-    let key_count = keys.len();
+    let key_count = if input.cursor.is_some() {
+        keys.len()
+    } else {
+        0
+    };
     let Relational::Limit { input: source, .. } = graph.operation_mut(root)? else {
         unreachable!()
     };
     let mut operation = std::mem::replace(source.as_mut(), Relational::One);
+    if let Relational::Sort { input, .. } = operation {
+        operation = *input;
+    }
     if let Some(predicate) = predicate {
         operation = operation.filter(predicate);
     }
     **source = operation.sort(keys);
-    Ok(key_count)
+    Ok((root, key_count))
 }
 
 /// User sort properties and aggregation keys can be NULL (NULLs sort last in

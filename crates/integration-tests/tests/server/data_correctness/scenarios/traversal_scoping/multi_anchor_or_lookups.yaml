@@ -11,10 +11,10 @@ query:
     MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
 
 expect:
-  sql_contains:
-    - "(_scope.id = 1000)"
-    - "(_scope.id = 1002)"
-    - ") OR startsWith(p.traversal_path, (SELECT"
+  sql_matches:
+    - '\(q\."[^"]+" = 1000\)'
+    - '\(q\."[^"]+" = 1002\)'
+    - '\) OR \(startsWith\(q\."[^"]+", \(SELECT'
   node_count: 2
   nodes:
     Project:

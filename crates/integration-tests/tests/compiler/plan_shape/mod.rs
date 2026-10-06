@@ -65,6 +65,105 @@ fn query_graph_request_contract() {
 }
 
 #[test]
+fn query_graph_relationship_scope_contract() {
+    use query_data_model::QueryDataModel;
+    use query_engine::compiler::{
+        self,
+        input::Input,
+        query_graph::{Expression as E, LoweredOperation as Operation, QueryGraph, ScanInput},
+        scope::{self, ScopeProof},
+    };
+    let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
+    let mut input: Input = serde_json::from_value(serde_json::json!({
+        "query_type": "traversal",
+        "nodes": [{"id": "caller", "entity": "Definition"}, {"id": "callee", "entity": "Definition"}],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}]
+    })).unwrap();
+    let proofs = ["caller", "callee"]
+        .into_iter()
+        .map(|alias| (alias.to_string(), ScopeProof::literal("1/42/")))
+        .collect();
+    let scope = scope::prepare(&mut input, proofs, model.as_ref());
+    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
+    let root = graph.select(Operation::One);
+    let table = model.relationship_table("CALLS").unwrap();
+    assert!(!model.table_path_scopable(table));
+    let edge = graph.scan(root, table, "edge").unwrap();
+    graph.bind_scan(edge, ScanInput::Relationship(0)).unwrap();
+    *graph.operation_mut(root).unwrap() = Operation::source(edge);
+    graph
+        .project(
+            root,
+            "id",
+            E::Column(graph.stored_column(edge, "source_id").unwrap()),
+        )
+        .unwrap();
+    scope::apply_graph(&mut graph, &scope, &input).unwrap();
+    let sql = graph.render(root).unwrap();
+    assert!(sql.contains("startsWith") && sql.contains("1/42/"), "{sql}");
+}
+
+#[test]
+fn query_graph_subquery_visibility_contract() {
+    use query_engine::compiler::{
+        self,
+        query_graph::{Expression as E, GraphError, LoweredOperation as Operation, QueryGraph},
+    };
+    let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
+    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
+    let root = graph.select(Operation::One);
+    let body = graph.select(Operation::One);
+    let key = graph.project(body, "id", E::Integer(7)).unwrap();
+    let definition = graph.define(root, body, "keys", false).unwrap();
+    let reference = graph.reference(root, definition, "keys").unwrap();
+    let key = graph.output_column(reference, key).unwrap();
+    graph.project(root, "id", E::Integer(7)).unwrap();
+    *graph.operation_mut(root).unwrap() =
+        Operation::One.filter(E::equal(E::Column(key), E::Integer(7)));
+    assert!(matches!(
+        graph.validate_lowered(root),
+        Err(GraphError::OperationVisibility)
+    ));
+    *graph.operation_mut(root).unwrap() = Operation::One.filter(E::InQuery {
+        value: Box::new(E::Integer(7)),
+        key,
+    });
+    let (sql, _) = graph.render_parameterized(root).unwrap();
+    assert!(sql.contains("IN (SELECT"), "{sql}");
+}
+
+#[test]
+fn query_graph_scalar_subquery_contract() {
+    use query_engine::compiler::{
+        self,
+        query_graph::{Expression as E, GraphError, LoweredOperation as Operation, QueryGraph},
+    };
+    let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
+    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
+    let root = graph.select(Operation::One);
+    let body = graph.select(Operation::One);
+    let output = graph.project(body, "count", E::Count).unwrap();
+    let relation = graph.derive(root, body, "scalar").unwrap();
+    let value = graph.output_column(relation, output).unwrap();
+    graph.project(root, "count", E::ScalarQuery(value)).unwrap();
+    assert!(matches!(
+        graph.validate_lowered(root),
+        Err(GraphError::AggregatePlacement)
+    ));
+    *graph.operation_mut(body).unwrap() = Operation::One.aggregate(vec![]);
+    let sql = graph.render(root).unwrap();
+    assert!(sql.contains("(SELECT") && sql.contains("COUNT(*)"), "{sql}");
+    let foreign = graph.select(Operation::One);
+    graph
+        .project(foreign, "count", E::ScalarQuery(value))
+        .unwrap();
+    assert!(matches!(
+        graph.render(foreign),
+        Err(GraphError::OutsideBlock)
+    ));
+}
+
+#[test]
 fn query_graph_stored_identity_contract() {
     use query_data_model::QueryDataModel;
     use query_engine::compiler::{

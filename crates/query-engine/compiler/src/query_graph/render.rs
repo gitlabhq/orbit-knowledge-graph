@@ -485,12 +485,45 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     ) -> Result<String> {
         Ok(match expression {
             Expression::Column(reference) => column(*reference)?,
+            Expression::Literal { data_type, value } => orbit_utils::query_types::ParamValue {
+                data_type: *data_type,
+                value: value.clone(),
+            }
+            .render_clickhouse_literal(),
             Expression::Integer(value) => value.to_string(),
             Expression::Boolean(value) => value.to_string(),
             Expression::Text(value) => {
                 format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''"))
             }
             Expression::Count => "COUNT(*)".into(),
+            Expression::ScalarQuery(reference) => {
+                let Source::Derived(body) = self.relation(reference.relation)?.source else {
+                    return Err(GraphError::ExpressionType);
+                };
+                let Port::Output(output) = reference.port else {
+                    return Err(GraphError::ExpressionType);
+                };
+                format!(
+                    "(SELECT {} FROM ({}))",
+                    output_name(output),
+                    self.render_block(body, false)?
+                )
+            }
+            Expression::PathDepth(value) => format!(
+                "toInt64(countSubstrings({}, '/'))",
+                self.render_expression_with(value, column)?
+            ),
+            Expression::Aggregate { function, value } => {
+                let name = match function {
+                    crate::input::AggFunction::Count => "count",
+                    crate::input::AggFunction::Sum => "sum",
+                    crate::input::AggFunction::Avg => "avg",
+                    crate::input::AggFunction::Min => "min",
+                    crate::input::AggFunction::Max => "max",
+                    crate::input::AggFunction::Collect => "groupArray",
+                };
+                format!("{name}({})", self.render_expression_with(value, column)?)
+            }
             Expression::InQuery { value, key } => {
                 let Source::Definition(definition) = self.relation(key.relation)?.source else {
                     return Err(GraphError::ExpressionType);
@@ -649,8 +682,11 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     };
                     let value = fold(value);
                     let argument = fold(argument.ok_or(GraphError::ExpressionType)?);
+                    if *operator == FilterOp::Contains {
+                        return Ok(format!("multiSearchAny({value}, [{argument}])"));
+                    }
                     let function = match operator {
-                        FilterOp::Contains | FilterOp::AllTokens => "hasAllTokens",
+                        FilterOp::AllTokens => "hasAllTokens",
                         FilterOp::AnyTokens => "hasAnyTokens",
                         FilterOp::TokenMatch => "hasToken",
                         FilterOp::StartsWith => "startsWith",

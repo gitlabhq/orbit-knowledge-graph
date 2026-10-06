@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_graph,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
@@ -170,12 +170,14 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
 
+    use futures::FutureExt;
+    let mut failures = Vec::new();
     for (frontend_key, query_str) in &scenario.query {
         let Ok(frontend) = frontend_key.parse::<Frontend>() else {
             eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
             continue;
         };
-        run_frontend(
+        let result = std::panic::AssertUnwindSafe(run_frontend(
             &ctx,
             (frontend, frontend_key),
             query_str,
@@ -183,9 +185,24 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             &redaction,
             &scenario.expect,
             name,
-        )
+        ))
+        .catch_unwind()
         .await;
+        if let Err(payload) = result {
+            let message = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("panic (see stderr)");
+            failures.push(format!("{frontend_key}: {message}"));
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "{name}: {} frontend failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 async fn run_frontend(
@@ -200,7 +217,7 @@ async fn run_frontend(
     let label = &format!("{name} [{frontend_key}]");
     let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile_model(query, frontend, &data_model, security) {
+    let compiled = match compile_graph(query, frontend, &data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -245,20 +262,51 @@ async fn run_frontend(
     }
 
     let sql = compiled.base.render();
-    for fragment in &expect.sql_contains {
+    let sql_failures = expect
+        .sql_contains
+        .iter()
+        .filter(|fragment| !sql.contains(fragment.as_str()))
+        .map(|fragment| format!("SQL does not contain '{fragment}'"))
+        .chain(
+            expect
+                .sql_not_contains
+                .iter()
+                .filter(|fragment| sql.contains(fragment.as_str()))
+                .map(|fragment| format!("SQL should not contain '{fragment}'")),
+        )
+        .chain(
+            expect
+                .sql_matches
+                .iter()
+                .filter(|pattern| {
+                    !regex::Regex::new(pattern)
+                        .expect("valid SQL pattern")
+                        .is_match(&sql)
+                })
+                .map(|pattern| format!("SQL does not match '{pattern}'")),
+        )
+        .chain(
+            expect
+                .sql_not_matches
+                .iter()
+                .filter(|pattern| {
+                    regex::Regex::new(pattern)
+                        .expect("valid SQL pattern")
+                        .is_match(&sql)
+                })
+                .map(|pattern| format!("SQL must not match '{pattern}'")),
+        )
+        .collect::<Vec<_>>();
+    let check_sql = || {
         assert!(
-            sql.contains(fragment.as_str()),
-            "{label}: SQL does not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
-    for fragment in &expect.sql_not_contains {
-        assert!(
-            !sql.contains(fragment.as_str()),
-            "{label}: SQL should not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
+            sql_failures.is_empty(),
+            "{label}: {}\nSQL: {sql}",
+            sql_failures.join("; ")
+        )
+    };
 
     if expect.compile_only {
+        check_sql();
         return;
     }
 
@@ -280,6 +328,7 @@ async fn run_frontend(
             label,
         )
         .await;
+        check_sql();
         return;
     }
 
@@ -310,6 +359,7 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+    check_sql();
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, names: &[String], label: &str) {
@@ -375,7 +425,7 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
 
         let compiled = Arc::new(
-            compile_model(&query_str, frontend, data_model, security)
+            compile_graph(&query_str, frontend, data_model, security)
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 

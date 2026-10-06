@@ -4,7 +4,7 @@ mod pattern;
 mod terms;
 
 use query_engine::compiler;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -389,7 +389,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                     path,
                     &mut failures,
                     |input, options| {
-                        let plan = plan::plan_duckdb(input, &local, options, &HashSet::new())?;
+                        let plan = plan::plan_duckdb(input, &local, options)?;
                         let lowered = lower::emit(&plan, input)?;
                         let views = explain::physical(&plan, &lowered.ast);
                         compiler::passes::codegen::duckdb::codegen(
@@ -765,7 +765,6 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
-            &HashSet::new(),
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {

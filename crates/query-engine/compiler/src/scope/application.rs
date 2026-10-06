@@ -34,11 +34,6 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
     input: &crate::input::Input,
 ) -> Result<()> {
     use crate::query_graph::{Expression as E, LoweredOperation as Operation, ScanInput, Source};
-    if !scope.requirements.is_empty() {
-        return Err(crate::error::QueryError::Lowering(
-            "graph scope lookup requirements are not implemented".into(),
-        ));
-    }
     let blocks = graph.blocks().collect::<Vec<_>>();
     for block in blocks {
         let Ok(relations) = graph.relations(block) else {
@@ -50,31 +45,27 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
             let Source::Stored(table) = declaration.source else {
                 continue;
             };
-            if !graph.catalog().table_path_scopable(table.name()) {
-                continue;
-            }
             let proof = match declaration.input {
-                Some(ScanInput::Node(index)) => scope.nodes.get(&input.nodes[index].id),
+                Some(ScanInput::Node(index))
+                    if graph.catalog().table_path_scopable(table.name()) =>
+                {
+                    scope.nodes.get(&input.nodes[index].id)
+                }
                 Some(ScanInput::Relationship(index)) => {
                     scope.relationships.get(index).and_then(Option::as_ref)
                 }
-                None => None,
+                _ => None,
             };
             let Some(proof) = proof else { continue };
-            if proof.depth.is_some() {
-                return Err(crate::error::QueryError::Lowering(
-                    "graph scope depth is not implemented".into(),
-                ));
-            }
             let column = graph.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?;
             let mut predicates = Vec::new();
-            let mut lookups = Vec::new();
+            let required = scope
+                .requirements
+                .iter()
+                .any(|requirement| requirement.sources == proof.sources);
             for source in &proof.sources {
-                match source {
-                    super::ScopeSource::Literal(path) => predicates.push(E::StartsWith(
-                        Box::new(E::Column(column)),
-                        Box::new(E::Text(path.clone())),
-                    )),
+                let path = match source {
+                    super::ScopeSource::Literal(path) => E::Text(path.clone()),
                     super::ScopeSource::Lookup {
                         source_table,
                         key_column,
@@ -123,20 +114,48 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
                         )?;
                         let output = graph.outputs(lookup)?.next().expect("scope path output");
                         let scope_relation = graph.derive(block, lookup, super::LOOKUP_ALIAS)?;
-                        let path = graph.output_column(scope_relation, output)?;
-                        predicates.push(E::Or(
-                            Box::new(E::StartsWith(
-                                Box::new(E::Column(column)),
-                                Box::new(E::Column(path)),
+                        E::ScalarQuery(graph.output_column(scope_relation, output)?)
+                    }
+                };
+                let mut predicate =
+                    E::StartsWith(Box::new(E::Column(column)), Box::new(path.clone()));
+                if let Some((min, max)) = proof.depth {
+                    if min == 0 && max == 0 {
+                        predicate = E::equal(E::Column(column), path.clone());
+                    } else {
+                        let depth = E::PathDepth(Box::new(E::Column(column)));
+                        let bound = |hops| {
+                            E::Add(
+                                Box::new(E::PathDepth(Box::new(path.clone()))),
+                                Box::new(E::Integer(i64::from(hops))),
+                            )
+                        };
+                        predicate = E::And(
+                            Box::new(predicate),
+                            Box::new(E::And(
+                                Box::new(E::GreaterEqual(
+                                    Box::new(depth.clone()),
+                                    Box::new(bound(min)),
+                                )),
+                                Box::new(E::LessEqual(Box::new(depth), Box::new(bound(max)))),
                             )),
-                            Box::new(E::equal(
-                                E::Column(path),
-                                E::Text(super::UNRESOLVED_PATH.into()),
-                            )),
-                        ));
-                        lookups.push(scope_relation);
+                        );
                     }
                 }
+                let unresolved = E::Text(super::UNRESOLVED_PATH.into());
+                predicates.push(if required {
+                    E::And(
+                        Box::new(predicate),
+                        Box::new(E::Predicate {
+                            operator: crate::input::FilterOp::Ne,
+                            value: Box::new(path),
+                            argument: Some(Box::new(unresolved)),
+                            fold_case: false,
+                        }),
+                    )
+                } else {
+                    E::Or(Box::new(predicate), Box::new(E::equal(path, unresolved)))
+                });
             }
             let predicate = predicates
                 .into_iter()
@@ -148,15 +167,7 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
                 .ok_or_else(|| {
                     crate::error::QueryError::Lowering("scope scan missing from operation".into())
                 })?;
-            let mut operation = std::mem::replace(scan, Operation::One);
-            for lookup in lookups {
-                operation = Operation::Join {
-                    left: Box::new(operation),
-                    right: Box::new(Operation::source(lookup)),
-                    kind: crate::query_graph::JoinKind::Cross,
-                    condition: E::Boolean(true),
-                };
-            }
+            let operation = std::mem::replace(scan, Operation::One);
             *scan = operation.filter(predicate);
         }
     }

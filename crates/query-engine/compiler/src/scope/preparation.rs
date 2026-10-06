@@ -18,7 +18,6 @@ pub fn prepare(
             .collect(),
         nodes: proofs,
         requirements: Vec::new(),
-        table_scans: Default::default(),
     };
     if input.query_type != QueryType::Aggregation {
         return scope;
@@ -67,8 +66,8 @@ pub fn prepare(
     };
 
     let index = *index;
+    input.nodes[target].existence = crate::input::NodeExistence::CurrentRow;
     let target = input.nodes[target].id.clone();
-    scope.table_scans.insert(target.clone());
     scope.nodes.insert(target, target_proof);
     scope.requirements.push(proof);
     scope.relationships.remove(index);

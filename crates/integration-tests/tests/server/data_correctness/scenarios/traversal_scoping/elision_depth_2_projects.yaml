@@ -6,8 +6,8 @@ query:
   gql: |
     MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS*2..2]->(x:Project) RETURN count(x) AS c LIMIT 10
 expect:
-  sql_contains: ["countSubstrings(x.traversal_path"]
-  sql_not_contains: ["gl_edge", "gl_group AS g"]
+  sql_matches: ['countSubstrings\(q\."[^"]+", ''/''\)']
+  sql_not_contains: ["gl_edge", " JOIN "]
   skip_requirements: ["filter:full_path"]
   row_count: 1
   row_values: [{c: 1}]
