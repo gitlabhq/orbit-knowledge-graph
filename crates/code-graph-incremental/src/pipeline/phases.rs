@@ -63,12 +63,12 @@ fn workset(
     };
     let mut candidates = Vec::new();
     for entry in repo.files() {
-        let path = &entry.path;
+        let path = entry.path.as_ref();
         let manifest = entry.keeps() && is_manifest(path);
         let in_family = SupportLang::from_path(path).is_some_and(|l| env.in_family(l));
         if entry.decision() == Decision::Keep(Role::Source) && in_family && !manifest {
-            listed.candidates.insert(path.clone());
-            candidates.push(path.clone());
+            listed.candidates.insert(path.to_owned());
+            candidates.push(path.to_owned());
             continue;
         }
         if manifest {
@@ -78,11 +78,11 @@ fn workset(
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
             {
                 Some(content) => listed.manifests.push(SourceFile {
-                    path: path.clone(),
+                    path: path.to_owned(),
                     content,
                 }),
                 None => {
-                    listed.unread_manifests.insert(path.clone());
+                    listed.unread_manifests.insert(path.to_owned());
                 }
             }
         }
@@ -118,7 +118,7 @@ impl Phase<ReindexInput> for Remap {
             .removed
             .iter()
             .map(String::as_str)
-            .chain(changes.changed.files().map(|f| f.path.as_str()))
+            .chain(changes.changed.files().map(|f| f.path.as_ref()))
             .collect();
         let dirty = remap(&mut state, &old_labels, &dirty_labels);
         state
@@ -381,17 +381,17 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .collect();
         let remaining: Vec<_> = repo
             .files()
-            .filter(|file| !parsed.contains(file.path.as_str()))
+            .filter(|file| !parsed.contains(file.path.as_ref()))
             .map(|file| {
                 let reason = match file.decision() {
                     Decision::List(reason) | Decision::Drop(reason) => {
                         FileReason::Skip(FileSkip::Filter(reason))
                     }
-                    _ if skipped.contains_key(file.path.as_str()) => {
-                        timeout(skipped[file.path.as_str()])
+                    _ if skipped.contains_key(file.path.as_ref()) => {
+                        timeout(skipped[file.path.as_ref()])
                     }
-                    _ if candidates.contains(&file.path)
-                        || unread_manifests.contains(&file.path) =>
+                    _ if candidates.contains(file.path.as_ref())
+                        || unread_manifests.contains(file.path.as_ref()) =>
                     {
                         FileReason::Fault(FileFault::FileRead)
                     }
