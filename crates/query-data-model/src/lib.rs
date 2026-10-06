@@ -2,6 +2,7 @@ mod derive;
 mod error;
 pub mod generic;
 pub mod implementations;
+pub mod storage;
 
 pub use error::DataModelError;
 pub use generic::{

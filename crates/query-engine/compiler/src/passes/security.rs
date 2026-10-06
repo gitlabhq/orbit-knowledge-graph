@@ -67,10 +67,11 @@ pub(crate) fn graph_filters<'a, M: query_data_model::QueryDataModel + ?Sized>(
             let Source::Stored(table) = graph.relation(relation)?.source else {
                 continue;
             };
-            if !should_apply_security_filter(table, graph.catalog()) {
+            if !should_apply_security_filter(table.name(), graph.catalog()) {
                 continue;
             }
-            let paths = context.paths_at_least(graph.catalog().table_minimum_access_level(table));
+            let paths =
+                context.paths_at_least(graph.catalog().table_minimum_access_level(table.name()));
             let paths = TraversalPathTrie::from_paths(&paths).to_minimal_prefixes();
             let column = graph.stored_column(relation, TRAVERSAL_PATH_COLUMN)?;
             let predicate = paths

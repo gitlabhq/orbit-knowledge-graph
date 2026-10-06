@@ -97,7 +97,10 @@ These assertions check plan structure; data-correctness scenarios check executio
 
 `compiler::query_graph` explores a single owner for query declarations. `compiler::compile_graph` exposes a separate compiler entry point for traversal requests.
 One block arena owns relation occurrences, CTE definitions, ordered outputs, and their computations.
-Stored ports borrow validated column names from the current data-model catalog. Derived ports reference exact output identities.
+Stored ports reference catalog-owned columns through typed table and column identities. Derived ports reference exact output identities.
+The shared storage module owns immutable column declarations and a name lookup index. Backend catalogs supply column type metadata.
+Names resolve at construction and SQL rendering; they are not stored identities. References from another table or catalog are rejected.
+Self-joins share stored column identities while retaining separate relation occurrences. Internal column names derive from ordinals.
 UNION declares its own outputs and maps them positionally to its arms. It does not inherit first-arm provenance.
 Structural validation checks block ownership and CTE visibility. Each phase supplies its expression and operation checks.
 Wrapping creates a new block around an existing block. No persistent scope-parent registry needs updating.

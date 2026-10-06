@@ -81,8 +81,22 @@ mod tests {
             model.backend().property_column(property),
             Some("project_id")
         );
-        assert!(table.column_types.contains_key("project_id"));
-        assert!(!table.column_types.contains_key("target_project_id"));
+        assert!(
+            table
+                .storage
+                .reference()
+                .column("project_id")
+                .unwrap()
+                .data_type()
+                .is_some()
+        );
+        assert!(
+            table
+                .storage
+                .reference()
+                .column("target_project_id")
+                .is_none()
+        );
     }
 
     #[test]
@@ -95,8 +109,8 @@ mod tests {
         let table = model.backend().table_for_entity(entity).unwrap();
 
         assert_eq!(model.backend().property_column(property), Some("when"));
-        assert!(table.columns.contains("when"));
-        assert!(!table.columns.contains("`when`"));
+        assert!(table.storage.reference().column("when").is_some());
+        assert!(table.storage.reference().column("`when`").is_none());
     }
 
     #[test]

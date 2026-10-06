@@ -50,7 +50,7 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
             let Source::Stored(table) = declaration.source else {
                 continue;
             };
-            if !graph.catalog().table_path_scopable(table) {
+            if !graph.catalog().table_path_scopable(table.name()) {
                 continue;
             }
             let proof = match declaration.input {

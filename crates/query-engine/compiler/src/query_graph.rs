@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use orbit_utils::query_types::SqlType;
 use query_data_model::QueryDataModel;
+use query_data_model::storage::{StoredColumnRef, StoredTableRef};
 
 static NEXT_GRAPH: AtomicU64 = AtomicU64::new(1);
 
@@ -44,7 +45,7 @@ pub struct ColumnRef<'catalog> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Port<'catalog> {
-    Stored(&'catalog str),
+    Stored(StoredColumnRef<'catalog>),
     Output(OutputId),
 }
 
@@ -162,7 +163,7 @@ pub enum ScanInput {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Source<'catalog> {
-    Stored(&'catalog str),
+    Stored(StoredTableRef<'catalog>),
     Derived(BlockId),
     Definition(DefinitionId),
 }
@@ -190,8 +191,25 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         table: &'catalog str,
         hint: impl Into<String>,
     ) -> Result<RelationId> {
-        if self.catalog.table_columns(table).is_none() {
-            return Err(GraphError::UnknownStored(table.into()));
+        let table = self
+            .catalog
+            .stored_table(table)
+            .ok_or_else(|| GraphError::UnknownStored(table.into()))?;
+        self.scan_stored(block, table, hint)
+    }
+
+    pub fn scan_stored(
+        &mut self,
+        block: BlockId,
+        table: StoredTableRef<'catalog>,
+        hint: impl Into<String>,
+    ) -> Result<RelationId> {
+        if self
+            .catalog
+            .stored_table(table.name())
+            .is_none_or(|owned| owned.id() != table.id())
+        {
+            return Err(GraphError::ForeignGraph);
         }
         self.add_relation(block, Source::Stored(table), hint.into())
     }
@@ -273,14 +291,26 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         let Source::Stored(table) = self.relation(relation)?.source else {
             return Err(GraphError::MissingOutput);
         };
-        let name = self
-            .catalog
-            .table_columns(table)
-            .and_then(|columns| columns.get(name))
-            .ok_or_else(|| GraphError::UnknownStored(format!("{table}.{name}")))?;
+        let column = table
+            .column(name)
+            .ok_or_else(|| GraphError::UnknownStored(format!("{}.{name}", table.name())))?;
+        self.stored_port(relation, column)
+    }
+
+    pub fn stored_port(
+        &self,
+        relation: RelationId,
+        column: StoredColumnRef<'catalog>,
+    ) -> Result<ColumnRef<'catalog>> {
+        let Source::Stored(table) = self.relation(relation)?.source else {
+            return Err(GraphError::MissingOutput);
+        };
+        if table.id() != column.table().id() {
+            return Err(GraphError::OutsideBlock);
+        }
         Ok(ColumnRef {
             relation,
-            port: Port::Stored(name),
+            port: Port::Stored(column),
         })
     }
 
@@ -310,8 +340,8 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
             return Err(GraphError::OutsideBlock);
         }
         match column.port {
-            Port::Stored(name) => {
-                self.stored_column(column.relation, name)?;
+            Port::Stored(stored) => {
+                self.stored_port(column.relation, stored)?;
             }
             Port::Output(output) => {
                 self.output_column(column.relation, output)?;
@@ -1516,7 +1546,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         operator,
                         value: Box::new(value_column),
                         argument: value.map(Box::new),
-                        fold_case: !self.catalog.in_sort_key(table, column),
+                        fold_case: !self.catalog.in_sort_key(table.name(), column),
                     }
                 };
                 operation = operation.filter(predicate);
@@ -1788,7 +1818,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         .ok_or(GraphError::LatestShape)?;
                     for predicate in &node_predicates[target] {
                         let mut immutable = true;
-                        predicate.columns(&mut |column| { immutable &= matches!(column.port, Port::Stored(name) if sort_key.iter().any(|key| key == name)); Ok(()) })?;
+                        predicate.columns(&mut |column| { immutable &= matches!(column.port, Port::Stored(stored) if sort_key.iter().any(|key| key == stored.name())); Ok(()) })?;
                         if immutable {
                             source = source.filter(predicate.clone());
                         }
@@ -2127,7 +2157,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         };
         let alias = self.relation(original)?.hint.clone();
         let body = self.select(PhysicalOperation::One);
-        let relation = self.scan(body, table, alias)?;
+        let relation = self.scan_stored(body, table, alias)?;
         if let Some(input) = self.relation(original)?.input.clone() {
             self.bind_scan(relation, input)?;
         }
@@ -2140,7 +2170,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 let Port::Stored(name) = column.port else {
                     return Err(GraphError::MissingOutput);
                 };
-                self.stored_column(relation, name)
+                self.stored_port(relation, name)
             })?);
         }
         for (column, candidate) in memberships {
@@ -2265,7 +2295,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 };
                 let keys = self
                     .catalog
-                    .table_sort_key(table)
+                    .table_sort_key(table.name())
                     .filter(|keys| !keys.is_empty())
                     .ok_or(GraphError::LatestShape)?
                     .iter()
@@ -2309,19 +2339,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
 
     fn source_columns(&self, relation: RelationId) -> Result<Vec<ColumnRef<'catalog>>> {
         match self.relation(relation)?.source {
-            Source::Stored(table) => {
-                let mut names = self
-                    .catalog
-                    .table_columns(table)
-                    .ok_or_else(|| GraphError::UnknownStored(table.into()))?
-                    .iter()
-                    .collect::<Vec<_>>();
-                names.sort();
-                names
-                    .into_iter()
-                    .map(|name| self.stored_column(relation, name))
-                    .collect()
-            }
+            Source::Stored(table) => table
+                .columns()
+                .map(|column| self.stored_port(relation, column))
+                .collect(),
             Source::Derived(body) => self
                 .outputs(body)?
                 .map(|output| self.output_column(relation, output))
@@ -2689,14 +2710,15 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         visiting: &mut HashSet<OutputId>,
     ) -> Result<ValueType> {
         match column.port {
-            Port::Stored(name) => {
-                let Source::Stored(table) = self.relation(column.relation)?.source else {
-                    return Err(GraphError::MissingOutput);
-                };
-                let ty = self
-                    .catalog
-                    .table_column_type(table, name)
-                    .ok_or_else(|| GraphError::UnknownStored(format!("{table}.{name}")))?;
+            Port::Stored(stored) => {
+                self.stored_port(column.relation, stored)?;
+                let ty = stored.data_type().ok_or_else(|| {
+                    GraphError::UnknownStored(format!(
+                        "{}.{}",
+                        stored.table().name(),
+                        stored.name()
+                    ))
+                })?;
                 Ok(ValueType::Scalar(match ty {
                     ontology::DataType::Int => SqlType::Int64,
                     ontology::DataType::Bool => SqlType::Bool,
@@ -3000,7 +3022,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
 
     fn render_column(&self, column: ColumnRef<'catalog>) -> Result<String> {
         let port = match column.port {
-            Port::Stored(name) => quoted(name),
+            Port::Stored(column) => quoted(column.name()),
             Port::Output(output) => {
                 self.output_label(output)?;
                 output_name(output)
@@ -3032,7 +3054,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             One => ("SELECT 1 AS _unit".into(), String::new(), vec![]),
             Source { relation, read } => {
                 let source = match self.relation(*relation)?.source {
-                    crate::query_graph::Source::Stored(table) => quoted(table),
+                    crate::query_graph::Source::Stored(table) => quoted(table.name()),
                     crate::query_graph::Source::Derived(body) => {
                         format!("({})", self.render_block(body, false)?)
                     }
@@ -3187,7 +3209,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     return Ok((
                         format!(
                             "SELECT {projection} FROM {} AS {}{} WHERE {}",
-                            quoted(table),
+                            quoted(table.name()),
                             relation_name(*relation),
                             if matches!(read, ReadMode::Current) {
                                 " FINAL"
@@ -3543,7 +3565,7 @@ fn collect_columns<'a>(expression: &Expression<'a>, needed: &mut Vec<ColumnRef<'
 }
 fn value_name(column: ColumnRef<'_>) -> String {
     let port = match column.port {
-        Port::Stored(name) => format!("stored_{name}"),
+        Port::Stored(column) => format!("stored_{}", column.ordinal()),
         Port::Output(output) => output_name(output),
     };
     quoted(&format!("{}_{}", relation_name(column.relation), port))
@@ -3600,7 +3622,7 @@ impl<M: QueryDataModel + ?Sized, E: std::fmt::Debug, O: std::fmt::Debug> QueryGr
                     .unwrap();
                     match relation.source {
                         Source::Stored(table) => {
-                            writeln!(text, "{indent}    (Scan {table})").unwrap()
+                            writeln!(text, "{indent}    (Scan {})", table.name()).unwrap()
                         }
                         Source::Derived(body) => self.explain_block(body, depth + 2, text)?,
                         Source::Definition(definition) => writeln!(

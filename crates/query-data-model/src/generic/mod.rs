@@ -1,7 +1,7 @@
 mod catalog;
 mod ids;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
@@ -133,7 +133,7 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
         source: EntityId,
         target: EntityId,
     ) -> Option<ForeignKey>;
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
+    fn stored_table(&self, table: &str) -> Option<crate::storage::StoredTableRef<'_>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(
@@ -252,8 +252,8 @@ pub trait QueryDataModel {
         self.query_backend().table_column_type(table, column)
     }
 
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
-        self.query_backend().table_columns(table)
+    fn stored_table(&self, table: &str) -> Option<crate::storage::StoredTableRef<'_>> {
+        self.query_backend().stored_table(table)
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {

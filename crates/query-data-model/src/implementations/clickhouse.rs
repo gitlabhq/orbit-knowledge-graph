@@ -1,17 +1,17 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use super::{PropertyBackendFacts, derive_property_backend_facts};
+use crate::storage::{StoredColumn, StoredTable, StoredTableRef};
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
     DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
     PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TableLayout {
     pub name: String,
-    pub columns: HashSet<String>,
-    pub column_types: HashMap<String, ontology::DataType>,
+    pub storage: StoredTable,
     pub sort_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
@@ -123,8 +123,14 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     }
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
-        self.table(table)
-            .and_then(|layout| layout.column_types.get(column).copied())
+        self.table(table).and_then(|layout| {
+            layout
+                .storage
+                .reference()
+                .column(column)?
+                .data_type()
+                .copied()
+        })
     }
 
     fn has_text_index(&self, property: PropertyId) -> bool {
@@ -180,8 +186,8 @@ impl QueryBackendCatalog for ClickHouseCatalog {
             .then_some(first)
     }
 
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
-        self.table(table).map(|layout| &layout.columns)
+    fn stored_table(&self, table: &str) -> Option<StoredTableRef<'_>> {
+        self.table(table).map(|layout| layout.storage.reference())
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
@@ -262,21 +268,22 @@ impl ClickHouseCatalog {
                 node.destination_table.clone(),
                 TableLayout {
                     name: node.destination_table.clone(),
-                    columns: node
-                        .storage
-                        .columns
-                        .iter()
-                        .map(|column| column.name.trim_matches('`').to_string())
-                        .collect(),
-                    column_types: node
-                        .fields
-                        .iter()
-                        .filter_map(|field| {
-                            field
-                                .column_name()
-                                .map(|_| (field.name.clone(), field.data_type))
-                        })
-                        .collect(),
+                    storage: StoredTable::new(
+                        node.destination_table.clone(),
+                        node.storage
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                let name = column.name.trim_matches('`').to_string();
+                                let data_type = node
+                                    .fields
+                                    .iter()
+                                    .find(|field| field.name == name)
+                                    .map(|field| field.data_type);
+                                StoredColumn { name, data_type }
+                            })
+                            .chain(system_columns()),
+                    ),
                     sort_key: node.sort_key.clone(),
                     entity: Some(entity_id),
                     path_columns: (!node.global)
@@ -306,19 +313,23 @@ impl ClickHouseCatalog {
                 .columns
                 .iter()
                 .chain(config.storage.denormalized_columns.iter())
-                .map(|column| column.name.trim_matches('`').to_string())
-                .collect();
-            let column_types = config
-                .columns
-                .iter()
-                .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
-                .collect();
+                .map(|column| {
+                    let name = column.name.trim_matches('`').to_string();
+                    let data_type = config
+                        .columns
+                        .iter()
+                        .find(|column| column.name.trim_matches('`') == name)
+                        .map(|column| column.data_type);
+                    StoredColumn { name, data_type }
+                });
             tables.insert(
                 table_name.to_string(),
                 TableLayout {
                     name: table_name.to_string(),
-                    columns,
-                    column_types,
+                    storage: StoredTable::new(
+                        table_name.to_string(),
+                        columns.chain(system_columns()),
+                    ),
                     sort_key: config.sort_key.clone(),
                     entity: None,
                     path_columns: vec![PathColumn {
@@ -328,16 +339,6 @@ impl ClickHouseCatalog {
                     path_scopable: false,
                 },
             );
-        }
-
-        for table in tables.values_mut() {
-            for (name, data_type) in [
-                (ontology::VERSION_COLUMN, ontology::DataType::Int),
-                (ontology::DELETED_COLUMN, ontology::DataType::Bool),
-            ] {
-                table.columns.insert(name.into());
-                table.column_types.insert(name.into(), data_type);
-            }
         }
 
         let mut relationships = vec![None; graph.relationships().count()];
@@ -455,28 +456,31 @@ impl ClickHouseCatalog {
                     }),
                 })
                 .collect();
-            let columns = join
-                .tables
-                .iter()
-                .enumerate()
-                .flat_map(|(index, table)| {
-                    tables
-                        .get(&table.table)
-                        .into_iter()
-                        .flat_map(move |layout| {
-                            layout
-                                .columns
-                                .iter()
-                                .map(move |column| join.column_for(index, column))
-                        })
-                })
-                .collect();
+            let mut columns =
+                join.tables
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(index, table)| {
+                        tables
+                            .get(&table.table)
+                            .into_iter()
+                            .flat_map(move |layout| {
+                                layout.storage.reference().columns().map(move |column| {
+                                    StoredColumn {
+                                        name: join.column_for(index, column.name()),
+                                        data_type: column.data_type().copied(),
+                                    }
+                                })
+                            })
+                    })
+                    .collect::<Vec<_>>();
+            columns.sort_by(|left, right| left.name.cmp(&right.name));
+            columns.dedup_by(|left, right| left.name == right.name);
             tables.insert(
                 join.table.clone(),
                 TableLayout {
                     name: join.table.clone(),
-                    columns,
-                    column_types: HashMap::new(),
+                    storage: StoredTable::new(join.table.clone(), columns),
                     sort_key: join.sort_key(),
                     entity: None,
                     path_columns,
@@ -496,4 +500,16 @@ impl ClickHouseCatalog {
             traversal_path_lookups,
         })
     }
+}
+
+fn system_columns() -> impl Iterator<Item = StoredColumn> {
+    [
+        (ontology::VERSION_COLUMN, ontology::DataType::Int),
+        (ontology::DELETED_COLUMN, ontology::DataType::Bool),
+    ]
+    .into_iter()
+    .map(|(name, data_type)| StoredColumn {
+        name: name.into(),
+        data_type: Some(data_type),
+    })
 }

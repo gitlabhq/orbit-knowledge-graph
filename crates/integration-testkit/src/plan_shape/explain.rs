@@ -657,7 +657,7 @@ fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPh
         }
         Expression::Column(column) => {
             let name = match column.port() {
-                Port::Stored(name) => name,
+                Port::Stored(column) => column.name(),
                 Port::Output(output) => graph.output_label(output).unwrap(),
             };
             format!("{}.{name}", graph.relation(column.relation()).unwrap().hint)
@@ -738,9 +738,11 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPha
         Relational::Source { relation, read } => {
             let declaration = graph.relation(*relation).unwrap();
             match declaration.source {
-                Source::Stored(table) => {
-                    scan(table, &declaration.hint, matches!(read, ReadMode::Current))
-                }
+                Source::Stored(table) => scan(
+                    table.name(),
+                    &declaration.hint,
+                    matches!(read, ReadMode::Current),
+                ),
                 Source::Derived(body) => Tree::node(
                     Operator::Bind,
                     &declaration.hint,
@@ -817,7 +819,7 @@ fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPha
                     "LimitBy {}",
                     graph
                         .catalog()
-                        .table_sort_key(table)
+                        .table_sort_key(table.name())
                         .unwrap()
                         .iter()
                         .map(|name| format!("{}.{name}", relation.hint))

@@ -92,7 +92,7 @@ pub fn apply_graph_excerpts<'a, M: query_data_model::QueryDataModel + ?Sized>(
         };
         if columns
             .get(&input.nodes[index].id)
-            .is_some_and(|columns| columns.contains(property))
+            .is_some_and(|columns| columns.contains(property.name()))
         {
             graph.replace_output(
                 output,

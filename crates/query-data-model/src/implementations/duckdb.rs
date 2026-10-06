@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
-
 use super::{PropertyBackendFacts, derive_property_backend_facts};
+use crate::storage::{StoredColumn, StoredTable, StoredTableRef};
 use crate::{
     DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
     QueryBackendCatalog, RelationshipId, TraversalPathLookup,
@@ -17,8 +16,7 @@ pub struct DuckDbEntityLayout {
 #[derive(Debug)]
 pub struct DuckDbCatalog {
     edge_table: String,
-    edge_columns: HashSet<String>,
-    edge_column_types: HashMap<String, ontology::DataType>,
+    storage: StoredTable,
     edge_sort_key: Vec<String>,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
@@ -102,8 +100,8 @@ impl QueryBackendCatalog for DuckDbCatalog {
         None
     }
 
-    fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
-        (table == self.edge_table()).then(|| self.edge_columns())
+    fn stored_table(&self, table: &str) -> Option<StoredTableRef<'_>> {
+        (table == self.edge_table()).then(|| self.storage.reference())
     }
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
@@ -143,12 +141,12 @@ impl DuckDbCatalog {
         &self.edge_table
     }
 
-    pub fn edge_columns(&self) -> &HashSet<String> {
-        &self.edge_columns
-    }
-
     pub fn edge_column_type(&self, column: &str) -> Option<ontology::DataType> {
-        self.edge_column_types.get(column).copied()
+        self.storage
+            .reference()
+            .column(column)?
+            .data_type()
+            .copied()
     }
 }
 
@@ -161,16 +159,16 @@ impl DuckDbCatalog {
             .local_edge_table_name()
             .unwrap_or_else(|| ontology.edge_table())
             .to_string();
-        let edge_columns = ontology
-            .local_edge_columns()
-            .iter()
-            .map(|column| column.name.clone())
-            .collect();
-        let edge_column_types = ontology
-            .local_edge_columns()
-            .iter()
-            .map(|column| (column.name.clone(), column.data_type))
-            .collect();
+        let storage = StoredTable::new(
+            edge_table.clone(),
+            ontology
+                .local_edge_columns()
+                .iter()
+                .map(|column| StoredColumn {
+                    name: column.name.clone(),
+                    data_type: Some(column.data_type),
+                }),
+        );
         let edge_sort_key = ontology
             .sort_key_for_table(&edge_table)
             .unwrap_or_else(|| ontology.edge_sort_key())
@@ -229,8 +227,7 @@ impl DuckDbCatalog {
         let relationships = graph.relationships().map(|_| edge_table.clone()).collect();
         Ok(DuckDbCatalog {
             edge_table,
-            edge_columns,
-            edge_column_types,
+            storage,
             edge_sort_key,
             entities,
             property_facts,
