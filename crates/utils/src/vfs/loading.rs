@@ -1,6 +1,6 @@
 //! Concurrent loading uses per-shard locks for nodes and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
-//! Disk files are linked; header-pending files are read for classification during loading.
+//! Disk files are linked; metadata-pending files are read for classification during loading.
 //! Freezing sorts and deduplicates nodes in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
@@ -41,7 +41,7 @@ pub struct Loading<T> {
     limits: Limits,
     cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     nodes: Vec<Mutex<Vec<Node<T>>>>,
-    blobs: Vec<Mutex<FxHashMap<ContentId, Blob>>>,
+    blobs: Vec<Mutex<FxHashMap<[u8; 32], Blob>>>,
     scratch: Scratch,
     files: AtomicU64,
     bytes: AtomicU64,
@@ -50,19 +50,15 @@ pub struct Loading<T> {
 }
 
 pub(super) struct Node<T> {
-    pub(super) file: File<T>,
+    pub(super) file: File<'static, T>,
     pub(super) slot: Option<Slot>,
-    pub(super) checked: bool,
 }
 
 pub(super) enum Slot {
-    Stored(ContentId),
+    Stored(Blob),
     Linked(PathBuf),
     Link(String),
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ContentId(pub(super) [u8; 32]);
 
 impl<T: Tag> Loading<T> {
     pub(super) fn new(
@@ -101,22 +97,22 @@ impl<T: Tag> Loading<T> {
         add_capped(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
         add_capped(&self.bytes, "total_bytes", size, self.limits.total_bytes)?;
 
-        let mut file = File::new(key, size);
         if let Put::Symlink(target) = what {
-            file.decide(Decision::List("symlink"));
-            self.add_node(file, Some(Slot::Link(target)), true);
+            let file = File::new(key, size, Decision::List("symlink"));
+            self.add_node(file, Some(Slot::Link(target)));
             return Ok(());
         }
-        match self.limits.file_bytes {
-            Some(cap) if size > cap => file.decide(Decision::List("oversize")),
-            _ => self.passes.header(&mut file),
-        }
+        let mut file = File::new(key, size, Decision::Pending);
+        file.metadata_decision = match self.limits.file_bytes {
+            Some(cap) if size > cap => Decision::List("oversize"),
+            _ => self.passes.metadata(&file),
+        };
         match (file.decision(), what) {
-            (Decision::Drop(_) | Decision::List(_), _) => self.add_node(file, None, true),
+            (Decision::Drop(_) | Decision::List(_), _) => self.add_node(file, None),
             (_, Put::Bytes(bytes)) => self.put_bytes(file, bytes, None)?,
             (_, Put::Lazy { read, .. }) => self.put_bytes(file, read()?, None)?,
             (Decision::Keep(_), Put::OnDisk { path, .. }) => {
-                self.add_node(file, Some(Slot::Linked(path)), false)
+                self.add_node(file, Some(Slot::Linked(path)))
             }
             (Decision::Pending, Put::OnDisk { path, .. }) => match disk::read(&path, size) {
                 Ok(bytes) => self.put_bytes(file, bytes, Some(path))?,
@@ -130,42 +126,38 @@ impl<T: Tag> Loading<T> {
 
     fn put_bytes(
         &self,
-        mut file: File<T>,
+        file: File<'static, T>,
         bytes: Vec<u8>,
         on_disk: Option<PathBuf>,
     ) -> Result<(), SourceError> {
         if bytes.len() as u64 != file.size {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "source size mismatch").into());
         }
-        self.passes.content(&mut file, &bytes);
-        file.keep_if_pending();
+        file.classify(&*self.passes, &bytes);
         let slot = match (file.decision(), on_disk) {
             (Decision::Keep(_), Some(path)) => Some(Slot::Linked(path)),
             (Decision::Keep(_), None) => Some(Slot::Stored(self.store(bytes)?)),
             _ => None,
         };
-        self.add_node(file, slot, true);
+        self.add_node(file, slot);
         Ok(())
     }
 
-    fn add_node(&self, file: File<T>, slot: Option<Slot>, checked: bool) {
+    fn add_node(&self, file: File<'static, T>, slot: Option<Slot>) {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
         let shard = &self.nodes[hasher.finish() as usize % NODE_SHARDS];
-        lock(shard).push(Node {
-            file,
-            slot,
-            checked,
-        });
+        lock(shard).push(Node { file, slot });
     }
 
-    fn store(&self, bytes: Vec<u8>) -> Result<ContentId, SourceError> {
-        let id = ContentId(Sha256::digest(&bytes).into());
+    fn store(&self, bytes: Vec<u8>) -> Result<Blob, SourceError> {
+        let id: [u8; 32] = Sha256::digest(&bytes).into();
         let len = bytes.len() as u64;
-        let mut shard = lock(&self.blobs[id.0[0] as usize]);
-        match shard.entry(id) {
-            Entry::Occupied(_) => {
+        let mut shard = lock(&self.blobs[id[0] as usize]);
+        let blob = match shard.entry(id) {
+            Entry::Occupied(entry) => {
                 self.deduped.fetch_add(len, Relaxed);
+                entry.into_mut()
             }
             Entry::Vacant(vacant) => {
                 let blob = match add_capped(
@@ -177,10 +169,10 @@ impl<T: Tag> Loading<T> {
                     Ok(_) => Blob::Memory(bytes.into()),
                     Err(_) => self.scratch.append(&bytes)?,
                 };
-                vacant.insert(blob);
+                vacant.insert(blob)
             }
-        }
-        Ok(id)
+        };
+        Ok(blob.clone())
     }
 
     pub(super) fn freeze(self) -> Vfs<T> {
@@ -203,14 +195,9 @@ impl<T: Tag> Loading<T> {
         let links = nodes
             .iter()
             .filter_map(|node| match &node.slot {
-                Some(Slot::Link(target)) => Some((node.file.path.clone(), target.clone())),
+                Some(Slot::Link(target)) => Some((node.file.path.to_string(), target.clone())),
                 _ => None,
             })
-            .collect();
-        let blobs = self
-            .blobs
-            .into_iter()
-            .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
             .collect();
         let usage = Usage {
             files: nodes.len(),
@@ -225,7 +212,6 @@ impl<T: Tag> Loading<T> {
             passes: self.passes,
             nodes,
             links,
-            blobs,
             scratch: self.scratch,
             usage,
         }

@@ -1,9 +1,0 @@
-sources: [memory, puts, lazy, checkout, changed, archive]
-entries:
-  - {path: file, data: data}
-rules:
-  - {phase: header, decision: {kind: keep, value: source}}
-  - {phase: content, decision: {kind: pending}}
-steps:
-  - {op: read, path: file, expect: {ok: data}}
-  - {op: files, expect: [{path: file, size: 4, decision: {kind: keep, value: input}}]}

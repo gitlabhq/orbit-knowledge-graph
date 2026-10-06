@@ -1,4 +1,0 @@
-sources: [archive]
-entries: [{path: file, data: data}]
-truncate_archive: 3
-load_error: empty

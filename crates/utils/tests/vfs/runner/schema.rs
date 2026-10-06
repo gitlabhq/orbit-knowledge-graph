@@ -1,10 +1,18 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Suite {
+    Scenario(Box<Scenario>),
+    Scenarios(Vec<Scenario>),
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
+    pub name: String,
     pub sources: Vec<SourceKind>,
-    pub entries: Vec<Entry>,
+    pub fixtures: Vec<Fixture>,
     #[serde(default)]
     pub rules: Vec<Rule>,
     #[serde(default)]
@@ -13,16 +21,14 @@ pub struct Scenario {
     pub options: Options,
     pub load_error: Option<String>,
     #[serde(default)]
-    pub steps: Vec<Step>,
+    pub tests: Vec<Test>,
     pub changed: Option<Vec<String>>,
-    pub truncate_archive: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     Memory,
-    Puts,
     Lazy,
     Checkout,
     Changed,
@@ -31,54 +37,18 @@ pub enum SourceKind {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Entry {
+pub struct Fixture {
     pub path: String,
     #[serde(default)]
-    pub data: Data,
+    pub content: String,
     pub link: Option<String>,
-    pub hardlink: Option<String>,
-    pub archive_path: Option<String>,
-    pub raw_type: Option<u8>,
-    pub declared_size: Option<u64>,
-    pub pax_size: Option<u64>,
-    pub read_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum Data {
-    Text(String),
-    Bytes(Vec<u8>),
-    Repeat(Repeat),
-}
-
-impl Default for Data {
-    fn default() -> Self {
-        Self::Text(String::new())
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Repeat {
-    pub text: String,
-    pub repeat: usize,
-}
-
-impl Data {
-    pub fn bytes(&self) -> Vec<u8> {
-        match self {
-            Self::Text(text) => text.as_bytes().to_vec(),
-            Self::Bytes(bytes) => bytes.clone(),
-            Self::Repeat(value) => {
-                assert!(
-                    value.text.len().saturating_mul(value.repeat) <= 16 * 1024 * 1024,
-                    "fixture too large"
-                );
-                value.text.repeat(value.repeat).into_bytes()
-            }
-        }
-    }
+pub struct Test {
+    pub name: String,
+    pub assert: Vec<Step>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -92,7 +62,7 @@ pub enum Tag {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
-    Header,
+    Metadata,
     Content,
 }
 
@@ -101,7 +71,7 @@ pub enum Phase {
 pub struct Rule {
     pub phase: Phase,
     pub suffix: Option<String>,
-    pub contains: Option<Data>,
+    pub contains: Option<String>,
     pub decision: Verdict,
 }
 
@@ -158,12 +128,12 @@ pub enum Scratch {
     Missing,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Step {
     Read {
         path: String,
-        expect: Outcome<Data>,
+        expect: Outcome<String>,
     },
     ReadDir {
         path: String,
@@ -183,36 +153,33 @@ pub enum Step {
     Usage {
         expect: Usage,
     },
-    LazyReads {
-        expect: usize,
-    },
     Write {
         path: String,
-        data: Data,
+        content: String,
     },
     Remove {
         path: String,
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Outcome<T> {
     Ok(Success<T>),
     Err(Failure),
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Success<T> {
     pub ok: T,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Failure {
     pub error: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Stat {
     pub path: String,
@@ -221,14 +188,14 @@ pub struct Stat {
     pub decision: Option<Verdict>,
     pub link: Option<String>,
 }
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     File,
     Dir,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Row {
     pub path: String,
@@ -236,7 +203,7 @@ pub struct Row {
     pub decision: Verdict,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Usage {
     pub files: Option<usize>,

@@ -3,10 +3,7 @@ mod sources;
 
 use std::io;
 use std::path::Path;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering::SeqCst},
-};
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use orbit_utils::vfs::{Decision, File, Pass, Vfs};
 use schema::*;
@@ -31,31 +28,44 @@ impl Policy {
         )
     }
 
-    fn apply(&self, phase: Phase, file: &mut File<Tag>, bytes: &[u8]) {
+    fn apply(
+        &self,
+        phase: Phase,
+        path: &str,
+        bytes: &[u8],
+        mut result: Decision<Tag>,
+    ) -> Decision<Tag> {
         for (rule, decision) in &self.0 {
             if rule.phase == phase
                 && rule
                     .suffix
                     .as_ref()
-                    .is_none_or(|suffix| file.path.ends_with(suffix))
+                    .is_none_or(|suffix| path.ends_with(suffix))
                 && rule.contains.as_ref().is_none_or(|data| {
-                    let needle = data.bytes();
+                    let needle = data.as_bytes();
                     needle.is_empty() || bytes.windows(needle.len()).any(|window| window == needle)
                 })
             {
-                file.decide(*decision);
+                result = *decision;
             }
         }
+        result
     }
 }
 
 impl Pass for Policy {
     type Tag = Tag;
-    fn header(&self, file: &mut File<Tag>) {
-        self.apply(Phase::Header, file, &[]);
+    fn metadata(&self, file: &File<'_, Tag>) -> Decision<Tag> {
+        assert!(file.bytes().is_none());
+        self.apply(Phase::Metadata, &file.path, &[], file.decision())
     }
-    fn content(&self, file: &mut File<Tag>, bytes: &[u8]) {
-        self.apply(Phase::Content, file, bytes);
+    fn content(&self, file: &File<'_, Tag>) -> Decision<Tag> {
+        self.apply(
+            Phase::Content,
+            &file.path,
+            file.bytes().expect("content phase supplies bytes"),
+            file.decision(),
+        )
     }
 }
 
@@ -91,7 +101,20 @@ fn check<T: std::fmt::Debug + PartialEq>(actual: io::Result<T>, expected: Outcom
 }
 
 pub fn run(yaml: &str) {
-    let scenario: Scenario = orbit_utils::yaml::from_str(yaml).expect("invalid VFS scenario");
+    let suite: Suite = orbit_utils::yaml::from_str(yaml).expect("invalid VFS suite");
+    match suite {
+        Suite::Scenario(scenario) => run_scenario(&scenario),
+        Suite::Scenarios(scenarios) => {
+            assert!(!scenarios.is_empty(), "suite has no scenarios");
+            for scenario in scenarios {
+                run_scenario(&scenario);
+            }
+        }
+    }
+}
+
+fn run_scenario(scenario: &Scenario) {
+    assert!(!scenario.name.trim().is_empty(), "scenario has no name");
     assert!(!scenario.sources.is_empty(), "scenario has no sources");
     for (index, source) in scenario.sources.iter().enumerate() {
         assert!(
@@ -102,30 +125,55 @@ pub fn run(yaml: &str) {
     for rule in &scenario.rules {
         assert!(
             rule.phase == Phase::Content || rule.contains.is_none(),
-            "header rules cannot inspect bytes"
+            "metadata rules cannot inspect bytes"
         );
     }
     assert!(
-        scenario.load_error.is_some() || !scenario.steps.is_empty(),
+        scenario.load_error.is_some() || !scenario.tests.is_empty(),
         "scenario has no assertions"
     );
+    assert!(
+        scenario.load_error.is_none() || scenario.tests.is_empty(),
+        "tests cannot run after a failed load"
+    );
+    for test in &scenario.tests {
+        assert!(!test.name.trim().is_empty(), "test has no name");
+        assert!(
+            test.assert
+                .iter()
+                .any(|step| !matches!(step, Step::Write { .. } | Step::Remove { .. })),
+            "test has no assertions"
+        );
+    }
     for kind in &scenario.sources {
+        assert!(
+            scenario.changed.is_none() || *kind == SourceKind::Changed,
+            "changed requires Changed"
+        );
+        for file in &scenario.fixtures {
+            assert!(
+                file.link.is_none()
+                    || (file.content.is_empty()
+                        && matches!(
+                            kind,
+                            SourceKind::Checkout | SourceKind::Changed | SourceKind::Archive
+                        )),
+                "links require a filesystem source and cannot have content"
+            );
+        }
         let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_source(yaml, *kind)));
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_source(scenario, *kind)));
         if let Err(error) = result {
-            eprintln!("VFS scenario source: {kind:?}");
+            eprintln!("VFS scenario: {}, source: {kind:?}", scenario.name);
             std::panic::resume_unwind(error);
         }
     }
 }
 
-fn run_source(yaml: &str, kind: SourceKind) {
-    let scenario: Scenario = orbit_utils::yaml::from_str(yaml).unwrap();
-    sources::validate(&scenario, kind);
+fn run_source(scenario: &Scenario, kind: SourceKind) {
     let root = tempfile::tempdir().unwrap();
     let scratch = tempfile::tempdir().unwrap();
-    let reads = AtomicUsize::new(0);
-    let puts = Arc::new(AtomicUsize::new(0));
+    let puts = AtomicUsize::new(0);
     let cancel = scenario.options.cancel_after.map(|after| {
         Box::new(move || puts.fetch_add(1, SeqCst) >= after) as Box<dyn Fn() -> bool + Send + Sync>
     });
@@ -143,10 +191,9 @@ fn run_source(yaml: &str, kind: SourceKind) {
         Policy::new(&scenario.rules[..middle]).then(Policy::new(&scenario.rules[middle..]));
     let vfs = Vfs::load(
         sources::Input {
-            scenario: &scenario,
+            scenario,
             kind,
             root: root.path(),
-            reads: &reads,
         },
         policy,
         scenario.limits.store(),
@@ -161,69 +208,67 @@ fn run_source(yaml: &str, kind: SourceKind) {
                 orbit_utils::vfs::SourceError::Cancelled => "cancelled".into(),
             };
             assert_eq!(&actual, expected);
-            assert!(
-                scenario.steps.is_empty(),
-                "steps cannot run after a failed load"
-            );
             return;
         }
         (Ok(vfs), None) => vfs,
         (actual, expected) => panic!("load expected {expected:?}, got {actual:?}"),
     };
-    for (index, step) in scenario.steps.into_iter().enumerate() {
-        eprintln!("step {index}: {step:?}");
-        match step {
-            Step::Read { path, expect } => match expect {
-                Outcome::Ok(value) => check(
-                    vfs.read(Path::new(&path)).map(|b| b.to_vec()),
-                    Outcome::Ok(Success {
-                        ok: value.ok.bytes(),
+    for test in &scenario.tests {
+        eprintln!("test: {}", test.name);
+        for step in test.assert.clone() {
+            eprintln!("assert: {step:?}");
+            match step {
+                Step::Read { path, expect } => match expect {
+                    Outcome::Ok(value) => check(
+                        vfs.read(Path::new(&path)).map(|b| b.to_vec()),
+                        Outcome::Ok(Success {
+                            ok: value.ok.into_bytes(),
+                        }),
+                    ),
+                    Outcome::Err(error) => check(
+                        vfs.read(Path::new(&path)).map(|b| b.to_vec()),
+                        Outcome::Err(error),
+                    ),
+                },
+                Step::ReadDir { path, expect } => check(vfs.read_dir(Path::new(&path)), expect),
+                Step::Stat { path, expect } => check(
+                    vfs.stat(Path::new(&path)).map(|stat| Stat {
+                        path: stat.path.to_string_lossy().into_owned(),
+                        kind: match stat.kind {
+                            orbit_utils::vfs::Kind::File => Kind::File,
+                            orbit_utils::vfs::Kind::Dir => Kind::Dir,
+                        },
+                        len: stat.len,
+                        decision: stat.decision.map(verdict),
+                        link: stat.link.map(|p| p.to_string_lossy().into_owned()),
                     }),
+                    expect,
                 ),
-                Outcome::Err(error) => check(
-                    vfs.read(Path::new(&path)).map(|b| b.to_vec()),
-                    Outcome::Err(error),
+                Step::Files { expect } => assert_eq!(
+                    vfs.files()
+                        .map(|file| Row {
+                            path: file.path.to_string(),
+                            size: file.size,
+                            decision: verdict(file.decision())
+                        })
+                        .collect::<Vec<_>>(),
+                    expect
                 ),
-            },
-            Step::ReadDir { path, expect } => check(vfs.read_dir(Path::new(&path)), expect),
-            Step::Stat { path, expect } => check(
-                vfs.stat(Path::new(&path)).map(|stat| Stat {
-                    path: stat.path.to_string_lossy().into_owned(),
-                    kind: match stat.kind {
-                        orbit_utils::vfs::Kind::File => Kind::File,
-                        orbit_utils::vfs::Kind::Dir => Kind::Dir,
-                    },
-                    len: stat.len,
-                    decision: stat.decision.map(verdict),
-                    link: stat.link.map(|p| p.to_string_lossy().into_owned()),
-                }),
-                expect,
-            ),
-            Step::Files { expect } => assert_eq!(
-                vfs.files()
-                    .map(|file| Row {
-                        path: file.path.clone(),
-                        size: file.size,
-                        decision: verdict(file.decision())
-                    })
-                    .collect::<Vec<_>>(),
-                expect
-            ),
-            Step::Subtree { path, expect } => assert_eq!(
-                vfs.subtree(Path::new(&path))
-                    .map(|file| file.path.clone())
-                    .collect::<Vec<_>>(),
-                expect
-            ),
-            Step::LazyReads { expect } => assert_eq!(reads.load(SeqCst), expect),
-            Step::Usage { expect } => check_usage(&vfs, expect),
-            Step::Write { path, data } => {
-                assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
-                sources::write(root.path(), &path, &data.bytes());
-            }
-            Step::Remove { path } => {
-                assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
-                std::fs::remove_file(sources::disk_path(root.path(), &path)).unwrap();
+                Step::Subtree { path, expect } => assert_eq!(
+                    vfs.subtree(Path::new(&path))
+                        .map(|file| file.path.to_string())
+                        .collect::<Vec<_>>(),
+                    expect
+                ),
+                Step::Usage { expect } => check_usage(&vfs, expect),
+                Step::Write { path, content } => {
+                    assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
+                    sources::write(root.path(), &path, content.as_bytes());
+                }
+                Step::Remove { path } => {
+                    assert!(matches!(kind, SourceKind::Checkout | SourceKind::Changed));
+                    std::fs::remove_file(sources::disk_path(root.path(), &path)).unwrap();
+                }
             }
         }
     }
