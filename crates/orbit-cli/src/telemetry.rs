@@ -3,12 +3,13 @@ use std::time::Duration;
 
 use labkit_events::StructuredEvent;
 use orbit_analytics::{
-    AnalyticsTracker, OrbitCliCommandContext, OrbitCommonContext, SnowplowAnalyticsTracker,
-    orbit_cli_command, orbit_common,
+    AnalyticsTracker, OrbitCliCommandContext, OrbitCliSetupContext, OrbitCommonContext,
+    SnowplowAnalyticsTracker, orbit_cli_command, orbit_cli_setup, orbit_common,
 };
 use regex::Regex;
 use uuid::Uuid;
 
+use crate::commands::setup::{Component, Outcome, SetupRun};
 use crate::settings;
 
 const DEFAULT_COLLECTOR_URL: &str = "https://events.gitlab.net";
@@ -17,6 +18,8 @@ const CATEGORY: &str = "orbit_cli";
 const MCP_COMMAND: &str = "mcp";
 const MCP_TOOL_CALL_ACTION: &str = "mcp_tool_call";
 const HOOK_GUARD_COMMAND: &str = "hook_guard";
+pub const AGENTS_CONFIGURED_ACTION: &str = "agents_configured";
+pub const AGENTS_REMOVED_ACTION: &str = "agents_removed";
 
 const ENABLED_ENV: &str = "ORBIT_TELEMETRY_ENABLED";
 const COLLECTOR_URL_ENV: &str = "ORBIT_TELEMETRY_COLLECTOR_URL";
@@ -115,6 +118,63 @@ pub fn emit_hook_guard_event<T: AnalyticsTracker + ?Sized>(
         cli_version: env!("ORBIT_VERSION").parse().ok(),
     };
     track_outcome(tracker, action, outcome, coding_agent);
+}
+
+pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
+    tracker: &T,
+    action: &str,
+    run: &SetupRun,
+    coding_agent: Option<&str>,
+) {
+    if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
+        .context(build_common_context(coding_agent))
+        .context(OrbitCliSetupContext::new(run.into()))
+        .build()
+    {
+        tracker.track(event);
+    }
+}
+
+impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
+    fn from(run: &SetupRun) -> Self {
+        use orbit_cli_setup::{
+            OrbitCliSetupComponentsItem as Item, OrbitCliSetupOutcome, OrbitCliSetupScope,
+        };
+        Self {
+            detected_agents: run
+                .detected_agents
+                .iter()
+                .filter_map(|name| name.parse().ok())
+                .collect(),
+            selected_agents: run
+                .selected_agents
+                .iter()
+                .filter_map(|name| name.parse().ok())
+                .collect(),
+            components: run
+                .components
+                .iter()
+                .map(|component| match component {
+                    Component::Instructions => Item::Instructions,
+                    Component::Hooks => Item::Hooks,
+                    Component::Skill => Item::Skill,
+                    Component::Mcp => Item::Mcp,
+                })
+                .collect(),
+            scope: match run.global {
+                true => OrbitCliSetupScope::Global,
+                false => OrbitCliSetupScope::Project,
+            },
+            interactive: run.interactive,
+            graph_first: run.graph_first,
+            index: run.index,
+            outcome: match run.outcome {
+                Outcome::Applied => OrbitCliSetupOutcome::Applied,
+                Outcome::DryRun => OrbitCliSetupOutcome::DryRun,
+                Outcome::NoAgentSelected => OrbitCliSetupOutcome::NoAgentSelected,
+            },
+        }
+    }
 }
 
 fn track_outcome<T: AnalyticsTracker + ?Sized>(
@@ -314,30 +374,66 @@ mod tests {
         emit_command_event(&tracker, "query", 1, Duration::from_millis(42), None);
         emit_tool_call_event(&tracker, "index", true, Duration::from_millis(9), None);
         emit_hook_guard_event(&tracker, "graph_first_deny", None);
+        emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
         let events = tracker.drain();
         assert_eq!(events[2].action(), "graph_first_deny");
+        assert_eq!(events[3].action(), "agents_configured");
         for event in events {
             assert_contexts_match_iglu_schemas(&event);
         }
     }
 
     fn assert_contexts_match_iglu_schemas(event: &StructuredEvent) {
-        for (name, uri) in [
-            ("orbit_common", orbit_analytics::ORBIT_COMMON_SCHEMA),
-            (
-                "orbit_cli_command",
-                orbit_analytics::ORBIT_CLI_COMMAND_SCHEMA,
-            ),
-        ] {
+        assert_eq!(event.contexts().len(), 2, "{}", event.action());
+        for context in event.contexts() {
+            let name = context
+                .schema
+                .split('/')
+                .nth(1)
+                .expect("iglu uri has a name");
             let validator = jsonschema::validator_for(&orbit_analytics::load_schema_json(name))
                 .expect("vendored schema compiles");
-            let data = context_data(event, uri);
             let errors: Vec<String> = validator
-                .iter_errors(&data)
+                .iter_errors(&context.data)
                 .map(|e| e.to_string())
                 .collect();
             assert!(errors.is_empty(), "{name} failed validation: {errors:?}");
         }
+    }
+
+    fn setup_run() -> SetupRun {
+        SetupRun {
+            detected_agents: vec!["claude".into(), "codex".into()],
+            selected_agents: vec!["claude".into()],
+            components: Component::from_flags(true, &[]),
+            global: true,
+            interactive: false,
+            graph_first: Some(false),
+            index: Some(true),
+            outcome: Outcome::Applied,
+        }
+    }
+
+    #[test]
+    fn setup_event_reports_the_run() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        emit_setup_event(&tracker, AGENTS_REMOVED_ACTION, &setup_run(), Some("codex"));
+        let events = tracker.drain();
+        assert_eq!(events[0].action(), "agents_removed");
+        let setup = context_data(&events[0], orbit_analytics::ORBIT_CLI_SETUP_SCHEMA);
+        assert_eq!(
+            setup["detected_agents"],
+            serde_json::json!(["claude", "codex"])
+        );
+        assert_eq!(setup["selected_agents"], serde_json::json!(["claude"]));
+        assert_eq!(
+            setup["components"],
+            serde_json::json!(["instructions", "hooks", "skill", "mcp"])
+        );
+        assert_eq!(setup["scope"], "global");
+        assert_eq!(setup["outcome"], "applied");
+        let common = context_data(&events[0], orbit_analytics::ORBIT_COMMON_SCHEMA);
+        assert_eq!(common["coding_agent"], "codex");
     }
 
     #[test]
