@@ -1,3 +1,18 @@
+## [0.137.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.137.0...v0.137.1) (2026-10-06)
+
+### Fixes
+
+* **billing:** bill a query only after the client receives its result ([2e8ec22](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2e8ec2205036f4a4f9301b15fb9a83c5ddeab5d3)) by Michael Angelo Rivera
+
+### Performance
+
+* **query:** serve string filters from skip indexes and fold ASCII case ([1e3c97a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1e3c97aa69ebe63b35b3a6dedec40b3269058a24)) by Michael Angelo Rivera
+
+### Other
+
+* **compiler:** keep pre-codegen ASTs backend-agnostic and using non-CH generic types ([4998a5c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4998a5c2377097d8b2f0eeb3f9de858db9a0843a)) by Michael Usachenko
+* **compiler:** render contains with the token operators and drop the unused LIKE operator ([e571006](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e57100620a9465e83fde7236244d889eedd43fd5)) by Michael Angelo Rivera
+
 ## [0.137.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.136.0...v0.137.0) (2026-10-05)
 
 ### Features
