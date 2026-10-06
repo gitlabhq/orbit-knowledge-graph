@@ -12,6 +12,7 @@ testkit = []
 orbit-server-config = { path = "../orbit-server-config" }
 labkit-events = { workspace = true }
 parking_lot = { workspace = true }
+regress = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
