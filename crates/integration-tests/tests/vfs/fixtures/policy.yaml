@@ -1,0 +1,121 @@
+- name: File policy controls content access and inventory
+  sources: [memory, lazy, directory, changeset, archive]
+  fixtures:
+    - path: main.rs
+      content: code
+    - path: manifest.toml
+      content: config
+    - path: logo.png
+      content: image
+    - path: blob.rs
+      content: "a\0b"
+    - path: build.log
+      content: log
+  rules:
+    - {phase: metadata, suffix: .rs, decision: {kind: keep, value: source}}
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .log, decision: {kind: list, value: log}}
+    - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
+  tests:
+    - name: Rejected files refuse reads but retain metadata
+      assert:
+        - {op: read, path: blob.rs, expect: {error: Unsupported}}
+        - {op: stat, path: blob.rs, expect: {ok: {path: /blob.rs, kind: file, len: 3, decision: {kind: list, value: binary}}}}
+        - {op: read, path: logo.png, expect: {error: Unsupported}}
+        - {op: stat, path: build.log, expect: {ok: {path: /build.log, kind: file, len: 3, decision: {kind: list, value: log}}}}
+        - {op: read, path: build.log, expect: {error: Unsupported}}
+    - name: Inventory reports the policy result for each retained file
+      assert:
+        - op: files
+          expect:
+            - {path: blob.rs, size: 3, decision: {kind: list, value: binary}}
+            - {path: build.log, size: 3, decision: {kind: list, value: log}}
+            - {path: logo.png, size: 5, decision: {kind: list, value: excluded}}
+            - {path: main.rs, size: 4, decision: {kind: keep, value: source}}
+            - {path: manifest.toml, size: 6, decision: {kind: keep, value: input}}
+        - {op: usage, expect: {files: 5, bytes: 21, kept: 10}}
+
+- name: A later pass can refine an earlier decision
+  sources: [memory, lazy, directory, changeset, archive]
+  fixtures:
+    - path: a.png
+      content: image
+    - path: b.keep.png
+      content: source
+  rules:
+    - {phase: metadata, suffix: .png, decision: {kind: list, value: excluded}}
+    - {phase: metadata, suffix: .keep.png, decision: {kind: keep, value: source}}
+  tests:
+    - name: The later keep decision makes the matching file readable
+      assert:
+        - {op: read, path: b.keep.png, expect: {ok: source}}
+        - {op: read, path: a.png, expect: {error: Unsupported}}
+
+- name: Pending content decisions settle to the default tag
+  sources: [memory, lazy, directory, changeset, archive]
+  fixtures:
+    - path: file
+      content: data
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, decision: {kind: pending}}
+  tests:
+    - name: Pending is never exposed after content classification
+      assert:
+        - {op: read, path: file, expect: {ok: data}}
+        - {op: files, expect: [{path: file, size: 4, decision: {kind: keep, value: input}}]}
+
+- name: Content policy preserves rejected files and their parent directories
+  sources: [memory, lazy, directory, changeset, archive]
+  fixtures:
+    - path: nested/file
+      content: data
+    - path: nested/empty
+      content: ""
+  rules:
+    - {phase: content, decision: {kind: list, value: content}}
+  tests:
+    - name: Rejected content leaves its metadata in the catalog
+      assert:
+        - op: files
+          expect:
+            - {path: nested/empty, size: 0, decision: {kind: list, value: content}}
+            - {path: nested/file, size: 4, decision: {kind: list, value: content}}
+        - {op: read_dir, path: /, expect: {ok: [nested]}}
+        - {op: read_dir, path: nested, expect: {ok: [empty, file]}}
+        - {op: subtree, path: nested, expect: [nested/empty, nested/file]}
+        - {op: stat, path: nested/file, expect: {ok: {path: /nested/file, kind: file, len: 4, decision: {kind: list, value: content}}}}
+        - {op: read, path: nested/file, expect: {error: Unsupported}}
+        - {op: read, path: nested/empty, expect: {error: Unsupported}}
+        - {op: usage, expect: {files: 2, bytes: 4, kept: 0, resident: 0, spilled: 0}}
+
+- name: A linked file receives its content decision on first read
+  sources: [directory, changeset]
+  fixtures:
+    - path: blob.rs
+      content: "x\0y"
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, contains: "\0", decision: {kind: list, value: binary}}
+  tests:
+    - name: Inventory reflects the decision after a refused read
+      assert:
+        - {op: files, expect: [{path: blob.rs, size: 3, decision: {kind: keep, value: source}}]}
+        - {op: read, path: blob.rs, expect: {error: Unsupported}}
+        - {op: files, expect: [{path: blob.rs, size: 3, decision: {kind: list, value: binary}}]}
+        - {op: usage, expect: {resident: 0, kept: 0}}
+
+- name: A late rejection retains the catalog
+  sources: [directory, changeset]
+  fixtures:
+    - path: file
+      content: data
+  rules:
+    - {phase: metadata, decision: {kind: keep, value: source}}
+    - {phase: content, decision: {kind: list, value: content}}
+  tests:
+    - name: Rejected content remains listed after loading
+      assert:
+        - {op: read, path: file, expect: {error: Unsupported}}
+        - {op: files, expect: [{path: file, size: 4, decision: {kind: list, value: content}}]}
+        - {op: read_dir, path: /, expect: {ok: [file]}}
