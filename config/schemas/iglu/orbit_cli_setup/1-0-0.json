@@ -1,0 +1,69 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Choices and outcome of one `orbit setup` or `orbit uninstall` run.",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_cli_setup",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["detected_agents", "selected_agents", "components", "scope", "interactive", "outcome"],
+  "properties": {
+    "detected_agents": {
+      "description": "Agents found on the machine, such as `claude` or `codex`.",
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "description": "Agent name",
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "maxLength": 32
+      }
+    },
+    "selected_agents": {
+      "description": "Agents the run configured or removed.",
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "description": "Agent name",
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "maxLength": 32
+      }
+    },
+    "components": {
+      "description": "Components the run applied.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "description": "Component name",
+        "type": "string",
+        "enum": ["instructions", "hooks", "skill", "mcp"]
+      }
+    },
+    "scope": {
+      "description": "Where the run wrote files: the user-global config or the current project.",
+      "type": "string",
+      "enum": ["global", "project"]
+    },
+    "interactive": {
+      "description": "True when the user answered the agent picker.",
+      "type": "boolean"
+    },
+    "graph_first": {
+      "description": "True when setup installed the graph-first guard. Null for uninstall.",
+      "type": ["boolean", "null"]
+    },
+    "index": {
+      "description": "True when setup indexes the current repository at the end. Null for uninstall.",
+      "type": ["boolean", "null"]
+    },
+    "outcome": {
+      "description": "Result of the run. A failed run sends no setup event; the command event reports the failure.",
+      "type": "string",
+      "enum": ["applied", "dry_run", "no_agent_selected"]
+    }
+  }
+}

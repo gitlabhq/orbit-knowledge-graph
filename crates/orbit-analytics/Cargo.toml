@@ -12,6 +12,7 @@ testkit = []
 orbit-server-config = { path = "../orbit-server-config" }
 labkit-events = { workspace = true }
 parking_lot = { workspace = true }
+regress = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -25,7 +26,7 @@ syn = { workspace = true }
 typify = { workspace = true }
 
 [package.metadata.cargo-shear]
-ignored = ["serde"] # used by build.rs-generated code (Serialize/Deserialize derives)
+ignored = ["serde", "regress"] # used by build.rs-generated code (serde derives, schema `pattern` checks)
 
 [lints]
 workspace = true
