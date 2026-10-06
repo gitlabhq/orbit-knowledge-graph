@@ -1,5 +1,4 @@
-use super::sql::latest_row_dedup;
-use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
+use crate::ast::{Cte, Expr, OrderExpr, Query, SelectExpr, TableRef};
 use crate::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
 
 use super::requirements::{column, predicate, projections};
@@ -13,8 +12,13 @@ pub(super) struct PhysicalLowerer<'a, T> {
 }
 
 impl<T> PhysicalLowerer<'_, T> {
-    fn sort_columns(&self, keys: &[query_data_model::bindings::ColumnRef]) -> Vec<String> {
-        keys.iter()
+    fn latest_row_dedup(
+        &self,
+        alias: &str,
+        keys: &[query_data_model::bindings::ColumnRef],
+    ) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
+        let keys: Vec<_> = keys
+            .iter()
             .map(|key| {
                 let query_data_model::bindings::ExportOrigin::Stored(column) = self
                     .bindings
@@ -23,9 +27,12 @@ impl<T> PhysicalLowerer<'_, T> {
                 else {
                     unreachable!("latest-row key must be stored")
                 };
-                self.storage.column(column).name().to_owned()
+                Expr::col(alias, self.storage.column(column).name())
             })
-            .collect()
+            .collect();
+        let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
+        order.push(OrderExpr::desc(Expr::col(alias, ontology::VERSION_COLUMN)));
+        (order, Some((1, keys)))
     }
     pub(super) fn execute(&self, plan: &ExecutionPlan) -> EmitOutput {
         let source = self.emit_source(&plan.source);
@@ -63,7 +70,7 @@ impl<T> PhysicalLowerer<'_, T> {
                 input,
                 aggregate_condition,
             } => {
-                let (order_by, limit_by) = latest_row_dedup(alias, &self.sort_columns(sort_key));
+                let (order_by, limit_by) = self.latest_row_dedup(alias, sort_key);
                 (
                     input.as_ref(),
                     order_by,
@@ -152,7 +159,7 @@ impl<T> PhysicalLowerer<'_, T> {
                 output
                     .predicates
                     .extend(aggregate_condition.iter().map(predicate));
-                let (order_by, limit_by) = latest_row_dedup(alias, &self.sort_columns(sort_key));
+                let (order_by, limit_by) = self.latest_row_dedup(alias, sort_key);
                 output.from = TableRef::subquery(
                     Query {
                         select: vec![SelectExpr::star()],

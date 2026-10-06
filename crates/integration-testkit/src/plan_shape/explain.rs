@@ -201,13 +201,12 @@ pub fn physical(
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> (Tree, Tree) {
     use query_data_model::QueryBackendCatalog;
-    let storage = model.query_backend().storage();
+    let sources = PlannedSources {
+        bindings: plan.bindings(),
+        storage: model.query_backend().storage(),
+    };
     let planned = match plan {
-        QueryPlan::Traversal(plan) => PlannedSources {
-            bindings: &plan.bindings,
-            storage,
-        }
-        .execution_tree(&plan.operation.execution),
+        QueryPlan::Traversal(plan) => sources.execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
             let group = |value: &compiler::passes::plan::aggregation::Group| {
@@ -257,13 +256,7 @@ pub fn physical(
             let tree = Tree::node(
                 Operator::Aggregate,
                 items,
-                vec![
-                    PlannedSources {
-                        bindings: &plan.bindings,
-                        storage,
-                    }
-                    .execution_source(&plan.operation.execution),
-                ],
+                vec![sources.execution_source(&plan.operation.execution)],
             );
             let tree = sort(
                 tree,
@@ -271,11 +264,7 @@ pub fn physical(
                     (export.name().to_owned(), *direction == OrderDirection::Desc)
                 }),
             );
-            PlannedSources {
-                bindings: &plan.bindings,
-                storage,
-            }
-            .definitions(&plan.operation.execution, tree)
+            sources.definitions(&plan.operation.execution, tree)
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -356,13 +345,7 @@ pub fn physical(
             plan.operation
                 .nodes
                 .iter()
-                .map(|node| {
-                    PlannedSources {
-                        bindings: &plan.bindings,
-                        storage,
-                    }
-                    .physical_tree(node)
-                })
+                .map(|node| sources.physical_tree(node))
                 .collect(),
         ),
     };

@@ -48,6 +48,16 @@ pub enum QueryPlan {
 }
 
 impl QueryPlan {
+    pub fn bindings(&self) -> &query_data_model::bindings::QueryBindings {
+        match self {
+            Self::Traversal(plan) => &plan.bindings,
+            Self::Aggregation(plan) => &plan.bindings,
+            Self::Neighbors(plan) => &plan.bindings,
+            Self::PathFinding(plan) => &plan.bindings,
+            Self::Hydration(plan) => &plan.bindings,
+        }
+    }
+
     pub fn hops(&self) -> &[Hop] {
         match self {
             Self::Traversal(plan) => &plan.hops,

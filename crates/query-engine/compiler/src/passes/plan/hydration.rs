@@ -3,7 +3,7 @@ use crate::input::*;
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
 use super::context::PlanningContext;
-use super::physical::{PhysicalPlan, PhysicalSource};
+use super::physical::PhysicalPlan;
 use super::requirements::{Column, OutputValue, Predicate, PrefixPaths, Projection, id_list};
 use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
@@ -91,14 +91,7 @@ pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
                 .chain(columns)
                 .collect::<Vec<_>>();
             Ok(PhysicalPlan {
-                source: PhysicalSource::current_rows(
-                    &mut context.bindings,
-                    model,
-                    table,
-                    alias,
-                    &projected_columns,
-                    predicates,
-                )?,
+                source: context.current_rows(table, alias, &projected_columns, predicates)?,
                 outputs: vec![
                     Projection::new(
                         OutputValue::Column(Column::new(alias, &node.id_property)),

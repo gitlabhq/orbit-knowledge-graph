@@ -5,7 +5,7 @@ use query_data_model::QueryDataModel;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
 
-use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
+use super::physical::{BindingSource, ExecutionPlan};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
 
 pub(super) struct PlanningContext<'a, M: QueryDataModel + ?Sized> {
@@ -37,16 +37,17 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
     }
 
     pub fn single_node(&mut self) -> Result<ExecutionPlan> {
-        let node = self
+        let alias = self
             .nodes
-            .values()
+            .keys()
             .next()
+            .cloned()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        let root = PhysicalPlan::single_node(&mut self.bindings, self.model, node)?;
+        let root = self.node_plan(&alias)?;
         Ok(ExecutionPlan {
             source: root.source,
             outputs: root.outputs,
-            bindings: vec![BindingSource::table(&node.alias)],
+            bindings: vec![BindingSource::table(&alias)],
             definitions: vec![],
         })
     }

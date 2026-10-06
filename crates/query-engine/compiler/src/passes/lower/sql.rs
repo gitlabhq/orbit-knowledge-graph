@@ -6,19 +6,6 @@ use crate::input::*;
 use crate::passes::plan::BoundFilter;
 use crate::passes::plan::helpers::denorm_tag_values;
 
-pub(crate) fn latest_row_dedup(
-    alias: &str,
-    sort_key: &[String],
-) -> (Vec<OrderExpr>, Option<(u32, Vec<Expr>)>) {
-    let keys: Vec<_> = sort_key
-        .iter()
-        .map(|column| Expr::col(alias, column))
-        .collect();
-    let mut order: Vec<_> = keys.iter().cloned().map(OrderExpr::asc).collect();
-    order.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    (order, Some((1, keys)))
-}
-
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(alias, prop, &bound.filter, bound.data_type.as_ref())
 }
