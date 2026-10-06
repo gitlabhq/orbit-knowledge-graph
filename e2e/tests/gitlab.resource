@@ -307,8 +307,10 @@ Create Vulnerability
     # severity must be the uppercase enum value (CRITICAL/HIGH/...) per
     # VulnerabilitySeverity GraphQL enum.
     ${severity_upper}=    Convert To Upper Case    ${severity}
+    ${context}=    Create Dictionary    name=main    type=BRANCH
     ${input}=    Create Dictionary    project=${project_gid}    name=${title}    description=${description}
     ...    severity=${severity_upper}    state=${state}    scanner=${scanner}    identifiers=${identifiers}
+    ...    projectTrackedContext=${context}
     ${query}=    Catenate    SEPARATOR=
     ...    mutation($input: VulnerabilityCreateInput!) {
     ...    \ \ vulnerabilityCreate(input: $input) {
