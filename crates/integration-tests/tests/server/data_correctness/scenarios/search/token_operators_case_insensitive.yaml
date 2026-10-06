@@ -1,0 +1,40 @@
+description: token_match, all_tokens, and any_tokens each exclude one row regardless of case and prune granules with the text skip index
+
+config:
+  redaction: { allow: { merge_request: [2101, 2102, 2103, 2104] } }
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2101, iid: 7, title: Fix urgent login crash, state: opened, source_branch: fix-a, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2102, iid: 8, title: Patch urgent login crash, state: opened, source_branch: fix-b, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2103, iid: 9, title: Fix urgent login bug, state: opened, source_branch: fix-c, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 2104, iid: 10, title: Fix login crash, state: opened, source_branch: fix-d, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": [{"token_match": "FIX"}, {"all_tokens": "LOGIN Crash"}, {"any_tokens": "URGENT ios"}]}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200
+      AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios')
+    RETURN mr.title LIMIT 10
+
+expect:
+  sql_contains:
+    - "hasToken(lower(mr.title), lower('FIX'))"
+    - "hasAllTokens(lower(mr.title), lower('LOGIN Crash'))"
+    - "hasAnyTokens(lower(mr.title), lower('URGENT ios'))"
+  indexes_used: [idx_title]
+  skip_requirements: ["filter:title"]
+  node_count: 1
+  nodes:
+    MergeRequest:
+      ids: [2101]
+      absent: [2001, 2102, 2103, 2104]
+      rows:
+        - { id: 2101, title: Fix urgent login crash }

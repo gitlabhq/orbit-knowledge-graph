@@ -63,7 +63,7 @@ pub fn visit_expressions<'a>(
 ) -> Result<()> {
     match expression {
         Expr::BinaryOp { left, right, .. }
-        | Expr::TokenSearch {
+        | Expr::TextSearch {
             value: left,
             query: right,
             ..
@@ -175,7 +175,7 @@ fn visit_expr_queries(
         }
         Expr::Scalar(query) => visit_queries_mut(query, callback),
         Expr::BinaryOp { left, right, .. }
-        | Expr::TokenSearch {
+        | Expr::TextSearch {
             value: left,
             query: right,
             ..

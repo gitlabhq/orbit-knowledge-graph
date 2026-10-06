@@ -159,16 +159,16 @@ mod tests {
 
     #[test]
     fn token_search_uses_clickhouse_modes_and_rejects_duckdb() {
-        use crate::ast::TokenMatchMode;
+        use crate::ast::TextMatch;
         for (mode, function) in [
-            (TokenMatchMode::Single, "hasToken"),
-            (TokenMatchMode::All, "hasAllTokens"),
-            (TokenMatchMode::Any, "hasAnyTokens"),
+            (TextMatch::TokenMatch, "hasToken"),
+            (TextMatch::AllTokens, "hasAllTokens"),
+            (TextMatch::AnyTokens, "hasAnyTokens"),
         ] {
             let ast = Node::Query(Box::new(Query {
                 select: vec![SelectExpr::col("n", "id")],
                 from: TableRef::scan("nodes", "n"),
-                where_clause: Some(Expr::TokenSearch {
+                where_clause: Some(Expr::TextSearch {
                     mode,
                     value: Box::new(Expr::col("n", "text")),
                     query: Box::new(Expr::string("graph query")),

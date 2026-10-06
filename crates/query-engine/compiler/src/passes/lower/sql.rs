@@ -77,23 +77,19 @@ pub(crate) fn filter_expression(
                 filter.value_str().unwrap_or(""),
             ));
             let col = fold(col);
-            match op {
-                FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens => {
-                    Expr::TokenSearch {
-                        mode: match op {
-                            FilterOp::TokenMatch => TokenMatchMode::Single,
-                            FilterOp::AllTokens => TokenMatchMode::All,
-                            FilterOp::AnyTokens => TokenMatchMode::Any,
-                            _ => unreachable!(),
-                        },
-                        value: Box::new(col),
-                        query: Box::new(needle),
-                    }
-                }
-                FilterOp::Contains => Expr::func(Function::Contains, vec![col, needle]),
-                FilterOp::StartsWith => Expr::func(Function::StartsWith, vec![col, needle]),
-                FilterOp::EndsWith => Expr::func(Function::EndsWith, vec![col, needle]),
+            let mode = match op {
+                FilterOp::Contains => TextMatch::Contains,
+                FilterOp::TokenMatch => TextMatch::TokenMatch,
+                FilterOp::AllTokens => TextMatch::AllTokens,
+                FilterOp::AnyTokens => TextMatch::AnyTokens,
+                FilterOp::StartsWith => return Expr::func(Function::StartsWith, vec![col, needle]),
+                FilterOp::EndsWith => return Expr::func(Function::EndsWith, vec![col, needle]),
                 _ => unreachable!(),
+            };
+            Expr::TextSearch {
+                mode,
+                value: Box::new(col),
+                query: Box::new(needle),
             }
         }
     }
