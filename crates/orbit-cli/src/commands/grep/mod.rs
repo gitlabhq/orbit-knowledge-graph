@@ -47,7 +47,7 @@ pub(crate) fn run(
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
     let (outcome, nodes) = backend.grep(&query, limit, &filter)?;
     report_exact_query_note(&mut out, &outcome)?;
-    let text_hits = match filter.is_empty() {
+    let text_hits: text::Mentions = match filter.is_empty() {
         true => text::mentions(
             backend.search().client(),
             backend.git(),
@@ -57,10 +57,13 @@ pub(crate) fn run(
         .unwrap_or_default(),
         false => text::Mentions::default(),
     };
+    if !text_hits.unmatched.is_empty() {
+        writeln!(out, "No matches: {}", text_hits.unmatched.join(" | "))?;
+    }
 
     if nodes.is_empty() && !text_hits.files.is_empty() {
         writeln!(out, "No definitions match.")?;
-        write!(out, "{}", text::render(&text_hits))?;
+        write!(out, "{}", text::render(&text_hits, &HashSet::new()))?;
         return Ok(());
     }
     if nodes.is_empty() {
@@ -79,8 +82,8 @@ pub(crate) fn run(
     }
 
     let sources = body_sources(&backend.git().repo_path, &outcome, &nodes);
-    report_results(&mut out, &outcome, &nodes, &sources)?;
-    write!(out, "{}", text::render(&text_hits))?;
+    let shown = report_results(&mut out, &outcome, &nodes, &sources)?;
+    write!(out, "{}", text::render(&text_hits, &shown))?;
     Ok(())
 }
 
@@ -230,9 +233,35 @@ fn report_results(
     outcome: &orbit_search::GrepOutcome,
     nodes: &[NodeValue],
     sources: &HashMap<String, Vec<String>>,
-) -> Result<()> {
+) -> Result<HashSet<(String, usize)>> {
     let mut shown: HashSet<(String, usize)> = HashSet::new();
-    for (node, hit) in nodes.iter().zip(&outcome.matches) {
+    let ranges = nodes
+        .iter()
+        .map(context::source_range)
+        .collect::<Result<Vec<_>>>()?;
+    let parent_of = |index: usize| {
+        let hit = &outcome.matches[index];
+        (!hit.exact_name && hit.name_match)
+            .then(|| {
+                ranges
+                    .iter()
+                    .zip(&outcome.matches)
+                    .position(|(parent, parent_hit)| {
+                        parent_hit.exact_name && is_member(&ranges[index].fqn, &parent.fqn)
+                    })
+            })
+            .flatten()
+    };
+    let mut members: HashMap<usize, usize> = HashMap::new();
+    for index in 0..ranges.len() {
+        if let Some(parent) = parent_of(index) {
+            *members.entry(parent).or_default() += 1;
+        }
+    }
+    for (index, (node, hit)) in nodes.iter().zip(&outcome.matches).enumerate() {
+        if parent_of(index).is_some() {
+            continue;
+        }
         let range = context::source_range(node)?;
         let label = if hit.exact_name {
             "exact-name"
@@ -248,9 +277,10 @@ fn report_results(
                 let text: String = hit.body_text.chars().take(BODY_PREVIEW_CHARS).collect();
                 (range.start + offset - 1, text)
             });
-        let mentions = match body {
-            Some(_) => format!(" \u{d7}{}", hit.mentions),
-            None => String::new(),
+        let mentions = match (&body, members.get(&index)) {
+            (Some(_), _) => format!(" \u{d7}{}", hit.mentions),
+            (None, Some(count)) => format!("  +{count} members"),
+            (None, None) => String::new(),
         };
         writeln!(
             out,
@@ -298,7 +328,12 @@ fn report_results(
     } else if hidden > 0 {
         writeln!(out, "  … {hidden} more; add --path/--kind or --limit.")?;
     }
-    Ok(())
+    Ok(shown)
+}
+
+fn is_member(fqn: &str, parent: &str) -> bool {
+    fqn.strip_prefix(parent)
+        .is_some_and(|rest| rest.starts_with(['.', ':', '#', '/']))
 }
 
 fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {

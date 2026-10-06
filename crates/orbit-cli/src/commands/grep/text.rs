@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use duckdb_client::search::{path_scope, text_line_table};
@@ -8,6 +8,7 @@ use crate::workspace::GitInfo;
 
 const MAX_FILES: usize = 12;
 const SNIPPETS_PER_FILE: usize = 3;
+const SNIPPETS_FETCHED: usize = 12;
 const SNIPPET_CHARS: usize = 50;
 const LINE_CHARS: usize = 170;
 const FILE_LIMIT: usize = 400;
@@ -26,6 +27,7 @@ pub(super) struct Mentions {
     pub(super) total_lines: usize,
     pub(super) total_files: usize,
     pub(super) files: Vec<FileHits>,
+    pub(super) unmatched: Vec<String>,
 }
 
 fn normalized(expr: &str) -> String {
@@ -68,7 +70,14 @@ pub(super) fn mentions(
     );
     let totals = client.query_arrow_json(
         &format!(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS lines, CAST(COUNT(DISTINCT file_path) AS BIGINT) AS files FROM ({matched})"
+            "SELECT CAST(COUNT(*) AS BIGINT) AS lines, CAST(COUNT(DISTINCT file_path) AS BIGINT) AS files{per_term} FROM ({matched})",
+            per_term = (0..alternatives.len())
+                .map(|i| format!(
+                    ", CAST(COUNT(*) FILTER (WHERE contains({}, {})) AS BIGINT) AS t{i}",
+                    normalized("text"),
+                    normalized(&format!("?{}", i + 2))
+                ))
+                .collect::<String>()
         ),
         &params,
     )?;
@@ -76,7 +85,7 @@ pub(super) fn mentions(
         &format!(
             "SELECT file_path, CAST(COUNT(*) AS BIGINT) AS n,
        list(line_no ORDER BY line_no) AS lines,
-       list_slice(list(text ORDER BY line_no), 1, {SNIPPETS_PER_FILE}) AS texts
+       list_slice(list(text ORDER BY line_no), 1, {SNIPPETS_FETCHED}) AS texts
 FROM ({matched})
 GROUP BY file_path
 ORDER BY n DESC, file_path
@@ -90,6 +99,12 @@ LIMIT {FILE_LIMIT}"
     Ok(Mentions {
         total_lines: i64_column(&totals, "lines").first().copied().unwrap_or(0) as usize,
         total_files: i64_column(&totals, "files").first().copied().unwrap_or(0) as usize,
+        unmatched: alternatives
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i64_column(&totals, &format!("t{i}")).first() == Some(&0))
+            .map(|(_, alternative)| alternative.clone())
+            .collect(),
         files: (0..files.len())
             .map(|i| {
                 let numbers: Vec<usize> = lines[i].iter().map(|n| *n as usize).collect();
@@ -246,13 +261,42 @@ fn clip(line: String) -> String {
     }
 }
 
-pub(super) fn render(mentions: &Mentions) -> String {
-    if mentions.files.is_empty() {
+pub(super) fn render(mentions: &Mentions, shown: &HashSet<(String, usize)>) -> String {
+    let mut fresh = Vec::new();
+    let (mut skipped_lines, mut skipped_files) = (0, 0);
+    for hits in &mentions.files {
+        let lines: Vec<usize> = hits
+            .lines
+            .iter()
+            .copied()
+            .filter(|line| !shown.contains(&(hits.file.clone(), *line)))
+            .collect();
+        skipped_lines += hits.lines.len() - lines.len();
+        if lines.is_empty() {
+            skipped_files += 1;
+            continue;
+        }
+        let snippets = hits
+            .snippets
+            .iter()
+            .filter(|(line, _)| lines.contains(line))
+            .take(SNIPPETS_PER_FILE)
+            .cloned()
+            .collect();
+        fresh.push(FileHits {
+            file: hits.file.clone(),
+            lines,
+            snippets,
+        });
+    }
+    if fresh.is_empty() {
         return String::new();
     }
-    let (rows, merged, merged_lines) = collapse_variants(mentions.files.clone());
-    let files = mentions.total_files.saturating_sub(merged);
-    let lines = mentions.total_lines.saturating_sub(merged_lines);
+    let (rows, merged, merged_lines) = collapse_variants(fresh);
+    let files = mentions.total_files.saturating_sub(merged + skipped_files);
+    let lines = mentions
+        .total_lines
+        .saturating_sub(merged_lines + skipped_lines);
     let mut out = format!("\nMentions — {lines} lines in {files} files:\n");
     for (label, hits) in rows.iter().take(MAX_FILES) {
         let mut parts: Vec<String> = hits
@@ -296,6 +340,7 @@ mod tests {
         let mentions = Mentions {
             total_lines: 7,
             total_files: 2,
+            unmatched: Vec::new(),
             files: vec![
                 file("docs/a.md", &[1, 2, 3, 4, 5], "x"),
                 file(
@@ -306,7 +351,7 @@ mod tests {
             ],
         };
         assert_eq!(
-            render(&mentions),
+            render(&mentions, &HashSet::new()),
             "\nMentions — 7 lines in 2 files:\n  \
              docs/a.md   :1 x  :2 x  :3 x  +2\n  \
              install/data/defaults.json   :130 \"maintenanceMode\": 0,  :131 \"maintenanceMode\": 0,\n"
@@ -347,15 +392,19 @@ mod tests {
         let mentions = Mentions {
             total_lines: 30,
             total_files: 30,
+            unmatched: Vec::new(),
             files: (0..30)
                 .map(|n| file(&format!("docs/f{n}.md"), &[n + 1], "x"))
                 .collect(),
         };
-        assert!(render(&mentions).ends_with("  … 18 more files. Narrow with --path.\n"));
+        assert!(
+            render(&mentions, &HashSet::new())
+                .ends_with("  … 18 more files. Narrow with --path.\n")
+        );
     }
 
     #[test]
     fn nothing_to_report_renders_nothing() {
-        assert_eq!(render(&Mentions::default()), "");
+        assert_eq!(render(&Mentions::default(), &HashSet::new()), "");
     }
 }

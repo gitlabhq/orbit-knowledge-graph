@@ -326,7 +326,7 @@ mod tests {
                 "FTS.",
                 "Terms AND; `a|b` OR",
                 "Grep means `",
-                "Mentions in config, templates, and docs",
+                "Mentions: every other matching line in code",
                 "Do not reread unchanged files",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
