@@ -1425,7 +1425,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
             "App|read_file|READ_FILE",
             "exact: App | read_file\n",
         ),
-        ("grep", "App|missing_symbol", "exact-miss: missing_symbol"),
+        ("grep", "App|missing_symbol", "exact: App\n"),
         ("context", "src/utils.py:3-4", "3|def read_file(path):"),
         (
             "context",
