@@ -13,7 +13,9 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef};
+use crate::ast::{
+    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
+};
 use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
@@ -226,7 +228,16 @@ impl Context {
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(*name, args),
-            Expr::TokenSearch { .. } => {
+            Expr::TextSearch {
+                mode: TextMatch::Contains,
+                value,
+                query,
+            } => format!(
+                "contains({}, {})",
+                self.emit_expr(value),
+                self.emit_expr(query)
+            ),
+            Expr::TextSearch { .. } => {
                 self.error = Some("token search is not supported by the DuckDB backend".into());
                 String::new()
             }
@@ -297,11 +308,6 @@ impl Context {
                 let r = self.emit_expr(right);
                 if *op == Op::In {
                     format!("{l} IN {r}")
-                } else if *op == Op::Like {
-                    // DuckDB has no default LIKE escape character, so the
-                    // `\_` / `\%` produced by the compiler's escape_like would
-                    // match a literal backslash. Request `\` explicitly.
-                    format!("({l} LIKE {r} ESCAPE '\\')")
                 } else {
                     format!("({l} {op} {r})")
                 }
@@ -401,7 +407,6 @@ impl Context {
         let duckdb_name = match name {
             Function::StartsWith => "starts_with",
             Function::EndsWith => "ends_with",
-            Function::Contains => "contains",
             Function::Lower => "lower",
             Function::Substring => "substring",
             Function::ArrayContains => "list_contains",
@@ -597,30 +602,6 @@ mod tests {
         assert!(
             !result.sql.contains("{p"),
             "should not contain CH-style params: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn like_emits_backslash_escape() {
-        // DuckDB's default LIKE has no escape character. The compiler emits
-        // `\_` / `\%` for literal matches (see escape_like); without ESCAPE
-        // '\', those collapse to literal backslash-underscore in DuckDB.
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
-            from: TableRef::scan("nodes", "n"),
-            where_clause: Some(Expr::binary(
-                Op::Like,
-                Expr::col("n", "name"),
-                Expr::lit("apply\\_%"),
-            )),
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
-        assert!(
-            result.sql.contains("LIKE") && result.sql.contains("ESCAPE '\\'"),
-            "expected LIKE ... ESCAPE '\\': {}",
             result.sql
         );
     }
