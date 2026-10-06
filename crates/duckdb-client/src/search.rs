@@ -279,6 +279,143 @@ WHERE d.def_id = s.def_id"
     Ok(())
 }
 
+pub const TEXT_LINE_PREFIX: &str = "gl_doc_line_";
+const TEXT_FILE_MAX_BYTES: u64 = 256 * 1024;
+const TEXT_LINES_MAX: usize = 500_000;
+const TEXT_LINE_MAX_CHARS: usize = 400;
+const TEXT_EXTS: &[&str] = &[
+    "yml",
+    "yaml",
+    "json",
+    "md",
+    "rst",
+    "asciidoc",
+    "adoc",
+    "sql",
+    "cue",
+    "rego",
+    "tpl",
+    "html",
+    "htm",
+    "hbs",
+    "handlebars",
+    "ejs",
+    "mustache",
+    "jinja",
+    "j2",
+    "njk",
+    "twig",
+    "erb",
+    "liquid",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "properties",
+    "css",
+    "scss",
+    "less",
+    "pcss",
+    "po",
+    "proto",
+];
+const TEXT_NAMES: &[&str] = &["Dockerfile", "Makefile", "go.mod"];
+const TEXT_SKIP_NAMES: &[&str] = &[
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "composer.lock",
+    "Cargo.lock",
+    "poetry.lock",
+    "go.sum",
+];
+const TEXT_SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    "target",
+    "generated",
+    ".git",
+];
+
+pub fn text_line_table(project_id: i64) -> String {
+    format!("{TEXT_LINE_PREFIX}{project_id}")
+}
+
+pub fn is_indexed_text_file(path: &str, size: u64) -> bool {
+    let mut parts = path.split('/');
+    let name = parts.next_back().unwrap_or(path);
+    if size > TEXT_FILE_MAX_BYTES
+        || TEXT_SKIP_NAMES.contains(&name)
+        || name.contains(".min.")
+        || parts.any(|dir| TEXT_SKIP_DIRS.contains(&dir))
+    {
+        return false;
+    }
+    TEXT_NAMES.contains(&name)
+        || name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| TEXT_EXTS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+pub fn populate_text_lines(
+    client: &DuckDbClient,
+    table: &str,
+    repository_root: &Path,
+    commit_sha: &str,
+    files: &[String],
+) -> Result<usize> {
+    client.execute(
+        &format!(
+            "CREATE OR REPLACE TABLE {table} (commit_sha VARCHAR, file_path VARCHAR, line_no BIGINT, text VARCHAR)"
+        ),
+        &[],
+    )?;
+    let mut shas = StringBuilder::new();
+    let mut paths = StringBuilder::new();
+    let mut texts = StringBuilder::new();
+    let mut numbers: Vec<i64> = Vec::new();
+    for file in files {
+        let Ok(content) = std::fs::read_to_string(repository_root.join(file)) else {
+            continue;
+        };
+        for (index, line) in content.lines().enumerate() {
+            if numbers.len() >= TEXT_LINES_MAX {
+                break;
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            shas.append_value(commit_sha);
+            paths.append_value(file);
+            texts.append_value(line.chars().take(TEXT_LINE_MAX_CHARS).collect::<String>());
+            numbers.push(index as i64 + 1);
+        }
+    }
+    let count = numbers.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("commit_sha", DataType::Utf8, false),
+            Field::new("file_path", DataType::Utf8, false),
+            Field::new("line_no", DataType::Int64, false),
+            Field::new("text", DataType::Utf8, false),
+        ])),
+        vec![
+            Arc::new(shas.finish()),
+            Arc::new(paths.finish()),
+            Arc::new(Int64Array::from(numbers)),
+            Arc::new(texts.finish()),
+        ],
+    )?;
+    client.insert_batch(table, &batch)?;
+    Ok(count)
+}
+
 pub fn create_fts_index_sql(doc_table: &str) -> String {
     format!(
         "PRAGMA create_fts_index('{doc_table}', 'def_id', 'name', 'context', 'source', stemmer='{FTS_STEMMER}', stopwords='none', overwrite=1)"
@@ -592,4 +729,35 @@ pub fn excluded_path_predicate(col: &str) -> String {
         "({})",
         likes.chain(regexes).collect::<Vec<_>>().join(" OR ")
     )
+}
+
+#[cfg(test)]
+mod text_line_tests {
+    use super::*;
+
+    #[test]
+    fn text_files_cover_config_templates_and_docs_but_not_locks_or_vendored() {
+        for path in [
+            "install/data/defaults.json",
+            "src/views/admin/settings/advanced.tpl",
+            "public/language/en-GB/admin/settings/advanced.json",
+            "docs/README.md",
+            "Dockerfile",
+            "go.mod",
+        ] {
+            assert!(is_indexed_text_file(path, 100), "{path}");
+        }
+        for path in [
+            "package-lock.json",
+            "go.sum",
+            "vendor/x/config.yml",
+            "web/node_modules/a/package.json",
+            "dist/app.min.css",
+            "src/app.js",
+            "logo.svg",
+        ] {
+            assert!(!is_indexed_text_file(path, 100), "{path}");
+        }
+        assert!(!is_indexed_text_file("big.json", 10 * 1024 * 1024));
+    }
 }

@@ -1,4 +1,5 @@
 mod local;
+mod text;
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -46,7 +47,22 @@ pub(crate) fn run(
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
     let (outcome, nodes) = backend.grep(&query, limit, &filter)?;
     report_exact_query_note(&mut out, &outcome)?;
+    let text_hits = match filter.is_empty() {
+        true => text::hits(
+            backend.search().client(),
+            backend.git(),
+            &outcome.alternatives,
+            &paths,
+        )
+        .unwrap_or_default(),
+        false => Vec::new(),
+    };
 
+    if nodes.is_empty() && !text_hits.is_empty() {
+        writeln!(out, "No definitions match.")?;
+        write!(out, "{}", text::render(&text_hits))?;
+        return Ok(());
+    }
     if nodes.is_empty() {
         if paths.is_empty() && filter.is_empty() {
             writeln!(
@@ -63,6 +79,7 @@ pub(crate) fn run(
     }
 
     report_results(&mut out, &outcome, &nodes)?;
+    write!(out, "{}", text::render(&text_hits))?;
     Ok(())
 }
 
