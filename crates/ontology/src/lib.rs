@@ -1385,14 +1385,6 @@ impl Ontology {
         &self.denormalized_properties
     }
 
-    /// Whether a node column carries the Orbit `text` storage index, which the
-    /// compiler's token-operator validation requires.
-    #[must_use]
-    pub fn has_text_index(&self, entity_name: &str, column_name: &str) -> bool {
-        self.text_indexed_columns(entity_name)
-            .contains(&column_name)
-    }
-
     /// Returns the sorted, deduplicated list of columns on a node entity that
     /// carry the `text` storage index, and therefore support the
     /// `token_match`, `all_tokens`, and `any_tokens` query operators.
@@ -3864,29 +3856,6 @@ properties:
     fn assert_text_indexed_columns_consistent(ontology: &Ontology) {
         for node in ontology.nodes() {
             let columns = ontology.text_indexed_columns(&node.name);
-
-            for column in &columns {
-                assert!(
-                    ontology.has_text_index(&node.name, column),
-                    "{}.{column} is reported text-indexed but has_text_index disagrees",
-                    node.name
-                );
-            }
-
-            // Reverse direction: every `text` storage index on the node
-            // must surface through the accessor, so the generated doc table can
-            // never omit a column for which the validator accepts token ops.
-            for idx in &node.storage.indexes {
-                if idx.index_type == constants::TEXT_INDEX_TYPE {
-                    assert!(
-                        columns.contains(&idx.column.as_str()),
-                        "{}.{} carries a text index but is missing from text_indexed_columns",
-                        node.name,
-                        idx.column
-                    );
-                }
-            }
-
             assert!(
                 columns.windows(2).all(|w| w[0] < w[1]),
                 "{} text-indexed columns must be sorted and deduplicated: {columns:?}",

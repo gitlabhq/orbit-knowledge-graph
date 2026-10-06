@@ -221,6 +221,7 @@ impl ClickHouseCatalog {
                         name: node.name.clone(),
                     })?;
             let mut default_properties = Vec::new();
+            let text_indexed = ontology.text_indexed_columns(&node.name);
             for field in &node.fields {
                 let property_id = graph.property_id(entity_id, &field.name).ok_or_else(|| {
                     DataModelError::UnknownReference {
@@ -237,7 +238,7 @@ impl ClickHouseCatalog {
                     }
                 });
                 property_facts[property_id.index()].has_text_index =
-                    ontology.has_text_index(&node.name, &field.name);
+                    text_indexed.contains(&field.name.as_str());
                 if node.default_columns.iter().any(|name| name == &field.name) {
                     default_properties.push(property_id);
                 }

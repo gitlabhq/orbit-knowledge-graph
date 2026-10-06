@@ -40,7 +40,7 @@ pub struct Column {
 pub struct Index {
     pub name: String,
     pub column: String,
-    pub case_insensitive: bool,
+    pub lowercase: bool,
     pub index_type: String,
     pub granularity: u32,
 }
@@ -48,7 +48,7 @@ pub struct Index {
 impl Index {
     pub fn expression(&self) -> String {
         let column = quote_identifier(&self.column);
-        if self.case_insensitive {
+        if self.lowercase {
             format!("lower({column})")
         } else {
             column

@@ -20,9 +20,9 @@ migrations:
   scope: "*"
   note: >-
     Text and ngram skip indexes are keyed on lower(column) and every path index
-    tokenizes on splitByNonAlpha, so string operators are indexed and case-insensitive;
-    ATTACH PARTITION FROM rejects parts whose index definitions differ, so every
-    table that carries a text index rebuilds.
+    tokenizes on splitByNonAlpha, so string operators are indexed and case-insensitive.
+    ATTACH PARTITION FROM rejects parts whose skip-index definitions differ, so a
+    clone cannot carry them and every table rebuilds.
 - version: 100
   scope: "*"
   note: >-

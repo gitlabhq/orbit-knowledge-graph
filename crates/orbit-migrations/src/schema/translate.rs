@@ -609,7 +609,7 @@ fn index_from_storage(storage_index: &StorageIndex) -> Vec<Index> {
     let index = Index {
         name: storage_index.name.clone(),
         column: storage_index.column.clone(),
-        case_insensitive: false,
+        lowercase: false,
         index_type: storage_index.index_type.clone(),
         granularity: storage_index.granularity,
     };
@@ -618,13 +618,13 @@ fn index_from_storage(storage_index: &StorageIndex) -> Vec<Index> {
     }
     vec![
         Index {
-            case_insensitive: true,
+            lowercase: true,
             index_type: "text(tokenizer = splitByNonAlpha)".into(),
             ..index.clone()
         },
         Index {
             name: format!("{}_ngram", index.name),
-            case_insensitive: true,
+            lowercase: true,
             index_type: "ngrambf_v1(3, 512, 2, 0)".into(),
             ..index
         },
