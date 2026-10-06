@@ -138,7 +138,7 @@ impl RepositoryCache for LocalRepositoryCache {
         };
 
         for file in files.files() {
-            if let Decision::List(reason) | Decision::Drop(reason) = file.decision() {
+            if let Decision::List(reason) = file.decision() {
                 self.metrics
                     .record_archive_entry_skipped(reason, 1, file.size);
             }

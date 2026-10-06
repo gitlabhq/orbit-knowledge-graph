@@ -291,7 +291,7 @@ impl PipelineContext {
                     .stat(Path::new(path))
                     .ok()
                     .and_then(|stat| stat.decision);
-                if let Some(FileDecision::List(reason) | FileDecision::Drop(reason)) = reason {
+                if let Some(FileDecision::List(reason)) = reason {
                     return AnalyzerError::skip(FileSkip::Filter(reason), "");
                 }
             }
@@ -1002,7 +1002,7 @@ impl Pipeline {
         if ctx.vfs.usage().files > 0 {
             let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
             for entry in ctx.vfs.files() {
-                if let FileDecision::List(reason) | FileDecision::Drop(reason) = entry.decision() {
+                if let FileDecision::List(reason) = entry.decision() {
                     reasons.insert(
                         entry.path.as_ref(),
                         FileReason::Skip(FileSkip::Filter(reason)),

@@ -384,9 +384,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             .filter(|file| !parsed.contains(file.path.as_ref()))
             .map(|file| {
                 let reason = match file.decision() {
-                    Decision::List(reason) | Decision::Drop(reason) => {
-                        FileReason::Skip(FileSkip::Filter(reason))
-                    }
+                    Decision::List(reason) => FileReason::Skip(FileSkip::Filter(reason)),
                     _ if skipped.contains_key(file.path.as_ref()) => {
                         timeout(skipped[file.path.as_ref()])
                     }
