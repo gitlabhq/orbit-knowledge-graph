@@ -7,4 +7,4 @@ description: >-
   Single tokens must also match literally, ignoring case; this is FTS, not regex.
   Results rank exact names before name/path hits and body mentions; pass
   `Definition:<id>` or `path:start-end` to `context` for source and relationships.
-  Matching lines in config, templates, and docs follow the definitions.
+  A Mentions section then lists matching lines in config, templates, and docs.

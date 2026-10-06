@@ -10,27 +10,34 @@ const MAX_FILES: usize = 12;
 const SNIPPETS_PER_FILE: usize = 3;
 const SNIPPET_CHARS: usize = 50;
 const LINE_CHARS: usize = 170;
-const ROW_LIMIT: usize = 2000;
+const FILE_LIMIT: usize = 400;
 const VARIANT_MIN: usize = 3;
 const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", "default"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TextHit {
+pub(super) struct FileHits {
     pub(super) file: String,
-    pub(super) line: usize,
-    pub(super) text: String,
+    pub(super) lines: Vec<usize>,
+    pub(super) snippets: Vec<(usize, String)>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct Mentions {
+    pub(super) total_lines: usize,
+    pub(super) total_files: usize,
+    pub(super) files: Vec<FileHits>,
 }
 
 fn normalized(expr: &str) -> String {
     format!("lower(regexp_replace({expr}, '[_\\-\\s]', '', 'g'))")
 }
 
-pub(super) fn hits(
+pub(super) fn mentions(
     client: &DuckDbClient,
     git: &GitInfo,
     alternatives: &[String],
     paths: &[String],
-) -> Result<Vec<TextHit>> {
+) -> Result<Mentions> {
     let table = text_line_table(git.project_id);
     let present = i64_column(
         &client.query_arrow_json(
@@ -40,7 +47,7 @@ pub(super) fn hits(
         "n",
     );
     if present.first().copied().unwrap_or(0) == 0 || alternatives.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Mentions::default());
     }
     let filter = (0..alternatives.len())
         .map(|i| {
@@ -55,43 +62,98 @@ pub(super) fn hits(
     let params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
         .chain(alternatives.iter().map(|a| a.clone().into()))
         .collect();
+    let scope = path_scope("file_path", paths, true);
+    let matched = format!(
+        "SELECT file_path, line_no, text FROM {table} WHERE commit_sha = ?1 AND ({filter})\n{scope}"
+    );
+    let totals = client.query_arrow_json(
+        &format!(
+            "SELECT CAST(COUNT(*) AS BIGINT) AS lines, CAST(COUNT(DISTINCT file_path) AS BIGINT) AS files FROM ({matched})"
+        ),
+        &params,
+    )?;
     let batches = client.query_arrow_json(
         &format!(
-            "SELECT file_path, line_no, text FROM {table}
-WHERE commit_sha = ?1 AND ({filter})
-{scope}ORDER BY file_path, line_no
-LIMIT {ROW_LIMIT}",
-            scope = path_scope("file_path", paths, true),
+            "SELECT file_path, CAST(COUNT(*) AS BIGINT) AS n,
+       list(line_no ORDER BY line_no) AS lines,
+       list_slice(list(text ORDER BY line_no), 1, {SNIPPETS_PER_FILE}) AS texts
+FROM ({matched})
+GROUP BY file_path
+ORDER BY n DESC, file_path
+LIMIT {FILE_LIMIT}"
         ),
         &params,
     )?;
     let files = string_column(&batches, "file_path");
-    let lines = i64_column(&batches, "line_no");
-    let texts = string_column(&batches, "text");
-    Ok((0..files.len())
-        .map(|i| TextHit {
-            file: files[i].clone(),
-            line: lines[i] as usize,
-            text: texts[i].trim().to_string(),
-        })
-        .collect())
+    let lines = list_i64_column(&batches, "lines");
+    let texts = list_string_column(&batches, "texts");
+    Ok(Mentions {
+        total_lines: i64_column(&totals, "lines").first().copied().unwrap_or(0) as usize,
+        total_files: i64_column(&totals, "files").first().copied().unwrap_or(0) as usize,
+        files: (0..files.len())
+            .map(|i| {
+                let numbers: Vec<usize> = lines[i].iter().map(|n| *n as usize).collect();
+                FileHits {
+                    file: files[i].clone(),
+                    snippets: numbers
+                        .iter()
+                        .copied()
+                        .zip(texts[i].iter().map(|t| t.trim().to_string()))
+                        .collect(),
+                    lines: numbers,
+                }
+            })
+            .collect(),
+    })
 }
 
-fn group(hits: &[TextHit]) -> Vec<(String, Vec<&TextHit>)> {
-    let mut files: Vec<(String, Vec<&TextHit>)> = Vec::new();
-    for hit in hits {
-        match files.iter_mut().find(|(file, _)| *file == hit.file) {
-            Some((_, list)) => list.push(hit),
-            None => files.push((hit.file.clone(), vec![hit])),
+fn list_i64_column(batches: &[arrow::record_batch::RecordBatch], name: &str) -> Vec<Vec<i64>> {
+    use arrow::array::{Array, Int64Array, ListArray};
+    let mut out = Vec::new();
+    for batch in batches {
+        let Some(column) = batch.column_by_name(name) else {
+            continue;
+        };
+        let Some(lists) = column.as_any().downcast_ref::<ListArray>() else {
+            continue;
+        };
+        for i in 0..lists.len() {
+            let values = lists.value(i);
+            let values = values.as_any().downcast_ref::<Int64Array>();
+            out.push(values.map_or_else(Vec::new, |v| v.iter().flatten().collect()));
         }
     }
-    collapse_variants(files)
+    out
 }
 
-fn collapse_variants(files: Vec<(String, Vec<&TextHit>)>) -> Vec<(String, Vec<&TextHit>)> {
+fn list_string_column(
+    batches: &[arrow::record_batch::RecordBatch],
+    name: &str,
+) -> Vec<Vec<String>> {
+    use arrow::array::{Array, ListArray, StringArray};
+    let mut out = Vec::new();
+    for batch in batches {
+        let Some(column) = batch.column_by_name(name) else {
+            continue;
+        };
+        let Some(lists) = column.as_any().downcast_ref::<ListArray>() else {
+            continue;
+        };
+        for i in 0..lists.len() {
+            let values = lists.value(i);
+            let values = values.as_any().downcast_ref::<StringArray>();
+            out.push(
+                values.map_or_else(Vec::new, |v| v.iter().flatten().map(String::from).collect()),
+            );
+        }
+    }
+    out
+}
+
+fn collapse_variants(files: Vec<FileHits>) -> (Vec<(String, FileHits)>, usize, usize) {
     let mut templates: HashMap<String, Vec<usize>> = HashMap::new();
-    for (index, (file, _)) in files.iter().enumerate() {
-        let parts: Vec<&str> = file.split('/').collect();
+    for (index, hits) in files.iter().enumerate() {
+        let parts: Vec<&str> = hits.file.split('/').collect();
         for slot in 0..parts.len().saturating_sub(1) {
             let mut key = parts.clone();
             key[slot] = "*";
@@ -105,11 +167,15 @@ fn collapse_variants(files: Vec<(String, Vec<&TextHit>)>) -> Vec<(String, Vec<&T
     groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
     let mut taken = vec![false; files.len()];
     let mut labels: HashMap<usize, String> = HashMap::new();
+    let mut merged = 0;
+    let mut merged_lines = 0;
     for (template, members) in groups {
         let mut by_shape: HashMap<Vec<usize>, Vec<usize>> = HashMap::new();
         for index in members.into_iter().filter(|i| !taken[*i]) {
-            let shape = files[index].1.iter().map(|hit| hit.line).collect();
-            by_shape.entry(shape).or_default().push(index);
+            by_shape
+                .entry(files[index].lines.clone())
+                .or_default()
+                .push(index);
         }
         let Some(same) = by_shape.into_values().max_by_key(|group| group.len()) else {
             continue;
@@ -123,7 +189,7 @@ fn collapse_variants(files: Vec<(String, Vec<&TextHit>)>) -> Vec<(String, Vec<&T
             .unwrap_or(0);
         let variant = |index: usize| {
             files[index]
-                .0
+                .file
                 .split('/')
                 .nth(slot)
                 .unwrap_or("")
@@ -142,6 +208,8 @@ fn collapse_variants(files: Vec<(String, Vec<&TextHit>)>) -> Vec<(String, Vec<&T
         for index in &same {
             taken[*index] = true;
         }
+        merged += same.len() - 1;
+        merged_lines += (same.len() - 1) * files[pick].lines.len();
         labels.insert(
             pick,
             template.replacen(
@@ -151,15 +219,16 @@ fn collapse_variants(files: Vec<(String, Vec<&TextHit>)>) -> Vec<(String, Vec<&T
             ),
         );
     }
-    files
+    let rows = files
         .into_iter()
         .enumerate()
-        .filter_map(|(index, (file, list))| match labels.remove(&index) {
-            Some(label) => Some((label, list)),
+        .filter_map(|(index, hits)| match labels.remove(&index) {
+            Some(label) => Some((label, hits)),
             None if taken[index] => None,
-            None => Some((file, list)),
+            None => Some((hits.file.clone(), hits)),
         })
-        .collect()
+        .collect();
+    (rows, merged, merged_lines)
 }
 
 fn snippet(text: &str) -> String {
@@ -177,32 +246,30 @@ fn clip(line: String) -> String {
     }
 }
 
-pub(super) fn render(hits: &[TextHit]) -> String {
-    let files = group(hits);
-    if files.is_empty() {
+pub(super) fn render(mentions: &Mentions) -> String {
+    if mentions.files.is_empty() {
         return String::new();
     }
-    let total: usize = files.iter().map(|(_, list)| list.len()).sum();
-    let mut out = format!(
-        "\nAlso in config, templates, and docs — {total} lines in {} files:\n",
-        files.len()
-    );
-    for (file, list) in files.iter().take(MAX_FILES) {
-        let mut parts: Vec<String> = list
+    let (rows, merged, merged_lines) = collapse_variants(mentions.files.clone());
+    let files = mentions.total_files.saturating_sub(merged);
+    let lines = mentions.total_lines.saturating_sub(merged_lines);
+    let mut out = format!("\nMentions — {lines} lines in {files} files:\n");
+    for (label, hits) in rows.iter().take(MAX_FILES) {
+        let mut parts: Vec<String> = hits
+            .snippets
             .iter()
-            .take(SNIPPETS_PER_FILE)
-            .map(|hit| format!(":{} {}", hit.line, snippet(&hit.text)))
+            .map(|(line, text)| format!(":{line} {}", snippet(text)))
             .collect();
-        if list.len() > SNIPPETS_PER_FILE {
-            parts.push(format!("+{}", list.len() - SNIPPETS_PER_FILE));
+        if hits.lines.len() > hits.snippets.len() {
+            parts.push(format!("+{}", hits.lines.len() - hits.snippets.len()));
         }
-        out.push_str(&clip(format!("  {file}   {}", parts.join("  "))));
+        out.push_str(&clip(format!("  {label}   {}", parts.join("  "))));
         out.push('\n');
     }
-    if files.len() > MAX_FILES {
+    if files > MAX_FILES.min(rows.len()) {
         out.push_str(&format!(
             "  … {} more files. Narrow with --path.\n",
-            files.len() - MAX_FILES
+            files - MAX_FILES.min(rows.len())
         ));
     }
     out
@@ -212,52 +279,57 @@ pub(super) fn render(hits: &[TextHit]) -> String {
 mod tests {
     use super::*;
 
-    fn hit(file: &str, line: usize, text: &str) -> TextHit {
-        TextHit {
-            file: file.into(),
-            line,
-            text: text.into(),
+    fn file(path: &str, lines: &[usize], text: &str) -> FileHits {
+        FileHits {
+            file: path.into(),
+            lines: lines.to_vec(),
+            snippets: lines
+                .iter()
+                .take(SNIPPETS_PER_FILE)
+                .map(|line| (*line, text.to_string()))
+                .collect(),
         }
     }
 
     #[test]
-    fn files_list_line_snippets_and_count_the_rest() {
-        let hits = vec![
-            hit("install/data/defaults.json", 130, "\"maintenanceMode\": 0,"),
-            hit(
-                "install/data/defaults.json",
-                131,
-                "\"maintenanceModeStatus\": 503,",
-            ),
-            hit("docs/a.md", 1, "a"),
-            hit("docs/a.md", 2, "b"),
-            hit("docs/a.md", 3, "c"),
-            hit("docs/a.md", 4, "d"),
-        ];
+    fn header_reports_exact_totals_and_extra_lines_are_counted() {
+        let mentions = Mentions {
+            total_lines: 7,
+            total_files: 2,
+            files: vec![
+                file("docs/a.md", &[1, 2, 3, 4, 5], "x"),
+                file(
+                    "install/data/defaults.json",
+                    &[130, 131],
+                    "\"maintenanceMode\": 0,",
+                ),
+            ],
+        };
         assert_eq!(
-            render(&hits),
-            "\nAlso in config, templates, and docs — 6 lines in 2 files:\n  \
-             install/data/defaults.json   :130 \"maintenanceMode\": 0,  :131 \"maintenanceModeStatus\": 503,\n  \
-             docs/a.md   :1 a  :2 b  :3 c  +1\n"
+            render(&mentions),
+            "\nMentions — 7 lines in 2 files:\n  \
+             docs/a.md   :1 x  :2 x  :3 x  +2\n  \
+             install/data/defaults.json   :130 \"maintenanceMode\": 0,  :131 \"maintenanceMode\": 0,\n"
         );
     }
 
     #[test]
     fn locale_copies_collapse_preferring_english_but_distinct_files_do_not() {
-        let mut hits: Vec<TextHit> = ["ar", "de", "en-GB", "fr"]
+        let mut files: Vec<FileHits> = ["ar", "de", "en-GB", "fr"]
             .iter()
             .map(|locale| {
-                hit(
+                file(
                     &format!("public/language/{locale}/advanced.json"),
-                    2,
-                    "\"maintenance-mode\": \"x\"",
+                    &[2],
+                    "x",
                 )
             })
             .collect();
-        hits.push(hit("src/api/users.yaml", 3, "x"));
-        hits.push(hit("src/privileges/users.yaml", 9, "x"));
-        hits.push(hit("src/write/users.yaml", 14, "x"));
-        let names: Vec<String> = group(&hits).into_iter().map(|(file, _)| file).collect();
+        files.push(file("src/api/users.yaml", &[3], "x"));
+        files.push(file("src/privileges/users.yaml", &[9], "x"));
+        files.push(file("src/write/users.yaml", &[14], "x"));
+        let (rows, merged, merged_lines) = collapse_variants(files);
+        let names: Vec<&str> = rows.iter().map(|(label, _)| label.as_str()).collect();
         assert_eq!(
             names,
             [
@@ -267,10 +339,23 @@ mod tests {
                 "src/write/users.yaml",
             ]
         );
+        assert_eq!((merged, merged_lines), (3, 3));
+    }
+
+    #[test]
+    fn more_files_than_shown_says_how_many() {
+        let mentions = Mentions {
+            total_lines: 30,
+            total_files: 30,
+            files: (0..30)
+                .map(|n| file(&format!("docs/f{n}.md"), &[n + 1], "x"))
+                .collect(),
+        };
+        assert!(render(&mentions).ends_with("  … 18 more files. Narrow with --path.\n"));
     }
 
     #[test]
     fn nothing_to_report_renders_nothing() {
-        assert_eq!(render(&[]), "");
+        assert_eq!(render(&Mentions::default()), "");
     }
 }
