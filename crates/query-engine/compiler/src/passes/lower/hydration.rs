@@ -43,11 +43,14 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
             .flat_map(|col| {
                 [
                     Expr::string(col),
-                    Expr::func("toString", vec![Expr::col(alias, col)]),
+                    Expr::func(Function::ToString, vec![Expr::col(alias, col)]),
                 ]
             })
             .collect();
-        Expr::func("toJSONString", vec![Expr::func("map", map_args)])
+        Expr::func(
+            Function::ToJson,
+            vec![Expr::func(Function::Object, map_args)],
+        )
     };
 
     let mut scan_where = Vec::new();
@@ -64,7 +67,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
     if let Some(id_filter) = Expr::col_in(
         alias,
         pk,
-        ChType::Int64,
+        SqlType::Int64,
         node.node_ids
             .iter()
             .map(|id| serde_json::Value::Number((*id).into()))
@@ -109,7 +112,7 @@ fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
 
 fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
     Expr::func(
-        "startsWith",
+        Function::StartsWith,
         vec![
             Expr::col(alias, TRAVERSAL_PATH_COLUMN),
             Expr::string(tp.as_str()),
@@ -120,12 +123,12 @@ fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
 fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
     let lambda_param = "_gkg_path";
     Expr::func(
-        "arrayExists",
+        Function::ArrayExists,
         vec![
             Expr::lambda(
                 lambda_param,
                 Expr::func(
-                    "startsWith",
+                    Function::StartsWith,
                     vec![
                         Expr::col(alias, TRAVERSAL_PATH_COLUMN),
                         Expr::ident(lambda_param),
@@ -133,7 +136,7 @@ fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
                 ),
             ),
             Expr::param(
-                ChType::String.to_array(),
+                SqlType::String.to_array(),
                 serde_json::Value::Array(
                     paths
                         .iter()

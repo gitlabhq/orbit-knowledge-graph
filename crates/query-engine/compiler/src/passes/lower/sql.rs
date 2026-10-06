@@ -38,7 +38,7 @@ pub(crate) fn filter_expression(
     }
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
-    let typed = |v: serde_json::Value| -> Expr { Expr::param(data_type_to_ch(data_type), v) };
+    let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     match filter.op.unwrap_or(FilterOp::Eq) {
         op @ (FilterOp::Eq
@@ -49,22 +49,37 @@ pub(crate) fn filter_expression(
         | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
         FilterOp::In => {
             if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                Expr::col_in(alias, prop, data_type_to_ch(data_type), arr.clone())
-                    .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+                Expr::col_in(alias, prop, parameter_type(data_type), arr.clone())
+                    .unwrap_or_else(|| Expr::param(SqlType::Bool, false))
             } else {
-                Expr::param(ChType::Bool, false)
+                Expr::param(SqlType::Bool, false)
             }
         }
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
+        op @ (FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens) => {
+            Expr::TokenSearch {
+                mode: match op {
+                    FilterOp::TokenMatch => TokenMatchMode::Single,
+                    FilterOp::AllTokens => TokenMatchMode::All,
+                    _ => TokenMatchMode::Any,
+                },
+                value: Box::new(col),
+                query: Box::new(Expr::param(
+                    SqlType::String,
+                    filter
+                        .value
+                        .as_ref()
+                        .and_then(|value| value.as_str())
+                        .unwrap_or(""),
+                )),
+            }
+        }
         op => {
             let function = match op {
-                FilterOp::Contains => "positionCaseInsensitive",
-                FilterOp::StartsWith => "startsWith",
-                FilterOp::EndsWith => "endsWith",
-                FilterOp::TokenMatch => "hasToken",
-                FilterOp::AllTokens => "hasAllTokens",
-                FilterOp::AnyTokens => "hasAnyTokens",
+                FilterOp::Contains => Function::ContainsInsensitive,
+                FilterOp::StartsWith => Function::StartsWith,
+                FilterOp::EndsWith => Function::EndsWith,
                 _ => unreachable!(),
             };
             let value = filter
@@ -72,7 +87,7 @@ pub(crate) fn filter_expression(
                 .as_ref()
                 .and_then(|value| value.as_str())
                 .unwrap_or("");
-            Expr::func(function, vec![col, Expr::param(ChType::String, value)])
+            Expr::func(function, vec![col, Expr::param(SqlType::String, value)])
         }
     }
 }
@@ -99,10 +114,10 @@ pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
         Expr::col_in(
             alias,
             col,
-            ChType::Int64,
+            SqlType::Int64,
             ids.iter().map(|id| serde_json::Value::from(*id)).collect(),
         )
-        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+        .unwrap_or_else(|| Expr::param(SqlType::Bool, false))
     }
 }
 
@@ -121,23 +136,26 @@ pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
     )
 }
 
-pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
+pub fn parameter_type(dt: Option<&ontology::DataType>) -> SqlType {
     match dt {
         Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => {
-            ChType::String
+            SqlType::String
         }
-        Some(ontology::DataType::Int) => ChType::Int64,
-        Some(ontology::DataType::Float) => ChType::Float64,
-        Some(ontology::DataType::Bool) => ChType::Bool,
-        Some(ontology::DataType::DateTime | ontology::DataType::Date) => ChType::DateTime64,
-        None => ChType::String,
+        Some(ontology::DataType::Int) => SqlType::Int64,
+        Some(ontology::DataType::Float) => SqlType::Float64,
+        Some(ontology::DataType::Bool) => SqlType::Bool,
+        Some(ontology::DataType::DateTime | ontology::DataType::Date) => SqlType::Timestamp {
+            precision: 6,
+            timezone: Some(TimeZone::Utc),
+        },
+        None => SqlType::String,
     }
 }
 
 pub fn deleted_false(alias: &str) -> Expr {
     Expr::eq(
         Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
+        Expr::param(SqlType::Bool, false),
     )
 }
 
@@ -154,7 +172,7 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
         Expr::col_in(
             alias,
             RELATIONSHIP_KIND_COLUMN,
-            ChType::String,
+            SqlType::String,
             types
                 .iter()
                 .map(|t| serde_json::Value::String(t.clone()))
@@ -175,13 +193,16 @@ pub fn denorm_tag_expr(
 
 pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Expr {
     if let [value] = values {
-        Expr::func("has", vec![Expr::col(alias, column), Expr::string(value)])
+        Expr::func(
+            Function::ArrayContains,
+            vec![Expr::col(alias, column), Expr::string(value)],
+        )
     } else {
         Expr::func(
-            "hasAny",
+            Function::ArrayContainsAny,
             vec![
                 Expr::col(alias, column),
-                Expr::func("array", values.iter().map(Expr::string).collect()),
+                Expr::func(Function::Array, values.iter().map(Expr::string).collect()),
             ],
         )
     }

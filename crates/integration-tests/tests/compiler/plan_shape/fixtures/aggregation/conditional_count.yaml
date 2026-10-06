@@ -26,4 +26,4 @@ physical:
     emitted:
       expect:
         - (Deduplicate LimitBy 1 BY ... (_))
-        - (Aggregate countIf((e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)) AS n (_))
+        - (Aggregate COUNT() FILTER [(e0.relationship_kind = 'CALLS') AND (e0.source_kind = 'Definition') AND (e0.target_kind = 'Definition') AND (e0._deleted = false) AND (e0.source_id = 1)] AS n (_))

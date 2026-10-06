@@ -1,6 +1,6 @@
 use super::sql;
 use crate::ast::*;
-use crate::input::{OrderDirection, TruncateUnit};
+use crate::input::OrderDirection;
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
 
@@ -60,10 +60,12 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                 OutputValue::Text(value) => Expr::string(value),
                 OutputValue::Depth(value) => Expr::int(i64::from(*value)),
                 OutputValue::Path(steps) => Expr::func(
-                    "array",
+                    Function::Array,
                     steps
                         .iter()
-                        .map(|(id, kind)| Expr::func("tuple", vec![column(id), column(kind)]))
+                        .map(|(id, kind)| {
+                            Expr::func(Function::Tuple, vec![column(id), column(kind)])
+                        })
                         .collect(),
                 ),
             };
@@ -75,15 +77,10 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
 fn group(value: &Group) -> Expr {
     let column = column(&value.column);
     match value.truncate {
-        Some(unit) => {
-            let truncated = Expr::func(unit.ch_function(), vec![column]);
-            match unit {
-                TruncateUnit::Minute | TruncateUnit::Hour => {
-                    Expr::func("toDateTime64", vec![truncated, Expr::ident("0")])
-                }
-                _ => Expr::func("toDate32", vec![truncated]),
-            }
-        }
+        Some(unit) => Expr::TimeBucket {
+            unit,
+            value: Box::new(column),
+        },
         None => column,
     }
 }
@@ -95,14 +92,18 @@ pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, lim
         .iter()
         .map(|(value, name)| SelectExpr::new(group(value), name))
         .chain(plan.measures.iter().map(|measure| {
-            let mut arguments: Vec<_> = measure.argument.iter().map(column).collect();
-            let name = if let Some(condition) = &condition {
-                arguments.push(condition.clone());
-                measure.function.as_sql_if()
-            } else {
-                measure.function.as_sql()
-            };
-            SelectExpr::new(Expr::func(name, arguments), &measure.name)
+            SelectExpr::new(
+                Expr::Aggregate {
+                    function: measure.function,
+                    argument: measure
+                        .argument
+                        .as_ref()
+                        .map(|value| Box::new(column(value))),
+                    distinct: false,
+                    condition: condition.clone().map(Box::new),
+                },
+                &measure.name,
+            )
         }))
         .collect();
     let order = plan

@@ -89,13 +89,13 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
 
     let start_tuple = |t: &str| {
         Expr::func(
-            "tuple",
+            Function::Tuple,
             vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(start_entity)],
         )
     };
     let end_tuple = |t: &str| {
         Expr::func(
-            "tuple",
+            Function::Tuple,
             vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(end_entity)],
         )
     };
@@ -105,9 +105,9 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
             SelectExpr::new(
                 Expr::func(
-                    "arrayConcat",
+                    Function::ArrayConcat,
                     vec![
-                        Expr::func("array", vec![start_tuple(FORWARD_ALIAS)]),
+                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
                         Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
                     ],
                 ),
@@ -146,26 +146,26 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             ),
             SelectExpr::new(
                 Expr::func(
-                    "arrayConcat",
+                    Function::ArrayConcat,
                     vec![
-                        Expr::func("array", vec![start_tuple(FORWARD_ALIAS)]),
+                        Expr::func(Function::Array, vec![start_tuple(FORWARD_ALIAS)]),
                         Expr::col(FORWARD_ALIAS, PATH_NODES_COLUMN),
                         Expr::func(
-                            "arrayReverse",
+                            Function::ArrayReverse,
                             vec![Expr::col(BACKWARD_ALIAS, PATH_NODES_COLUMN)],
                         ),
-                        Expr::func("array", vec![end_tuple(BACKWARD_ALIAS)]),
+                        Expr::func(Function::Array, vec![end_tuple(BACKWARD_ALIAS)]),
                     ],
                 ),
                 path_column(),
             ),
             SelectExpr::new(
                 Expr::func(
-                    "arrayConcat",
+                    Function::ArrayConcat,
                     vec![
                         Expr::col(FORWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN),
                         Expr::func(
-                            "arrayReverse",
+                            Function::ArrayReverse,
                             vec![Expr::col(BACKWARD_ALIAS, FRONTIER_EDGE_KINDS_COLUMN)],
                         ),
                     ],
@@ -254,7 +254,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
             edge_filter: Expr::col_in(
                 "e1",
                 edge_col,
-                ChType::Int64,
+                SqlType::Int64,
                 np.node_ids.iter().map(|id| Value::from(*id)).collect(),
             ),
             cte_name: None,
@@ -352,7 +352,7 @@ fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
         return Expr::col_in(
             alias,
             col,
-            ChType::Int64,
+            SqlType::Int64,
             np.node_ids.iter().map(|id| Value::from(*id)).collect(),
         );
     }
@@ -467,28 +467,19 @@ fn build_frontier_arm(
         .map(|i| {
             let a = format!("e{i}");
             Expr::func(
-                "tuple",
+                Function::Tuple,
                 vec![Expr::col(&a, next_col), Expr::col(&a, next_kind_col)],
             )
         })
         .collect();
     let path_nodes = if tuples.is_empty() {
-        Expr::func(
-            "arrayResize",
-            vec![
-                Expr::func(
-                    "array",
-                    vec![Expr::func("tuple", vec![Expr::int(0), Expr::string("")])],
-                ),
-                Expr::int(0),
-            ],
-        )
+        Expr::EmptyTupleArray(vec![SqlType::Int64, SqlType::String])
     } else {
-        Expr::func("array", tuples)
+        Expr::func(Function::Array, tuples)
     };
 
     let edge_kinds = Expr::func(
-        "array",
+        Function::Array,
         (1..=depth)
             .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
             .collect(),

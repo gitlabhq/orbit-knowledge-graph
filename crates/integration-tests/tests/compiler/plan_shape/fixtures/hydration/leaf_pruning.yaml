@@ -24,4 +24,4 @@ physical:
                     (Scan Table(gl_file) AS f))))))
     emitted:
       expect:
-        - (Filter startsWith(f.traversal_path, '1/100/') OR startsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))
+        - (Filter StartsWith(f.traversal_path, '1/100/') OR StartsWith(f.traversal_path, '1/200/'), f.id IN [1, 2] (_))

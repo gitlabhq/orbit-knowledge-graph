@@ -70,6 +70,18 @@ The current ontology files, archives, DDL, and indexing declarations remain unch
 Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
+The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
+Built-in calls use a closed `Function` vocabulary rather than SQL names. Each renderer owns function spelling, argument placement, and dialect syntax.
+The emitted explain view prints exact `Function` variant names, such as `StartsWith`. ClickHouse codegen renders `startsWith`; DuckDB renders `starts_with`.
+Security checks recognize the prefix operation directly. String byte length is distinct from character substring operations.
+Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
+ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.
+Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
+Week buckets start on Sunday. Day and larger buckets return dates; minute and hour buckets retain timestamp output.
+Collection aggregates omit null inputs and return an empty array for empty input. Other aggregates retain their backend result conventions, including empty sums and averages.
+Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
+CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
+UNION arms also retain their local CTE definitions. Empty path arrays carry field types instead of relying on dummy values in lowering.
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.
