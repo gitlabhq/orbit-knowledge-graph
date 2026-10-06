@@ -200,7 +200,7 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
 const CODE_INDEX_META_KEY: &str = "code_index_revision";
-const CODE_INDEX_REVISION: &str = "1";
+const CODE_INDEX_REVISION: &str = "2";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
