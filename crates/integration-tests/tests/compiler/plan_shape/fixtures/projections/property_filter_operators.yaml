@@ -32,4 +32,4 @@ physical:
         - (Filter contains(p.name, 'orbit'), starts_with(p.name, 'git'), ends_with(p.name, 'lab'), token_match(p.name, 'graph'), all_tokens(p.name, 'graph query'), any_tokens(p.name, 'code data'), p.name IS NOT NULL, p.description IS NULL, ... (_))
     emitted:
       expect:
-        - (Filter contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), token_match(Lower(p.name), Lower('graph')), all_tokens(Lower(p.name), Lower('graph query')), any_tokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
+        - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
