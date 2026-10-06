@@ -8,10 +8,10 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  Prefer `{{orbit}}` commands to bash tools for file/code search and callers/callees. Instructions to use grep refer to `{{orbit}} grep`.
+  Use `{{orbit}} grep` instead of grep or rg for every search. It covers code, tests, config, and docs, and shows the top match's source.
 
   - Unknown code? `{{orbit}} grep 'words'`. FTS. Terms AND; `a|b` OR. Too broad? Add `--path`/`--kind`.
-  - grep shows names, file:lines, matching lines, and Mentions: every other matching line in code, tests, config, and docs. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
+  - Output: matching definitions, Mentions (every other matching line), then the top match's source. Source? `{{orbit}} context path:120-180`. Callers/callees? `{{orbit}} context <name>`.
   - Need file map? `{{orbit}} context path`. Directory? `{{orbit}} context dir`.
   - Do not reread unchanged files. Reuse shown source.
 
