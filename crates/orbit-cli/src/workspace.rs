@@ -145,7 +145,11 @@ pub struct IndexedRepo {
     pub edited: usize,
 }
 
-pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
+pub fn open_indexed(
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    touched: &[String],
+) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let db = resolve_db_path(db)?;
     let top_level = git_toplevel(&repo_path)
@@ -163,7 +167,12 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
             );
         }
     }
-    let edited = crate::commands::refresh::refresh_worktree(&git, &db).unwrap_or_else(|error| {
+    let edited = crate::commands::refresh::refresh_worktree(
+        &git,
+        &db,
+        &repo_relative_paths(&git.repo_path, touched),
+    )
+    .unwrap_or_else(|error| {
         tracing::warn!("working-tree refresh failed: {error:#}");
         0
     });
@@ -173,6 +182,35 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
         client,
         edited,
     })
+}
+
+/// Repo-relative forms of `paths` given relative to the current directory, the repo, or absolute.
+/// `a,b` lists are split; `path:120-180` ranges keep only the path; unresolvable entries are kept as
+/// written (trimmed) so globs still work.
+pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    paths
+        .iter()
+        .flat_map(|p| p.split(','))
+        .map(str::trim)
+        .filter_map(|path| {
+            let relative = [cwd.join(path), repo.join(path)]
+                .into_iter()
+                .find_map(|candidate| {
+                    let full = dunce::canonicalize(candidate).ok()?;
+                    full.strip_prefix(&root)
+                        .ok()
+                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                })
+                .unwrap_or_else(|| {
+                    path.trim_start_matches("./")
+                        .trim_end_matches('/')
+                        .to_string()
+                });
+            (!relative.is_empty() && relative != ".").then_some(relative)
+        })
+        .collect()
 }
 
 fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
@@ -187,14 +225,7 @@ fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
         "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
         &[git.project_id.into(), git.commit_sha.clone().into()],
     )?;
-    if duckdb_client::scalar_i64(&files) == 0 {
-        return Ok(true);
-    }
-    let text_table = client.query_arrow_json(
-        "SELECT COUNT(*) AS n FROM duckdb_tables() WHERE table_name = ?1",
-        &[duckdb_client::search::text_line_table(git.project_id).into()],
-    )?;
-    Ok(duckdb_client::scalar_i64(&text_table) == 0)
+    Ok(duckdb_client::scalar_i64(&files) == 0)
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
@@ -209,7 +240,7 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 
 const LOCAL_DDL_META_KEY: &str = "local_ddl";
 const CODE_INDEX_META_KEY: &str = "code_index_revision";
-const CODE_INDEX_REVISION: &str = "3";
+const CODE_INDEX_REVISION: &str = "4";
 
 pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;

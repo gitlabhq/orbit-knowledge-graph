@@ -2,7 +2,7 @@ mod local;
 mod text;
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use duckdb_client::search::NodeValue;
@@ -31,11 +31,33 @@ pub(crate) fn run(
         None => Vec::new(),
     };
 
-    let backend = LocalBackend::open(repo, db, &paths)?;
+    let mut terms: Vec<text::Term> = alternatives.iter().map(|a| text::Term::parse(a)).collect();
+    let scan = match query.is_some() {
+        true => {
+            let matcher = text::matcher(&terms).or_else(|_| {
+                terms = terms.iter().map(text::Term::literal).collect();
+                text::matcher(&terms)
+            })?;
+            let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
+            let scope = crate::workspace::repo_relative_paths(&root, &paths);
+            let hits = text::scan(&root, &scope, &matcher)?;
+            let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+            files.sort();
+            files.dedup();
+            let new = crate::commands::refresh::untracked(&root, &files);
+            Some((hits, new))
+        }
+        false => None,
+    };
+    let touched = scan
+        .as_ref()
+        .map(|(_, new)| new.clone())
+        .unwrap_or_default();
+    let backend = LocalBackend::open(repo, db, &paths, &touched)?;
     let paths = backend.paths().to_vec();
 
     let mut out = std::io::stdout().lock();
-    let Some(query) = query else {
+    let (Some(query), Some((mut hits, _))) = (query, scan) else {
         return report_outline(&mut out, &backend, &paths, &filter, launcher);
     };
     if !paths.is_empty() {
@@ -44,39 +66,16 @@ pub(crate) fn run(
     if !filter.kinds.is_empty() {
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
-    let mut alternatives: Vec<text::Term> =
-        alternatives.iter().map(|a| text::Term::parse(a)).collect();
-    let search = |terms: &[text::Term]| {
-        text::hits(
-            backend.search().client(),
-            backend.git(),
-            terms,
-            &paths,
-            &filter.kinds,
-        )
-    };
-    let hits = match search(&alternatives) {
-        Ok(hits) => hits,
-        Err(_) => {
-            alternatives = alternatives.iter().map(text::Term::literal).collect();
-            search(&alternatives)?
-        }
-    };
+    let alternatives = terms;
+    hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+    text::attach_definitions(
+        backend.search().client(),
+        backend.git(),
+        &mut hits,
+        &alternatives,
+        &filter.kinds,
+    )?;
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    let skipped: Vec<&String> = paths
-        .iter()
-        .filter(|path| {
-            std::fs::metadata(backend.git().repo_path.join(path)).is_ok_and(|meta| {
-                meta.is_file() && !duckdb_client::search::is_indexed_text_file(path, meta.len())
-            })
-        })
-        .collect();
-    for path in skipped {
-        writeln!(
-            out,
-            "Not searched: {path} is excluded from the line index (size, type, or generated)"
-        )?;
-    }
     write!(out, "{}", text::render(&hits, &alternatives))?;
     write!(
         out,
