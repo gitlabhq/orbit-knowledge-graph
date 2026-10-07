@@ -3,7 +3,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -27,11 +26,6 @@ use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-
-/// Upper bound on draining the billing tracker at shutdown. The Orbit Helm
-/// chart leaves `terminationGracePeriodSeconds` at the Kubernetes default of
-/// 30 s; labkit sends serially with a 5 s HTTP timeout per request.
-const BILLING_TRACKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -289,15 +283,8 @@ async fn run_webserver(
         tracker.shutdown().await;
     }
 
-    if let Some(tracker) = billing_tracker
-        && tokio::time::timeout(BILLING_TRACKER_SHUTDOWN_TIMEOUT, tracker.shutdown())
-            .await
-            .is_err()
-    {
-        warn!(
-            timeout_secs = BILLING_TRACKER_SHUTDOWN_TIMEOUT.as_secs(),
-            "billing tracker shutdown timed out; events still queued are lost"
-        );
+    if let Some(tracker) = billing_tracker {
+        tracker.shutdown().await;
     }
 
     result

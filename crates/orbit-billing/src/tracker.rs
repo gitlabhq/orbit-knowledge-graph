@@ -78,9 +78,9 @@ impl SnowplowBillingTracker {
 
     /// Sends every queued event, then stops labkit's background send task.
     ///
-    /// Batches waiting for a retry are dropped by labkit rather than retried.
-    /// Sends are serial with a per-request HTTP timeout, so callers must bound
-    /// this with their own deadline.
+    /// Batches waiting for a retry are abandoned rather than retried. labkit
+    /// itself bounds this call: it stops sending once the collector is
+    /// detected unreachable, and caps how long it waits on the token source.
     pub async fn shutdown(&self) {
         tracing::info!("billing tracker shutdown: draining queued events");
         self.tracker.shutdown().await;
