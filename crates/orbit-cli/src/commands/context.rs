@@ -191,6 +191,7 @@ fn resolve_targets(
 
 fn repo_relative_dir(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
+        .or_else(|_| dunce::canonicalize(std::env::current_dir()?.join(path)))
         .with_context(|| format!("{path} does not exist"))?;
     anyhow::ensure!(canonical.is_dir(), "{path} is not a directory");
     let relative = canonical.strip_prefix(repo_path).with_context(|| {
@@ -329,6 +330,7 @@ fn render_range(
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
     let canonical = dunce::canonicalize(repo_path.join(path))
+        .or_else(|_| dunce::canonicalize(std::env::current_dir()?.join(path)))
         .with_context(|| format!("{path} does not exist"))?;
     anyhow::ensure!(canonical.is_file(), "{path} is not a file");
     let relative = canonical.strip_prefix(repo_path).with_context(|| {

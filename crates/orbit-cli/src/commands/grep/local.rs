@@ -9,6 +9,25 @@ pub(super) struct LocalBackend {
     search: DuckDbSearch,
     header: String,
     git: workspace::GitInfo,
+    paths: Vec<String>,
+}
+
+fn repo_path(repo: &std::path::Path, path: &str) -> Option<String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let relative = dunce::canonicalize(cwd.join(path))
+        .ok()
+        .and_then(|full| {
+            let root = dunce::canonicalize(repo).ok()?;
+            full.strip_prefix(root)
+                .ok()
+                .map(|r| r.to_string_lossy().replace('\\', "/"))
+        })
+        .unwrap_or_else(|| {
+            path.trim_start_matches("./")
+                .trim_end_matches('/')
+                .to_string()
+        });
+    (!relative.is_empty() && relative != ".").then_some(relative)
 }
 
 impl LocalBackend {
@@ -18,11 +37,21 @@ impl LocalBackend {
         paths: &[String],
     ) -> Result<Self> {
         let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+        let paths: Vec<String> = paths
+            .iter()
+            .flat_map(|p| p.split(','))
+            .filter_map(|p| repo_path(&git.repo_path, p.trim()))
+            .collect();
         Ok(Self {
-            search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, paths)?,
+            search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, &paths)?,
             header: git.short_sha().to_string(),
+            paths,
             git,
         })
+    }
+
+    pub(super) fn paths(&self) -> &[String] {
+        &self.paths
     }
 
     pub(super) fn git(&self) -> &workspace::GitInfo {
@@ -340,7 +369,6 @@ mod tests {
             assert!(outcome.matches.is_empty());
             assert!(nodes.is_empty());
         }
-        assert!(search.grep("!!!", 5, &RecallFilter::default()).is_err());
         assert!(search.grep("clone", 0, &RecallFilter::default()).is_err());
         assert_eq!(
             search.list_corpus(&RecallFilter::default()).unwrap().len(),

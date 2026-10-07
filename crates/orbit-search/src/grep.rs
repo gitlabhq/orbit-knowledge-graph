@@ -30,28 +30,36 @@ impl RecallFilter {
 
 pub fn query_alternatives(query: &str) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
-    let mut alternatives = Vec::new();
-    for alternative in split_unescaped(query) {
-        let alternative = alternative.trim();
-        if !alternative.chars().any(char::is_alphanumeric) {
-            return Err(format!("no usable search terms in query: {query:?}"));
-        }
-        if seen.insert(alternative.to_lowercase()) {
-            alternatives.push(alternative.to_string());
-        }
+    let alternatives: Vec<String> = split_top_level(query)
+        .into_iter()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty() && seen.insert(a.to_lowercase()))
+        .collect();
+    match alternatives.is_empty() {
+        true => Err(format!("no usable search terms in query: {query:?}")),
+        false => Ok(alternatives),
     }
-    Ok(alternatives)
 }
 
-fn split_unescaped(query: &str) -> Vec<String> {
-    let (mut parts, mut current) = (Vec::new(), String::new());
+fn split_top_level(query: &str) -> Vec<String> {
+    let (mut parts, mut current, mut depth) = (Vec::new(), String::new(), 0i32);
     let mut chars = query.chars();
     while let Some(c) = chars.next() {
         match c {
-            '\\' => current.extend(chars.next()),
-            '|' => parts.push(std::mem::take(&mut current)),
-            _ => current.push(c),
+            '\\' => {
+                current.push(c);
+                current.extend(chars.next());
+                continue;
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '|' if depth <= 0 => {
+                parts.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
         }
+        current.push(c);
     }
     parts.push(current);
     parts
@@ -62,10 +70,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn backslashes_escape_literally() {
+    fn splits_only_on_top_level_unescaped_bars() {
         assert_eq!(
-            query_alternatives(r"Router::new|route\(|^\[dependencies\]|a\|b").unwrap(),
-            ["Router::new", "route(", "^[dependencies]", "a|b"]
+            query_alternatives(r"Router::new|route\(|func \(p\) (a|b)|a\|b|????").unwrap(),
+            [
+                "Router::new",
+                r"route\(",
+                r"func \(p\) (a|b)",
+                r"a\|b",
+                "????"
+            ]
         );
     }
 
@@ -79,9 +93,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_and_punctuation_alternatives_are_rejected() {
-        for query in ["", " ", "!?", "|", "clone|", "clone||prepare", "clone|?!"] {
+    fn only_empty_queries_are_rejected() {
+        for query in ["", " ", "|", " | "] {
             assert!(query_alternatives(query).is_err(), "{query:?}");
         }
+        assert_eq!(
+            query_alternatives("clone||prepare|").unwrap(),
+            ["clone", "prepare"]
+        );
     }
 }

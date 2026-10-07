@@ -29,15 +29,70 @@ fn normalized(expr: &str) -> String {
     format!("lower(regexp_replace({expr}, '[_\\-\\s]', '', 'g'))")
 }
 
-pub(super) fn anchored(term: &str) -> (&str, bool, bool) {
-    let start = term.starts_with('^');
-    let core = term.strip_prefix('^').unwrap_or(term);
-    let end = core.len() > 1 && core.ends_with('$');
-    (
-        core.strip_suffix('$').filter(|_| end).unwrap_or(core),
-        start,
-        end,
-    )
+pub(super) struct Term {
+    pub(super) raw: String,
+    regex: Option<(regex::Regex, regex::Regex)>,
+}
+
+impl Term {
+    pub(super) fn parse(raw: &str) -> Self {
+        let pattern = raw.contains([
+            '\\', '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '^', '$',
+        ]);
+        let regex = pattern
+            .then(|| {
+                let line = regex::Regex::new(&format!("(?i){raw}")).ok()?;
+                let whole = regex::Regex::new(&format!("(?i)^(?:{raw})$")).ok()?;
+                Some((line, whole))
+            })
+            .flatten();
+        Self {
+            raw: raw.to_string(),
+            regex,
+        }
+    }
+
+    pub(super) fn literal(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            regex: None,
+        }
+    }
+
+    fn sql(&self, column: &str, param: &str) -> String {
+        match self.regex {
+            Some(_) => format!("regexp_matches({column}, {param})"),
+            None => format!("contains({}, {})", normalized(column), normalized(param)),
+        }
+    }
+
+    fn sql_name(&self, column: &str, param: &str) -> String {
+        match self.regex {
+            Some(_) => format!("regexp_full_match({column}, {param})"),
+            None => format!("{} = {}", normalized(column), normalized(param)),
+        }
+    }
+
+    fn param(&self) -> String {
+        match self.regex {
+            Some(_) => format!("(?i){}", self.raw),
+            None => self.raw.clone(),
+        }
+    }
+
+    fn matches(&self, text: &str) -> bool {
+        match &self.regex {
+            Some((line, _)) => line.is_match(text),
+            None => compact(text).contains(&compact(&self.raw)),
+        }
+    }
+
+    fn names(&self, name: &str) -> bool {
+        match &self.regex {
+            Some((_, whole)) => whole.is_match(name),
+            None => compact(name) == compact(&self.raw),
+        }
+    }
 }
 
 fn compact(text: &str) -> String {
@@ -50,7 +105,7 @@ fn compact(text: &str) -> String {
 pub(super) fn hits(
     client: &DuckDbClient,
     git: &GitInfo,
-    alternatives: &[String],
+    alternatives: &[Term],
     paths: &[String],
     kinds: &[String],
 ) -> Result<Vec<Hit>> {
@@ -66,15 +121,7 @@ pub(super) fn hits(
     let filter = alternatives
         .iter()
         .enumerate()
-        .map(|(i, term)| {
-            let (text, param) = (normalized("h.text"), normalized(&format!("?{}", i + 2)));
-            match anchored(term) {
-                (_, true, true) => format!("{text} = {param}"),
-                (_, true, false) => format!("starts_with({text}, {param})"),
-                (_, false, true) => format!("ends_with({text}, {param})"),
-                _ => format!("contains({text}, {param})"),
-            }
-        })
+        .map(|(i, term)| term.sql("h.text", &format!("?{}", i + 2)))
         .collect::<Vec<_>>()
         .join(" OR ");
     let project = alternatives.len() + 2;
@@ -90,7 +137,7 @@ pub(super) fn hits(
         ),
     };
     let mut params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
-        .chain(alternatives.iter().map(|a| anchored(a).0.into()))
+        .chain(alternatives.iter().map(|a| a.param().into()))
         .collect();
     params.push(git.project_id.into());
     let batches = client.query_arrow_json(
@@ -121,11 +168,12 @@ ORDER BY file_path, line_no",
             fqn = def.column("fqn")?,
             id = def.column("id")?,
             scope = path_scope("h.file_path", paths, true),
-            named = (0..alternatives.len())
-                .map(|i| format!(
-                    "{} = {}",
-                    normalized(&format!("d.{}", def.column("name").unwrap_or("name"))),
-                    normalized(&format!("?{}", i + 2))
+            named = alternatives
+                .iter()
+                .enumerate()
+                .map(|(i, term)| term.sql_name(
+                    &format!("d.{}", def.column("name").unwrap_or("name")),
+                    &format!("?{}", i + 2)
                 ))
                 .collect::<Vec<_>>()
                 .join(" OR "),
@@ -206,26 +254,26 @@ fn is_test(path: &str) -> bool {
     TEST.is_match(path)
 }
 
-fn names(hit: &Hit, alternatives: &[String]) -> bool {
-    hit.def.as_ref().is_some_and(|def| {
-        def.start == hit.line
-            && alternatives
-                .iter()
-                .any(|a| compact(&def.name) == compact(a))
-    })
+fn names(hit: &Hit, alternatives: &[Term]) -> bool {
+    hit.def
+        .as_ref()
+        .is_some_and(|def| def.start == hit.line && alternatives.iter().any(|a| a.names(&def.name)))
 }
 
-fn assigns(hit: &Hit, alternatives: &[String]) -> bool {
-    alternatives.iter().any(|term| {
-        regex::Regex::new(&format!(
-            r"(?i)^\s*(?:(?:const|let|var)\s+)?(?:[\w$]+\.)*{}\s*=[^=]",
-            regex::escape(term.trim())
-        ))
-        .is_ok_and(|re| re.is_match(&hit.text))
-    })
+fn assigns(hit: &Hit, alternatives: &[Term]) -> bool {
+    alternatives
+        .iter()
+        .filter(|t| t.regex.is_none())
+        .any(|term| {
+            regex::Regex::new(&format!(
+                r"(?i)^\s*(?:(?:const|let|var)\s+)?(?:[\w$]+\.)*{}\s*=[^=]",
+                regex::escape(term.raw.trim())
+            ))
+            .is_ok_and(|re| re.is_match(&hit.text))
+        })
 }
 
-fn defining_rank(hit: &Hit, alternatives: &[String]) -> u8 {
+fn defining_rank(hit: &Hit, alternatives: &[Term]) -> u8 {
     match (names(hit, alternatives), assigns(hit, alternatives)) {
         (true, _) => 0,
         (false, true) => 1,
@@ -367,7 +415,7 @@ fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>
     (rows, merged_files, merged_lines)
 }
 
-pub(super) fn render(hits: &[Hit], alternatives: &[String]) -> String {
+pub(super) fn render(hits: &[Hit], alternatives: &[Term]) -> String {
     let mut files: Vec<(String, Vec<&Hit>)> = Vec::new();
     for hit in hits {
         match files.last_mut() {
@@ -397,8 +445,8 @@ pub(super) fn render(hits: &[Hit], alternatives: &[String]) -> String {
     let mut out = String::new();
     let missing: Vec<&str> = alternatives
         .iter()
-        .filter(|a| !hits.iter().any(|h| compact(&h.text).contains(&compact(a))))
-        .map(String::as_str)
+        .filter(|a| !hits.iter().any(|h| a.matches(&h.text)))
+        .map(|a| a.raw.as_str())
         .collect();
     if !missing.is_empty() {
         out.push_str(&format!("No matches: {}\n", missing.join(" | ")));
@@ -415,7 +463,7 @@ pub(super) fn render(hits: &[Hit], alternatives: &[String]) -> String {
     out
 }
 
-pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[String]) -> String {
+pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[Term]) -> String {
     let Some(hit) = hits
         .iter()
         .filter(|h| is_code(&h.file) && !is_test(&h.file) && defining_rank(h, alternatives) < 2)
@@ -468,7 +516,7 @@ mod tests {
 
     #[test]
     fn every_hit_is_listed_with_definitions_first_and_no_counts_hidden() {
-        let terms = vec!["maintenanceMode".to_string(), "nosuchxyz".to_string()];
+        let terms = vec![Term::parse("maintenanceMode"), Term::parse("nosuchxyz")];
         let mut hits = vec![
             hit(
                 "install/data/defaults.json",
@@ -541,11 +589,25 @@ mod tests {
                 )
             })
             .collect();
-        let out = render(&hits, &["maintenanceMode".to_string()]);
+        let out = render(&hits, &[Term::parse("maintenanceMode")]);
         assert!(
             out.contains("public/language/{en-GB,+3}/advanced.json"),
             "{out}"
         );
         assert!(out.starts_with("1 lines in 1 files\n"), "{out}");
+    }
+
+    #[test]
+    fn regex_terms_match_like_ripgrep_and_bad_patterns_fall_back_to_literals() {
+        assert!(Term::parse(r"\bCveDetail\b").matches("x := CveDetail{}"));
+        assert!(!Term::parse(r"\bCveDetail\b").matches("CveDetails"));
+        assert!(Term::parse(r"type .* struct\{\}").matches("type key struct{}"));
+        assert!(Term::parse(r"route\(").matches(".route(\"/x\")"));
+        assert!(Term::parse("route(").matches(".route(\"/x\")"));
+        assert!(Term::parse("????").matches("x = '????'"));
+        assert!(Term::parse("^rand").matches("rand = \"0.10\""));
+        assert!(!Term::parse("^rand").matches("x.rand = 1"));
+        assert!(Term::parse("mark_in_sync").matches("markInSync()"));
+        assert!(Term::parse("on.*Login").names("onLogin"));
     }
 }
