@@ -5723,6 +5723,7 @@ dependencies = [
  "ignore",
  "lz4_flex 0.11.6",
  "memchr",
+ "rayon",
  "regex",
  "rustc-hash 2.1.3",
  "serde",

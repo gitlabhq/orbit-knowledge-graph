@@ -1,4 +1,4 @@
-//! Read-side nodes are sorted and immutable. File lookups and subtree bounds use binary search.
+//! Read-side entries are sorted and immutable. File lookups and subtree bounds use binary search.
 //! Directory listing scans the matching subtree. Content decisions on linked files use OnceLock;
 //! concurrent first reads may wait for classification. Stored content reads do not take store locks.
 //! Virtual links resolve within `/`. Missing paths return NotFound and listed files Unsupported.
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use super::loading::{Content, Loading, Node};
+use super::loading::{Content, Loading, VfsEntry};
 use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
 use super::scratch::Scratch;
 use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
@@ -30,7 +30,7 @@ pub struct Stat<T> {
 
 pub struct Vfs<T> {
     pub(super) passes: Box<dyn Pass<Tag = T>>,
-    pub(super) nodes: Vec<Node<T>>,
+    pub(super) entries: Vec<VfsEntry<T>>,
     pub(super) links: FxHashMap<String, String>,
     pub(super) scratch: Scratch,
     pub(super) usage: Usage,
@@ -46,12 +46,12 @@ impl<T: Tag> Vfs<T> {
     ) -> Result<Self, SourceError> {
         let loading = Loading::new(passes, limits, options);
         source.fill(&loading)?;
-        Ok(loading.freeze())
+        Ok(loading.finish())
     }
 
     pub fn read(&self, path: &Path) -> io::Result<Bytes> {
         let (key, _) = self.resolve(path)?;
-        let Some(node) = self.node(&key) else {
+        let Some(entry) = self.entry(&key) else {
             return Err(match self.is_dir(&key) {
                 true => {
                     io::Error::new(io::ErrorKind::IsADirectory, format!("{key} is a directory"))
@@ -59,10 +59,10 @@ impl<T: Tag> Vfs<T> {
                 false => not_found(),
             });
         };
-        if matches!(node.file.decision(), Decision::List(_)) {
-            return Err(unsupported(&node.file));
+        if matches!(entry.file.decision(), Decision::List(_)) {
+            return Err(unsupported(&entry.file));
         }
-        let bytes = match &node.content {
+        let bytes = match &entry.content {
             Content::Memory(bytes) => bytes.clone(),
             Content::Spilled {
                 offset,
@@ -77,7 +77,7 @@ impl<T: Tag> Vfs<T> {
                         "reader exceeded file byte limit",
                     ));
                 }
-                if bytes.len() as u64 != node.file.size {
+                if bytes.len() as u64 != entry.file.size {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "source size mismatch",
@@ -85,19 +85,19 @@ impl<T: Tag> Vfs<T> {
                 }
                 bytes.into()
             }
-            Content::Unavailable => return Err(unsupported(&node.file)),
+            Content::Unavailable => return Err(unsupported(&entry.file)),
             Content::Failed(error) => return Err(io::Error::new(error.kind(), error.clone())),
             Content::Symlink(_) => return Err(not_found()),
         };
-        match node.file.classify(&*self.passes, &bytes) {
+        match entry.file.classify(&*self.passes, &bytes) {
             Decision::Keep(_) => Ok(bytes),
-            _ => Err(unsupported(&node.file)),
+            _ => Err(unsupported(&entry.file)),
         }
     }
 
     pub fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
         let (key, _) = self.resolve(path)?;
-        if self.node(&key).is_some() {
+        if self.entry(&key).is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::NotADirectory,
                 format!("{key} is a file"),
@@ -121,8 +121,8 @@ impl<T: Tag> Vfs<T> {
 
     pub fn stat(&self, path: &Path) -> io::Result<Stat<T>> {
         let (key, link) = self.resolve(path)?;
-        let (kind, len, decision) = match self.node(&key) {
-            Some(node) => (Kind::File, node.file.size, Some(node.file.decision())),
+        let (kind, len, decision) = match self.entry(&key) {
+            Some(entry) => (Kind::File, entry.file.size, Some(entry.file.decision())),
             None if self.is_dir(&key) => (Kind::Dir, 0, None),
             None => return Err(not_found()),
         };
@@ -136,7 +136,7 @@ impl<T: Tag> Vfs<T> {
     }
 
     pub fn files(&self) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
-        self.nodes.iter().map(|node| &node.file)
+        self.entries.iter().map(|entry| &entry.file)
     }
 
     pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
@@ -147,10 +147,10 @@ impl<T: Tag> Vfs<T> {
     pub fn usage(&self) -> Usage {
         Usage {
             kept: self
-                .nodes
+                .entries
                 .iter()
-                .filter(|node| node.file.keeps() && !matches!(node.content, Content::Failed(_)))
-                .map(|node| node.file.size)
+                .filter(|entry| entry.file.keeps() && !matches!(entry.content, Content::Failed(_)))
+                .map(|entry| entry.file.size)
                 .sum(),
             ..self.usage
         }
@@ -162,17 +162,18 @@ impl<T: Tag> Vfs<T> {
             false => format!("{key}/"),
         };
         let start = self
-            .nodes
+            .entries
             .partition_point(|n| n.file.path.as_ref() < prefix.as_str());
-        let end = start + self.nodes[start..].partition_point(|n| n.file.path.starts_with(&prefix));
-        self.nodes[start..end].iter().map(|node| &node.file)
+        let end =
+            start + self.entries[start..].partition_point(|n| n.file.path.starts_with(&prefix));
+        self.entries[start..end].iter().map(|entry| &entry.file)
     }
 
-    fn node(&self, key: &str) -> Option<&Node<T>> {
-        self.nodes
-            .binary_search_by(|node| node.file.path.as_ref().cmp(key))
+    fn entry(&self, key: &str) -> Option<&VfsEntry<T>> {
+        self.entries
+            .binary_search_by(|entry| entry.file.path.as_ref().cmp(key))
             .ok()
-            .map(|i| &self.nodes[i])
+            .map(|i| &self.entries[i])
     }
 
     fn is_dir(&self, key: &str) -> bool {

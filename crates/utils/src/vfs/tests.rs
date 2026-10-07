@@ -135,6 +135,30 @@ fn virtual_links_resolve_only_inside_the_catalog() {
 }
 
 #[test]
+fn large_unsorted_catalog_keeps_the_last_version_of_each_path() {
+    struct Replacements;
+    impl Source for Replacements {
+        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+            for version in [b"old", b"new"] {
+                for index in (0..10_000).rev() {
+                    into.put(&format!("dir/{index:05}"), Put::Bytes(version.to_vec()))?;
+                }
+            }
+            Ok(())
+        }
+    }
+    let vfs = Vfs::load(Replacements, (), Limits::default(), Options::default()).unwrap();
+    assert_eq!(vfs.usage().files, 10_000);
+    assert_eq!(vfs.usage().duplicate_paths, 10_000);
+    for (index, file) in vfs.files().enumerate() {
+        assert_eq!(file.path, format!("dir/{index:05}"));
+        assert_eq!(&*vfs.read(Path::new(file.path.as_ref())).unwrap(), b"new");
+    }
+    assert_eq!(vfs.subtree(Path::new("dir")).count(), 10_000);
+    assert_eq!(vfs.read_dir(Path::new("dir")).unwrap().len(), 10_000);
+}
+
+#[test]
 fn storage_modes_share_content_and_enforce_exact_budgets() {
     let body = vec![b'x'; 4096];
     for (resident, compress) in [(4096, false), (0, false), (0, true)] {

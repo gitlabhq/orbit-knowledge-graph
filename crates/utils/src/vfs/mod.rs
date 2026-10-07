@@ -1,7 +1,7 @@
 //! A repository as a read-only filesystem, loaded once from a source.
 //!
 //! ```text
-//! Source ──put──▶ Loading<T> ──freeze──▶ Vfs<T>
+//! Source ──put──▶ Loading<T> ──finish──▶ Vfs<T>
 //!                   │                      read / read_dir / stat
 //!                   ▼                      files / subtree / usage
 //!            Pass::metadata (&File)

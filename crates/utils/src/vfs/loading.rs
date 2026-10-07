@@ -1,7 +1,7 @@
-//! Concurrent loading uses per-shard locks for nodes and content-addressed blobs.
+//! Concurrent loading uses per-shard locks for entries and content-addressed blobs.
 //! Limits count offered files before policy runs. Rejected content is not materialized.
 //! On-demand readers retain their backing; pending files are read for classification during loading.
-//! Freezing sorts and deduplicates nodes in place, retaining the latest entry per path.
+//! Finishing sorts and deduplicates entries in place, retaining the latest entry per path.
 
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
@@ -32,14 +33,14 @@ pub enum Put<'a> {
     Symlink(String),
 }
 
-const NODE_SHARDS: usize = 64;
+const ENTRY_SHARDS: usize = 64;
 const BLOB_SHARDS: usize = 256;
 
 pub struct Loading<T> {
     passes: Box<dyn Pass<Tag = T>>,
     limits: Limits,
     cancelled: Option<Box<dyn Fn() -> bool + Send + Sync>>,
-    nodes: Vec<Mutex<Vec<Node<T>>>>,
+    entries: Vec<Mutex<Vec<VfsEntry<T>>>>,
     blobs: Vec<Mutex<FxHashMap<[u8; 32], Content>>>,
     scratch: Scratch,
     files: AtomicU64,
@@ -48,7 +49,7 @@ pub struct Loading<T> {
     deduped: AtomicU64,
 }
 
-pub(super) struct Node<T> {
+pub(super) struct VfsEntry<T> {
     pub(super) file: File<'static, T>,
     pub(super) content: Content,
 }
@@ -74,7 +75,7 @@ impl<T: Tag> Loading<T> {
             scratch: Scratch::new(&options, limits.spilled_bytes),
             limits,
             cancelled: options.cancelled,
-            nodes: (0..NODE_SHARDS).map(|_| Mutex::default()).collect(),
+            entries: (0..ENTRY_SHARDS).map(|_| Mutex::default()).collect(),
             blobs: (0..BLOB_SHARDS).map(|_| Mutex::default()).collect(),
             files: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
@@ -102,7 +103,7 @@ impl<T: Tag> Loading<T> {
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
-            self.add_node(file, Content::Symlink(target));
+            self.add_entry(file, Content::Symlink(target));
             return Ok(());
         }
         let mut file = File::new(key, size, Decision::Pending);
@@ -111,11 +112,11 @@ impl<T: Tag> Loading<T> {
             _ => self.passes.metadata(&file),
         };
         match (file.decision(), what) {
-            (Decision::List(_), _) => self.add_node(file, Content::Unavailable),
+            (Decision::List(_), _) => self.add_entry(file, Content::Unavailable),
             (_, Put::Bytes(bytes)) => self.put_bytes(file, Ok(bytes), None)?,
             (_, Put::ReadAndStore { read, .. }) => self.put_bytes(file, read(), None)?,
             (Decision::Keep(_), Put::ReadOnDemand { read, .. }) => {
-                self.add_node(file, Content::ReadOnDemand(read))
+                self.add_entry(file, Content::ReadOnDemand(read))
             }
             (Decision::Pending, Put::ReadOnDemand { read, .. }) => {
                 self.put_bytes(
@@ -147,7 +148,7 @@ impl<T: Tag> Loading<T> {
         }) {
             Ok(bytes) => bytes,
             Err(error) => {
-                self.add_node(file, Content::Failed(Arc::new(error)));
+                self.add_entry(file, Content::Failed(Arc::new(error)));
                 return Ok(());
             }
         };
@@ -157,15 +158,15 @@ impl<T: Tag> Loading<T> {
             (Decision::Keep(_), None) => self.store(bytes)?,
             _ => Content::Unavailable,
         };
-        self.add_node(file, content);
+        self.add_entry(file, content);
         Ok(())
     }
 
-    fn add_node(&self, file: File<'static, T>, content: Content) {
+    fn add_entry(&self, file: File<'static, T>, content: Content) {
         let mut hasher = FxHasher::default();
         file.path.hash(&mut hasher);
-        let shard = &self.nodes[hasher.finish() as usize % NODE_SHARDS];
-        lock(shard).push(Node { file, content });
+        let shard = &self.entries[hasher.finish() as usize % ENTRY_SHARDS];
+        lock(shard).push(VfsEntry { file, content });
     }
 
     fn store(&self, bytes: Vec<u8>) -> Result<Content, SourceError> {
@@ -193,31 +194,31 @@ impl<T: Tag> Loading<T> {
         Ok(blob.clone())
     }
 
-    pub(super) fn freeze(self) -> Vfs<T> {
-        let mut nodes: Vec<Node<T>> = self
-            .nodes
+    pub(super) fn finish(self) -> Vfs<T> {
+        let mut entries: Vec<VfsEntry<T>> = self
+            .entries
             .into_iter()
             .flat_map(|shard| shard.into_inner().unwrap_or_else(|e| e.into_inner()))
             .collect();
-        nodes.sort_by(|a, b| a.file.path.cmp(&b.file.path));
-        let offered = nodes.len();
-        nodes.dedup_by(|later, earlier| {
+        entries.par_sort_by(|a, b| a.file.path.cmp(&b.file.path));
+        let offered = entries.len();
+        entries.dedup_by(|later, earlier| {
             if later.file.path != earlier.file.path {
                 return false;
             }
             std::mem::swap(later, earlier);
             true
         });
-        let duplicate_paths = offered - nodes.len();
-        let links = nodes
+        let duplicate_paths = offered - entries.len();
+        let links = entries
             .iter()
-            .filter_map(|node| match &node.content {
-                Content::Symlink(target) => Some((node.file.path.to_string(), target.clone())),
+            .filter_map(|entry| match &entry.content {
+                Content::Symlink(target) => Some((entry.file.path.to_string(), target.clone())),
                 _ => None,
             })
             .collect();
         let usage = Usage {
-            files: nodes.len(),
+            files: entries.len(),
             bytes: self.bytes.load(Relaxed),
             kept: 0,
             resident: self.resident.load(Relaxed),
@@ -227,7 +228,7 @@ impl<T: Tag> Loading<T> {
         };
         Vfs {
             passes: self.passes,
-            nodes,
+            entries,
             links,
             scratch: self.scratch,
             usage,
