@@ -73,3 +73,14 @@ To update to the latest version, re-run the install command with `--force`:
 ```shell
 glab skills install --global --force orbit
 ```
+
+## Use the wrapper skill
+
+The `orbit-wrapper` skill copies no guidance. It runs
+`glab orbit skills get orbit` and loads the skill bundled with your installed
+Orbit CLI, so it can't drift from the binary. Install it with
+[`npx skills`](https://github.com/vercel-labs/skills):
+
+```shell
+npx skills add https://gitlab.com/gitlab-org/orbit/knowledge-graph --skill orbit-wrapper
+```
