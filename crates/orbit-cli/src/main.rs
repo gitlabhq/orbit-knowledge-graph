@@ -88,6 +88,10 @@ struct GrepArgs {
     #[arg(long, value_name = "PATH")]
     path: Vec<String>,
 
+    /// More paths to search, as in `rg PATTERN [PATH...]`.
+    #[arg(value_name = "PATHS", trailing_var_arg = true)]
+    paths: Vec<String>,
+
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
     kind: Option<Kinds>,
 
@@ -583,7 +587,8 @@ async fn dispatch(
             query,
             repo,
             limit,
-            path,
+            mut path,
+            paths,
             kind,
             db,
         }) => commands::grep::run(
@@ -591,7 +596,10 @@ async fn dispatch(
             repo,
             db,
             limit,
-            path,
+            {
+                path.extend(paths);
+                path
+            },
             orbit_search::RecallFilter {
                 kinds: kind_names(kind),
             },

@@ -8,7 +8,7 @@ use crate::workspace::GitInfo;
 
 const VARIANT_MIN: usize = 3;
 const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", "default"];
-const TOP_SOURCE_LINES: usize = 25;
+const TOP_SOURCE_LINES: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Def {
