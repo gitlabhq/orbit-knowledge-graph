@@ -696,10 +696,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     format!("{function}({value}, {argument})")
                 }
             }
-            Expression::Bucket { unit, value } => format!(
-                "dateTrunc('{}', {})",
-                unit.name(),
-                self.render_expression_with(value, column)?
+            Expression::Bucket { unit, value } => crate::passes::codegen::clickhouse::time_bucket(
+                *unit,
+                &self.render_expression_with(value, column)?,
             ),
             Expression::LatestPath {
                 path,

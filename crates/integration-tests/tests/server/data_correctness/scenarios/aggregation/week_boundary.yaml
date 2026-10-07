@@ -1,0 +1,18 @@
+description: Week buckets start on Sunday and return dates across the year boundary
+config:
+  extra_seed:
+    gl_note:
+      - {id: 98001, created_at: "2023-12-30 23:59:59", traversal_path: "1/100/1000/"}
+      - {id: 98002, created_at: "2023-12-31 00:00:00", traversal_path: "1/100/1000/"}
+      - {id: 98003, created_at: "2024-01-01 12:00:00", traversal_path: "1/100/1000/"}
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"n","entity":"Note","node_ids":[98001,98002,98003]}],"group_by":[{"key":"n.created_at","truncate":"week"}],"aggregations":[{"count":"n","as":"c"}],"aggregation_sort":"n_created_at_week"}
+  gql: |
+    MATCH (n:Note) WHERE n.id IN [98001, 98002, 98003] RETURN date_trunc('week', n.created_at), count(n) AS c ORDER BY n_created_at_week
+expect:
+  row_count: 2
+  row_values:
+    - {n_created_at_week: "2023-12-24", c: 1}
+    - {n_created_at_week: "2023-12-31", c: 2}
+  skip_requirements: [node_ids, aggregation, aggregation_sort]

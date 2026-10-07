@@ -344,7 +344,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 self.expression_type(value, visiting)?;
                 Ok(ValueType::Scalar(SqlType::String))
             }
-            Expression::Bucket { value, .. } => {
+            Expression::Bucket { unit, value } => {
                 let ty = self.expression_type(value, visiting)?;
                 if !matches!(
                     ty,
@@ -352,7 +352,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 ) {
                     return Err(GraphError::ExpressionType);
                 }
-                Ok(ty)
+                Ok(ValueType::Scalar(unit.result_type()))
             }
             Expression::Parameter { data_type, .. } => Ok(match data_type {
                 SqlType::Array(element) => {

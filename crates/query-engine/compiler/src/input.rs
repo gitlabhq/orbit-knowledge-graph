@@ -821,6 +821,17 @@ pub enum TruncateUnit {
 }
 
 impl TruncateUnit {
+    pub fn result_type(self) -> orbit_utils::query_types::SqlType {
+        use orbit_utils::query_types::SqlType;
+        match self {
+            Self::Minute | Self::Hour => SqlType::Timestamp {
+                precision: 0,
+                timezone: None,
+            },
+            _ => SqlType::Date,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Minute => "minute",

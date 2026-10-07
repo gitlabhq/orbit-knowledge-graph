@@ -234,8 +234,19 @@ pub fn apply_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
         }
         QueryType::Neighbors | QueryType::PathFinding => {
             let names = if input.query_type == QueryType::Neighbors {
+                let center = &input.nodes[0];
+                let primary_key = crate::constants::primary_key_column(&center.id);
+                let center_key = if graph.outputs(root)?.any(|output| {
+                    graph
+                        .output_label(output)
+                        .is_ok_and(|label| label == primary_key)
+                }) {
+                    primary_key
+                } else {
+                    crate::constants::redaction_id_column(&center.id)
+                };
                 vec![
-                    crate::constants::redaction_id_column(&input.nodes[0].id),
+                    center_key,
                     crate::constants::neighbor_id_column().into(),
                     crate::constants::neighbor_type_column().into(),
                     crate::constants::relationship_type_column().into(),

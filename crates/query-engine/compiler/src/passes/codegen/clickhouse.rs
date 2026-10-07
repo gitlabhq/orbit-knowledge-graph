@@ -76,6 +76,24 @@ pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
     })
 }
 
+pub(crate) fn time_bucket(unit: crate::input::TruncateUnit, value: &str) -> String {
+    use crate::input::TruncateUnit;
+    let function = match unit {
+        TruncateUnit::Minute => "toStartOfMinute",
+        TruncateUnit::Hour => "toStartOfHour",
+        TruncateUnit::Day => "toStartOfDay",
+        TruncateUnit::Week => "toStartOfWeek",
+        TruncateUnit::Month => "toStartOfMonth",
+        TruncateUnit::Quarter => "toStartOfQuarter",
+        TruncateUnit::Year => "toStartOfYear",
+    };
+    let bucket = format!("{function}({value})");
+    match unit.result_type() {
+        SqlType::Timestamp { .. } => format!("toDateTime64({bucket}, 0)"),
+        _ => format!("toDate32({bucket})"),
+    }
+}
+
 /// # Trust boundary
 ///
 /// This function bypasses compiler authorization and result enforcement. Use it only for trusted, internally
@@ -262,24 +280,7 @@ impl Context {
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
             }
-            Expr::TimeBucket { unit, value } => {
-                use crate::input::TruncateUnit;
-                let function = match unit {
-                    TruncateUnit::Minute => "toStartOfMinute",
-                    TruncateUnit::Hour => "toStartOfHour",
-                    TruncateUnit::Day => "toStartOfDay",
-                    TruncateUnit::Week => "toStartOfWeek",
-                    TruncateUnit::Month => "toStartOfMonth",
-                    TruncateUnit::Quarter => "toStartOfQuarter",
-                    TruncateUnit::Year => "toStartOfYear",
-                };
-                let bucket = format!("{function}({})", self.emit_expr(value));
-                if matches!(unit, TruncateUnit::Minute | TruncateUnit::Hour) {
-                    format!("toDateTime64({bucket}, 0)")
-                } else {
-                    format!("toDate32({bucket})")
-                }
-            }
+            Expr::TimeBucket { unit, value } => time_bucket(*unit, &self.emit_expr(value)),
             Expr::TextSearch { mode, value, query } => {
                 let (value, query) = (self.emit_expr(value), self.emit_expr(query));
                 match mode {

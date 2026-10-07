@@ -1,0 +1,28 @@
+description: Neighbor pages distinguish centers that share an authorization identity
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"d","entity":"MergeRequestDiff","node_ids":[5000,5001]}],"neighbors":{"direction":"incoming","rel_types":["HAS_DIFF"]},"cursor":{"page_size":1}}
+  gql: |
+    MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.id IN [5000, 5001] RETURN d, n PAGE 1
+expect:
+  all_pages:
+    page_count: 2
+    edge_count: 2
+    node_ids:
+      MergeRequestDiff: [5000, 5001]
+      MergeRequest: [2000]
+  pages:
+    - has_more: true
+      node_count: 2
+      nodes:
+        MergeRequestDiff: {ids: [5000]}
+      edge_exists:
+        HAS_DIFF: [[2000, 5000]]
+      skip_requirements: [cursor, neighbors]
+    - has_more: false
+      node_count: 2
+      nodes:
+        MergeRequestDiff: {ids: [5001]}
+      edge_exists:
+        HAS_DIFF: [[2000, 5001]]
+      skip_requirements: [cursor, neighbors]
