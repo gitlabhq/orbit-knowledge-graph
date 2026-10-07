@@ -54,7 +54,7 @@ struct Fold<'t> {
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
-    pending_calls: Vec<(Value, u32, u32)>,
+    pending_calls: Vec<(Value, u32, u32, Vec<u32>)>,
     fields: FxHashMap<u32, FxHashMap<u32, u32>>,
     scopes: Vec<(u32, FxHashMap<u32, u32>)>,
 }
@@ -381,7 +381,17 @@ impl<'t> Fold<'t> {
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
-            self.pending_calls.push((value, from, c.index()));
+            let fallback = if callee
+                .sym_opt()
+                .is_some_and(|sym| !self.config.builtins.contains(&sym))
+                && !callee.has(C::Member)
+                && !callee.has(C::Ivar)
+            {
+                self.wildcards.clone()
+            } else {
+                Vec::new()
+            };
+            self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
                 self.resolve_obj(obj, m.sym(), from);
@@ -1015,10 +1025,14 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
     f.ssa.seal_remaining();
     f.ssa.remove_redundant_phi_sccs();
 
-    for (value, from, site) in std::mem::take(&mut f.pending_calls) {
+    for (value, from, site, fallback) in std::mem::take(&mut f.pending_calls) {
         f.run.check().and_then(|()| f.file.check())?;
         let first = f.edges.len();
-        for value in f.ssa.resolve_value(&value) {
+        let mut targets = f.ssa.resolve_value(&value);
+        if targets.is_empty() {
+            targets.extend(fallback.into_iter().map(Value::ImportRef));
+        }
+        for value in targets {
             f.emit(&value, from);
         }
         for edge in &mut f.edges[first..] {
