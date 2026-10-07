@@ -319,6 +319,11 @@ impl<'a> Cursor<'a> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
     }
 
+    pub fn initializer(self) -> Option<Self> {
+        self.child(C::Binding)
+            .filter(|binding| binding.sym_opt().is_none())
+    }
+
     pub fn typed(self) -> Option<Self> {
         self.child(C::SsaTyped).or_else(|| {
             let rhs = self.child(C::Rhs)?;

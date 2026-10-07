@@ -1,0 +1,141 @@
+name: "Rust: unit struct bindings use declarations"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "unit_struct_bindings"
+      version = "0.1.0"
+      edition = "2021"
+  - path: src/lib.rs
+    content: |
+      mod dep;
+      use dep::{imported_lowercase, ImportedCallback, ImportedTuple};
+      use external::Unknown;
+
+      struct lowercase;
+      impl lowercase {
+          fn ping(&self) {}
+      }
+
+      struct Uppercase;
+      impl Uppercase {
+          fn pong(&self) {}
+      }
+
+      fn Callback() {}
+      struct Tuple(i32);
+
+      fn constructor_references() {
+          let tuple = Tuple;
+      }
+
+      fn lowercase_receiver() {
+          let value = lowercase;
+          value.ping();
+      }
+
+      fn uppercase_receiver() {
+          let value = Uppercase;
+          value.pong();
+      }
+
+      fn function_reference() {
+          let value = Callback;
+      }
+
+      fn function_alias_call() {
+          let value = Callback;
+          value();
+      }
+
+      fn shadowed_type() {
+          let Uppercase = Callback;
+          let value = Uppercase;
+      }
+
+      fn unknown_value() {
+          let value = Unresolved;
+      }
+
+      fn imported_receiver() {
+          let value = imported_lowercase;
+          value.imported_ping();
+      }
+
+      fn imported_reference() {
+          let value = ImportedCallback;
+      }
+
+      fn imported_alias_call() {
+          let value = ImportedCallback;
+          value();
+      }
+
+      fn tuple_reference() {
+          let value = ImportedTuple;
+      }
+
+      fn external_reference() {
+          let value = Unknown;
+      }
+  - path: src/dep.rs
+    content: |
+      pub struct imported_lowercase;
+      impl imported_lowercase {
+          pub fn imported_ping(&self) {}
+      }
+      pub fn ImportedCallback() {}
+      pub struct ImportedTuple(pub i32);
+tests:
+  - name: "Unit struct method targets do not depend on capitalization"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['lowercase_receiver', 'uppercase_receiver']
+        AND callee.name IN ['ping', 'pong']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: lowercase_receiver, target: ping } }
+      - { row: { caller: uppercase_receiver, target: pong } }
+  - name: "Copying uppercase function values does not call them"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['function_reference', 'shadowed_type', 'unknown_value', 'imported_reference', 'tuple_reference', 'external_reference', 'constructor_references']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { empty: true }
+  - name: "Calling an uppercase function alias resolves its declaration"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'function_alias_call'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: Callback } }
+  - name: "Local unit construction requires a unit struct declaration"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['lowercase_receiver', 'uppercase_receiver']
+        AND callee.definition_type = 'Struct'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: lowercase } }
+      - { row: { target: Uppercase } }
+  - name: "Imported unit constructors and callable values use their declarations"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['imported_receiver', 'imported_alias_call']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: imported_receiver, target: imported_lowercase } }
+      - { row: { caller: imported_receiver, target: imported_ping } }
+      - { row: { caller: imported_alias_call, target: ImportedCallback } }
+  - name: "Unresolved imported references do not become calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:ImportedSymbol)
+      WHERE caller.name IN ['external_reference', 'unknown_value', 'imported_reference']
+      RETURN callee.identifier_name
+    assert:
+      - { empty: true }

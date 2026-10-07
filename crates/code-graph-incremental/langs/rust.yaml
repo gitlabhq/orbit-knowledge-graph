@@ -93,9 +93,6 @@ stages:
       # `let f = Service::new;` aliases the associated function
       - match: '(let_declaration pattern: $N value: (scoped_identifier path: $P name: $M:(identifier "/^[a-z]/")))'
         replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P))))'
-      # `let s = Service;` constructs a unit struct: type names are CamelCase
-      - match: '(let_declaration pattern: $N value: $V:(identifier "/^[A-Z][a-z]/"))'
-        replace: '(__binding @$N (__declaration) (__rhs (__call (__callee @$V))))'
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
@@ -307,6 +304,8 @@ stages:
         replace: '(ordered_field_declaration_list $$$T->tuple_field)'
 
       # Containers (after functions)
+      - match: '(struct_item name: $N !(field_declaration_list) !(ordered_field_declaration_list))'
+        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N)))))'
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_item name: $N body: $B)'

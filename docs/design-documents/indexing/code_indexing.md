@@ -230,6 +230,10 @@ Orbit Remote schema versions are unaffected.
 
 The incremental engine distinguishes an undefined name from a local value whose
 target is unknown. Unknown locals block fallback to same-named imports or functions.
+Rust identifier initializers use ordinary bindings. Unit struct declarations have
+an anonymous binding whose initializer constructs the struct. The linker follows
+that declaration rather than capitalization. Imported bindings use the existing
+type-flow path; unresolved references do not become calls.
 Direct Rust tuple destructuring reads the source bindings before assigning the
 destination bindings, including positions discarded with `_`.
 Rust pattern rules lower tuple and record components to ordinary declarations

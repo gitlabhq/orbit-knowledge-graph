@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use smallvec::smallvec;
 
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
@@ -8,18 +9,9 @@ use crate::env::Env;
 use crate::resolver::CLASS_LIKE;
 use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
-use crate::ssa::{BlockId, ParseValue, SsaEngine, Value};
+use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
 use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
-
-#[derive(Clone)]
-enum Linked {
-    Def(u32),
-    Import(u32),
-    Type(u32),
-    Call(u32),
-    Opaque,
-}
 
 enum WorkItem {
     Visit(u32),
@@ -41,14 +33,13 @@ struct Fold<'t> {
     tree: &'t Tree,
     ssa: SsaEngine,
     cur: BlockId,
-    predeclared: FxHashMap<u32, u32>,
+    registered: FxHashSet<u32>,
     defs: Vec<u32>,
     defs_by_name: FxHashMap<u32, Vec<u32>>,
     /// Per class: member name to first def, and ivar name to its typed binding.
     members: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     ivars: RefCell<FxHashMap<u32, FxHashMap<u32, u32>>>,
     supertypes: FxHashMap<u32, Vec<u32>>,
-    imports: Vec<u32>,
     wildcards: Vec<u32>,
     tags: ReservedTags,
     config: &'t LinkConfig,
@@ -56,21 +47,21 @@ struct Fold<'t> {
     run: &'t Sentinel,
     file: Sentinel,
     killed: Option<Killed>,
-    def_stack: Vec<(Option<u32>, BlockId)>,
+    def_stack: Vec<u32>,
     chain_seen: FxHashSet<u32>,
     obj_seen: FxHashSet<u32>,
-    chain_memo: FxHashMap<u32, Vec<Linked>>,
+    chain_memo: FxHashMap<u32, Vec<Value>>,
     wildcard: u32,
     edges: Vec<Edge>,
     value_sink: FxHashMap<u32, u32>,
     pending_calls: Vec<(Value, u32, u32)>,
-    fields: FxHashMap<u32, FxHashSet<u32>>,
-    scopes: Vec<FxHashMap<u32, u32>>,
+    fields: FxHashMap<u32, FxHashMap<u32, u32>>,
+    scopes: Vec<(u32, FxHashMap<u32, u32>)>,
 }
 
 impl<'t> Fold<'t> {
     fn enclosing(&self) -> u32 {
-        self.def_stack.last().and_then(|&(d, _)| d).unwrap_or(0)
+        self.def_stack.last().copied().unwrap_or(0)
     }
 
     /// Stops at the first failed check; `link` reports it after the walk.
@@ -227,22 +218,20 @@ impl<'t> Fold<'t> {
                 && self
                     .lookup(local)
                     .iter()
-                    .any(|r| matches!(r, Linked::Def(_)))
+                    .any(|r| matches!(r, Value::LocalDef(_)))
             {
                 continue;
             }
-            let import_idx = self.imports.len() as u32;
-            self.imports.push(n.index());
             self.wildcards
                 .extend((local == self.wildcard).then_some(n.index()));
             let binding = self.declare_binding(n, local);
             self.ssa
-                .write_variable(binding, self.cur, Value::ImportRef(import_idx));
+                .write_variable(binding, self.cur, Value::ImportRef(n.index()));
             for alias in [C::Alias, C::SsaHint]
                 .into_iter()
                 .filter_map(|kind| n.child_sym(kind))
             {
-                if let Some(scope) = self.scopes.last_mut() {
+                if let Some((_, scope)) = self.scopes.last_mut() {
                     scope.insert(alias, binding);
                 }
             }
@@ -265,7 +254,7 @@ impl<'t> Fold<'t> {
             self.lookup(self.syms.lookup(first))
                 .into_iter()
                 .find_map(|r| match r {
-                    Linked::Def(d) => Some(self.tree.cursor(d)),
+                    Value::LocalDef(d) => Some(self.tree.cursor(d)),
                     _ => None,
                 })?;
         for segment in segments {
@@ -289,24 +278,12 @@ impl<'t> Fold<'t> {
                 .collect(),
         };
         for (bind_as, node) in &targets {
-            let def_idx = self.def_index(*node);
+            self.register_def(self.tree.cursor(*node));
             let binding = self.declare_binding(name, *bind_as);
             self.ssa
-                .write_variable(binding, self.cur, Value::LocalDef(def_idx));
+                .write_variable(binding, self.cur, Value::LocalDef(*node));
         }
         !targets.is_empty()
-    }
-
-    fn def_index(&mut self, node: u32) -> u32 {
-        if let Some(&idx) = self.predeclared.get(&node) {
-            return idx;
-        }
-        if let Some(idx) = self.defs.iter().position(|&d| d == node) {
-            return idx as u32;
-        }
-        let idx = self.register_def(node);
-        self.predeclared.insert(node, idx);
-        idx
     }
 
     fn handle_def(&mut self, c: Cursor<'t>, stack: &mut Vec<WorkItem>) {
@@ -314,10 +291,7 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
-        let def_idx = match self.predeclared.remove(&idx) {
-            Some(i) => i,
-            None => self.register_def(idx),
-        };
+        self.register_def(c);
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
         }
@@ -326,15 +300,15 @@ impl<'t> Fold<'t> {
             .filter(|s| s.is(C::SuperType))
             .flat_map(|s| self.lookup_chain(s))
             .filter_map(|r| match r {
-                Linked::Def(d) => Some(d),
+                Value::LocalDef(d) => Some(d),
                 _ => None,
             })
             .collect::<Vec<_>>();
         self.supertypes.insert(idx, supers.clone());
-        self.declare(c, name, def_idx);
+        self.declare(c, name);
         let parent_block = self.cur;
         self.cur = self.ssa.add_sealed_successor(parent_block);
-        if let Some(&(Some(parent), _)) = self.def_stack.last() {
+        if let Some(&parent) = self.def_stack.last() {
             self.edges.push(Edge::local(parent, idx, EdgeKind::Defines));
         }
         for dn in supers {
@@ -342,7 +316,7 @@ impl<'t> Fold<'t> {
         }
         if c.has_tag(self.tags.scoped) {
             self.enter_scope(c);
-            self.def_stack.push((Some(idx), parent_block));
+            self.def_stack.push(idx);
             stack.push(WorkItem::ExitScope {
                 wildcards: self.wildcards.len(),
                 block: Some(parent_block),
@@ -354,20 +328,20 @@ impl<'t> Fold<'t> {
     fn predeclare(&mut self, scope: Cursor<'t>) {
         for d in scope.children().filter(|d| d.is(C::Def)) {
             if let Some(name) = d.child_sym(C::DefName) {
-                let def_idx = self.def_index(d.index());
-                self.declare(d, name, def_idx);
+                self.register_def(d);
+                self.declare(d, name);
             }
         }
     }
 
-    fn declare(&mut self, c: Cursor<'t>, name: u32, def_idx: u32) {
+    fn declare(&mut self, c: Cursor<'t>, name: u32) {
         for sym in std::iter::once(name).chain(c.children_of(C::Alias).map(|a| a.sym())) {
             if sym == name && c.has(C::ImplBlock) && !self.lookup(name).is_empty() {
                 continue;
             }
             let binding = self.declare_binding(c, sym);
             self.ssa
-                .write_variable(binding, self.cur, Value::LocalDef(def_idx));
+                .write_variable(binding, self.cur, Value::LocalDef(c.index()));
         }
     }
 
@@ -375,12 +349,16 @@ impl<'t> Fold<'t> {
         self.defs_by_name.get(&sym).into_iter().flatten().copied()
     }
 
-    fn register_def(&mut self, node: u32) -> u32 {
-        self.defs.push(node);
-        if let Some(name) = self.tree.cursor(node).child_sym(C::DefName) {
-            self.defs_by_name.entry(name).or_default().push(node);
+    fn register_def(&mut self, node: Cursor<'_>) {
+        if self.registered.insert(node.index())
+            && let Some(name) = node.child_sym(C::DefName)
+        {
+            self.defs.push(node.index());
+            self.defs_by_name
+                .entry(name)
+                .or_default()
+                .push(node.index());
         }
-        self.defs.len() as u32 - 1
     }
 
     fn handle_call(&mut self, c: Cursor<'t>) {
@@ -392,8 +370,17 @@ impl<'t> Fold<'t> {
         }
         let from = self.enclosing();
         let first = self.edges.len();
-        if let Some(slot) = self.field_slot(callee) {
-            let value = self.ssa.read_variable_internal(slot, self.cur);
+        let value = self
+            .field_slot(callee)
+            .map(|slot| self.read_value(slot))
+            .or_else(|| {
+                let sym = callee
+                    .sym_opt()
+                    .filter(|_| !c.has_tag(self.tags.implicit_self))?;
+                let value = self.ssa.read_variable_internal(self.binding(sym), self.cur);
+                matches!(value, Value::Phi(_)).then_some(value)
+            });
+        if let Some(value) = value {
             self.pending_calls.push((value, from, c.index()));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -407,13 +394,6 @@ impl<'t> Fold<'t> {
                 self.push_calls(from, self.find_method_in(cls, iv.sym()));
             }
         } else if let Some(sym) = callee.sym_opt() {
-            if !c.has_tag(self.tags.implicit_self)
-                && let value @ Value::Phi(_) =
-                    self.ssa.read_variable_internal(self.binding(sym), self.cur)
-            {
-                self.pending_calls.push((value, from, c.index()));
-                return;
-            }
             if c.has_tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from);
             } else {
@@ -439,18 +419,19 @@ impl<'t> Fold<'t> {
     }
 
     fn handle_binding(&mut self, c: Cursor<'t>) -> bool {
-        let field = self.member_binding(c);
-        if let Some((root, field)) = field {
-            self.fields.entry(root).or_default().insert(field);
-        }
+        let field = self.member_binding(c).map(|(root, field)| {
+            *self
+                .fields
+                .entry(root)
+                .or_default()
+                .entry(field)
+                .or_insert_with(|| self.syms.intern(&format!("{root}\0{field}")))
+        });
         let declaration = c.has(C::Declaration) && c.child_sym(C::Declaration).is_none();
         let lhs = if declaration {
             self.binding_key(c, c.sym())
         } else {
-            field.map_or_else(
-                || self.binding(c.sym()),
-                |(root, field)| self.field_key(root, field),
-            )
+            field.unwrap_or_else(|| self.binding(c.sym()))
         };
         if lhs == 0 || (c.has(C::Ivar) && field.is_none()) {
             return false;
@@ -470,13 +451,40 @@ impl<'t> Fold<'t> {
                 self.walk_children(rhs);
             }
             let tail = rhs.map(Cursor::tail_expr);
-            let val = if c.has(C::SsaTyped)
+            let mut val = if c.has(C::SsaTyped)
                 || tail.is_some_and(|tail| tail.is(C::Member) && self.field_slot(tail).is_none())
             {
                 Value::Call(c.index())
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
+            if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
+                for value in self.lookup(rhs.sym()) {
+                    match value {
+                        Value::ImportRef(_) => {
+                            val = Value::Call(c.index());
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                ..Edge::local(self.enclosing(), c.index(), EdgeKind::TypeFlow)
+                            });
+                        }
+                        Value::LocalDef(node)
+                            if self
+                                .tree
+                                .cursor(node)
+                                .initializer()
+                                .and_then(Cursor::rhs_callee)
+                                .is_some() =>
+                        {
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Calls)
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
             self.ssa.write_variable(lhs, self.cur, val);
             if let Some(tail) = tail {
                 self.bind_fields(lhs, tail);
@@ -486,10 +494,6 @@ impl<'t> Fold<'t> {
             self.declare_binding(c, c.sym());
         }
         true
-    }
-
-    fn field_key(&self, root: u32, field: u32) -> u32 {
-        self.syms.intern(&format!("{root}\0{field}"))
     }
 
     fn read_value(&mut self, binding: u32) -> Value {
@@ -503,7 +507,7 @@ impl<'t> Fold<'t> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(&name).copied())
+            .find_map(|(_, scope)| scope.get(&name).copied())
             .unwrap_or(name)
     }
 
@@ -518,18 +522,18 @@ impl<'t> Fold<'t> {
         } else {
             self.binding_key(node, name)
         };
-        if let Some(scope) = self.scopes.last_mut() {
+        if let Some((_, scope)) = self.scopes.last_mut() {
             scope.insert(name, binding);
         }
         binding
     }
 
     fn enter_scope(&mut self, scope: Cursor<'t>) {
-        self.scopes.push(FxHashMap::default());
+        let label = scope.tag(self.tags.scoped).unwrap_or(scope.sym());
+        self.scopes.push((label, FxHashMap::default()));
         if scope.has_tag(self.tags.hoisted) {
             self.predeclare(scope);
         }
-        let label = scope.tag(self.tags.scoped).unwrap_or(scope.sym());
         if label == 0 {
             return;
         }
@@ -546,17 +550,13 @@ impl<'t> Fold<'t> {
                 .child_sym(C::DefName)
                 .unwrap_or(declaration.sym());
             let key = self.binding_key(declaration, name);
-            let Some((current, parents)) = self.scopes.split_last_mut() else {
+            let Some(((_, current), parents)) = self.scopes.split_last_mut() else {
                 return;
             };
             if !current.contains_key(&name) {
                 if let Some(owner) = declaration.child_sym(C::Alias) {
-                    let outer = scope
-                        .ancestors()
-                        .filter(|node| node.is(C::Scope) || node.has_tag(scoped));
-                    let binding = outer.zip(parents.iter().rev()).find_map(|(node, names)| {
-                        (node.tag(scoped).unwrap_or(node.sym()) == owner)
-                            .then(|| names.get(&name).copied().unwrap_or(name))
+                    let binding = parents.iter().rev().find_map(|(label, names)| {
+                        (*label == owner).then(|| names.get(&name).copied().unwrap_or(name))
                     });
                     if let Some(binding) = binding {
                         current.insert(name, binding);
@@ -581,10 +581,7 @@ impl<'t> Fold<'t> {
 
     fn field_slot(&self, node: Cursor<'_>) -> Option<u32> {
         let (root, field) = self.member_binding(node)?;
-        self.fields
-            .get(&root)?
-            .contains(&field)
-            .then(|| self.field_key(root, field))
+        self.fields.get(&root)?.get(&field).copied()
     }
 
     fn bind_fields(&mut self, lhs: u32, value: Cursor<'t>) {
@@ -613,44 +610,28 @@ impl<'t> Fold<'t> {
             let source = self
                 .field_slot(value)
                 .unwrap_or(self.binding(self.tail_sym(value)));
-            self.fields
-                .get(&source)
-                .into_iter()
-                .flatten()
-                .map(|&field| (field, self.field_key(source, field)))
-                .collect()
+            self.fields.get(&source).cloned().unwrap_or_default()
         };
-        if sources.is_empty() && !self.fields.contains_key(&lhs) {
-            return;
-        }
-        let fields = self.fields.entry(lhs).or_default();
-        fields.extend(sources.keys().copied());
-        let mut copies: Vec<_> = fields
-            .clone()
-            .into_iter()
-            .map(|field| {
-                (
-                    self.field_key(lhs, field),
-                    sources.get(&field).copied().unwrap_or(0),
-                )
-            })
-            .collect();
-        while let Some((target, source)) = copies.pop() {
-            if target == source {
+        let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
+        while let Some((target, sources)) = copies.pop() {
+            if sources.is_empty() && !self.fields.contains_key(&target) {
                 continue;
             }
-            let value = self.read_value(source);
-            self.ssa.write_variable(target, self.cur, value);
-            let source_fields = self.fields.get(&source).cloned().unwrap_or_default();
             let fields = self.fields.entry(target).or_default();
-            fields.extend(source_fields.iter().copied());
-            for field in fields.clone() {
-                let source = if source_fields.contains(&field) {
-                    self.field_key(source, field)
-                } else {
-                    0
-                };
-                copies.push((self.field_key(target, field), source));
+            for field in sources.keys() {
+                fields
+                    .entry(*field)
+                    .or_insert_with(|| self.syms.intern(&format!("{target}\0{field}")));
+            }
+            for (field, target) in fields.clone() {
+                let source = sources.get(&field).copied().unwrap_or(0);
+                if target == source {
+                    continue;
+                }
+                let value = self.read_value(source);
+                self.ssa.write_variable(target, self.cur, value);
+                let sources = self.fields.get(&source).cloned().unwrap_or_default();
+                copies.push((target, sources));
             }
         }
     }
@@ -685,21 +666,9 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn to_linked(&self, pv: &ParseValue) -> Option<Linked> {
-        match pv {
-            ParseValue::LocalDef(di) => Some(Linked::Def(self.defs[*di as usize])),
-            ParseValue::ImportRef(ii) => self.imports.get(*ii as usize).map(|&n| Linked::Import(n)),
-            ParseValue::Type(ts) if *ts != 0 => Some(Linked::Type(*ts)),
-            ParseValue::Call(call) => Some(Linked::Call(*call)),
-            ParseValue::Opaque => Some(Linked::Opaque),
-            _ => None,
-        }
-    }
-
-    fn lookup(&mut self, sym: u32) -> Vec<Linked> {
+    fn lookup(&mut self, sym: u32) -> Vec<Value> {
         for block in [self.cur, BlockId(0)] {
-            let vals = self.ssa.read_variable(self.binding(sym), block);
-            let result: Vec<Linked> = vals.iter().filter_map(|pv| self.to_linked(pv)).collect();
+            let result = self.ssa.read_variable(self.binding(sym), block);
             if !result.is_empty() {
                 return result;
             }
@@ -707,25 +676,25 @@ impl<'t> Fold<'t> {
         Vec::new()
     }
 
-    fn emit(&mut self, r: &Linked, from: u32) {
+    fn emit(&mut self, r: &Value, from: u32) {
         match r {
-            Linked::Def(node) => {
+            Value::LocalDef(node) => {
                 if self.tree.cursor(*node).has_tag(self.tags.callable) {
                     self.edges.push(Edge::local(from, *node, EdgeKind::Calls));
                 }
             }
-            Linked::Import(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
-            Linked::Call(call) => self
+            Value::ImportRef(node) => self.edges.push(Edge::local(from, *node, EdgeKind::Imports)),
+            Value::Call(call) => self
                 .edges
                 .push(Edge::local(from, *call, EdgeKind::TypeFlow)),
-            Linked::Type(_) | Linked::Opaque => {}
+            _ => {}
         }
     }
 
-    fn any_class(&self, resolved: &[Linked]) -> bool {
+    fn any_class(&self, resolved: &[Value]) -> bool {
         resolved
             .iter()
-            .any(|r| matches!(r, Linked::Def(n) if self.tree.cursor(*n).is_class()))
+            .any(|r| matches!(r, Value::LocalDef(n) if self.tree.cursor(*n).is_class()))
     }
 
     fn resolve_obj(&mut self, obj: Cursor, method: u32, from: u32) {
@@ -740,15 +709,15 @@ impl<'t> Fold<'t> {
     fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32) {
         for r in self.lookup_chain(obj) {
             match r {
-                Linked::Type(ts) => self.resolve_method(ts, method, from),
-                Linked::Def(node) => {
+                Value::Type(ts) => self.resolve_method(ts, method, from),
+                Value::LocalDef(node) => {
                     let members = self.find_method_in(node, method);
                     if members.is_empty() && obj.is(C::Object) {
-                        self.emit(&Linked::Def(node), from);
+                        self.emit(&Value::LocalDef(node), from);
                     }
                     self.push_calls(from, members);
                 }
-                Linked::Call(n) if let Some(ty) = self.binding_type(n) => {
+                Value::Call(n) if let Some(ty) = self.binding_type(n) => {
                     self.resolve_obj(ty, method, from);
                     if obj.is(C::Object) {
                         self.emit(&r, from);
@@ -763,7 +732,7 @@ impl<'t> Fold<'t> {
     fn resolve_implicit(&mut self, sym: u32, from: u32) {
         if self.ssa.is_defined(self.binding(sym), self.cur) {
             let mut bound = self.lookup(sym);
-            bound.retain(|r| matches!(r, Linked::Def(_) | Linked::Import(_)));
+            bound.retain(|r| matches!(r, Value::LocalDef(_) | Value::ImportRef(_)));
             for r in &bound {
                 self.emit(r, from);
             }
@@ -792,13 +761,13 @@ impl<'t> Fold<'t> {
                 Wildcards::All => true,
                 Wildcards::Callable => callable_import(n),
             });
-            targets = wild.map(|&n| Linked::Import(n)).collect();
+            targets = wild.map(|&n| Value::ImportRef(n)).collect();
         }
         for r in &targets {
             match r {
-                Linked::Type(ts) => {
+                Value::Type(ts) => {
                     for inner in self.lookup(*ts) {
-                        if let Linked::Def(target) = inner {
+                        if let Value::LocalDef(target) = inner {
                             let callable = self.tree.cursor(target).child_sym(C::Callable);
                             let targets = callable
                                 .map_or(vec![target], |name| self.find_method_in(target, name));
@@ -813,7 +782,7 @@ impl<'t> Fold<'t> {
 
     fn resolve_method(&mut self, type_sym: u32, method: u32, from: u32) {
         for r in self.lookup(type_sym) {
-            if let Linked::Def(cls) = r {
+            if let Value::LocalDef(cls) = r {
                 self.push_calls(from, self.find_method_in(cls, method));
             }
         }
@@ -829,7 +798,7 @@ impl<'t> Fold<'t> {
 
     fn flow_chain_root(&mut self, obj: Cursor, from: u32) {
         for r in self.lookup_chain(obj.chain_root()) {
-            if let Linked::Call(n) = r
+            if let Value::Call(n) = r
                 && self.binding_type(n).is_some()
             {
                 self.edges.push(Edge::local(from, n, EdgeKind::TypeFlow));
@@ -846,11 +815,11 @@ impl<'t> Fold<'t> {
         }
     }
 
-    fn field_value(&self, def: u32) -> Option<Linked> {
+    fn field_value(&self, def: u32) -> Option<Value> {
         let d = self.tree.cursor(def);
         let binding = d.child(C::Binding).filter(|b| b.typed().is_some())?;
         let stored = d.has(C::FieldDef) || d.has(C::Property);
-        stored.then(|| Linked::Call(Self::producer_of(binding)))
+        stored.then(|| Value::Call(Self::producer_of(binding)))
     }
 
     fn producer_of(binding: Cursor) -> u32 {
@@ -901,7 +870,7 @@ impl<'t> Fold<'t> {
     }
 
     // x = x.foo() roots x's type in itself: in-progress nodes yield nothing.
-    fn lookup_chain(&mut self, c: Cursor) -> Vec<Linked> {
+    fn lookup_chain(&mut self, c: Cursor) -> Vec<Value> {
         if let Some(done) = self.chain_memo.get(&c.index()) {
             return done.clone();
         }
@@ -914,11 +883,11 @@ impl<'t> Fold<'t> {
         out
     }
 
-    fn lookup_chain_inner(&mut self, c: Cursor) -> Vec<Linked> {
+    fn lookup_chain_inner(&mut self, c: Cursor) -> Vec<Value> {
         if let Some(call) = c.child(C::Call)
             && !(call.has(C::Property) && self.chain_is_class(c.reference()))
         {
-            return vec![Linked::Call(call.index())];
+            return vec![Value::Call(call.index())];
         }
         let c = c.reference();
         let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
@@ -933,12 +902,12 @@ impl<'t> Fold<'t> {
                 let field = self
                     .enclosing_class(self.enclosing())
                     .and_then(|cls| self.ivar_type(cls, sym));
-                bound.extend(field.map(|f| Linked::Call(Self::producer_of(f))));
+                bound.extend(field.map(|f| Value::Call(Self::producer_of(f))));
             }
             return bound
                 .into_iter()
                 .map(|r| match r {
-                    Linked::Def(d) => self.field_value(d).unwrap_or(r),
+                    Value::LocalDef(d) => self.field_value(d).unwrap_or(r),
                     _ => r,
                 })
                 .collect();
@@ -949,8 +918,8 @@ impl<'t> Fold<'t> {
         let mut targets = Vec::new();
         for r in self.lookup_chain(obj) {
             match r {
-                Linked::Type(s) => targets.extend(self.lookup(s)),
-                Linked::Call(n) if let Some(ty) = self.binding_type(n) => {
+                Value::Type(s) => targets.extend(self.lookup(s)),
+                Value::Call(n) if let Some(ty) = self.binding_type(n) => {
                     targets.extend(self.lookup_chain(ty));
                     targets.push(r);
                 }
@@ -960,12 +929,12 @@ impl<'t> Fold<'t> {
         targets
             .into_iter()
             .flat_map(|r| match r {
-                Linked::Def(d) => self
+                Value::LocalDef(d) => self
                     .find_method_in(d, m.sym())
                     .into_iter()
-                    .map(Linked::Def)
+                    .map(Value::LocalDef)
                     .collect(),
-                Linked::Import(_) => vec![r],
+                Value::ImportRef(_) => vec![r],
                 _ => vec![],
             })
             .collect()
@@ -1001,6 +970,9 @@ impl<'t> Fold<'t> {
 pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed> {
     let (lang, config) = (&env.lang, &env.rules_for(&tree.label).config.link);
     let file = Sentinel::new("link", &tree.label, env.limits.file_link_ms);
+    let tags = ReservedTags::new(lang);
+    let root = tree.root();
+    let root_label = root.tag(tags.scoped).unwrap_or(root.sym());
     let mut ssa = SsaEngine::new();
     let entry = ssa.add_block();
     ssa.seal_block(entry);
@@ -1009,21 +981,20 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         tree,
         ssa,
         cur: entry,
-        predeclared: FxHashMap::default(),
+        registered: FxHashSet::default(),
         defs: Vec::new(),
         defs_by_name: FxHashMap::default(),
         members: RefCell::default(),
         ivars: RefCell::default(),
         supertypes: FxHashMap::default(),
-        imports: Vec::new(),
         wildcards: Vec::new(),
-        tags: ReservedTags::new(lang),
+        tags,
         config,
         syms: &lang.syms,
         run,
         file,
         killed: None,
-        def_stack: vec![(None, entry)],
+        def_stack: Vec::new(),
         chain_seen: FxHashSet::default(),
         obj_seen: FxHashSet::default(),
         chain_memo: FxHashMap::default(),
@@ -1032,10 +1003,9 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         value_sink: FxHashMap::default(),
         pending_calls: Vec::new(),
         fields: FxHashMap::default(),
-        scopes: vec![FxHashMap::default()],
+        scopes: vec![(root_label, FxHashMap::default())],
     };
 
-    let root = tree.root();
     f.predeclare(root);
     f.walk_children(root);
     if let Some(k) = f.killed.take() {
@@ -1049,9 +1019,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         f.run.check().and_then(|()| f.file.check())?;
         let first = f.edges.len();
         for value in f.ssa.resolve_value(&value) {
-            if let Some(target) = f.to_linked(&value) {
-                f.emit(&target, from);
-            }
+            f.emit(&value, from);
         }
         for edge in &mut f.edges[first..] {
             edge.site = Some(site);
@@ -1063,7 +1031,7 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         f.run.check().and_then(|()| f.file.check())?;
         for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
             for target in f.lookup_chain(c) {
-                if let Linked::Def(target) = target {
+                if let Value::LocalDef(target) = target {
                     f.edges.push(Edge::local(dn, target, EdgeKind::Calls));
                 }
             }
