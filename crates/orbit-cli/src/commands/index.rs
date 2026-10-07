@@ -489,9 +489,11 @@ struct LocalIndexer {
 impl LocalIndexer {
     fn open(path: PathBuf, threads: usize, show_stats: bool, db: Option<PathBuf>) -> Result<Self> {
         let db_path = workspace::resolve_db_path(db)?;
-        let repos = workspace::Workspace::open_default()?.resolve_repos(&path)?;
+        let workspace = workspace::Workspace::open_default()?;
+        let path = dunce::canonicalize(&path)?;
+        let repos = workspace.resolve_repos(&path)?;
         if repos.is_empty() {
-            return Err(NoRepositoryFound(dunce::canonicalize(&path).unwrap_or(path)).into());
+            return Err(NoRepositoryFound(path).into());
         }
 
         let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;

@@ -85,7 +85,7 @@ pub(super) fn format_files_per_component(plan: &Plan) -> String {
 pub(super) fn format_try_it_command(outcome: &IndexOutcome) -> Option<String> {
     match outcome {
         IndexOutcome::OutsideRepository => Some(index_command_line(example_repository_path())),
-        IndexOutcome::NotIndexed => Some(index_command_line(".")),
+        IndexOutcome::NotIndexed { index_path } => Some(index_command_line(index_path)),
         IndexOutcome::Indexed { suggested_grep } => {
             suggested_grep.as_deref().map(grep_command_line)
         }
@@ -97,7 +97,7 @@ pub(super) fn format_closing_line(outcome: &IndexOutcome) -> &'static str {
         IndexOutcome::OutsideRepository => {
             "Done. This folder is not a git repository, so nothing was indexed."
         }
-        IndexOutcome::NotIndexed => {
+        IndexOutcome::NotIndexed { .. } => {
             "Done. Run it, then ask your agent where a function is defined."
         }
         IndexOutcome::Indexed {

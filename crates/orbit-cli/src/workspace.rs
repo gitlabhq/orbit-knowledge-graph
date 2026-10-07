@@ -60,11 +60,17 @@ impl Workspace {
 
         let mut discovered = discover_repos(&canonical);
         discovered.retain(|repo| *repo == canonical || !is_ignored_by_enclosing_repo(repo));
-        if discovered.is_empty() && is_git_repo(&canonical) {
-            Ok(vec![canonical])
-        } else {
-            Ok(discovered)
+        if !discovered.is_empty() {
+            return Ok(discovered);
         }
+        if is_git_repo(&canonical) {
+            return Ok(vec![canonical]);
+        }
+        // A subdirectory resolves to its repository, as `repo-map` does.
+        Ok(git_toplevel(&canonical)
+            .and_then(|root| Ok(dunce::canonicalize(root)?))
+            .into_iter()
+            .collect())
     }
 }
 
