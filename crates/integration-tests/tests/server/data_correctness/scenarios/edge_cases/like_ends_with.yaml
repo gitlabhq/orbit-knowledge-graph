@@ -20,7 +20,7 @@ query:
 
 expect:
   sql_contains: ["endsWith(lower(u.username), lower('ICE'))"]
-  indexes_used: [idx_username_ngram]
+  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:

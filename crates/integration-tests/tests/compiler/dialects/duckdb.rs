@@ -13,6 +13,35 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 }
 
 #[test]
+fn local_starts_with_folds_unicode_case() {
+    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("folding.duckdb")).unwrap();
+    database
+        .initialize_schema(&compiler::generate_local_ddl(&ontology, ""))
+        .unwrap();
+    database
+        .execute(
+            "INSERT INTO gl_file (id, traversal_path, project_id, branch, name, extension, language, path) VALUES (1, '1/', 1, 'main', 'f', '', '', 'ärger'), (2, '1/', 1, 'main', 'f', '', '', 'other')",
+            &[],
+        )
+        .unwrap();
+    let compiled = compile_local(
+        r#"{"query_type":"traversal","nodes":[{"id":"f","entity":"File","columns":["path"],"filters":{"path":{"starts_with":"ÄRG"}}}],"limit":10}"#,
+        Frontend::JsonDsl,
+        &ontology,
+    )
+    .unwrap();
+
+    let result = database
+        .query_arrow(&compiled.base.render())
+        .unwrap_or_else(|error| panic!("{error}: {}", compiled.base.render()));
+
+    assert_eq!(duckdb_client::string_column(&result, "f_path"), ["ärger"]);
+}
+
+#[test]
 fn fused_neighbors_execute_both_directions_including_self_loops() {
     let directory = tempfile::tempdir().unwrap();
     let database =
