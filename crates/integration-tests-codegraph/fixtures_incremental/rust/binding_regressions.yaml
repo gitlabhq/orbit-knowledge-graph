@@ -1,0 +1,197 @@
+name: "Rust: binding evaluation and nested pattern regressions"
+fixtures:
+  - path: main.rs
+    content: |
+      #[derive(Clone, Copy)]
+      struct Holder {
+          callback: fn(),
+          other: fn(),
+      }
+
+      struct Pair(fn(), fn());
+
+      fn first() {}
+      fn second() {}
+
+      fn make() -> Holder {
+          Holder {
+              callback: first,
+              other: second,
+          }
+      }
+
+      fn swapped() {
+          let (first, second) = (second, first);
+          first();
+      }
+      fn ignored() {
+          let (_, callback) = (first, second);
+          callback();
+      }
+      fn opaque(callback: fn()) {
+          let (first, _) = (callback, second);
+          first();
+      }
+      fn initializer_calls() {
+          let (_, _) = (make(), make());
+      }
+      fn before(again: bool) {
+          let mut callback: fn() = first;
+          while again {
+              callback();
+              callback = second;
+          }
+      }
+      fn after(again: bool) {
+          let mut callback: fn() = first;
+          while again {
+              callback = second;
+              callback();
+          }
+      }
+      fn unchanged(again: bool) {
+          let callback: fn() = first;
+          while again {
+              callback();
+          }
+      }
+      fn copied() {
+          let mut h = Holder { callback: first, other: second };
+          let saved = h;
+          h.callback = second;
+          (saved.callback)();
+      }
+      fn selected() {
+          let h = Holder { callback: first, other: second };
+          let callback = h.other;
+          callback();
+      }
+      fn unknown(callback: fn()) {
+          let mut h = Holder { callback: first, other: second };
+          h.callback = callback;
+          (h.callback)();
+      }
+      fn separate(h: Holder) {
+          (h.callback)();
+      }
+      fn record_alias() {
+          let holder = Holder { callback: first, other: second };
+          let Holder { callback: holder, .. } = holder;
+          holder();
+      }
+      fn repeated_patterns() {
+          let (a, _) = (first, second);
+          let (_, b) = (first, second);
+          a();
+          b();
+      }
+      fn source_is_evaluated_once() {
+          let Holder { callback, .. } = make();
+      }
+      fn nested_record() {
+          let holder = Holder { callback: first, other: second };
+          let pair = (holder, second);
+          let (Holder { callback, .. }, _) = pair;
+          callback();
+      }
+      fn nested_tuple() {
+          let inner = (first, second);
+          let outer = (second, inner);
+          let (_, (_, callback)) = outer;
+          callback();
+      }
+      fn nested_literals() {
+          let (_, (callback, _)) = (second, (first, second));
+          callback();
+      }
+      fn capture_in_order() {
+          let mut f: fn() = first;
+          let holder = Holder {
+              callback: f,
+              other: {
+                  f = second;
+                  second
+              },
+          };
+          (holder.callback)();
+      }
+      fn replaced_nested_fields() {
+          let mut pair = ((first, second), second);
+          pair = ((second, first), first);
+          let ((callback, _), _) = pair;
+          callback();
+      }
+      fn tuple_struct_pattern() {
+          let pair = Pair(first, second);
+          let Pair(_, callback) = pair;
+          callback();
+      }
+      fn mutable_pattern() {
+          let mut value: fn() = first;
+          let (mut callback, _) = (value, second);
+          callback();
+          callback = second;
+          callback();
+      }
+      fn reference_pattern() {
+          let holder = Holder { callback: first, other: second };
+          let Holder { ref callback, .. } = holder;
+          callback();
+      }
+tests:
+  - name: "Scalar and tuple bindings emit no extra calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['swapped', 'ignored', 'opaque', 'initializer_calls', 'before', 'after', 'unchanged']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 8 }
+      - { row: { caller: swapped, target: second } }
+      - { row: { caller: ignored, target: second } }
+      - { row: { caller: initializer_calls, target: make } }
+      - { row: { caller: before, target: first } }
+      - { row: { caller: before, target: second } }
+      - { row: { caller: after, target: second } }
+      - { row: { caller: unchanged, target: first } }
+  - name: "Unknown values do not retain known callback targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['opaque', 'unknown', 'separate'] AND callee.name IN ['first', 'second']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { empty: true }
+  - name: "Bindings preserve exact callable targets through loops and nested patterns"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name IN ['first', 'second']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 20 }
+      - { row: { caller: swapped, target: second } }
+      - { row: { caller: ignored, target: second } }
+      - { row: { caller: before, target: first } }
+      - { row: { caller: before, target: second } }
+      - { row: { caller: after, target: second } }
+      - { row: { caller: unchanged, target: first } }
+      - { row: { caller: copied, target: first } }
+      - { row: { caller: selected, target: second } }
+      - { row: { caller: record_alias, target: first } }
+      - { row: { caller: repeated_patterns, target: first } }
+      - { row: { caller: repeated_patterns, target: second } }
+      - { row: { caller: nested_record, target: first } }
+      - { row: { caller: nested_tuple, target: second } }
+      - { row: { caller: nested_literals, target: first } }
+      - { row: { caller: capture_in_order, target: first } }
+      - { row: { caller: replaced_nested_fields, target: second } }
+      - { row: { caller: tuple_struct_pattern, target: second } }
+      - { row: { caller: mutable_pattern, target: first } }
+      - { row: { caller: mutable_pattern, target: second } }
+      - { row: { caller: reference_pattern, target: first } }
+  - name: "Each source call executes once per expression"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'make'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: caller, values: [initializer_calls, initializer_calls, source_is_evaluated_once] } }

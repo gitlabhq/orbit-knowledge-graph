@@ -310,7 +310,7 @@ tests:
           - { empty: true }
 
   - name: "deep chain: pool.getConnection().getDb().execute().fetchAll()"
-    skip: true
+    skip: false
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -328,7 +328,8 @@ tests:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'DeepChainUser'
-            AND NOT callee.name IN ['Pool', 'getConnection', 'getDb', 'execute', 'fetchAll']
+            AND callee.name <> 'Pool' AND callee.name <> 'getConnection'
+            AND callee.name <> 'getDb' AND callee.name <> 'execute' AND callee.name <> 'fetchAll'
           RETURN callee.name
         assert:
           - { empty: true }
@@ -380,7 +381,7 @@ tests:
 
   # corrected: three calls exist: the constructor, fetch, and the inherited speak
   - name: "packaged inheritance: d.speak() resolves via super FQN"
-    skip: true
+    skip: false
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -396,10 +397,10 @@ tests:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'com.example.PackagedUser'
-            AND NOT callee.fqn STARTS WITH 'com.example'
-          RETURN callee.name, callee.fqn
+          RETURN callee.fqn AS target
         assert:
-          - { empty: true }
+          - { row_count: 3 }
+          - { match: { field: target, pattern: 'com.example*' } }
 
   - name: "Same-name factories keep separate return types"
     query: |

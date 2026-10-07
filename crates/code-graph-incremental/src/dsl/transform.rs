@@ -112,6 +112,7 @@ impl Tf {
             "default" => Tf::Default(s(0)?),
             "tree_path" => Tf::TreePath(s(0)?),
             "sibling_index" => Tf::SiblingIndex,
+            "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
@@ -321,6 +322,7 @@ impl Tf {
                 lang.syms.intern(&segments.join(sep))
             }
             Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
+            Tf::TreeNodeId => lang.syms.intern(&Tree::to_raw(id).to_string()),
             Tf::SiblingIndex => {
                 let index = id
                     .preceding_siblings(&t.arena)

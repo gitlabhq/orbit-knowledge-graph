@@ -822,6 +822,9 @@ fn dispatch(
                 }
                 _ => class,
             };
+            if call.is(C::Binding) && class.initializer().and_then(Cursor::rhs_callee).is_none() {
+                return None;
+            }
             let name = call
                 .member()
                 .map(|m| m.sym())
@@ -859,6 +862,13 @@ enum Owner<'a> {
 }
 
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
+    if producer.typed().is_none()
+        && let Some(rhs) = producer
+            .child(C::Rhs)
+            .filter(|rhs| rhs.children().next().is_none())
+    {
+        return resolve_chain(ctx, rhs);
+    }
     let callee = if producer.is(C::Binding) {
         resolve_chain(ctx, producer.typed()?)?
     } else {

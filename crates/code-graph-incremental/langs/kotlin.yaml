@@ -40,6 +40,8 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(callable_reference $N:simple_identifier)'
+        replace: '(simple_identifier @$N)'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'
@@ -152,20 +154,20 @@ stages:
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)'
         replace: '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))) $$$V)'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T)))) $$$V)'
       # Properties and locals: a __def for the graph plus SSA bindings
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__ssa_branch)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:simple_identifier)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $$$V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $$$V)))'
 
       # Assignments
       - match: '(assignment (directly_assignable_expression $N:__ivar) $R:__call)'
@@ -228,6 +230,8 @@ stages:
         replace: '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
   - name: ssa-cleanup
     rules:
+      - match: '(statements $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:simple_identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

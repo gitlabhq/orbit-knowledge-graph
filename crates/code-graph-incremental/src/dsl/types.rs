@@ -40,6 +40,7 @@ pub enum Tf {
     Default(Box<str>),
     TreePath(Box<str>),
     SiblingIndex,
+    TreeNodeId,
     KindName,
     Regex(regex::Regex, Box<str>),
     RegexFirst(regex::Regex, Box<str>),
@@ -67,6 +68,7 @@ impl Tf {
                 | Tf::Or(_, _)
                 | Tf::TreePath(_)
                 | Tf::SiblingIndex
+                | Tf::TreeNodeId
                 | Tf::KindName
                 | Tf::HasEdge(_, _)
         )

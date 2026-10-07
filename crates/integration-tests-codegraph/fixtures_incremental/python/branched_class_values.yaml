@@ -1,0 +1,52 @@
+name: "Python: class values retain declaration identity across joins"
+fixtures:
+  - path: main.py
+    content: |
+      class A:
+          pass
+
+      class B:
+          pass
+
+      def branched(flag):
+          if flag:
+              cls = A
+          else:
+              cls = B
+          cls()
+
+      def local_classes(flag):
+          class LocalA:
+              pass
+
+          class LocalB:
+              pass
+
+          if flag:
+              cls = LocalA
+          else:
+              cls = LocalB
+          cls()
+
+      def rebound_name(flag):
+          original = A
+          if flag:
+              cls = original
+          else:
+              cls = B
+          original = B
+          cls()
+tests:
+  - name: "Class joins call the original declarations, including local classes"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name IN ['branched', 'local_classes', 'rebound_name']
+      RETURN caller.name AS caller, target.name AS target
+    assert:
+      - { row_count: 6 }
+      - { row: { caller: branched, target: A } }
+      - { row: { caller: branched, target: B } }
+      - { row: { caller: local_classes, target: LocalA } }
+      - { row: { caller: local_classes, target: LocalB } }
+      - { row: { caller: rebound_name, target: A } }
+      - { row: { caller: rebound_name, target: B } }
