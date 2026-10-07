@@ -19,12 +19,7 @@ description: >-
   {{ catalog }}{% if relationships %}
 
 
-  Graph relationships, one (Source)-[:TYPE]->(Target|Target) per line. Use
-  these names without fetching the schema. Fetch properties only for nodes
-  whose fields you don't know; unknown-property errors list the valid ones.
-  Anchor groups and projects by full_path. Resolve loose names with a
-  contains filter on full_path, which ignores case. For nodes without a
-  relationship, query both sets and compare.
+  Graph relationships:
 
 
   {{ relationships }}{% endif %}{% else %}Call this before invoke_command to get each command's
