@@ -26,6 +26,7 @@ tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+typed-path = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
