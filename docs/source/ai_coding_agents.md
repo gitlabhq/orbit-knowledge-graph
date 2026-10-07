@@ -86,3 +86,18 @@ skill, not alongside it. Install it with
 ```shell
 npx skills add https://gitlab.com/gitlab-org/orbit/knowledge-graph --skill orbit-wrapper
 ```
+
+In Claude Code's default permission mode, the skill can't run its `!` command
+and fails to load. Allow the command in `~/.claude/settings.json`, or in the
+project's `.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(glab orbit skills get orbit)"]
+  }
+}
+```
+
+With that rule the skill loads without a prompt. Running Claude Code with
+`--dangerously-skip-permissions` also works.
