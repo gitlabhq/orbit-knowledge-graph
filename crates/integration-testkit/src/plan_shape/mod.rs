@@ -3,15 +3,14 @@ mod operator;
 mod pattern;
 mod terms;
 
-use query_engine::compiler;
-use std::collections::BTreeMap;
-use std::path::Path;
-use std::sync::Arc;
-
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, plan};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, QueryDataModel};
+use query_engine::compiler;
 use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -102,7 +101,7 @@ impl Assertions {
                 absent: None,
                 exact_order: Some(order),
             }) if !order.is_empty() => Some(order.as_slice()),
-            Some(_) => {
+            _ => {
                 return Err(format!(
                     "{label}.ctes: use absent: true or a nonempty exact_order, but not both"
                 ));
@@ -187,13 +186,13 @@ impl Assertions {
                     }
                 }
             }
-            let definitions: Vec<_> = if actual.label == operator::Operator::With {
+            let definitions = if actual.label == operator::Operator::With {
                 actual
                     .children
                     .iter()
                     .filter(|child| child.label == operator::Operator::Cte)
                     .map(|child| &child.head)
-                    .collect()
+                    .collect::<Vec<_>>()
             } else {
                 vec![]
             };
@@ -255,7 +254,7 @@ fn check<M: QueryDataModel>(
             };
             let mut options = plan::HydrationCompileOptions::default();
             if let Some(hydration) = &scenario.hydration {
-                input.query_type = compiler::input::QueryType::Hydration;
+                input.query_type = compiler::QueryType::Hydration;
                 for (alias, paths) in &hydration.paths {
                     let node = input
                         .nodes
@@ -354,7 +353,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         };
         for backend in scenario.physical.keys() {
             cases += scenario.query.len();
-            let previous_failures = failures.len();
+            let previous = failures.len();
             match backend.as_str() {
                 "clickhouse" => check(
                     &scenario,
@@ -363,20 +362,22 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                     path,
                     &mut failures,
                     |input, options| {
-                        use compiler::query_graph::{Expression, PhysicalOperation, QueryGraph};
-                        let mut graph =
-                            QueryGraph::<_, Expression<'_>, PhysicalOperation<'_>>::new(&remote);
+                        use compiler::query_graph::{LatestRows, QueryGraph};
+                        let mut graph = QueryGraph::<_, LatestRows<'_>>::new(&remote);
                         let root = graph.plan_with_options(input, options)?;
-                        let planned = if input.query_type == compiler::QueryType::Hydration {
-                            explain::graph_hydration(&graph, root)
-                        } else if input.query_type == compiler::QueryType::Neighbors {
-                            explain::graph_neighbors(&graph, root, input)
-                        } else if input.query_type == compiler::QueryType::PathFinding {
-                            explain::graph_pathfinding(&graph, root, input)
-                        } else {
-                            explain::query_graph(&graph, root)
+                        let planned = match input.query_type {
+                            compiler::QueryType::Hydration => {
+                                explain::graph_hydration(&graph, root)
+                            }
+                            compiler::QueryType::Neighbors => {
+                                explain::graph_neighbors(&graph, root, input)
+                            }
+                            compiler::QueryType::PathFinding => {
+                                explain::graph_pathfinding(&graph, root, input)
+                            }
+                            _ => explain::query_graph(&graph, root),
                         };
-                        let graph = graph.lower_operations()?;
+                        let graph = graph.lower_operations();
                         let emitted = explain::query_graph(&graph, root);
                         graph.render_parameterized(root)?;
                         Ok((planned, emitted))
@@ -415,7 +416,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                 .to_string_lossy();
             let total = totals.entry(format!("{backend}/{area}")).or_default();
             total.0 += scenario.query.len();
-            total.1 += failures.len() - previous_failures;
+            total.1 += failures.len() - previous;
         }
     }
     for (index, failure) in failures.iter().enumerate() {
@@ -437,360 +438,275 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     );
 }
 
-#[test]
-fn yaml_requires_both_frontends_or_an_explicit_exception() {
-    for (query, exceptions, valid) in [
-        ("{json: query, gql: query}", "{}", true),
-        (
-            "{json: query}",
-            "{gql: Normalizes the tested direction}",
-            true,
-        ),
-        (
-            "{gql: query}",
-            "{json: Cannot express property comparisons}",
-            true,
-        ),
-        ("{json: query}", "{}", false),
-        ("{json: query}", "{gql: ' '}", false),
-        (
-            "{json: query, gql: query}",
-            "{gql: Redundant exception}",
-            false,
-        ),
-        ("{json: query, gql: query, sql: query}", "{}", false),
-        ("{json: query, gql: ' '}", "{}", false),
-    ] {
-        let yaml = format!(
-            "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nlogical: {{}}\nphysical: {{}}"
-        );
-        let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
-        assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[test]
-fn patterns_match_structure_and_reject_malformed_input() {
-    let actual = pattern::parse("(Join ON a.x = b.y (Filter a.p = 1, !deleted(a) (Scan Table(t) AS a)) (Scan Table(u) AS b))").unwrap();
-    for (text, expected) in [
-        ("(Join ON a.x = b.y (_) (_))", true),
-        ("(Join ON a.x = b.y (_))", false),
-        ("(Join ON a.x = b.y (...) (Scan Table(u) AS b))", true),
-        ("(Scan Table(t) ...)", true),
-        ("(Scan Table(other) ...)", false),
-        ("(Scan Table(t) AS ab...)", false),
-        ("(Filter a.p = 1, ... (_))", true),
-        ("(Filter !deleted(a), a.p = 1 (_))", true),
-        ("(Filter a.p = 1 (_))", false),
-        ("(Filter a.p = 1, a.p = 1, ... (_))", false),
-    ] {
-        assert_eq!(
-            !pattern::find(
-                &actual,
-                &pattern::parse(text).unwrap(),
-                &terms::Captures::new()
-            )
-            .is_empty(),
-            expected,
-            "{text}"
-        );
-    }
-    assert_eq!(pattern::parse(&actual.to_string()).unwrap(), actual);
-    for text in [
-        "(",
-        "(a",
-        "a b",
-        "\"unfinished",
-        ")",
-        "(...)",
-        "(Scan t (... extra))",
-        "(Filter a, ..., ... (_))",
-        "(Filter a ... (_))",
-        "(Scan ... t)",
-        "(_ extra)",
-        "(Filter a = ] (_))",
-        "(Scan $)",
-    ] {
-        assert!(pattern::parse(text).is_err());
-    }
-}
-
-#[test]
-fn yaml_assertions_bind_ctes_and_check_consumers_counts_and_order() {
-    let actual = pattern::parse("(With (CTE cte_7 (Project p.id AS id (Scan Table(gl_project) AS p))) (CTE cte_8 (Project mr.id AS id (Scan Table(gl_merge_request) AS mr))) (Filter p.id IN cte_7.id, mr.id IN cte_8.id (Join ON p.id = mr.project_id (_) (_))))").unwrap();
-    let yaml = r#"
-bind:
-  - (CTE $projects (Project p.id AS id (_)))
-  - (CTE $requests (Project mr.id AS id (_)))
-ctes:
-  exact_order: [$projects, $requests]
-expect:
-  - (Filter p.id IN $projects.id, mr.id IN $requests.id (_))
-occurrences:
-  - pattern: (CTE $projects (_))
-    count: 1
-reject:
-  - (Filter p.id IN $requests.id, ... (_))
-"#;
-    let check = |yaml: &str| {
-        orbit_utils::yaml::from_str::<Assertions>(yaml)
-            .unwrap()
-            .check(&actual, "fixture.physical.clickhouse.planned")
-    };
-    check(yaml).unwrap();
-    for (before, after, location) in [
-        ("count: 1", "count: 2", "occurrences[0]"),
-        ("[$projects, $requests]", "[$requests, $projects]", ".ctes"),
-        (
-            "mr.id IN $requests.id (_)",
-            "mr.id IN $projects.id (_)",
-            "expect[0]",
-        ),
-        (
-            "p.id IN $projects.id, mr.id",
-            "p.id IN $undefined.id, mr.id",
-            "unbound capture",
-        ),
-        (
-            "(CTE $projects (Project p.id AS id (_)))",
-            "(CTE $projects (_))",
-            "bind[0]",
-        ),
-    ] {
-        let error = check(&yaml.replace(before, after)).unwrap_err();
-        assert!(error.contains(location), "{error}");
-    }
-}
-
-#[test]
-fn yaml_expression_patterns_preserve_groups_literals_and_capture_consistency() {
-    let actual = pattern::parse("(Project concat('a  b', '$literal', '?') AS text (Filter (a.x = 1 OR a.y = 2) AND a.z = 3, a.first = 7, a.second = 7 (Scan Table(t) AS a)))").unwrap();
-    let check = |text: &str| {
-        Assertions {
-            expect: vec![text.into()],
-            ..Default::default()
+    #[test]
+    fn frontends_require_queries_or_explanations() {
+        for (query, exceptions, valid) in [
+            ("{json: query, gql: query}", "{}", true),
+            ("{json: query}", "{gql: Unsupported syntax}", true),
+            ("{gql: query}", "{json: Unsupported syntax}", true),
+            ("{json: query}", "{}", false),
+            ("{json: query}", "{gql: ' '}", false),
+            ("{json: query, gql: query}", "{gql: Redundant}", false),
+            ("{json: query, gql: query, sql: query}", "{}", false),
+            ("{json: query, gql: ' '}", "{}", false),
+        ] {
+            let yaml = format!(
+                "name: frontends\nquery: {query}\nmissing_frontends: {exceptions}\nlogical: {{}}\nphysical: {{}}"
+            );
+            let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
+            assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
         }
-        .check(&actual, "expressions")
-    };
-    check("(Project concat('a  b', '$literal', '?') AS text (_))").unwrap();
-    check("(Filter (a.x = ? OR a.y = 2) AND a.z = 3, ... (_))").unwrap();
-    assert!(check("(Filter a.x = 1 OR (a.y = 2 AND a.z = 3), ... (_))").is_err());
-    assert!(check("(Project concat('a b', '$literal', '?') AS text (_))").is_err());
-    let bound: Assertions = orbit_utils::yaml::from_str(
-        r#"
-bind: ["(Filter a.first = $value, a.second = $value, ... (_))"]
-expect: ["(Filter a.second = $value, ... (_))"]
-"#,
-    )
-    .unwrap();
-    bound.check(&actual, "capture").unwrap();
-    let different =
-        pattern::parse(&actual.to_string().replace("a.second = 7", "a.second = 8")).unwrap();
-    assert!(bound.check(&different, "capture").is_err());
-}
+    }
 
-#[test]
-fn yaml_exact_assertions_preserve_projection_order_and_reject_holes() {
-    let actual =
-        pattern::parse("(Project a.id AS id, a.name AS name (Scan Table(t) AS a))").unwrap();
-    let check = |text: &str| {
-        Assertions {
-            exact: Some(text.into()),
-            ..Default::default()
+    #[test]
+    fn patterns_match_structure_and_reject_malformed_input() {
+        let actual = pattern::parse("(Join ON a.x = b.y (Filter a.p = 1, !deleted(a) (Scan Table(t) AS a)) (Scan Table(u) AS b))").unwrap();
+        for (text, expected) in [
+            ("(Join ON a.x = b.y (_) (_))", true),
+            ("(Join ON a.x = b.y (_))", false),
+            ("(Join ON a.x = b.y (...) (Scan Table(u) AS b))", true),
+            ("(Scan Table(t) ...)", true),
+            ("(Scan Table(other) ...)", false),
+            ("(Scan Table(t) AS ab...)", false),
+            ("(Filter a.p = 1, ... (_))", true),
+            ("(Filter !deleted(a), a.p = 1 (_))", true),
+            ("(Filter a.p = 1 (_))", false),
+            ("(Filter a.p = 1, a.p = 1, ... (_))", false),
+        ] {
+            assert_eq!(
+                !pattern::find(
+                    &actual,
+                    &pattern::parse(text).unwrap(),
+                    &terms::Captures::new()
+                )
+                .is_empty(),
+                expected,
+                "{text}"
+            );
         }
-        .check(&actual, "exact")
-    };
-    check(&actual.to_string()).unwrap();
-    assert!(check("(Project a.name AS name, a.id AS id (Scan Table(t) AS a))").is_err());
-    assert!(
-        check("(Project ... (_))")
-            .unwrap_err()
-            .contains("wildcards")
-    );
-    assert!(orbit_utils::yaml::from_str::<PhysicalAssertions>("expect: ['(Scan t)']").is_err());
-}
-
-#[test]
-fn yaml_capture_search_discards_failed_alternatives() {
-    let actual = pattern::parse("(With (Join ON a.id = b.id (Scan wrong) (Scan mismatch)) (Join ON c.id = d.id (Scan wanted) (Scan right)))").unwrap();
-    let assertions: Assertions = orbit_utils::yaml::from_str(
-        r#"
-bind:
-  - (Join ON $left.id = $right.id (Scan wanted) (Scan right))
-expect:
-  - (Join ON $left.id = $right.id (Scan wanted) (Scan right))
-reject:
-  - (Join ON $left.id = $right.id (Scan wrong) (Scan mismatch))
-"#,
-    )
-    .unwrap();
-    assertions.check(&actual, "backtracking").unwrap();
-}
-
-#[test]
-fn yaml_phase_assertions_cannot_match_another_phase() {
-    let assertions: PhysicalAssertions = orbit_utils::yaml::from_str(
-        r#"
-planned:
-  expect: ["(Scan Table(planned) AS p)"]
-emitted:
-  expect: ["(Scan Table(emitted) AS e)"]
-"#,
-    )
-    .unwrap();
-    let planned = pattern::parse("(Scan Table(planned) AS p)").unwrap();
-    let emitted = pattern::parse("(Scan Table(emitted) AS e)").unwrap();
-    let planned_checks = assertions.planned.unwrap();
-    let emitted_checks = assertions.emitted.unwrap();
-    planned_checks.check(&planned, "planned").unwrap();
-    emitted_checks.check(&emitted, "emitted").unwrap();
-    assert!(planned_checks.check(&emitted, "planned").is_err());
-    assert!(emitted_checks.check(&planned, "emitted").is_err());
-}
-
-#[test]
-fn yaml_cte_assertions_check_absence_and_exact_order() {
-    let actual =
-        pattern::parse("(With (CTE first (Scan a)) (CTE second (Scan b)) (Scan c))").unwrap();
-    let check = |yaml: &str, tree: &pattern::Expression| {
-        orbit_utils::yaml::from_str::<Assertions>(yaml)
-            .unwrap()
-            .check(tree, "definition-order")
-    };
-    check("ctes: {exact_order: [first, second]}", &actual).unwrap();
-    assert!(
-        check("ctes: {exact_order: [second, first]}", &actual)
-            .unwrap_err()
-            .contains(".ctes")
-    );
-    check("ctes: {absent: true}", &pattern::parse("(Scan a)").unwrap()).unwrap();
-    assert!(check("ctes: {absent: true}", &actual).is_err());
-    assert!(check("ctes: {exact_order: [first]}", &actual).is_err());
-    assert!(check("ctes: {exact_order: [first, second, third]}", &actual).is_err());
-    for ctes in [
-        "{}",
-        "{absent: false}",
-        "{exact_order: []}",
-        "{absent: true, exact_order: [first]}",
-    ] {
-        assert!(
-            check(&format!("expect: ['(Scan a)']\nctes: {ctes}"), &actual)
-                .unwrap_err()
-                .contains(".ctes")
-        );
+        assert_eq!(pattern::parse(&actual.to_string()).unwrap(), actual);
+        for text in [
+            "(",
+            "(a",
+            "a b",
+            "\"unfinished",
+            ")",
+            "(...)",
+            "(Scan t (... extra))",
+            "(Filter a, ..., ... (_))",
+            "(Filter a ... (_))",
+            "(Scan ... t)",
+            "(_ extra)",
+            "(Filter a = ] (_))",
+            "(Scan $)",
+        ] {
+            assert!(pattern::parse(text).is_err(), "{text}");
+        }
     }
-    assert!(orbit_utils::yaml::from_str::<Assertions>("definition_order: []").is_err());
-    assert!(
-        check("{}", &actual)
-            .unwrap_err()
-            .contains("missing positive assertions")
-    );
-}
 
-#[test]
-fn every_rendered_operator_parses_as_a_nested_child() {
-    use operator::Operator;
-    use pattern::Expression;
-
-    for &operator in Operator::ALL {
-        let child = Expression::node(operator, "", vec![]);
-        let tree = Expression::node(Operator::With, "", vec![child]);
-        assert_eq!(pattern::parse(&tree.to_string()).unwrap(), tree);
-    }
-    let error = pattern::parse("(FutureScan table)").unwrap_err();
-    assert!(error.contains("unknown operator 'FutureScan'"), "{error}");
-    let grouped = pattern::parse(
-        "(Filter (Project.id = 1 OR Scan.id = 2), COUNT(a.id) > 0 (Scan Table(t) AS a))",
-    )
-    .unwrap();
-    assert_eq!(grouped.children.len(), 1);
-    assert_eq!(grouped.items.len(), 2);
-}
-
-#[test]
-fn yaml_assertions_preserve_uppercase_expression_groups() {
-    let actual = pattern::Expression::node(
-        operator::Operator::Filter,
-        "(NULL) IS NULL, (STATUS = ACTIVE), (NOT (a.deleted = true))",
-        vec![pattern::Expression::node(
-            operator::Operator::Scan,
-            "Table(t) AS a",
-            vec![],
-        )],
-    );
-    let assertions: Assertions = orbit_utils::yaml::from_str(
-        r#"
-expect:
-  - (Filter (NULL) IS NULL, (STATUS = ACTIVE), (NOT (a.deleted = true)) (Scan Table(t) AS a))
-reject:
-  - (Filter (STATUS = INACTIVE), ... (_))
-"#,
-    )
-    .unwrap();
-    assertions.check(&actual, "uppercase-groups").unwrap();
-    assert_eq!(pattern::parse(&actual.to_string()).unwrap(), actual);
-}
-
-#[test]
-fn hydration_planning_selects_paths_before_sql_rendering() {
-    use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::hydration::HydrationPathFilter;
-    use orbit_utils::traversal_path::TraversalPath;
-
-    let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-        .unwrap();
-    for (count, dynamic, budget, set, expected_paths) in [
-        (256, true, None, false, 256),
-        (257, true, None, true, 257),
-        (257, false, None, false, 257),
-        (257, true, Some(1), false, 1),
-    ] {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: vec![InputNode {
-                id: "f".into(),
-                entity: Some("File".into()),
-                node_ids: vec![1],
-                traversal_paths: (0..count)
-                    .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
-                    .collect(),
-                ..Default::default()
-            }],
-            ..Default::default()
+    #[test]
+    fn captures_check_consumers_counts_order_and_backtracking() {
+        let actual = pattern::parse("(With (CTE first (Project p.id AS id (Scan Table(p) AS p))) (CTE second (Project n.id AS id (Scan Table(n) AS n))) (Filter p.id IN first.id, n.id IN second.id (Join ON p.id = n.id (_) (_))))").unwrap();
+        let yaml = "bind: ['(CTE $p (Project p.id AS id (_)))', '(CTE $n (Project n.id AS id (_)))']\nctes: {exact_order: [$p, $n]}\nexpect: ['(Filter p.id IN $p.id, n.id IN $n.id (_))']\noccurrences: [{pattern: '(CTE $p (_))', count: 1}]\nreject: ['(Filter p.id IN $n.id, ... (_))']";
+        let check = |yaml: &str| {
+            orbit_utils::yaml::from_str::<Assertions>(yaml)
+                .unwrap()
+                .check(&actual, "captures")
         };
-        let plan = plan::plan_clickhouse(
-            &input,
-            &model,
-            plan::HydrationCompileOptions {
-                dynamic,
-                path_segment_budget: budget,
-            },
+        check(yaml).unwrap();
+        for (from, to) in [
+            ("count: 1", "count: 2"),
+            ("[$p, $n]", "[$n, $p]"),
+            ("n.id IN $n.id (_)", "n.id IN $p.id (_)"),
+            ("p.id IN $p.id, n.id", "p.id IN $missing.id, n.id"),
+            ("(CTE $p (Project p.id AS id (_)))", "(CTE $p (_))"),
+        ] {
+            assert!(check(&yaml.replace(from, to)).is_err());
+        }
+        let actual = pattern::parse("(With (Join ON a.id = b.id (Scan wrong) (Scan mismatch)) (Join ON c.id = d.id (Scan wanted) (Scan right)))").unwrap();
+        let checks: Assertions = orbit_utils::yaml::from_str("bind: ['(Join ON $l.id = $r.id (Scan wanted) (Scan right))']\nexpect: ['(Join ON $l.id = $r.id (Scan wanted) (Scan right))']").unwrap();
+        checks.check(&actual, "backtracking").unwrap();
+    }
+
+    #[test]
+    fn expressions_preserve_literal_spacing_groups_and_repeated_captures() {
+        let actual = pattern::parse("(Project concat('a  b', '$literal', '?') AS text (Filter (a.x = 1 OR a.y = 2) AND a.z = 3, a.first = 7, a.second = 7 (Scan Table(t) AS a)))").unwrap();
+        let check = |text: &str| {
+            Assertions {
+                expect: vec![text.into()],
+                ..Default::default()
+            }
+            .check(&actual, "expressions")
+        };
+        check("(Project concat('a  b', '$literal', '?') AS text (_))").unwrap();
+        check("(Filter (a.x = ? OR a.y = 2) AND a.z = 3, ... (_))").unwrap();
+        assert!(check("(Filter a.x = 1 OR (a.y = 2 AND a.z = 3), ... (_))").is_err());
+        assert!(check("(Project concat('a b', '$literal', '?') AS text (_))").is_err());
+        let checks: Assertions = orbit_utils::yaml::from_str("bind: ['(Filter a.first = $v, a.second = $v, ... (_))']\nexpect: ['(Filter a.second = $v, ... (_))']").unwrap();
+        checks.check(&actual, "repeat").unwrap();
+        assert!(
+            checks
+                .check(
+                    &pattern::parse(&actual.to_string().replace("a.second = 7", "a.second = 8"))
+                        .unwrap(),
+                    "repeat"
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn exact_and_phase_assertions_are_strict() {
+        let actual =
+            pattern::parse("(Project a.id AS id, a.name AS name (Scan Table(t) AS a))").unwrap();
+        let check = |text: &str| {
+            Assertions {
+                exact: Some(text.into()),
+                ..Default::default()
+            }
+            .check(&actual, "exact")
+        };
+        check(&actual.to_string()).unwrap();
+        assert!(check("(Project a.name AS name, a.id AS id (Scan Table(t) AS a))").is_err());
+        assert!(
+            check("(Project ... (_))")
+                .unwrap_err()
+                .contains("wildcards")
+        );
+        assert!(orbit_utils::yaml::from_str::<PhysicalAssertions>("expect: ['(Scan t)']").is_err());
+        let phases: PhysicalAssertions = orbit_utils::yaml::from_str(
+            "planned: {expect: ['(Scan planned)']}\nemitted: {expect: ['(Scan emitted)']}",
         )
         .unwrap();
-        let plan::QueryPlan::Hydration(hydration) = &plan else {
-            panic!("expected hydration");
+        let planned = pattern::parse("(Scan planned)").unwrap();
+        let emitted = pattern::parse("(Scan emitted)").unwrap();
+        let (left, right) = (phases.planned.unwrap(), phases.emitted.unwrap());
+        left.check(&planned, "planned").unwrap();
+        right.check(&emitted, "emitted").unwrap();
+        assert!(left.check(&emitted, "planned").is_err());
+        assert!(right.check(&planned, "emitted").is_err());
+    }
+
+    #[test]
+    fn ctes_require_exact_order_or_absence() {
+        let actual =
+            pattern::parse("(With (CTE first (Scan a)) (CTE second (Scan b)) (Scan c))").unwrap();
+        let check = |yaml: &str, actual: &pattern::Expression| {
+            orbit_utils::yaml::from_str::<Assertions>(yaml)
+                .unwrap()
+                .check(actual, "ctes")
         };
-        let (actual_set, paths) = match hydration.operation.nodes[0].path_filter.as_ref().unwrap() {
-            HydrationPathFilter::PrefixUnion(paths) => (false, paths),
-            HydrationPathFilter::PrefixSet(paths) => (true, paths),
-        };
-        assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input).unwrap();
-        let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
-        assert_eq!(sql.contains("arrayExists"), set);
-        assert_eq!(
-            sql.matches("startsWith").count(),
-            if set { 1 } else { expected_paths }
+        check("ctes: {exact_order: [first, second]}", &actual).unwrap();
+        check("ctes: {absent: true}", &pattern::parse("(Scan a)").unwrap()).unwrap();
+        for ctes in [
+            "{exact_order: [second, first]}",
+            "{exact_order: [first]}",
+            "{exact_order: [first, second, third]}",
+            "{absent: true}",
+            "{}",
+            "{absent: false}",
+            "{exact_order: []}",
+            "{absent: true, exact_order: [first]}",
+        ] {
+            assert!(check(&format!("ctes: {ctes}"), &actual).is_err());
+        }
+        assert!(
+            check("{}", &actual)
+                .unwrap_err()
+                .contains("missing positive assertions")
         );
-        let (planned, _) = explain::physical(&plan, &lowered.ast);
-        let mode = if set { "SET" } else { "UNION" };
+        assert!(orbit_utils::yaml::from_str::<Assertions>("definition_order: []").is_err());
+    }
+
+    #[test]
+    fn operators_and_uppercase_groups_roundtrip() {
+        for &operator in operator::Operator::ALL {
+            let tree = pattern::Expression::node(
+                operator::Operator::With,
+                "",
+                vec![pattern::Expression::node(operator, "", vec![])],
+            );
+            assert_eq!(pattern::parse(&tree.to_string()).unwrap(), tree);
+        }
+        assert!(
+            pattern::parse("(FutureScan table)")
+                .unwrap_err()
+                .contains("unknown operator")
+        );
+        let grouped = pattern::parse(
+            "(Filter (Project.id = 1 OR Scan.id = 2), COUNT(a.id) > 0 (Scan Table(t) AS a))",
+        )
+        .unwrap();
+        assert_eq!((grouped.children.len(), grouped.items.len()), (1, 2));
+        let text = "(Filter (NULL) IS NULL, (STATUS = ACTIVE), (NOT (a.deleted = true)) (Scan Table(t) AS a))";
+        let actual = pattern::parse(text).unwrap();
         Assertions {
-            expect: vec![format!(
-                "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
-            )],
+            expect: vec![text.into()],
+            reject: vec!["(Filter (STATUS = INACTIVE), ... (_))".into()],
             ..Default::default()
         }
-        .check(&planned, "hydration.planned")
+        .check(&actual, "uppercase")
         .unwrap();
+        assert_eq!(pattern::parse(&actual.to_string()).unwrap(), actual);
+    }
+
+    #[test]
+    fn hydration_planning_selects_paths_before_sql_rendering() {
+        use compiler::input::{InputNode, QueryType};
+        use compiler::query_graph::{LatestRows, QueryGraph};
+        use orbit_utils::traversal_path::TraversalPath;
+        let model =
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap();
+        for (count, dynamic, budget, set, expected_paths) in [
+            (256, true, None, false, 256),
+            (257, true, None, true, 257),
+            (257, false, None, false, 257),
+            (257, true, Some(1), false, 1),
+        ] {
+            let input = Input {
+                query_type: QueryType::Hydration,
+                nodes: vec![InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    node_ids: vec![1],
+                    columns: Some(compiler::ColumnSelection::List(vec!["id".into()])),
+                    traversal_paths: (0..count)
+                        .map(|id| TraversalPath::new_unchecked(format!("1/{id}/")))
+                        .collect(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let mut graph = QueryGraph::<_, LatestRows<'_>>::new(&model);
+            let root = graph
+                .plan_with_options(
+                    &input,
+                    plan::HydrationCompileOptions {
+                        dynamic,
+                        path_segment_budget: budget,
+                    },
+                )
+                .unwrap();
+            let mode = if set { "SET" } else { "UNION" };
+            Assertions {
+                expect: vec![format!(
+                    "(Filter f.traversal_path PREFIX {mode} ?, ... (_))"
+                )],
+                ..Default::default()
+            }
+            .check(&explain::graph_hydration(&graph, root), "hydration.planned")
+            .unwrap();
+            let sql = graph.lower_operations().render(root).unwrap();
+            assert_eq!(sql.contains("arrayExists"), set);
+            assert_eq!(
+                sql.matches("startsWith").count(),
+                if set { 1 } else { expected_paths }
+            );
+        }
     }
 }

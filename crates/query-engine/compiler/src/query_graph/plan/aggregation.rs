@@ -1,14 +1,58 @@
 use super::*;
+use crate::input::{
+    AggExpr, ColumnSelection, Input, InputGroupByKey, group_by_output_names, node_group_ids,
+};
 
-impl<'catalog, M: QueryDataModel + ?Sized>
-    QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
-{
-    pub(super) fn aggregation(&mut self, input: &crate::input::Input) -> Result<BlockId> {
-        use crate::input::{AggExpr, InputGroupByKey, group_by_output_names};
-        let (root, condition) = self.plan_access(input)?;
-        let operation = std::mem::replace(self.operation_mut(root)?, PhysicalOperation::One);
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
+    pub(super) fn aggregation(&mut self, input: &Input) -> Result<BlockId> {
+        let (access, mut operation) = self.plan_access(input)?;
+        let root = access.root;
+        for predicate in &input.join_predicates {
+            let left =
+                self.aggregate_column(root, input, &predicate.lhs_node, &predicate.lhs_prop)?;
+            let right =
+                self.aggregate_column(root, input, &predicate.rhs_node, &predicate.rhs_prop)?;
+            operation = self.filter_relation(
+                operation,
+                Expression::Predicate {
+                    operator: predicate.op,
+                    value: Box::new(Expression::Column(left)),
+                    argument: Some(Box::new(Expression::Column(right))),
+                    fold_case: false,
+                },
+            )?;
+        }
+        let mut outputs = self.aggregate_groups(root, input)?;
         let mut groups = Vec::new();
-        for alias in crate::input::node_group_ids(&input.aggregation.group_by) {
+        for (_, value) in &outputs {
+            if !groups.contains(value) {
+                groups.push(value.clone());
+            }
+        }
+        for metric in &input.aggregation.metrics {
+            outputs.push((
+                metric.output_name(),
+                self.aggregate_measure(
+                    root,
+                    input,
+                    &metric.expr,
+                    access.aggregate_condition.as_ref(),
+                )?,
+            ));
+        }
+        let operation = self.aggregate_relation(operation, groups)?;
+        let projection =
+            self.project_values(self.limit_relation(operation, input.limit)?, outputs)?;
+        self.finish_query(projection)
+    }
+
+    fn aggregate_groups(
+        &self,
+        root: BlockId,
+        input: &Input,
+    ) -> Result<Vec<(String, Expression<'a>)>> {
+        let mut outputs = Vec::new();
+        for alias in node_group_ids(&input.aggregation.group_by) {
             let (index, node) = input
                 .nodes
                 .iter()
@@ -17,21 +61,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .ok_or(GraphError::MissingOutput)?;
             let relation = self.input_node(root, index)?;
             let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
-            if let Some(crate::input::ColumnSelection::List(properties)) = &node.columns {
+            if let Some(ColumnSelection::List(properties)) = &node.columns {
                 for property in properties {
                     let Some(column) = self.catalog.property_column_named(entity, property) else {
                         continue;
                     };
-                    let value = Expression::Column(self.column(relation, column)?);
-                    if !groups.contains(&value) {
-                        groups.push(value.clone());
-                    }
                     let label = format!("{alias}_{property}");
-                    if !self.outputs(root)?.any(|output| {
-                        self.output_label(output)
-                            .is_ok_and(|existing| existing == label)
-                    }) {
-                        self.project(root, label, value)?;
+                    if !outputs.iter().any(|(existing, _)| *existing == label) {
+                        outputs.push((label, Expression::Column(self.column(relation, column)?)));
                     }
                 }
             }
@@ -51,58 +88,62 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 } => (node, property.as_str(), *truncate),
                 InputGroupByKey::Node { node, .. } => (node, "id", None),
             };
-            let column = self.aggregate_column(root, input, node, property)?;
-            let value = match truncate {
-                Some(unit) => Expression::Bucket {
-                    unit,
-                    value: Box::new(Expression::Column(column)),
+            let value = Expression::Column(self.aggregate_column(root, input, node, property)?);
+            outputs.push((
+                label,
+                match truncate {
+                    Some(unit) => Expression::Bucket {
+                        unit,
+                        value: Box::new(value),
+                    },
+                    None => value,
                 },
-                None => Expression::Column(column),
-            };
-            if !groups.contains(&value) {
-                groups.push(value.clone());
+            ));
+        }
+        Ok(outputs)
+    }
+
+    fn aggregate_measure(
+        &self,
+        root: BlockId,
+        input: &Input,
+        measure: &AggExpr,
+        condition: Option<&Expression<'a>>,
+    ) -> Result<Expression<'a>> {
+        if let AggExpr::Count(target) = measure
+            && target.property.is_none()
+        {
+            return Ok(condition.cloned().map_or(Expression::Count, |condition| {
+                Expression::CountIf(Box::new(condition))
+            }));
+        }
+        let column = self.aggregate_column(
+            root,
+            input,
+            measure.node(),
+            measure.property().ok_or(GraphError::MissingOutput)?,
+        )?;
+        let value = Box::new(Expression::Column(column));
+        Ok(if matches!(measure, AggExpr::Sum(_)) {
+            Expression::Sum {
+                value,
+                condition: condition.cloned().map(Box::new),
             }
-            self.project(root, label, value)?;
-        }
-        for metric in &input.aggregation.metrics {
-            let value = match &metric.expr {
-                AggExpr::Count(target) if target.property.is_none() => {
-                    condition.clone().map_or(Expression::Count, |condition| {
-                        Expression::CountIf(Box::new(condition))
-                    })
-                }
-                AggExpr::Sum(property) => Expression::Sum {
-                    value: Box::new(Expression::Column(self.aggregate_column(
-                        root,
-                        input,
-                        &property.node,
-                        &property.property,
-                    )?)),
-                    condition: condition.clone().map(Box::new),
-                },
-                expression => Expression::Aggregate {
-                    function: expression.function(),
-                    value: Box::new(Expression::Column(self.aggregate_column(
-                        root,
-                        input,
-                        expression.node(),
-                        expression.property().ok_or(GraphError::MissingOutput)?,
-                    )?)),
-                },
-            };
-            self.project(root, metric.output_name(), value)?;
-        }
-        *self.operation_mut(root)? = operation.group_by(groups).limit(input.limit);
-        Ok(root)
+        } else {
+            Expression::Aggregate {
+                function: measure.function(),
+                value,
+            }
+        })
     }
 
     fn aggregate_column(
         &self,
         root: BlockId,
-        input: &crate::input::Input,
+        input: &Input,
         alias: &str,
         property: &str,
-    ) -> Result<ColumnRef<'catalog>> {
+    ) -> Result<ColumnRef<'a>> {
         let (index, node) = input
             .nodes
             .iter()
@@ -112,12 +153,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         if property == "id" {
             return self.input_identity(root, input, index);
         }
+        let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
         let column = self
             .catalog
-            .property_column_named(
-                node.entity.as_deref().ok_or(GraphError::MissingOutput)?,
-                property,
-            )
+            .property_column_named(entity, property)
             .ok_or(GraphError::MissingOutput)?;
         self.column(self.input_node(root, index)?, column)
     }

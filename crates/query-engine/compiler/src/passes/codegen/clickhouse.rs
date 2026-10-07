@@ -1,67 +1,38 @@
-//! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax.
-
 use orbit_server_config::QueryConfig;
+use orbit_utils::query_types::ParamBindings;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::convert::Infallible;
 
+use super::{ParamValue, ParameterizedQuery, SqlDialect};
 use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
-use serde_json::Value;
-use std::collections::HashMap;
-
-use super::{ParamValue, ParameterizedQuery, SqlDialect};
-use orbit_utils::query_types::ParamBindings;
+use crate::query_graph::{BlockId, QueryGraph};
 
 pub fn codegen(
     ast: &Node,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let mut ctx = Context::new();
-    let mut sql = match ast {
-        Node::Query(q) => ctx.emit_query(q)?,
-        Node::Insert(ins) => ctx.emit_insert(ins),
-    };
-    if let Some(error) = ctx.error {
-        return Err(crate::error::QueryError::Codegen(error));
-    }
-
+    let (mut sql, params) = emit_simple_query(ast)?;
     if matches!(ast, Node::Query(_)) {
         append_settings(&mut sql, &query_config)?;
     }
-
     Ok(ParameterizedQuery {
         sql,
-        params: ctx.params.into_map(),
+        params,
         result_context,
         query_config,
         dialect: SqlDialect::ClickHouse,
     })
 }
 
-fn append_settings(sql: &mut String, query_config: &QueryConfig) -> Result<()> {
-    let mut settings = query_config
-        .to_clickhouse_settings()
-        .map_err(crate::error::QueryError::Codegen)?;
-
-    settings.extend(query_config.compiler_derived.to_clickhouse_settings());
-
-    if !settings.is_empty() {
-        let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
-        sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
-    }
-    Ok(())
-}
-
 pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
-    graph: crate::query_graph::QueryGraph<
-        'a,
-        M,
-        crate::query_graph::Expression<'a>,
-        crate::query_graph::LoweredOperation<'a>,
-    >,
-    root: crate::query_graph::BlockId,
+    graph: QueryGraph<'a, M, Infallible>,
+    root: BlockId,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
@@ -74,6 +45,24 @@ pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
         query_config,
         dialect: SqlDialect::ClickHouse,
     })
+}
+
+fn append_settings(sql: &mut String, config: &QueryConfig) -> Result<()> {
+    let mut settings = config
+        .to_clickhouse_settings()
+        .map_err(QueryError::Codegen)?;
+    settings.extend(config.compiler_derived.to_clickhouse_settings());
+    if !settings.is_empty() {
+        sql.push_str(&format!(
+            " SETTINGS {}",
+            settings
+                .iter()
+                .map(|(name, value)| format!("{name} = {value}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn time_bucket(unit: crate::input::TruncateUnit, value: &str) -> String {
@@ -94,171 +83,153 @@ pub(crate) fn time_bucket(unit: crate::input::TruncateUnit, value: &str) -> Stri
     }
 }
 
-/// # Trust boundary
-///
-/// This function bypasses compiler authorization and result enforcement. Use it only for trusted, internally
-/// constructed ASTs (e.g. schema version management DDL/DML), never for
-/// user-supplied query input.
+/// Accepts trusted internal SQL only; it does not apply request authorization.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
-    let mut ctx = Context::new();
+    let mut context = Context::default();
     let sql = match node {
-        Node::Query(q) => ctx.emit_query(q)?,
-        Node::Insert(ins) => ctx.emit_insert(ins),
+        Node::Query(query) => context.emit_query(query)?,
+        Node::Insert(insert) => context.emit_insert(insert)?,
     };
-    if let Some(error) = ctx.error {
-        return Err(crate::error::QueryError::Codegen(error));
-    }
-    Ok((sql, ctx.params.into_map()))
+    Ok((sql, context.params.into_map()))
 }
 
+#[derive(Default)]
 struct Context {
     params: ParamBindings,
-    error: Option<String>,
 }
 
 impl Context {
-    fn new() -> Self {
-        Self {
-            params: ParamBindings::default(),
-            error: None,
-        }
-    }
-
-    fn emit_insert(&mut self, ins: &Insert) -> String {
-        let cols = ins.columns().join(", ");
-        let rows: Vec<String> = ins
+    fn emit_insert(&mut self, insert: &Insert) -> Result<String> {
+        let rows = insert
             .values()
             .iter()
             .map(|row| {
-                let exprs: Vec<String> = row.iter().map(|e| self.emit_expr(e)).collect();
-                format!("({})", exprs.join(", "))
+                Ok(format!(
+                    "({})",
+                    row.iter()
+                        .map(|value| self.emit_expr(value))
+                        .collect::<Result<Vec<_>>>()?
+                        .join(", ")
+                ))
             })
-            .collect();
-        format!(
+            .collect::<Result<Vec<_>>>()?;
+        Ok(format!(
             "INSERT INTO {} ({}) VALUES {}",
-            ins.table(),
-            cols,
+            insert.table(),
+            insert.columns().join(", "),
             rows.join(", ")
-        )
+        ))
     }
 
-    fn emit_query(&mut self, q: &Query) -> Result<String> {
+    fn emit_query(&mut self, query: &Query) -> Result<String> {
         let mut parts = Vec::new();
-
-        if !q.ctes.is_empty() {
-            parts.push(self.emit_ctes(&q.ctes)?);
+        if !query.ctes.is_empty() {
+            parts.push(self.emit_ctes(&query.ctes)?);
         }
-
-        parts.push(self.emit_query_body(q)?);
-
+        parts.push(self.emit_query_body(query)?);
         Ok(parts.join(" "))
     }
 
-    fn emit_ctes(&mut self, ctes: &[Cte]) -> Result<String> {
-        let has_recursive = ctes.iter().any(|c| c.recursive);
-        let keyword = if has_recursive {
+    fn emit_ctes(&mut self, definitions: &[Cte]) -> Result<String> {
+        let keyword = if definitions.iter().any(|definition| definition.recursive) {
             "WITH RECURSIVE"
         } else {
             "WITH"
         };
-
-        let cte_parts: Vec<String> = ctes
+        let definitions = definitions
             .iter()
-            .map(|cte| {
-                let inner = self.emit_query(&cte.query)?;
-                if cte.materialized {
-                    Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
+            .map(|definition| {
+                let materialized = if definition.materialized {
+                    "MATERIALIZED "
                 } else {
-                    Ok(format!("{} AS ({})", cte.name, inner))
-                }
+                    ""
+                };
+                Ok(format!(
+                    "{} AS {materialized}({})",
+                    definition.name,
+                    self.emit_query(&definition.query)?
+                ))
             })
             .collect::<Result<Vec<_>>>()?;
-
-        Ok(format!("{} {}", keyword, cte_parts.join(", ")))
+        Ok(format!("{keyword} {}", definitions.join(", ")))
     }
 
-    fn emit_query_body(&mut self, q: &Query) -> Result<String> {
-        let mut parts = Vec::new();
-
-        let select_items: Vec<_> = q
+    fn emit_query_body(&mut self, query: &Query) -> Result<String> {
+        let projection = query
             .select
             .iter()
-            .map(|sel| {
-                let expr = self.emit_expr(&sel.expr);
-                match &sel.alias {
-                    Some(alias) => format!("{expr} AS {alias}"),
-                    None => expr,
-                }
+            .map(|output| {
+                let value = self.emit_expr(&output.expr)?;
+                Ok(match &output.alias {
+                    Some(label) => format!("{value} AS {label}"),
+                    None => value,
+                })
             })
-            .collect();
-        let keyword = if q.distinct {
-            "SELECT DISTINCT"
-        } else {
-            "SELECT"
-        };
-        parts.push(format!("{keyword} {}", select_items.join(", ")));
-
-        let from = self.emit_table_ref(&q.from)?;
-        parts.push(format!("FROM {from}"));
-
-        if let Some(w) = &q.where_clause {
-            parts.push(format!("WHERE {}", self.emit_expr(w)));
+            .collect::<Result<Vec<_>>>()?;
+        let mut parts = vec![
+            format!(
+                "SELECT {}{}",
+                if query.distinct { "DISTINCT " } else { "" },
+                projection.join(", ")
+            ),
+            format!("FROM {}", self.emit_table_ref(&query.from)?),
+        ];
+        if let Some(predicate) = &query.where_clause {
+            parts.push(format!("WHERE {}", self.emit_expr(predicate)?));
         }
-
-        if !q.group_by.is_empty() {
-            let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
+        if !query.group_by.is_empty() {
+            let groups = query
+                .group_by
+                .iter()
+                .map(|value| self.emit_expr(value))
+                .collect::<Result<Vec<_>>>()?;
             parts.push(format!("GROUP BY {}", groups.join(", ")));
         }
-
-        if let Some(h) = &q.having {
-            parts.push(format!("HAVING {}", self.emit_expr(h)));
+        if let Some(predicate) = &query.having {
+            parts.push(format!("HAVING {}", self.emit_expr(predicate)?));
         }
-
-        for union_q in &q.union_all {
-            let arm = self.emit_query(union_q)?;
-            parts.push(if union_q.ctes.is_empty() {
-                format!("UNION ALL {arm}")
+        for arm in &query.union_all {
+            let sql = self.emit_query(arm)?;
+            parts.push(if arm.ctes.is_empty() {
+                format!("UNION ALL {sql}")
             } else {
-                format!("UNION ALL ({arm})")
+                format!("UNION ALL ({sql})")
             });
         }
-
-        // ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an
-        // unparenthesized UNION ALL, not the whole union. Wrap so they apply
-        // to the combined result.
-        if !q.union_all.is_empty()
-            && (q.limit.is_some() || q.limit_by.is_some() || !q.order_by.is_empty())
+        if !query.union_all.is_empty()
+            && (query.limit.is_some() || query.limit_by.is_some() || !query.order_by.is_empty())
         {
-            let body = std::mem::take(&mut parts).join(" ");
-            parts.push(format!("SELECT * FROM ({body})"));
+            parts = vec![format!("SELECT * FROM ({})", parts.join(" "))];
         }
-
-        if !q.order_by.is_empty() {
-            let orders: Vec<_> = q
+        if !query.order_by.is_empty() {
+            let order = query
                 .order_by
                 .iter()
-                .map(|o| {
-                    let dir = if o.desc { "DESC" } else { "ASC" };
-                    format!("{} {dir}", self.emit_expr(&o.expr))
+                .map(|key| {
+                    Ok(format!(
+                        "{} {}",
+                        self.emit_expr(&key.expr)?,
+                        if key.desc { "DESC" } else { "ASC" }
+                    ))
                 })
-                .collect();
-            parts.push(format!("ORDER BY {}", orders.join(", ")));
+                .collect::<Result<Vec<_>>>()?;
+            parts.push(format!("ORDER BY {}", order.join(", ")));
         }
-
-        if let Some((n, ref cols)) = q.limit_by {
-            let cols: Vec<_> = cols.iter().map(|c| self.emit_expr(c)).collect();
-            parts.push(format!("LIMIT {n} BY {}", cols.join(", ")));
+        if let Some((count, keys)) = &query.limit_by {
+            let keys = keys
+                .iter()
+                .map(|key| self.emit_expr(key))
+                .collect::<Result<Vec<_>>>()?;
+            parts.push(format!("LIMIT {count} BY {}", keys.join(", ")));
         }
-
-        if let Some(limit) = q.limit {
+        if let Some(limit) = query.limit {
             parts.push(format!("LIMIT {limit}"));
         }
-
         Ok(parts.join(" "))
     }
 
-    fn emit_expr(&mut self, e: &Expr) -> String {
-        match e {
+    fn emit_expr(&mut self, expression: &Expr) -> Result<String> {
+        Ok(match expression {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
             Expr::EmptyTupleArray(fields) => format!(
@@ -269,20 +240,24 @@ impl Context {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Expr::Literal(v) => self.emit_literal(v),
+            Expr::Literal(value) => self.emit_literal(value),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
                 if !name.accepts_arity(args.len()) {
-                    self.error = Some(format!("{name} does not accept {} arguments", args.len()));
-                    return String::new();
+                    return Err(QueryError::Codegen(format!(
+                        "{name} does not accept {} arguments",
+                        args.len()
+                    )));
                 }
-                let name = function_name(*name);
-                let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
-                format!("{}({})", name, args.join(", "))
+                let args = args
+                    .iter()
+                    .map(|argument| self.emit_expr(argument))
+                    .collect::<Result<Vec<_>>>()?;
+                format!("{}({})", function_name(*name), args.join(", "))
             }
-            Expr::TimeBucket { unit, value } => time_bucket(*unit, &self.emit_expr(value)),
+            Expr::TimeBucket { unit, value } => time_bucket(*unit, &self.emit_expr(value)?),
             Expr::TextSearch { mode, value, query } => {
-                let (value, query) = (self.emit_expr(value), self.emit_expr(query));
+                let (value, query) = (self.emit_expr(value)?, self.emit_expr(query)?);
                 match mode {
                     TextMatch::Contains => format!("multiSearchAny({value}, [{query}])"),
                     TextMatch::TokenMatch => format!("hasToken({value}, {query})"),
@@ -296,12 +271,8 @@ impl Context {
                 distinct,
                 condition,
             } => {
-                if let Err(error) =
-                    super::validate_aggregate(*function, argument.as_deref(), *distinct)
-                {
-                    self.error = Some(error);
-                    return String::new();
-                }
+                super::validate_aggregate(*function, argument.as_deref(), *distinct)
+                    .map_err(QueryError::Codegen)?;
                 let base = match function {
                     crate::input::AggFunction::Count => "count",
                     crate::input::AggFunction::Sum => "sum",
@@ -321,140 +292,118 @@ impl Context {
                 } else {
                     base.to_uppercase()
                 };
-                let mut args: Vec<_> = argument.iter().map(|value| self.emit_expr(value)).collect();
+                let mut args = argument
+                    .iter()
+                    .map(|value| self.emit_expr(value))
+                    .collect::<Result<Vec<_>>>()?;
                 if let Some(condition) = condition {
-                    args.push(self.emit_expr(condition));
+                    args.push(self.emit_expr(condition)?);
                 }
                 format!("{name}({})", args.join(", "))
             }
-            Expr::Lambda { param, body } => {
-                let body = self.emit_expr(body);
-                format!("{param} -> {body}")
-            }
+            Expr::Lambda { param, body } => format!("{param} -> {}", self.emit_expr(body)?),
             Expr::BinaryOp { op, left, right } => {
-                let l = self.emit_expr(left);
-                let r = self.emit_expr(right);
+                let (left, right) = (self.emit_expr(left)?, self.emit_expr(right)?);
                 if *op == Op::In {
-                    format!("{l} IN {r}")
+                    format!("{left} IN {right}")
                 } else {
-                    format!("({l} {op} {r})")
+                    format!("({left} {op} {right})")
                 }
             }
             Expr::UnaryOp { op, expr } => {
-                let e = self.emit_expr(expr);
-                if *op == Op::IsNull || *op == Op::IsNotNull {
-                    format!("({e} {op})")
+                let value = self.emit_expr(expr)?;
+                if matches!(op, Op::IsNull | Op::IsNotNull) {
+                    format!("({value} {op})")
                 } else {
-                    format!("({op} {e})")
+                    format!("({op} {value})")
                 }
             }
             Expr::InSubquery {
                 expr,
                 cte_name,
                 column,
-            } => {
-                let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
-            }
+            } => format!(
+                "{} IN (SELECT {column} FROM {cte_name})",
+                self.emit_expr(expr)?
+            ),
             Expr::InSelect { expr, query } => {
-                let e = self.emit_expr(expr);
-                let q = self
-                    .emit_query(query)
-                    .expect("inline narrow subquery must not fail");
-                format!("{e} IN ({q})")
+                format!("{} IN ({})", self.emit_expr(expr)?, self.emit_query(query)?)
             }
-            Expr::Scalar(query) => {
-                let q = self
-                    .emit_query(query)
-                    .expect("scalar subquery must not fail");
-                format!("({q})")
-            }
-            Expr::Star => "*".to_string(),
-        }
+            Expr::Scalar(query) => format!("({})", self.emit_query(query)?),
+            Expr::Star => "*".into(),
+        })
     }
 
-    fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
-        let type_name = orbit_utils::clickhouse::type_name(data_type);
-        match v {
-            Value::Null => "NULL".into(),
-            Value::Array(_) if matches!(data_type, SqlType::Array(_)) => {
-                let name = self.params.intern(data_type, v);
-                format!("{{{name}:{type_name}}}")
-            }
-            Value::Array(arr) => {
-                let placeholders: Vec<_> = arr
+    fn emit_param(&mut self, data_type: SqlType, value: &Value) -> String {
+        if value.is_null() {
+            return "NULL".into();
+        }
+        if let Value::Array(values) = value
+            && !matches!(data_type, SqlType::Array(_))
+        {
+            return format!(
+                "({})",
+                values
                     .iter()
-                    .map(|item| {
-                        let name = self.params.intern(data_type, item);
-                        format!("{{{name}:{type_name}}}")
-                    })
-                    .collect();
-                format!("({})", placeholders.join(", "))
-            }
-            _ => {
-                let name = self.params.intern(data_type, v);
-                format!("{{{name}:{type_name}}}")
-            }
+                    .map(|value| self.emit_param(data_type, value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
+        let name = self.params.intern(data_type, value);
+        format!(
+            "{{{name}:{}}}",
+            orbit_utils::clickhouse::type_name(data_type)
+        )
     }
 
-    fn emit_literal(&mut self, v: &Value) -> String {
-        match v {
-            Value::Null => "NULL".into(),
-            Value::Array(arr) => {
-                let placeholders: Vec<_> = arr
+    fn emit_literal(&mut self, value: &Value) -> String {
+        if let Value::Array(values) = value {
+            format!(
+                "({})",
+                values
                     .iter()
-                    .map(|item| self.emit_param(SqlType::from_value(item), item))
-                    .collect();
-                format!("({})", placeholders.join(", "))
-            }
-            _ => self.emit_param(SqlType::from_value(v), v),
+                    .map(|value| self.emit_param(SqlType::from_value(value), value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            self.emit_param(SqlType::from_value(value), value)
         }
     }
 
-    fn emit_table_ref(&mut self, t: &TableRef) -> Result<String> {
-        match t {
+    fn emit_table_ref(&mut self, source: &TableRef) -> Result<String> {
+        Ok(match source {
             TableRef::Scan {
                 table,
                 alias,
                 final_,
                 ..
-            } => {
-                if *final_ {
-                    Ok(format!("{table} AS {alias} FINAL"))
-                } else {
-                    Ok(format!("{table} AS {alias}"))
-                }
-            }
+            } => format!("{table} AS {alias}{}", if *final_ { " FINAL" } else { "" }),
             TableRef::Join {
                 join_type,
                 left,
                 right,
                 on,
             } => {
-                let left_sql = self.emit_table_ref(left)?;
-                let right_sql = self.emit_table_ref(right)?;
+                let (left, right) = (self.emit_table_ref(left)?, self.emit_table_ref(right)?);
                 if *join_type == JoinType::Cross {
-                    Ok(format!("{left_sql} INNER JOIN {right_sql} ON 1"))
+                    format!("{left} INNER JOIN {right} ON 1")
                 } else {
-                    let on_expr = self.emit_expr(on);
-                    Ok(format!(
-                        "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
-                    ))
+                    format!("{left} {join_type} JOIN {right} ON {}", self.emit_expr(on)?)
                 }
             }
             TableRef::Union { queries, alias } => {
-                let union_parts: Vec<String> = queries
+                let arms = queries
                     .iter()
-                    .map(|q| self.emit_query(q))
-                    .collect::<Result<_>>()?;
-                Ok(format!("({}) AS {alias}", union_parts.join(" UNION ALL ")))
+                    .map(|query| self.emit_query(query))
+                    .collect::<Result<Vec<_>>>()?;
+                format!("({}) AS {alias}", arms.join(" UNION ALL "))
             }
             TableRef::Subquery { query, alias } => {
-                let inner_sql = self.emit_query(query)?;
-                Ok(format!("({inner_sql}) AS {alias}"))
+                format!("({}) AS {alias}", self.emit_query(query)?)
             }
-        }
+        })
     }
 }
 
@@ -493,59 +442,43 @@ pub(crate) fn function_name(function: Function) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{JoinType, OrderExpr, SelectExpr};
+    use crate::ast::{OrderExpr, SelectExpr};
 
-    fn empty_ctx() -> ResultContext {
-        ResultContext::new()
+    fn emit(query: Query) -> ParameterizedQuery {
+        codegen(
+            &Node::Query(Box::new(query)),
+            ResultContext::new(),
+            QueryConfig::default(),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn simple_select() {
-        let q = Query {
+    fn select_binds_values_and_keeps_public_labels() {
+        let result = emit(Query {
             select: vec![
-                SelectExpr {
-                    expr: Expr::col("n", "id"),
-                    alias: Some("node_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("n", "label"),
-                    alias: Some("node_type".into()),
-                },
+                SelectExpr::new(Expr::col("n", "id"), "node_id"),
+                SelectExpr::new(Expr::col("n", "label"), "node_type"),
             ],
             from: TableRef::scan("nodes", "n"),
             where_clause: Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
             limit: Some(10),
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        });
         assert_eq!(
             result.sql,
             "SELECT n.id AS node_id, n.label AS node_type FROM nodes AS n WHERE (n.label = {p0:String}) LIMIT 10"
         );
-        assert_eq!(
-            result.params.get("p0").map(|p| &p.value),
-            Some(&Value::from("User"))
-        );
+        assert_eq!(result.params["p0"].value, "User");
     }
 
     #[test]
-    fn with_join() {
-        let q = Query {
+    fn joins_and_grouped_having_keep_their_inputs() {
+        let count = Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id")));
+        let result = emit(Query {
             select: vec![
-                SelectExpr {
-                    expr: Expr::col("n", "id"),
-                    alias: Some("node_id".into()),
-                },
-                SelectExpr {
-                    expr: Expr::col("e", "label"),
-                    alias: Some("rel_type".into()),
-                },
+                SelectExpr::new(Expr::col("n", "label"), "type"),
+                SelectExpr::new(count.clone(), "count"),
             ],
             from: TableRef::join(
                 JoinType::Inner,
@@ -553,100 +486,28 @@ mod tests {
                 TableRef::scan("edges", "e"),
                 Expr::eq(Expr::col("n", "id"), Expr::col("e", "source_id")),
             ),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT n.id AS node_id, e.label AS rel_type FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id)"
-        );
-    }
-
-    #[test]
-    fn aggregation() {
-        let q = Query {
-            select: vec![
-                SelectExpr {
-                    expr: Expr::col("n", "label"),
-                    alias: Some("type".into()),
-                },
-                SelectExpr {
-                    expr: Expr::aggregate(
-                        crate::input::AggFunction::Count,
-                        Some(Expr::col("n", "id")),
-                    ),
-                    alias: Some("count".into()),
-                },
-            ],
-            from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
-            order_by: vec![OrderExpr {
-                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
-                desc: true,
-            }],
+            having: Some(Expr::binary(Op::Gt, count.clone(), Expr::lit(5))),
+            order_by: vec![OrderExpr::desc(count)],
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        });
         assert_eq!(
             result.sql,
-            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label ORDER BY COUNT(n.id) DESC"
+            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n INNER JOIN edges AS e ON (n.id = e.source_id) GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64}) ORDER BY COUNT(n.id) DESC"
         );
     }
 
     #[test]
-    fn in_operator() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("nodes", "n"),
-            where_clause: Some(Expr::binary(
-                Op::In,
-                Expr::col("n", "label"),
-                Expr::lit(Value::Array(vec![
-                    Value::from("User"),
-                    Value::from("Project"),
-                    Value::from("Group"),
-                ])),
-            )),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT n.id FROM nodes AS n WHERE n.label IN ({p0:String}, {p1:String}, {p2:String})"
-        );
-    }
-
-    #[test]
-    fn and_or_conditions() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
+    fn null_boolean_and_membership_expressions_render() {
+        let result = emit(Query {
+            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
             from: TableRef::scan("nodes", "n"),
             where_clause: Expr::and_all([
-                Some(Expr::eq(Expr::col("n", "label"), Expr::lit("User"))),
+                Some(Expr::binary(
+                    Op::In,
+                    Expr::col("n", "label"),
+                    Expr::lit(serde_json::json!(["User", "Project"])),
+                )),
                 Expr::or_all([
                     Some(Expr::binary(
                         Op::Gt,
@@ -657,248 +518,42 @@ mod tests {
                 ]),
             ]),
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT n.id FROM nodes AS n WHERE ((n.label = {p0:String}) AND ((n.created_at > {p1:String}) OR (n.deleted_at IS NULL)))"
+        });
+        assert!(result.sql.contains("n.label IN ({p0:String}, {p1:String})"));
+        assert!(
+            result
+                .sql
+                .contains("((n.created_at > {p2:String}) OR (n.deleted_at IS NULL))")
         );
     }
 
     #[test]
-    fn literals() {
-        let mut ctx = Context::new();
-
-        assert_eq!(ctx.emit_literal(&Value::from("hello")), "{p0:String}");
-        assert_eq!(ctx.emit_literal(&Value::from(42)), "{p1:Int64}");
-        assert_eq!(ctx.emit_literal(&Value::from(true)), "{p2:Bool}");
-        assert_eq!(ctx.emit_literal(&Value::Null), "NULL");
+    fn parameters_are_interned_by_value_and_type() {
+        let mut context = Context::default();
+        assert_eq!(context.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(context.emit_literal(&Value::from("dup")), "{p0:String}");
+        assert_eq!(context.emit_literal(&Value::from(42)), "{p1:Int64}");
+        assert_eq!(context.emit_literal(&Value::from(true)), "{p2:Bool}");
+        assert_eq!(context.emit_literal(&Value::Null), "NULL");
+        let array = serde_json::json!(["1/2/", "1/3/"]);
+        let ty = SqlType::Array(crate::ast::ScalarType::String);
+        assert_eq!(context.emit_param(ty, &array), "{p3:Array(String)}");
+        assert_eq!(context.emit_param(ty, &array), "{p3:Array(String)}");
         assert_eq!(
-            ctx.emit_literal(&Value::Array(vec![Value::from(1), Value::from(2)])),
-            "({p3:Int64}, {p4:Int64})"
-        );
-    }
-
-    #[test]
-    fn param_interning() {
-        let mut ctx = Context::new();
-        let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
-        let array_type = SqlType::Array(crate::ast::ScalarType::String);
-
-        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
-        assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
-        assert_eq!(ctx.emit_literal(&Value::from("other")), "{p1:String}");
-        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
-        assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
-        assert_eq!(
-            ctx.emit_param(
+            context.emit_param(
                 SqlType::Timestamp {
                     precision: 6,
                     timezone: Some(crate::ast::TimeZone::Utc)
                 },
                 &Value::from("dup")
             ),
-            "{p3:DateTime64(6, 'UTC')}"
+            "{p4:DateTime64(6, 'UTC')}"
         );
-        assert_eq!(ctx.params.into_map().len(), 4);
+        assert_eq!(context.params.into_map().len(), 5);
     }
 
     #[test]
-    fn unary_ops() {
-        let mut ctx = Context::new();
-
-        assert_eq!(
-            ctx.emit_expr(&Expr::unary(Op::IsNull, Expr::col("t", "deleted_at"))),
-            "(t.deleted_at IS NULL)"
-        );
-        assert_eq!(
-            ctx.emit_expr(&Expr::unary(Op::Not, Expr::col("t", "active"))),
-            "(NOT t.active)"
-        );
-    }
-
-    #[test]
-    fn edge_type_filter() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_user", "u"),
-                TableRef::scan("gl_edge", "e"),
-                Expr::and(
-                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
-                    Expr::eq(
-                        Expr::col("e", "relationship_kind"),
-                        Expr::string("AUTHORED"),
-                    ),
-                ),
-            ),
-            ..Default::default()
-        };
-        let r = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(
-            r.sql.contains("e.relationship_kind = {p0:String}"),
-            "{}",
-            r.sql
-        );
-        assert_eq!(
-            r.params.get("p0").map(|p| &p.value),
-            Some(&Value::String("AUTHORED".into()))
-        );
-
-        let type_filter = Expr::col_in(
-            "e",
-            "relationship_kind",
-            SqlType::String,
-            vec![
-                Value::String("AUTHORED".into()),
-                Value::String("CONTAINS".into()),
-            ],
-        )
-        .unwrap();
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_user", "u"),
-                TableRef::scan("gl_edge", "e"),
-                Expr::and(
-                    Expr::eq(Expr::col("u", "id"), Expr::col("e", "source")),
-                    type_filter,
-                ),
-            ),
-            ..Default::default()
-        };
-        let r = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(
-            r.sql.contains("e.relationship_kind IN {p0:Array(String)}"),
-            "{}",
-            r.sql
-        );
-        assert_eq!(r.params.len(), 1);
-    }
-
-    #[test]
-    fn result_context_preserved() {
-        let mut ctx = ResultContext::new();
-        ctx.add_node("u", "User");
-
-        let q = Query {
-            select: vec![],
-            from: TableRef::scan("nodes", "n"),
-            ..Default::default()
-        };
-
-        let result = codegen(&Node::Query(Box::new(q)), ctx, QueryConfig::default()).unwrap();
-        assert_eq!(result.result_context.len(), 1);
-        assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
-    }
-
-    #[test]
-    fn having_clause() {
-        let q = Query {
-            select: vec![
-                SelectExpr::new(Expr::col("n", "label"), "type"),
-                SelectExpr::new(
-                    Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
-                    "count",
-                ),
-            ],
-            from: TableRef::scan("nodes", "n"),
-            group_by: vec![Expr::col("n", "label")],
-            having: Some(Expr::binary(
-                Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
-                Expr::lit(5),
-            )),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT n.label AS type, COUNT(n.id) AS count FROM nodes AS n GROUP BY n.label HAVING (COUNT(n.id) > {p0:Int64})"
-        );
-    }
-
-    #[test]
-    fn having_without_group_by() {
-        let q = Query {
-            select: vec![SelectExpr::new(
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
-                "total",
-            )],
-            from: TableRef::scan("nodes", "n"),
-            having: Some(Expr::binary(
-                Op::Gt,
-                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
-                Expr::lit(0),
-            )),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(result.sql.contains("HAVING"));
-        assert!(!result.sql.contains("GROUP BY"));
-    }
-
-    #[test]
-    fn subquery_in_from() {
-        let inner = Query {
-            select: vec![
-                SelectExpr::new(Expr::col("p", "id"), "id"),
-                SelectExpr::new(Expr::col("p", "name"), "name"),
-            ],
-            from: TableRef::scan("gl_project", "p"),
-            where_clause: Some(Expr::eq(Expr::col("p", "name"), Expr::lit("test"))),
-            ..Default::default()
-        };
-
-        let outer = Query {
-            select: vec![SelectExpr::new(Expr::col("sub", "id"), "id")],
-            from: TableRef::subquery(inner, "sub"),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(outer)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(result.sql.contains("(SELECT"));
-        assert!(result.sql.contains(") AS sub"));
-        assert!(result.sql.contains("gl_project AS p"));
-    }
-
-    #[test]
-    fn subquery_in_join() {
+    fn subquery_join_and_scalar_aggregate_render() {
         let inner = Query {
             select: vec![SelectExpr::new(Expr::col("e", "source_id"), "source_id")],
             from: TableRef::scan("gl_edge", "e"),
@@ -912,68 +567,34 @@ mod tests {
             )),
             ..Default::default()
         };
-
-        let outer = Query {
+        let result = emit(Query {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::join(
                 JoinType::Inner,
                 TableRef::scan("gl_user", "u"),
-                TableRef::subquery(inner, "deduped_e"),
-                Expr::eq(Expr::col("u", "id"), Expr::col("deduped_e", "source_id")),
+                TableRef::subquery(inner, "deduped"),
+                Expr::eq(Expr::col("u", "id"), Expr::col("deduped", "source_id")),
             ),
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(outer)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        });
         assert!(result.sql.contains("INNER JOIN (SELECT"));
         assert!(result.sql.contains("HAVING"));
-        assert!(result.sql.contains(") AS deduped_e ON"));
-    }
-
-    #[test]
-    fn union_all_in_cte_body() {
-        use crate::ast::Cte;
-
-        let q = Query {
-            ctes: vec![Cte {
-                name: "path_cte".into(),
-                query: Box::new(Query {
-                    select: vec![SelectExpr::new(Expr::col("p", "id"), "node_id")],
-                    from: TableRef::scan("gl_project", "p"),
-                    union_all: vec![Query {
-                        select: vec![SelectExpr::new(Expr::col("c", "node_id"), "node_id")],
-                        from: TableRef::scan("path_cte", "c"),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }),
-                recursive: true,
-                materialized: false,
-            }],
-            select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
-            from: TableRef::scan("path_cte", "r"),
-            limit: Some(10),
+        assert!(result.sql.contains(") AS deduped ON"));
+        let result = emit(Query {
+            select: vec![SelectExpr::new(
+                Expr::aggregate(crate::input::AggFunction::Count, None),
+                "total",
+            )],
+            from: TableRef::scan("nodes", "n"),
+            having: Some(Expr::lit(true)),
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(result.sql.contains("WITH RECURSIVE"));
-        assert!(result.sql.contains("UNION ALL"));
+        });
+        assert!(result.sql.contains("HAVING") && !result.sql.contains("GROUP BY"));
     }
 
     #[test]
-    fn union_all_in_top_level_query() {
-        let q = Query {
+    fn union_limit_applies_to_all_arms() {
+        let result = emit(Query {
             select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
             from: TableRef::scan("gl_user", "u"),
             union_all: vec![Query {
@@ -983,59 +604,45 @@ mod tests {
             }],
             limit: Some(10),
             ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        // Outer LIMIT must apply to the whole union, not just the last branch.
-        // ClickHouse binds a trailing LIMIT after a bare UNION ALL to the last
-        // SELECT only, so the union is wrapped in a subquery.
+        });
         assert_eq!(
             result.sql,
-            "SELECT * FROM (SELECT u.id AS id FROM gl_user AS u UNION ALL \
-             SELECT p.id AS id FROM gl_project AS p) LIMIT 10"
+            "SELECT * FROM (SELECT u.id AS id FROM gl_user AS u UNION ALL SELECT p.id AS id FROM gl_project AS p) LIMIT 10"
         );
     }
 
     #[test]
-    fn table_ref_union_emits_derived_table() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("all_edges", "id"), "id")],
-            from: TableRef::Union {
-                queries: vec![
-                    Query {
-                        select: vec![SelectExpr::new(Expr::col("e1", "source"), "id")],
-                        from: TableRef::scan("gl_edge", "e1"),
-                        ..Default::default()
-                    },
-                    Query {
-                        select: vec![SelectExpr::new(Expr::col("e2", "source"), "id")],
-                        from: TableRef::scan("gl_edge", "e2"),
-                        ..Default::default()
-                    },
-                ],
-                alias: "all_edges".into(),
-            },
+    fn recursive_ctes_and_derived_unions_render() {
+        let arm = Query {
+            select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+            from: TableRef::scan("gl_project", "p"),
             ..Default::default()
         };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
+        let result = emit(Query {
+            ctes: vec![Cte {
+                name: "paths".into(),
+                query: Box::new(Query {
+                    union_all: vec![arm.clone()],
+                    ..arm.clone()
+                }),
+                recursive: true,
+                materialized: false,
+            }],
+            select: vec![SelectExpr::new(Expr::col("all", "id"), "id")],
+            from: TableRef::Union {
+                queries: vec![arm.clone(), arm],
+                alias: "all".into(),
+            },
+            ..Default::default()
+        });
+        assert!(result.sql.contains("WITH RECURSIVE"));
         assert!(result.sql.contains("UNION ALL"));
-        assert!(result.sql.contains(") AS all_edges"));
+        assert!(result.sql.contains(") AS all"));
     }
 
     #[test]
-    fn insert_values() {
-        let ins = Insert::new(
+    fn insert_binds_values_and_omits_query_settings() {
+        let insert = Insert::new(
             "gl_schema_versions",
             vec!["key".into(), "version".into()],
             vec![
@@ -1043,68 +650,26 @@ mod tests {
                 vec![Expr::string("datalake"), Expr::int(1)],
             ],
         );
-
         let result = codegen(
-            &Node::Insert(Box::new(ins)),
-            empty_ctx(),
-            QueryConfig::default(),
+            &Node::Insert(Box::new(insert)),
+            ResultContext::new(),
+            QueryConfig {
+                use_query_cache: Some(true),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(
             result.sql,
             "INSERT INTO gl_schema_versions (key, version) VALUES ({p0:String}, {p1:Int64}), ({p2:String}, {p3:Int64})"
         );
-        assert_eq!(
-            result.params.get("p0").map(|p| &p.value),
-            Some(&Value::String("graph".into()))
-        );
-        assert_eq!(
-            result.params.get("p1").map(|p| &p.value),
-            Some(&Value::Number(3.into()))
-        );
+        assert_eq!(result.params["p0"].value, "graph");
+        assert_eq!(result.params["p1"].value, 3);
     }
 
     #[test]
-    fn insert_skips_settings() {
-        let ins = Insert::new("t", vec!["a".into()], vec![vec![Expr::int(1)]]);
-
-        let cfg = QueryConfig {
-            max_execution_time: None,
-            use_query_cache: Some(true),
-            query_cache_ttl: Some(60),
-            ..Default::default()
-        };
-        let result = codegen(&Node::Insert(Box::new(ins)), empty_ctx(), cfg).unwrap();
-        assert!(
-            !result.sql.contains("SETTINGS"),
-            "INSERT should not have SETTINGS: {}",
-            result.sql,
-        );
-    }
-
-    #[test]
-    fn scan_final() {
-        let q = Query {
-            select: vec![SelectExpr::new(Expr::col("t", "id"), "id")],
-            from: TableRef::scan_final("gl_schema_versions", "t"),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            result.sql,
-            "SELECT t.id AS id FROM gl_schema_versions AS t FINAL"
-        );
-    }
-
-    #[test]
-    fn emit_simple_query_with_final_and_params() {
-        let q = Query {
+    fn trusted_current_read_keeps_parameters() {
+        let query = Query {
             select: vec![
                 SelectExpr::new(Expr::col("t", "key"), "key"),
                 SelectExpr::new(Expr::col("t", "version"), "version"),
@@ -1113,181 +678,71 @@ mod tests {
             where_clause: Some(Expr::eq(Expr::col("t", "key"), Expr::string("graph"))),
             ..Default::default()
         };
-
-        let (sql, params) = emit_simple_query(&Node::Query(Box::new(q))).unwrap();
+        let (sql, params) = emit_simple_query(&Node::Query(Box::new(query))).unwrap();
         assert_eq!(
             sql,
             "SELECT t.key AS key, t.version AS version FROM gl_schema_versions AS t FINAL WHERE (t.key = {p0:String})"
         );
-        assert_eq!(params.len(), 1);
-        assert_eq!(
-            params.get("p0").map(|p| &p.value),
-            Some(&Value::String("graph".into()))
-        );
+        assert_eq!(params["p0"].value, "graph");
     }
 
     #[test]
-    fn render_replaces_scalar_params() {
-        let mut params = HashMap::new();
-        params.insert(
-            "p0".into(),
-            ParamValue {
-                data_type: SqlType::String,
-                value: Value::from("User"),
-            },
-        );
-        params.insert(
-            "p1".into(),
-            ParamValue {
-                data_type: SqlType::String,
-                value: Value::from("active"),
-            },
-        );
-
-        let pq = ParameterizedQuery {
-            sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
-            params,
-            result_context: empty_ctx(),
-            query_config: QueryConfig::default(),
-            dialect: SqlDialect::ClickHouse,
-        };
-
-        assert_eq!(
-            pq.render(),
-            "SELECT * FROM t WHERE kind = 'User' AND state = 'active'"
-        );
-    }
-
-    #[test]
-    fn render_replaces_array_params() {
-        let mut params = HashMap::new();
-        params.insert(
-            "p0".into(),
-            ParamValue {
-                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::String),
-                value: serde_json::json!(["a", "b"]),
-            },
-        );
-        params.insert(
-            "p1".into(),
-            ParamValue {
-                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::Int64),
-                value: serde_json::json!([10, 20]),
-            },
-        );
-
-        let pq = ParameterizedQuery {
-            sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
-            params,
-            result_context: empty_ctx(),
-            query_config: QueryConfig::default(),
-            dialect: SqlDialect::ClickHouse,
-        };
-
-        assert_eq!(
-            pq.render(),
-            "SELECT * FROM t WHERE x IN ['a', 'b'] AND y IN [10, 20]"
-        );
-    }
-
-    #[test]
-    fn query_settings_emitted_after_limit() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("nodes", "n"),
+    fn settings_and_result_contract_survive_codegen() {
+        let query = Query {
+            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
+            from: TableRef::scan_final("nodes", "n"),
             limit: Some(100),
             ..Default::default()
         };
-
-        let cfg = QueryConfig {
+        assert!(!emit(query.clone()).sql.contains("SETTINGS"));
+        let mut context = ResultContext::new();
+        context.add_node("u", "User");
+        let mut config = QueryConfig {
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
-            ..QueryConfig::default()
-        };
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
-        assert!(
-            result.sql.contains("LIMIT 100 SETTINGS"),
-            "SETTINGS should come after LIMIT: {}",
-            result.sql,
-        );
-        assert!(result.sql.contains("use_query_cache = 1"), "{}", result.sql);
-        assert!(
-            result.sql.contains("query_cache_ttl = 60"),
-            "{}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn compiler_derived_settings_reach_the_settings_clause() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan_final("nodes", "n"),
             ..Default::default()
         };
-        let mut config = QueryConfig::default();
         config.compiler_derived.optimize_move_to_prewhere_if_final = true;
         config
             .compiler_derived
             .use_index_for_in_with_subqueries_max_values = Some(100_000);
-
-        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), config).unwrap();
-        assert!(
-            result
-                .sql
-                .contains("optimize_move_to_prewhere_if_final = 1"),
-            "{}",
-            result.sql
-        );
-        assert!(
-            result
-                .sql
-                .contains("use_index_for_in_with_subqueries_max_values = 100000"),
-            "{}",
-            result.sql
-        );
+        let result = codegen(&Node::Query(Box::new(query)), context, config).unwrap();
+        for expected in [
+            "LIMIT 100 SETTINGS",
+            "use_query_cache = 1",
+            "query_cache_ttl = 60",
+            "optimize_move_to_prewhere_if_final = 1",
+            "use_index_for_in_with_subqueries_max_values = 100000",
+        ] {
+            assert!(result.sql.contains(expected), "{}", result.sql);
+        }
+        assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
 
     #[test]
-    fn no_query_settings_when_empty() {
-        let q = Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("n", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("nodes", "n"),
-            ..Default::default()
-        };
-
-        let result = codegen(
-            &Node::Query(Box::new(q)),
-            empty_ctx(),
-            QueryConfig::default(),
-        )
-        .unwrap();
-        assert!(
-            !result.sql.contains("SETTINGS"),
-            "no SETTINGS with default config: {}",
-            result.sql
-        );
-    }
-
-    #[test]
-    fn render_leaves_unknown_params() {
-        let pq = ParameterizedQuery {
-            sql: "SELECT {p0:String} AND {p1:Int64}".into(),
-            params: HashMap::new(),
-            result_context: empty_ctx(),
+    fn rendered_parameters_preserve_unknown_placeholders() {
+        let query = ParameterizedQuery {
+            sql: "SELECT {p0:String}, {p1:Array(Int64)}, {unknown:String}".into(),
+            params: HashMap::from([
+                (
+                    "p0".into(),
+                    ParamValue {
+                        data_type: SqlType::String,
+                        value: Value::from("User"),
+                    },
+                ),
+                (
+                    "p1".into(),
+                    ParamValue {
+                        data_type: SqlType::Array(crate::ast::ScalarType::Int64),
+                        value: serde_json::json!([10, 20]),
+                    },
+                ),
+            ]),
+            result_context: ResultContext::new(),
             query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
         };
-
-        assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
+        assert_eq!(query.render(), "SELECT 'User', [10, 20], {unknown:String}");
     }
 }

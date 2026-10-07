@@ -1,28 +1,25 @@
+use super::access::{AccessPlan, entity, needs_values};
+use super::keys::KeyRead;
 use super::*;
-use crate::input::{Direction, Input};
+use crate::input::{
+    Direction, Input, InputNode, InputRelationship, QueryType, RelationshipSelection,
+};
 use std::collections::HashMap;
 
-use super::access::{AccessPlan, entity};
+struct EdgeAccess<'input, 'catalog> {
+    relation: RelationId,
+    table: &'catalog str,
+    endpoints: [(&'input str, &'static str); 2],
+    predicates: Vec<Expression<'catalog>>,
+    memberships: Vec<(&'static str, (DefinitionId, OutputId))>,
+}
 
-impl<'catalog, M: QueryDataModel + ?Sized>
-    QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
-{
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
     pub(super) fn join_edges<'input>(
         &mut self,
         input: &'input Input,
-        plan: &mut AccessPlan<'input, 'catalog>,
-    ) -> Result<PhysicalOperation<'catalog>> {
-        let root = plan.root;
-        let relations = &mut plan.relations;
-        let node_operations = &mut plan.node_operations;
-        let node_predicates = &mut plan.node_predicates;
-        let elided = &mut plan.elided;
-        let entity = |alias: &str| entity(input, alias);
-        let mut operation = PhysicalOperation::One;
-        let mut edges = Vec::new();
-        let mut filter_keys = HashMap::new();
-        let mut key_scans = Vec::new();
-        let mut tagged = HashSet::new();
+        plan: &mut AccessPlan<'input, 'a>,
+    ) -> Result<PhysicalOperation<'a>> {
         let variable = input
             .relationships
             .iter()
@@ -40,463 +37,149 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         {
             order.reverse();
         }
-        for (index, input_index) in order.into_iter().enumerate() {
-            let relationship = &input.relationships[input_index];
-            if relationship.direction == Direction::Both {
-                return Err(GraphError::UnsupportedInput(
-                    "variable or bidirectional traversal".into(),
-                ));
-            }
-            let table = self
-                .catalog
-                .relationship_table_for_query(relationship.types.as_slice());
-            let edge = if relationship.hops.max > 1 {
-                self.hop_relation(root, relationship, input_index)?
-            } else {
-                self.scan(root, table, format!("e{index}"))?
-            };
-            self.bind_scan(edge, ScanInput::Relationship(input_index))?;
-            let (start, end) = relationship.direction.edge_columns();
-            let read = if input.relationships.len() == 1 || relationship.hops.max > 1 {
-                PhysicalOperation::source(edge)
-            } else {
-                PhysicalOperation::current(edge)
-            };
-            let mut scan = read;
-            if let crate::input::RelationshipSelection::Kinds(kinds) = &relationship.types {
-                let column = Expression::Column(self.column(edge, "relationship_kind")?);
-                scan = scan.filter(if let [kind] = kinds.as_slice() {
-                    Expression::equal(column, Expression::Text(kind.clone()))
-                } else {
-                    Expression::In(
-                        Box::new(column),
-                        Box::new(Expression::Strings(kinds.clone())),
-                    )
-                });
-            }
-            for (column, kind) in [
-                (
-                    "source_kind",
-                    if relationship.direction == Direction::Incoming {
-                        entity(&relationship.to)?
-                    } else {
-                        entity(&relationship.from)?
-                    },
-                ),
-                (
-                    "target_kind",
-                    if relationship.direction == Direction::Incoming {
-                        entity(&relationship.from)?
-                    } else {
-                        entity(&relationship.to)?
-                    },
-                ),
-            ] {
-                scan = scan.filter(Expression::equal(
-                    Expression::Column(self.column(edge, column)?),
-                    Expression::Text(kind.into()),
-                ));
-            }
-            scan = scan.filter(Expression::equal(
-                Expression::Column(self.column(edge, "_deleted")?),
-                Expression::Boolean(false),
-            ));
-            for (column, filters) in &relationship.filters {
-                for filter in filters {
-                    scan = scan.filter(
-                        self.filter_predicate(
-                            self.column(edge, column)?,
-                            self.catalog
-                                .stored_table(table)
-                                .and_then(|table| table.column(column))
-                                .ok_or(GraphError::MissingOutput)?,
-                            filter,
-                        )?,
-                    );
-                }
-            }
-            let endpoints = [
-                (relationship.from.as_str(), start),
-                (relationship.to.as_str(), end),
-            ];
-            let mut pushed = Vec::new();
-            for (alias, _) in endpoints {
-                let node = input
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == alias)
-                    .ok_or(GraphError::MissingOutput)?;
-                let mut properties = node.filters.iter().collect::<Vec<_>>();
-                properties.sort_by_key(|(name, _)| *name);
-                for (property, filters) in properties {
-                    if let Some((column, values)) = super::predicates::edge_tag(
-                        self.catalog,
-                        node,
-                        property,
-                        filters,
-                        relationship,
-                    ) && tagged.insert((alias, property.as_str()))
-                    {
-                        for values in values {
-                            let predicate = if values.is_empty() {
-                                Expression::Boolean(false)
-                            } else {
-                                Expression::HasAny(
-                                    Box::new(Expression::Column(self.column(edge, column)?)),
-                                    Box::new(Expression::Array(
-                                        values.into_iter().map(Expression::Text).collect(),
-                                    )),
-                                )
-                            };
-                            scan = scan.filter(predicate);
-                        }
-                    }
-                }
-            }
-            for (alias, _) in endpoints {
-                for predicate in &node_predicates[alias] {
-                    let mut names = Vec::new();
-                    predicate.columns(&mut |column| {
-                        if let Port::Stored(stored) = column.port {
-                            names.push(stored.name());
-                        }
-                        Ok(())
-                    })?;
-                    if names.len() != 1
-                        || ontology::EDGE_RESERVED_COLUMNS.contains(&names[0])
-                        || matches!(names[0], "id" | "_deleted" | "_version")
-                        || !input
-                            .nodes
-                            .iter()
-                            .find(|node| node.id == alias)
-                            .is_some_and(|node| node.filters.contains_key(names[0]))
-                        || self
-                            .catalog
-                            .stored_table(table)
-                            .and_then(|table| table.column(names[0]))
-                            .is_none()
-                    {
-                        continue;
-                    }
-                    let name = names[0];
-                    let predicate = predicate.rebind(&|_| self.column(edge, name))?;
-                    if !pushed.contains(&predicate) {
-                        pushed.push(predicate.clone());
-                        scan = scan.filter(predicate);
-                    }
-                }
-            }
-            for (alias, column) in endpoints {
+        let mut tagged = HashSet::new();
+        let mut candidates = HashMap::new();
+        let mut edges: Vec<EdgeAccess<'input, 'a>> = Vec::new();
+        let mut keys = Vec::new();
+        let mut operation = None;
+        for (position, index) in order.into_iter().enumerate() {
+            let relationship = &input.relationships[index];
+            let mut access =
+                self.edge_access(input, plan, relationship, index, position, &mut tagged)?;
+            for (alias, column) in access.endpoints {
                 let node = input
                     .nodes
                     .iter()
                     .find(|node| node.id == alias)
                     .ok_or(GraphError::MissingOutput)?;
                 if node.id_property == "id" {
-                    for predicate in
-                        Expression::identity_predicates(self.column(edge, column)?, node)
-                    {
-                        scan = scan.filter(predicate);
-                    }
+                    access.predicates.extend(Expression::identity_predicates(
+                        self.column(access.relation, column)?,
+                        node,
+                    ));
                 }
-                let ordered = input
-                    .order_by
-                    .as_ref()
-                    .is_some_and(|order| order.node == alias);
-                let needs_values = ordered
-                    || input
-                        .aggregation
-                        .group_by
-                        .iter()
-                        .any(|group| group.node() == alias)
-                    || input.aggregation.metrics.iter().any(|metric| {
-                        metric.expr.node() == alias && metric.expr.property().is_some()
-                    })
-                    || input.join_predicates.iter().any(|predicate| {
-                        predicate.lhs_node == alias || predicate.rhs_node == alias
-                    });
-                let filter_only = !needs_values
+                let needed = needs_values(input, node);
+                let filter_only = !needed
                     && !node.filters.is_empty()
                     && input.relationships.len() >= 2
-                    && relations.contains_key(alias);
-                let selective = !node.node_ids.is_empty()
-                    || node.id_range.is_some()
-                    || node.filters.keys().any(|property| {
-                        self.catalog
-                            .property(entity(alias).unwrap(), property)
-                            .is_some_and(|property| {
-                                self.catalog.property_selectivity(property.id)
-                                    == ontology::FieldSelectivity::High
-                            })
-                    });
-                if !variable && (needs_values && selective || filter_only) {
-                    let first = !filter_keys.contains_key(alias);
-                    let candidate = if let Some(candidate) = filter_keys.get(alias) {
-                        *candidate
-                    } else if elided.contains(alias) {
-                        let relation = relations[alias];
-                        let body = relation.block;
-                        let output = self.project(
-                            body,
-                            "id",
-                            Expression::Column(self.stored_column(relation, "id")?),
-                        )?;
-                        let definition =
-                            self.define(root, body, format!("_filter_{alias}"), false)?;
-                        let candidate = (definition, output);
-                        filter_keys.insert(alias, candidate);
-                        candidate
+                    && plan.relations.contains_key(alias);
+                if variable || !(needed && self.selective_node(node) || filter_only) {
+                    continue;
+                }
+                let first = !candidates.contains_key(alias);
+                let candidate = if let Some(candidate) = candidates.get(alias) {
+                    *candidate
+                } else {
+                    let candidate = if plan.elided.contains(alias) {
+                        let body = plan.relations[alias].block;
+                        let output = self
+                            .outputs(body)?
+                            .next()
+                            .ok_or(GraphError::EmptyProjection)?;
+                        (
+                            self.define(plan.root, body, format!("_filter_{alias}"))?,
+                            output,
+                        )
                     } else {
-                        let candidate = self.candidate(
-                            root,
-                            relations[alias],
+                        self.candidate(
+                            plan.root,
+                            (
+                                plan.relations[alias],
+                                if filter_only {
+                                    KeyRead::Current
+                                } else {
+                                    KeyRead::Latest
+                                },
+                            ),
                             "id",
-                            &node_predicates[alias],
+                            &plan.node_predicates[alias],
                             &[],
                             &format!("_filter_{alias}"),
-                        )?;
-                        let body = candidate.1.block;
-                        let relation = self.input_node(
-                            body,
-                            input
-                                .nodes
-                                .iter()
-                                .position(|node| node.id == alias)
-                                .unwrap(),
-                        )?;
-                        if filter_only {
-                            *self
-                                .operation_mut(body)?
-                                .source_mut(relation)
-                                .ok_or(GraphError::MissingOutput)? =
-                                PhysicalOperation::current(relation);
-                        } else {
-                            let version = self.stored_column(relation, "_version")?;
-                            let operation = self.operation_mut(body)?;
-                            *operation = std::mem::replace(operation, PhysicalOperation::One)
-                                .latest(version, None);
-                        }
-                        filter_keys.insert(alias, candidate);
-                        candidate
+                        )?
                     };
-                    if first || !filter_only {
-                        scan =
-                            self.narrow(root, scan, self.stored_column(edge, column)?, candidate)?;
-                    }
+                    candidates.insert(alias, candidate);
+                    candidate
+                };
+                if first || !filter_only {
+                    access.memberships.push((column, candidate));
                 }
             }
-            let mut predicates = Vec::new();
-            let mut memberships = Vec::new();
-            let mut filtered = &scan;
-            loop {
-                match filtered {
-                    PhysicalOperation::Filter { input, predicate } => {
-                        predicates.push(predicate.clone());
-                        filtered = input;
-                    }
-                    PhysicalOperation::Join {
-                        left,
-                        right,
-                        kind: JoinKind::Membership,
-                        condition,
-                    } => {
-                        let (
-                            PhysicalOperation::Source { relation, .. },
-                            Expression::Equal(value, key),
-                        ) = (right.as_ref(), condition)
-                        else {
-                            return Err(GraphError::JoinShape);
-                        };
-                        let (
-                            Source::Definition(definition),
-                            Expression::Column(value),
-                            Expression::Column(key),
-                        ) = (
-                            self.relation(*relation)?.source,
-                            value.as_ref(),
-                            key.as_ref(),
-                        )
-                        else {
-                            return Err(GraphError::JoinShape);
-                        };
-                        let (Port::Stored(stored), Port::Output(output)) = (value.port, key.port)
-                        else {
-                            return Err(GraphError::JoinShape);
-                        };
-                        memberships.push((stored.name(), (definition, output), *relation));
-                        filtered = left;
-                    }
-                    _ => break,
-                }
-            }
-            predicates.reverse();
-            memberships.reverse();
-            key_scans.push(KeyScan {
-                relation: edge,
-                predicates,
-                memberships: memberships
-                    .iter()
-                    .map(|(name, key, _)| (*name, *key))
-                    .collect(),
+            keys.push(KeyScan {
+                relation: access.relation,
+                predicates: access.predicates.clone(),
+                memberships: access.memberships.clone(),
             });
-            if input.query_type == crate::input::QueryType::Aggregation
+            let cascade = if input.relationships.len() > 1 && !variable {
+                if let Some(previous) = edges.last().and_then(|edge| shared_endpoint(edge, &access))
+                {
+                    self.cascade_keys(plan.root, input, &keys[..position], previous.0)?
+                        .map(|key| {
+                            self.stored_column(access.relation, previous.1)
+                                .map(|value| (value, key))
+                        })
+                        .transpose()?
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if input.query_type == QueryType::Aggregation
                 && input.relationships.len() == 1
                 && !variable
             {
-                let deleted = self.stored_column(edge, "_deleted")?;
-                let deletion =
-                    Expression::equal(Expression::Column(deleted), Expression::Boolean(false));
-                let predicates = &key_scans[index].predicates;
-                plan.aggregate_condition = predicates
+                plan.aggregate_condition = access
+                    .predicates
                     .iter()
                     .cloned()
                     .reduce(|left, right| Expression::And(Box::new(left), Box::new(right)));
-                let mut current = PhysicalOperation::source(edge);
-                let mut recheck = Vec::new();
-                for predicate in predicates {
-                    if *predicate == deletion {
-                        continue;
-                    }
-                    let mut immutable = true;
-                    predicate.columns(&mut |column| {
-                        immutable &= matches!(column.port, Port::Stored(stored) if self.catalog.in_sort_key(table, stored.name()));
-                        Ok(())
-                    })?;
-                    if immutable {
-                        current = current.filter(predicate.clone());
-                    } else {
-                        recheck.push(predicate.clone());
-                    }
-                }
-                for (column, (_, output), relation) in &memberships {
-                    current = current.membership(
-                        self.stored_column(edge, column)?,
-                        self.output_column(*relation, *output)?,
-                    );
-                }
-                scan = current.latest(self.stored_column(edge, "_version")?, Some(deleted));
-                for predicate in recheck {
-                    scan = scan.filter(predicate);
-                }
             }
-            if input.relationships.len() > 1 && !variable {
-                let deletion = Expression::equal(
-                    Expression::Column(self.stored_column(edge, "_deleted")?),
-                    Expression::Boolean(false),
-                );
-                let mut current = PhysicalOperation::current(edge);
-                let mut outside = Vec::new();
-                for predicate in &key_scans[index].predicates {
-                    if *predicate == deletion {
-                        continue;
-                    }
-                    let mut endpoint_only = true;
-                    predicate.columns(&mut |column| { endpoint_only &= matches!(column.port, Port::Stored(stored) if stored.name() == start || stored.name() == end); Ok(()) })?;
-                    if endpoint_only {
-                        current = current.filter(predicate.clone());
-                    } else {
-                        outside.push(predicate.clone());
-                    }
-                }
-                let narrow_inside = self
-                    .catalog
-                    .table_sort_key(table)
-                    .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
-                if narrow_inside {
-                    for (column, (_, output), relation) in &memberships {
-                        current = current.membership(
-                            self.stored_column(edge, column)?,
-                            self.output_column(*relation, *output)?,
-                        );
-                    }
-                }
-                let previous =
-                    edges
-                        .last()
-                        .and_then(|(_, ends): &(RelationId, [(&str, &str); 2])| {
-                            ends.iter().find_map(|(alias, previous_column)| {
-                                endpoints
-                                    .iter()
-                                    .find(|(current, _)| current == alias)
-                                    .map(|(_, current_column)| (*previous_column, *current_column))
-                            })
-                        });
-                let cascade = if let Some((previous_column, current_column)) = previous {
-                    self.cascade_keys(root, input, &key_scans[..index], previous_column)?
-                        .map(|key| {
-                            (
-                                self.stored_column(edge, current_column)
-                                    .expect("edge endpoint"),
-                                key,
-                            )
-                        })
-                } else {
-                    None
-                };
-                if narrow_inside && let Some((value, key)) = cascade {
-                    current = current.membership(value, key);
-                }
-                scan = current.filter(deletion).materialize(edge);
-                if !narrow_inside {
-                    for (column, (_, output), relation) in &memberships {
-                        scan = scan.membership(
-                            self.stored_column(edge, column)?,
-                            self.output_column(*relation, *output)?,
-                        );
-                    }
-                }
-                if !narrow_inside && let Some((value, key)) = cascade {
-                    scan = scan.membership(value, key);
-                }
-                for predicate in outside {
-                    scan = scan.filter(predicate);
-                }
-            }
-            if index == 0 {
-                operation = scan;
-            } else {
-                let (previous, previous_column, current_column) = edges
+            let source = self.edge_operation(plan.root, input, &access, variable, cascade)?;
+            operation = Some(if let Some(left) = operation {
+                let (previous, left_column, right_column) = edges
                     .iter()
                     .rev()
-                    .find_map(|(previous, ends): &(RelationId, [(&str, &str); 2])| {
-                        ends.iter().find_map(|(node, column)| {
-                            endpoints
-                                .iter()
-                                .find(|(next, _)| next == node)
-                                .map(|(_, next_column)| (*previous, *column, *next_column))
-                        })
+                    .find_map(|previous| {
+                        shared_endpoint(previous, &access)
+                            .map(|(left, right)| (previous.relation, left, right))
                     })
                     .ok_or(GraphError::JoinShape)?;
-                operation = operation.join(
-                    scan,
+                self.join_relations(
+                    left,
+                    source,
+                    JoinKind::Inner,
                     Expression::equal(
-                        Expression::Column(self.column(previous, previous_column)?),
-                        Expression::Column(self.column(edge, current_column)?),
+                        Expression::Column(self.column(previous, left_column)?),
+                        Expression::Column(self.column(access.relation, right_column)?),
                     ),
-                );
-            }
-            edges.push((edge, endpoints));
+                )?
+            } else {
+                source
+            });
+            edges.push(access);
         }
+        let mut operation = operation.ok_or(GraphError::JoinShape)?;
         for node in &input.nodes {
-            if elided.contains(node.id.as_str()) {
+            if plan.elided.contains(node.id.as_str()) {
                 continue;
             }
-            let (index, edge, column) = edges
+            let (position, edge, column) = edges
                 .iter()
                 .enumerate()
-                .find_map(|(index, (edge, endpoints))| {
-                    endpoints
+                .find_map(|(position, edge)| {
+                    edge.endpoints
                         .iter()
-                        .find(|(name, _)| *name == node.id)
-                        .map(|(_, column)| (index, *edge, *column))
+                        .find(|(alias, _)| *alias == node.id)
+                        .map(|(_, column)| (position, edge.relation, *column))
                 })
                 .ok_or(GraphError::JoinShape)?;
-            let relation = relations[node.id.as_str()];
+            let relation = plan.relations[node.id.as_str()];
             let identity = self.stored_column(relation, &node.id_property)?;
-            let mut source = node_operations
+            let mut source = plan
+                .node_operations
                 .remove(node.id.as_str())
-                .expect("declared node");
-            let needs_values = input
+                .ok_or(GraphError::MissingOutput)?;
+            let needed = input
                 .order_by
                 .as_ref()
                 .is_some_and(|order| order.node == node.id)
@@ -515,50 +198,315 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .count()
                 > 1;
             if !variable
-                && needs_values
+                && needed
                 && !convergent
-                && !filter_keys.is_empty()
-                && !filter_keys.contains_key(node.id.as_str())
+                && !candidates.is_empty()
+                && !candidates.contains_key(node.id.as_str())
             {
-                let keys = self.edge_keys(
+                let (body, output) = self.edge_keys(
+                    plan.root,
                     input,
-                    &key_scans[..=index],
+                    &keys[..=position],
                     column,
                     "id",
-                    format!("e{index}n"),
+                    format!("e{position}n"),
                 )?;
-                let label = format!("_narrow_{}", node.id);
-                let definition = self.define(root, keys.0, label, false)?;
-                let mut narrowed = self.narrow(
-                    root,
-                    PhysicalOperation::source(relation),
+                let definition = self.define(plan.root, body, format!("_narrow_{}", node.id))?;
+                source = self.narrowed_node(
+                    plan.root,
+                    relation,
                     identity,
-                    (definition, keys.1),
+                    (definition, output),
+                    &plan.node_predicates[node.id.as_str()],
                 )?;
-                let Source::Stored(table) = self.relation(relation)?.source else {
-                    return Err(GraphError::MissingOutput);
-                };
-                for predicate in &node_predicates[node.id.as_str()] {
-                    let mut immutable = true;
-                    predicate.columns(&mut |column| { immutable &= matches!(column.port, Port::Stored(stored) if self.catalog.in_sort_key(table.name(), stored.name())); Ok(()) })?;
-                    if immutable {
-                        narrowed = narrowed.filter(predicate.clone());
-                    }
-                }
-                narrowed = narrowed.latest(self.stored_column(relation, "_version")?, None);
-                for predicate in &node_predicates[node.id.as_str()] {
-                    narrowed = narrowed.filter(predicate.clone());
-                }
-                source = narrowed.materialize(relation);
             }
-            operation = operation.join(
+            operation = self.join_relations(
+                operation,
                 source,
+                JoinKind::Inner,
                 Expression::equal(
                     Expression::Column(identity),
                     Expression::Column(self.column(edge, column)?),
                 ),
-            );
+            )?;
         }
         Ok(operation)
     }
+
+    fn selective_node(&self, node: &InputNode) -> bool {
+        !node.node_ids.is_empty()
+            || node.id_range.is_some()
+            || node.filters.keys().any(|property| {
+                self.catalog
+                    .property(node.entity.as_deref().unwrap_or_default(), property)
+                    .is_some_and(|property| {
+                        self.catalog.property_selectivity(property.id)
+                            == ontology::FieldSelectivity::High
+                    })
+            })
+    }
+
+    fn edge_access<'input>(
+        &mut self,
+        input: &'input Input,
+        plan: &AccessPlan<'input, 'a>,
+        relationship: &'input InputRelationship,
+        index: usize,
+        position: usize,
+        tagged: &mut HashSet<(&'input str, &'input str)>,
+    ) -> Result<EdgeAccess<'input, 'a>> {
+        if relationship.direction == Direction::Both {
+            return Err(GraphError::UnsupportedInput(
+                "bidirectional traversal".into(),
+            ));
+        }
+        let table = self
+            .catalog
+            .relationship_table_for_query(relationship.types.as_slice());
+        let relation = if relationship.hops.max > 1 {
+            self.hop_relation(plan.root, relationship, index)?
+        } else {
+            let relation = self.scan(plan.root, table, format!("e{position}"))?;
+            self.bind_scan(relation, ScanInput::Relationship(index))?;
+            relation
+        };
+        let (start, end) = relationship.direction.edge_columns();
+        let endpoints = [
+            (relationship.from.as_str(), start),
+            (relationship.to.as_str(), end),
+        ];
+        let mut predicates = Vec::new();
+        if let RelationshipSelection::Kinds(kinds) = &relationship.types {
+            let value = Expression::Column(self.column(relation, "relationship_kind")?);
+            predicates.push(if let [kind] = kinds.as_slice() {
+                Expression::equal(value, Expression::Text(kind.clone()))
+            } else {
+                Expression::In(
+                    Box::new(value),
+                    Box::new(Expression::Strings(kinds.clone())),
+                )
+            });
+        }
+        let (source, target) = if relationship.direction == Direction::Incoming {
+            (&relationship.to, &relationship.from)
+        } else {
+            (&relationship.from, &relationship.to)
+        };
+        for (column, alias) in [("source_kind", source), ("target_kind", target)] {
+            predicates.push(Expression::equal(
+                Expression::Column(self.column(relation, column)?),
+                Expression::Text(entity(input, alias)?.into()),
+            ));
+        }
+        predicates.push(Expression::equal(
+            Expression::Column(self.column(relation, ontology::DELETED_COLUMN)?),
+            Expression::Boolean(false),
+        ));
+        for (column, filters) in &relationship.filters {
+            let stored = self
+                .catalog
+                .stored_table(table)
+                .and_then(|table| table.column(column))
+                .ok_or(GraphError::MissingOutput)?;
+            for filter in filters {
+                predicates.push(self.filter_predicate(
+                    self.column(relation, column)?,
+                    stored,
+                    filter,
+                )?);
+            }
+        }
+        for (alias, _) in endpoints {
+            let node = input
+                .nodes
+                .iter()
+                .find(|node| node.id == alias)
+                .ok_or(GraphError::MissingOutput)?;
+            let mut properties = node.filters.iter().collect::<Vec<_>>();
+            properties.sort_by_key(|(name, _)| *name);
+            for (property, filters) in properties {
+                if let Some((column, groups)) =
+                    super::predicates::edge_tag(self.catalog, node, property, filters, relationship)
+                    && tagged.insert((alias, property.as_str()))
+                {
+                    for values in groups {
+                        predicates.push(if values.is_empty() {
+                            Expression::Boolean(false)
+                        } else {
+                            Expression::HasAny(
+                                Box::new(Expression::Column(self.column(relation, column)?)),
+                                Box::new(Expression::Array(
+                                    values.into_iter().map(Expression::Text).collect(),
+                                )),
+                            )
+                        });
+                    }
+                }
+            }
+        }
+        let mut pushed = Vec::new();
+        for (alias, _) in endpoints {
+            let node = input
+                .nodes
+                .iter()
+                .find(|node| node.id == alias)
+                .ok_or(GraphError::MissingOutput)?;
+            for predicate in &plan.node_predicates[alias] {
+                let mut names = Vec::new();
+                predicate.columns(&mut |column| {
+                    if let Port::Stored(stored) = column.port {
+                        names.push(stored.name());
+                    }
+                    Ok(())
+                })?;
+                let [name] = names.as_slice() else { continue };
+                if ontology::EDGE_RESERVED_COLUMNS.contains(name)
+                    || matches!(*name, "id" | "_deleted" | "_version")
+                    || !node.filters.contains_key(*name)
+                    || self
+                        .catalog
+                        .stored_table(table)
+                        .and_then(|table| table.column(name))
+                        .is_none()
+                {
+                    continue;
+                }
+                let predicate = predicate.rebind(&|_| self.column(relation, name))?;
+                if !pushed.contains(&predicate) {
+                    pushed.push(predicate);
+                }
+            }
+        }
+        predicates.extend(pushed);
+        Ok(EdgeAccess {
+            relation,
+            table,
+            endpoints,
+            predicates,
+            memberships: vec![],
+        })
+    }
+
+    fn edge_operation(
+        &mut self,
+        root: BlockId,
+        input: &Input,
+        access: &EdgeAccess<'_, 'a>,
+        variable: bool,
+        cascade: Option<(ColumnRef<'a>, ColumnRef<'a>)>,
+    ) -> Result<PhysicalOperation<'a>> {
+        let relation = access.relation;
+        if variable || input.relationships.len() == 1 && input.query_type != QueryType::Aggregation
+        {
+            let mode = if input.relationships.len() == 1
+                || matches!(self.relation(relation)?.source, Source::Derived(_))
+            {
+                ReadMode::Raw
+            } else {
+                ReadMode::Current
+            };
+            let mut operation = self.read_relation(relation, mode)?;
+            for predicate in &access.predicates {
+                operation = self.filter_relation(operation, predicate.clone())?;
+            }
+            for (column, key) in &access.memberships {
+                operation = self.narrow(root, operation, self.column(relation, column)?, *key)?;
+            }
+            return Ok(operation);
+        }
+        let deleted = self.stored_column(relation, ontology::DELETED_COLUMN)?;
+        let deletion = Expression::equal(Expression::Column(deleted), Expression::Boolean(false));
+        let latest = input.relationships.len() == 1;
+        let mut operation = self.read_relation(
+            relation,
+            if latest {
+                ReadMode::Raw
+            } else {
+                ReadMode::Current
+            },
+        )?;
+        let mut outside = Vec::new();
+        for predicate in &access.predicates {
+            if *predicate == deletion {
+                continue;
+            }
+            let inside = if latest {
+                self.sort_key_predicate(predicate)?
+            } else {
+                let mut endpoint_only = true;
+                predicate.columns(&mut |column| {
+                    endpoint_only &= matches!(column.port, Port::Stored(stored) if access.endpoints.iter().any(|(_, name)| *name == stored.name()));
+                    Ok(())
+                })?;
+                endpoint_only
+            };
+            if inside {
+                operation = self.filter_relation(operation, predicate.clone())?;
+            } else {
+                outside.push(predicate);
+            }
+        }
+        let narrow_inside = latest
+            || self
+                .catalog
+                .table_sort_key(access.table)
+                .is_some_and(|keys| {
+                    keys.iter()
+                        .take(4)
+                        .any(|key| access.endpoints.iter().any(|(_, name)| key == name))
+                });
+        if narrow_inside {
+            operation = self.edge_memberships(root, operation, access, cascade)?;
+        }
+        operation = if latest {
+            self.latest_relation(
+                operation,
+                self.stored_column(relation, ontology::VERSION_COLUMN)?,
+                Some(deleted),
+            )?
+        } else {
+            self.materialize_relation(self.filter_relation(operation, deletion)?, relation)?
+        };
+        if !narrow_inside {
+            operation = self.edge_memberships(root, operation, access, cascade)?;
+        }
+        for predicate in outside {
+            operation = self.filter_relation(operation, predicate.clone())?;
+        }
+        Ok(operation)
+    }
+
+    fn edge_memberships(
+        &mut self,
+        root: BlockId,
+        mut operation: PhysicalOperation<'a>,
+        access: &EdgeAccess<'_, 'a>,
+        cascade: Option<(ColumnRef<'a>, ColumnRef<'a>)>,
+    ) -> Result<PhysicalOperation<'a>> {
+        for (column, candidate) in &access.memberships {
+            operation = self.narrow(
+                root,
+                operation,
+                self.stored_column(access.relation, column)?,
+                *candidate,
+            )?;
+        }
+        if let Some((value, key)) = cascade {
+            operation = self.membership_relation(operation, value, key)?;
+        }
+        Ok(operation)
+    }
+}
+
+fn shared_endpoint(
+    left: &EdgeAccess<'_, '_>,
+    right: &EdgeAccess<'_, '_>,
+) -> Option<(&'static str, &'static str)> {
+    left.endpoints.iter().find_map(|(alias, column)| {
+        right
+            .endpoints
+            .iter()
+            .find(|(candidate, _)| candidate == alias)
+            .map(|(_, next)| (*column, *next))
+    })
 }

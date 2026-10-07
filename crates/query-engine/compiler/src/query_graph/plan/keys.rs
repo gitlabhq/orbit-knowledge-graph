@@ -1,127 +1,145 @@
 use super::*;
+use crate::input::{Input, InputRelationship};
 
-impl<'catalog, M: QueryDataModel + ?Sized>
-    QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
-{
+pub(super) enum KeyRead {
+    Raw,
+    Current,
+    Latest,
+}
+
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
     pub(super) fn candidate(
         &mut self,
         parent: BlockId,
-        original: RelationId,
+        original: (RelationId, KeyRead),
         key: &str,
-        predicates: &[Expression<'catalog>],
+        predicates: &[Expression<'a>],
         memberships: &[(&str, (DefinitionId, OutputId))],
         hint: &str,
     ) -> Result<(DefinitionId, OutputId)> {
-        let Source::Stored(table) = self.relation(original)?.source else {
-            return Err(GraphError::LatestShape);
-        };
+        let (original, read) = original;
+        let body = self.query_in(parent)?;
         let alias = self.relation(original)?.hint.clone();
-        let body = self.select(PhysicalOperation::One);
-        let relation = self.scan_stored(body, table, alias)?;
-        if let Some(input) = self.relation(original)?.input.clone() {
-            self.bind_scan(relation, input)?;
-        }
-        let mut operation = PhysicalOperation::source(relation);
-        for predicate in predicates {
-            operation = operation.filter(predicate.rebind(&|column| {
-                if column.relation != original {
-                    return Err(GraphError::OutsideBlock);
-                }
-                let Port::Stored(name) = column.port else {
-                    return Err(GraphError::MissingOutput);
-                };
-                self.stored_port(relation, name)
-            })?);
-        }
-        for (column, candidate) in memberships {
-            operation = self.narrow(
-                body,
+        let (scan, mut operation) =
+            self.key_source(body, original, &alias, &read, predicates, memberships)?;
+        if matches!(read, KeyRead::Latest) {
+            operation = self.latest_relation(
                 operation,
-                self.stored_column(relation, column)?,
-                *candidate,
+                self.stored_column(scan, ontology::VERSION_COLUMN)?,
+                None,
             )?;
         }
-        let output = self.project(
-            body,
-            "id",
-            Expression::Column(self.stored_column(relation, key)?),
-        )?;
-        *self.operation_mut(body)? = operation;
-        Ok((self.define(parent, body, hint, false)?, output))
+        let output = self.finish_key_query(operation, self.stored_column(scan, key)?, "id")?;
+        Ok((self.define(parent, body, hint)?, output))
     }
 
     pub(super) fn cascade_keys(
         &mut self,
         parent: BlockId,
-        input: &crate::input::Input,
-        scans: &[KeyScan<'catalog>],
+        input: &Input,
+        scans: &[KeyScan<'a>],
         output_column: &str,
-    ) -> Result<Option<ColumnRef<'catalog>>> {
-        if scans.is_empty() {
+    ) -> Result<Option<ColumnRef<'a>>> {
+        let Some(index) = scans.len().checked_sub(1) else {
             return Ok(None);
-        }
-        let index = scans.len() - 1;
-        let selective = scans.iter().any(|scan| {
-            let Some(ScanInput::Relationship(index)) = self
-                .relation(scan.relation)
-                .ok()
-                .and_then(|relation| relation.input.clone())
-            else {
-                return false;
-            };
-            let relationship = &input.relationships[index];
-            input
+        };
+        let mut selective = false;
+        for scan in scans {
+            let relationship = self.key_relationship(input, scan.relation)?;
+            selective |= input
                 .nodes
                 .iter()
                 .filter(|node| node.id == relationship.from || node.id == relationship.to)
-                .any(|node| !node.node_ids.is_empty() || node.id_range.is_some())
-        });
+                .any(|node| !node.node_ids.is_empty() || node.id_range.is_some());
+        }
         if !selective && scans.iter().all(|scan| scan.memberships.is_empty()) {
             return Ok(None);
         }
-        let (block, output) = self.edge_keys(
+        let hint = format!("e{index}p");
+        let (body, output) = self.edge_keys(
+            parent,
             input,
             scans,
             output_column,
             output_column,
-            format!("e{index}p"),
+            hint.clone(),
         )?;
-        let relation = self.derive(parent, block, format!("e{index}p"))?;
+        let relation = self.derive(parent, body, hint)?;
         Ok(Some(self.output_column(relation, output)?))
     }
 
     pub(super) fn edge_keys(
         &mut self,
-        input: &crate::input::Input,
-        scans: &[KeyScan<'catalog>],
+        parent: BlockId,
+        input: &Input,
+        scans: &[KeyScan<'a>],
         output_column: &str,
         output_label: &str,
         alias: String,
     ) -> Result<(BlockId, OutputId)> {
-        let KeyScan {
-            relation: original,
-            predicates,
-            memberships,
-        } = scans.last().ok_or(GraphError::MissingOutput)?;
-        let index = scans.len() - 1;
-        let Some(ScanInput::Relationship(input_index)) = self.relation(*original)?.input else {
-            return Err(GraphError::MissingOutput);
+        let (last, previous) = scans.split_last().ok_or(GraphError::MissingOutput)?;
+        let body = self.query_in(parent)?;
+        let (scan, mut operation) = self.key_source(
+            body,
+            last.relation,
+            &alias,
+            &KeyRead::Raw,
+            &last.predicates,
+            &last.memberships,
+        )?;
+        if let Some(upstream) = previous.last() {
+            let upstream = self.key_relationship(input, upstream.relation)?;
+            let current = self.key_relationship(input, last.relation)?;
+            if let Some((upstream_column, current_column)) = connected_endpoints(upstream, current)
+                && let Some(key) = self.cascade_keys(body, input, previous, upstream_column)?
+            {
+                operation = self.membership_relation(
+                    operation,
+                    self.stored_column(scan, current_column)?,
+                    key,
+                )?;
+            }
+        }
+        let output = self.finish_key_query(
+            operation,
+            self.stored_column(scan, output_column)?,
+            output_label,
+        )?;
+        Ok((body, output))
+    }
+
+    fn key_source(
+        &mut self,
+        block: BlockId,
+        original: RelationId,
+        hint: &str,
+        read: &KeyRead,
+        predicates: &[Expression<'a>],
+        memberships: &[(&str, (DefinitionId, OutputId))],
+    ) -> Result<(RelationId, PhysicalOperation<'a>)> {
+        let declaration = self.relation(original)?;
+        let Source::Stored(table) = declaration.source else {
+            return Err(GraphError::LatestShape);
         };
-        let relationship = &input.relationships[input_index];
-        let Source::Stored(table) = self.relation(*original)?.source else {
-            return Err(GraphError::MissingOutput);
+        let input = declaration.input.clone();
+        let scan = self.scan_stored(block, table, hint)?;
+        if let Some(input) = input {
+            self.bind_scan(scan, input)?;
+        }
+        let mode = if matches!(read, KeyRead::Current) {
+            ReadMode::Current
+        } else {
+            ReadMode::Raw
         };
-        let block = self.select(PhysicalOperation::One);
-        let scan = self.scan_stored(block, table, alias)?;
-        self.bind_scan(scan, ScanInput::Relationship(input_index))?;
-        let mut operation = PhysicalOperation::source(scan);
+        let mut operation = self.read_relation(scan, mode)?;
         for predicate in predicates {
-            operation = operation.filter(predicate.rebind(&|column| match column.port {
-                Port::Stored(stored) if column.relation == *original => {
+            let predicate = predicate.rebind(&|column| match column.port {
+                Port::Stored(stored) if column.relation == original => {
                     self.stored_port(scan, stored)
                 }
                 _ => Err(GraphError::OutsideBlock),
-            })?);
+            })?;
+            operation = self.filter_relation(operation, predicate)?;
         }
         for (column, candidate) in memberships {
             operation = self.narrow(
@@ -131,51 +149,68 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 *candidate,
             )?;
         }
-        if index > 0 {
-            let Some(ScanInput::Relationship(previous_index)) =
-                self.relation(scans[index - 1].relation)?.input
-            else {
-                return Err(GraphError::MissingOutput);
-            };
-            let previous = &input.relationships[previous_index];
-            let (previous_start, previous_end) = previous.direction.edge_columns();
-            let (start, end) = relationship.direction.edge_columns();
-            let link = [
-                (&previous.to, previous_end),
-                (&previous.from, previous_start),
-            ]
-            .into_iter()
-            .find_map(|(alias, column)| {
-                [(&relationship.from, start), (&relationship.to, end)]
-                    .into_iter()
-                    .find(|(current, _)| current == &alias)
-                    .map(|(_, current)| (column, current))
-            });
-            if let Some((previous_column, current_column)) = link
-                && let Some(key) =
-                    self.cascade_keys(block, input, &scans[..index], previous_column)?
-            {
-                operation = operation.membership(self.stored_column(scan, current_column)?, key);
-            }
-        }
-        let output = self.project(
-            block,
-            output_label,
-            Expression::Column(self.stored_column(scan, output_column)?),
-        )?;
-        *self.operation_mut(block)? = operation;
-        Ok((block, output))
+        Ok((scan, operation))
+    }
+
+    fn key_relationship<'input>(
+        &self,
+        input: &'input Input,
+        scan: RelationId,
+    ) -> Result<&'input InputRelationship> {
+        let Some(ScanInput::Relationship(index)) = self.relation(scan)?.input else {
+            return Err(GraphError::MissingOutput);
+        };
+        input
+            .relationships
+            .get(index)
+            .ok_or(GraphError::MissingOutput)
+    }
+
+    fn finish_key_query(
+        &mut self,
+        operation: PhysicalOperation<'a>,
+        key: ColumnRef<'a>,
+        label: &str,
+    ) -> Result<OutputId> {
+        let projection =
+            self.project_values(operation, [(label.into(), Expression::Column(key))])?;
+        let output = projection
+            .outputs()
+            .next()
+            .ok_or(GraphError::EmptyProjection)?
+            .0;
+        self.finish_query(projection)?;
+        Ok(output)
     }
 
     pub(super) fn narrow(
         &mut self,
         block: BlockId,
-        input: PhysicalOperation<'catalog>,
-        column: ColumnRef<'catalog>,
+        input: PhysicalOperation<'a>,
+        column: ColumnRef<'a>,
         (definition, output): (DefinitionId, OutputId),
-    ) -> Result<PhysicalOperation<'catalog>> {
+    ) -> Result<PhysicalOperation<'a>> {
         let hint = self.definition_hint(definition)?.to_owned();
         let keys = self.reference(block, definition, hint)?;
-        Ok(input.membership(column, self.output_column(keys, output)?))
+        self.membership_relation(input, column, self.output_column(keys, output)?)
     }
+}
+
+fn connected_endpoints(
+    upstream: &InputRelationship,
+    current: &InputRelationship,
+) -> Option<(&'static str, &'static str)> {
+    let (upstream_start, upstream_end) = upstream.direction.edge_columns();
+    let (current_start, current_end) = current.direction.edge_columns();
+    [
+        (&upstream.to, upstream_end),
+        (&upstream.from, upstream_start),
+    ]
+    .into_iter()
+    .find_map(|(alias, column)| {
+        [(&current.from, current_start), (&current.to, current_end)]
+            .into_iter()
+            .find(|(candidate, _)| *candidate == alias)
+            .map(|(_, current)| (column, current))
+    })
 }

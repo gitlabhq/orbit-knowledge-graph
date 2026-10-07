@@ -1,10 +1,15 @@
 mod security;
 
+use compiler::query_graph::{
+    Expression as E, GraphError, JoinKind, Port, QueryGraph, ReadMode, ScanInput,
+};
+use query_data_model::QueryDataModel;
+use query_engine::compiler::{self, Frontend, HydrationPlan, QueryError, SecurityContext};
+use std::convert::Infallible;
+
 #[test]
 fn wildcard_selection_preserves_empty_resolution() {
-    use query_engine::compiler::{self, Frontend, SecurityContext, input::RelationshipSelection};
-    let ontology = super::setup::embedded_ontology();
-    let model = compiler::data_model::clickhouse(ontology.clone()).unwrap();
+    let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
     let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
     for (frontend, query) in [
         (
@@ -19,7 +24,7 @@ fn wildcard_selection_preserves_empty_resolution() {
         let compiled = compiler::compile_graph(query, frontend, &model, &security).unwrap();
         assert_eq!(
             compiled.input.relationships[0].types,
-            RelationshipSelection::Kinds(vec![])
+            compiler::input::RelationshipSelection::Kinds(vec![])
         );
         assert!(compiled.base.render().contains("IN []"));
     }
@@ -44,12 +49,10 @@ fn yaml_plan_shapes() {
 
 #[test]
 fn query_graph_request_contract() {
-    use query_engine::compiler::{self, Frontend, HydrationPlan, QueryError, SecurityContext};
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
     let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
     let mut query = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}, "columns": ["username"]}],
+        "query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}, "columns": ["username"]}],
         "cursor": {"page_size": 10}
     });
     let first =
@@ -60,9 +63,9 @@ fn query_graph_request_contract() {
         "User"
     );
     assert!(matches!(first.hydration, HydrationPlan::None));
-    assert!(first.base.sql.contains("LIMIT 11"));
-    assert!(first.base.sql.contains("_gkg_cursor_0"));
-    assert!(first.base.sql.contains("substringUTF8"));
+    for expected in ["LIMIT 11", "_gkg_cursor_0", "substringUTF8"] {
+        assert!(first.base.sql.contains(expected));
+    }
     assert!(!first.base.sql.contains("alice"));
     assert!(
         first
@@ -71,7 +74,6 @@ fn query_graph_request_contract() {
             .values()
             .any(|parameter| parameter.value == "alice")
     );
-
     query["cursor"]["after"] =
         compiler::passes::cursor::encode(first.pagination.query_hash, &[Some("42".into())]).into();
     let next =
@@ -88,53 +90,50 @@ fn query_graph_request_contract() {
         compiler::compile_graph(&query.to_string(), Frontend::JsonDsl, &model, &security),
         Err(QueryError::PaginationError(_))
     ));
-
     let project = r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[7],"columns":["name"]}]}"#;
     let compiled = compiler::compile_graph(project, Frontend::JsonDsl, &model, &security).unwrap();
-    assert!(compiled.base.sql.contains("argMaxOrNull"));
-    assert!(compiled.base.sql.contains("startsWith"));
+    assert!(compiled.base.sql.contains("argMaxOrNull") && compiled.base.sql.contains("startsWith"));
     assert!(compiled.base.result_context.get("p").is_some());
-    let empty = SecurityContext::new(1, vec![]).unwrap();
     assert!(matches!(
-        compiler::compile_graph(project, Frontend::JsonDsl, &model, &empty),
+        compiler::compile_graph(
+            project,
+            Frontend::JsonDsl,
+            &model,
+            &SecurityContext::new(1, vec![]).unwrap()
+        ),
         Err(QueryError::Security(_))
     ));
 }
 
 #[test]
 fn query_graph_relationship_scope_contract() {
-    use query_data_model::QueryDataModel;
-    use query_engine::compiler::{
-        self,
-        input::Input,
-        query_graph::{Expression as E, LoweredOperation as Operation, QueryGraph, ScanInput},
-        scope::{self, ScopeProof},
-    };
+    use compiler::scope::{self, ScopeProof};
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut input: Input = serde_json::from_value(serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "caller", "entity": "Definition"}, {"id": "callee", "entity": "Definition"}],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}]
+    let mut input: compiler::Input = serde_json::from_value(serde_json::json!({
+        "query_type": "traversal", "nodes": [{"id":"caller","entity":"Definition"},{"id":"callee","entity":"Definition"}],
+        "relationships": [{"type":"CALLS","from":"caller","to":"callee"}]
     })).unwrap();
     let proofs = ["caller", "callee"]
         .into_iter()
         .map(|alias| (alias.to_string(), ScopeProof::literal("1/42/")))
         .collect();
     let scope = scope::prepare(&mut input, proofs, model.as_ref());
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
     let table = model.relationship_table("CALLS").unwrap();
     assert!(!model.table_path_scopable(table));
     let edge = graph.scan(root, table, "edge").unwrap();
     graph.bind_scan(edge, ScanInput::Relationship(0)).unwrap();
-    *graph.operation_mut(root).unwrap() = Operation::source(edge);
-    graph
-        .project(
-            root,
-            "id",
-            E::Column(graph.stored_column(edge, "source_id").unwrap()),
+    let projection = graph
+        .project_values(
+            graph.read_relation(edge, ReadMode::Raw).unwrap(),
+            [(
+                "id".into(),
+                E::Column(graph.stored_column(edge, "source_id").unwrap()),
+            )],
         )
         .unwrap();
+    graph.finish_query(projection).unwrap();
     scope::apply_graph(&mut graph, &scope, &input).unwrap();
     let sql = graph.render(root).unwrap();
     assert!(sql.contains("startsWith") && sql.contains("1/42/"), "{sql}");
@@ -142,76 +141,91 @@ fn query_graph_relationship_scope_contract() {
 
 #[test]
 fn query_graph_subquery_visibility_contract() {
-    use query_engine::compiler::{
-        self,
-        query_graph::{Expression as E, GraphError, LoweredOperation as Operation, QueryGraph},
-    };
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
-    let body = graph.select(Operation::One);
-    let key = graph.project(body, "id", E::Integer(7)).unwrap();
-    let definition = graph.define(root, body, "keys", false).unwrap();
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
+    let body = graph.query();
+    let projection = graph
+        .project_values(
+            graph.unit_relation(body).unwrap(),
+            [("id".into(), E::Integer(7))],
+        )
+        .unwrap();
+    let key = projection.outputs().next().unwrap().0;
+    graph.finish_query(projection).unwrap();
+    let definition = graph.define(root, body, "keys").unwrap();
     let reference = graph.reference(root, definition, "keys").unwrap();
     let key = graph.output_column(reference, key).unwrap();
-    graph.project(root, "id", E::Integer(7)).unwrap();
-    *graph.operation_mut(root).unwrap() =
-        Operation::One.filter(E::equal(E::Column(key), E::Integer(7)));
     assert!(matches!(
-        graph.validate_lowered(root),
+        graph.filter_relation(
+            graph.unit_relation(root).unwrap(),
+            E::equal(E::Column(key), E::Integer(7))
+        ),
         Err(GraphError::OperationVisibility)
     ));
-    *graph.operation_mut(root).unwrap() = Operation::One.filter(E::InQuery {
-        value: Box::new(E::Integer(7)),
-        key,
-    });
+    let source = graph
+        .filter_relation(
+            graph.unit_relation(root).unwrap(),
+            E::InQuery {
+                value: Box::new(E::Integer(7)),
+                key,
+            },
+        )
+        .unwrap();
+    let projection = graph
+        .project_values(source, [("id".into(), E::Integer(7))])
+        .unwrap();
+    graph.finish_query(projection).unwrap();
     let (sql, _) = graph.render_parameterized(root).unwrap();
     assert!(sql.contains("IN (SELECT"), "{sql}");
 }
 
 #[test]
 fn query_graph_scalar_subquery_contract() {
-    use query_engine::compiler::{
-        self,
-        query_graph::{Expression as E, GraphError, LoweredOperation as Operation, QueryGraph},
-    };
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
-    let body = graph.select(Operation::One);
-    let output = graph.project(body, "count", E::Count).unwrap();
-    let relation = graph.derive(root, body, "scalar").unwrap();
-    let value = graph.output_column(relation, output).unwrap();
-    graph.project(root, "count", E::ScalarQuery(value)).unwrap();
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
+    let body = graph.query();
     assert!(matches!(
-        graph.validate_lowered(root),
+        graph.project_values(
+            graph.unit_relation(body).unwrap(),
+            [("count".into(), E::Count)]
+        ),
         Err(GraphError::AggregatePlacement)
     ));
-    *graph.operation_mut(body).unwrap() = Operation::One.aggregate(vec![]);
-    let sql = graph.render(root).unwrap();
-    assert!(sql.contains("(SELECT") && sql.contains("COUNT(*)"), "{sql}");
-    let foreign = graph.select(Operation::One);
-    graph
-        .project(foreign, "count", E::ScalarQuery(value))
+    let aggregate = graph
+        .aggregate_relation(graph.unit_relation(body).unwrap(), vec![])
         .unwrap();
+    let projection = graph
+        .project_values(aggregate, [("count".into(), E::Count)])
+        .unwrap();
+    let output = projection.outputs().next().unwrap().0;
+    graph.finish_query(projection).unwrap();
+    let scalar = graph.scalar_query(root, output, "scalar").unwrap();
+    let foreign = graph.query();
     assert!(matches!(
-        graph.render(foreign),
+        graph.project_values(
+            graph.unit_relation(foreign).unwrap(),
+            [("count".into(), scalar.clone())]
+        ),
         Err(GraphError::OutsideBlock)
     ));
+    let projection = graph
+        .project_values(
+            graph.unit_relation(root).unwrap(),
+            [("count".into(), scalar)],
+        )
+        .unwrap();
+    graph.finish_query(projection).unwrap();
+    let sql = graph.render(root).unwrap();
+    assert!(sql.contains("(SELECT") && sql.contains("COUNT(*)"), "{sql}");
 }
 
 #[test]
 fn query_graph_rebinds_nested_computations_between_blocks() {
-    use query_data_model::QueryDataModel;
-    use query_engine::compiler::{
-        self,
-        query_graph::{
-            Expression as E, GraphError, LoweredOperation as Operation, Port, QueryGraph,
-        },
-    };
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let original = graph.select(Operation::One);
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let original = graph.query();
     let first = graph
         .scan(original, model.entity_table("Project").unwrap(), "project")
         .unwrap();
@@ -244,16 +258,22 @@ fn query_graph_rebinds_nested_computations_between_blocks() {
             },
         ),
     ]);
-    graph.project(original, "summary", value.clone()).unwrap();
-    *graph.operation_mut(original).unwrap() = Operation::source(first).aggregate(vec![]);
-    let root = graph.select(Operation::One);
+    let source = graph
+        .aggregate_relation(graph.read_relation(first, ReadMode::Raw).unwrap(), vec![])
+        .unwrap();
+    let projection = graph
+        .project_values(source, [("summary".into(), value.clone())])
+        .unwrap();
+    graph.finish_query(projection).unwrap();
+    let root = graph.query();
     let second = graph
         .scan(root, model.entity_table("Project").unwrap(), "project")
         .unwrap();
-    *graph.operation_mut(root).unwrap() = Operation::source(second).aggregate(vec![]);
-    let output = graph.project(root, "summary", value.clone()).unwrap();
+    let source = graph
+        .aggregate_relation(graph.read_relation(second, ReadMode::Raw).unwrap(), vec![])
+        .unwrap();
     assert!(matches!(
-        graph.validate_lowered(root),
+        graph.project_values(source, [("summary".into(), value.clone())]),
         Err(GraphError::OutsideBlock)
     ));
     let rebound = value
@@ -264,7 +284,13 @@ fn query_graph_rebinds_nested_computations_between_blocks() {
             graph.stored_port(second, stored)
         })
         .unwrap();
-    graph.replace_output(output, rebound).unwrap();
+    let source = graph
+        .aggregate_relation(graph.read_relation(second, ReadMode::Raw).unwrap(), vec![])
+        .unwrap();
+    let projection = graph
+        .project_values(source, [("summary".into(), rebound)])
+        .unwrap();
+    graph.finish_query(projection).unwrap();
     let (sql, params) = graph.render_parameterized(root).unwrap();
     assert!(
         sql.contains("argMaxOrNull") && sql.contains("countIf") && sql.contains("sumIf"),
@@ -275,11 +301,6 @@ fn query_graph_rebinds_nested_computations_between_blocks() {
 
 #[test]
 fn query_graph_stored_identity_contract() {
-    use query_data_model::QueryDataModel;
-    use query_engine::compiler::{
-        self,
-        query_graph::{Expression, LoweredOperation, QueryGraph},
-    };
     let ontology = super::setup::embedded_ontology();
     let model = compiler::data_model::clickhouse(ontology.clone()).unwrap();
     let other = compiler::data_model::clickhouse(ontology).unwrap();
@@ -294,11 +315,9 @@ fn query_graph_stored_identity_contract() {
         .unwrap();
     let id = users.column("id").unwrap();
     assert_eq!(users.resolve(id.id()), Some(id));
-    assert!(projects.resolve(id.id()).is_none());
-    assert!(foreign_users.resolve(id.id()).is_none());
-
-    let mut graph = QueryGraph::<_, Expression<'_>, LoweredOperation<'_>>::new(model.as_ref());
-    let root = graph.select(LoweredOperation::One);
+    assert!(projects.resolve(id.id()).is_none() && foreign_users.resolve(id.id()).is_none());
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
     let first = graph.scan_stored(root, users, "first").unwrap();
     let second = graph.scan_stored(root, users, "second").unwrap();
     let first_id = graph.stored_port(first, id).unwrap();
@@ -316,17 +335,27 @@ fn query_graph_stored_identity_contract() {
             .stored_port(first, foreign_users.column("id").unwrap())
             .is_err()
     );
-    graph
-        .project(root, "first_id", Expression::Column(first_id))
+    let source = graph
+        .join_relations(
+            graph.read_relation(first, ReadMode::Current).unwrap(),
+            graph.read_relation(second, ReadMode::Current).unwrap(),
+            JoinKind::Inner,
+            E::equal(E::Column(first_id), E::Column(second_id)),
+        )
         .unwrap();
-    graph
-        .project(root, "second_id", Expression::Column(second_id))
+    let projection = graph
+        .project_values(
+            source,
+            [
+                ("first_id".into(), E::Column(first_id)),
+                ("second_id".into(), E::Column(second_id)),
+            ],
+        )
         .unwrap();
-    *graph.operation_mut(root).unwrap() = LoweredOperation::current(first).join(
-        LoweredOperation::current(second),
-        Expression::equal(Expression::Column(first_id), Expression::Column(second_id)),
-    );
+    graph.finish_query(projection).unwrap();
     let (sql, _) = graph.render_parameterized(root).unwrap();
-    assert!(sql.contains("AS \"first_id\""), "{sql}");
-    assert!(sql.contains("AS \"second_id\""), "{sql}");
+    assert!(
+        sql.contains("AS \"first_id\"") && sql.contains("AS \"second_id\""),
+        "{sql}"
+    );
 }

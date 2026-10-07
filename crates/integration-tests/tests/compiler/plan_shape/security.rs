@@ -1,9 +1,8 @@
+use compiler::passes::{check::check_graph, security::apply_graph_security};
+use compiler::query_graph::{Expression as E, JoinKind, OperationKind, QueryGraph, ReadMode};
 use query_data_model::QueryDataModel;
-use query_engine::compiler::{
-    self, AccessLevel, AuthorizedPath, SecurityContext,
-    passes::{check::check_graph, security::apply_graph_security},
-    query_graph::{Expression as E, LoweredOperation as Operation, QueryGraph},
-};
+use query_engine::compiler::{self, AccessLevel, AuthorizedPath, SecurityContext};
+use std::convert::Infallible;
 
 #[test]
 fn authorization_covers_every_nested_scan_occurrence() {
@@ -19,115 +18,150 @@ fn authorization_covers_every_nested_scan_occurrence() {
         "membership",
         "join",
     ] {
-        let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-        let root = graph.select(Operation::One);
-        let body = graph.select(Operation::One);
+        let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+        let root = graph.query();
+        let body = graph.query();
         let scan = graph
             .scan(body, model.entity_table("Project").unwrap(), "same_hint")
             .unwrap();
         let id = graph.stored_column(scan, "id").unwrap();
-        *graph.operation_mut(body).unwrap() = Operation::current(scan);
-        let output = graph.project(body, "id", E::Column(id)).unwrap();
-        match position {
+        let scalar = matches!(position, "scalar" | "scalar_filter");
+        let mut source = graph.read_relation(scan, ReadMode::Current).unwrap();
+        if scalar {
+            source = graph.aggregate_relation(source, vec![]).unwrap();
+        }
+        let value = if scalar { E::Count } else { E::Column(id) };
+        let projection = graph
+            .project_values(source, [("id".into(), value.clone())])
+            .unwrap();
+        let output = projection.outputs().next().unwrap().0;
+        graph.finish_query(projection).unwrap();
+        let (source, value) = match position {
             "scalar" | "scalar_filter" => {
-                *graph.operation_mut(body).unwrap() = Operation::current(scan).aggregate(vec![]);
-                graph.replace_output(output, E::Count).unwrap();
-                let relation = graph.derive(root, body, "scalar").unwrap();
-                let scalar = E::ScalarQuery(graph.output_column(relation, output).unwrap());
+                let scalar = graph.scalar_query(root, output, "scalar").unwrap();
+                let source = graph.unit_relation(root).unwrap();
                 if position == "scalar_filter" {
-                    *graph.operation_mut(root).unwrap() =
-                        Operation::One.filter(E::equal(scalar, E::Integer(1)));
-                    graph.project(root, "count", E::Integer(1)).unwrap();
+                    (
+                        graph
+                            .filter_relation(source, E::equal(scalar, E::Integer(1)))
+                            .unwrap(),
+                        E::Integer(1),
+                    )
                 } else {
-                    graph.project(root, "count", scalar).unwrap();
+                    (source, scalar)
                 }
             }
             "nested_definition" => {
-                let wrapper = graph.select(Operation::One);
-                let definition = graph.define(wrapper, body, "inner", false).unwrap();
+                let wrapper = graph.query();
+                let definition = graph.define(wrapper, body, "inner").unwrap();
                 let reference = graph.reference(wrapper, definition, "inner").unwrap();
-                let output = graph
-                    .project(
-                        wrapper,
-                        "id",
-                        E::Column(graph.output_column(reference, output).unwrap()),
+                let projection = graph
+                    .project_values(
+                        graph.read_relation(reference, ReadMode::Raw).unwrap(),
+                        [(
+                            "id".into(),
+                            E::Column(graph.output_column(reference, output).unwrap()),
+                        )],
                     )
                     .unwrap();
-                *graph.operation_mut(wrapper).unwrap() = Operation::source(reference);
-                let definition = graph.define(root, wrapper, "outer", false).unwrap();
+                let output = projection.outputs().next().unwrap().0;
+                graph.finish_query(projection).unwrap();
+                let definition = graph.define(root, wrapper, "outer").unwrap();
                 let reference = graph.reference(root, definition, "outer").unwrap();
-                graph
-                    .project(
-                        root,
-                        "id",
-                        E::Column(graph.output_column(reference, output).unwrap()),
-                    )
-                    .unwrap();
-                *graph.operation_mut(root).unwrap() = Operation::source(reference);
+                (
+                    graph.read_relation(reference, ReadMode::Raw).unwrap(),
+                    E::Column(graph.output_column(reference, output).unwrap()),
+                )
             }
             "definition" | "membership" => {
-                let definition = graph.define(root, body, "keys", false).unwrap();
-                let relation = graph.reference(root, definition, "keys").unwrap();
-                let value = graph.output_column(relation, output).unwrap();
+                let definition = graph.define(root, body, "keys").unwrap();
+                let reference = graph.reference(root, definition, "keys").unwrap();
+                let key = graph.output_column(reference, output).unwrap();
                 if position == "membership" {
-                    *graph.operation_mut(root).unwrap() = Operation::One.filter(E::InQuery {
-                        value: Box::new(E::Integer(1)),
-                        key: value,
-                    });
-                    graph.project(root, "id", E::Integer(1)).unwrap();
+                    (
+                        graph
+                            .filter_relation(
+                                graph.unit_relation(root).unwrap(),
+                                E::InQuery {
+                                    value: Box::new(E::Integer(1)),
+                                    key,
+                                },
+                            )
+                            .unwrap(),
+                        E::Integer(1),
+                    )
                 } else {
-                    *graph.operation_mut(root).unwrap() = Operation::source(relation);
-                    graph.project(root, "id", E::Column(value)).unwrap();
+                    (
+                        graph.read_relation(reference, ReadMode::Raw).unwrap(),
+                        E::Column(key),
+                    )
                 }
             }
             "union" => {
-                let other = graph.select(Operation::One);
-                let other_scan = graph
+                let other = graph.query();
+                let scan = graph
                     .scan(other, model.default_edge_table(), "same_hint")
                     .unwrap();
-                graph
-                    .project(
-                        other,
-                        "id",
-                        E::Column(graph.stored_column(other_scan, "source_id").unwrap()),
+                let projection = graph
+                    .project_values(
+                        graph.read_relation(scan, ReadMode::Raw).unwrap(),
+                        [(
+                            "id".into(),
+                            E::Column(graph.stored_column(scan, "source_id").unwrap()),
+                        )],
                     )
                     .unwrap();
-                *graph.operation_mut(other).unwrap() = Operation::source(other_scan);
+                graph.finish_query(projection).unwrap();
                 let union = graph
                     .union_all(vec![body, other], vec!["id".into()])
                     .unwrap();
-                let relation = graph.derive(root, union, "union").unwrap();
-                graph
-                    .project(root, "id", E::Column(graph.column(relation, "id").unwrap()))
-                    .unwrap();
-                *graph.operation_mut(root).unwrap() = Operation::source(relation);
+                let reference = graph.derive(root, union, "union").unwrap();
+                (
+                    graph.read_relation(reference, ReadMode::Raw).unwrap(),
+                    E::Column(graph.column(reference, "id").unwrap()),
+                )
             }
             _ => {
-                let relation = graph.derive(root, body, "derived").unwrap();
-                let value = graph.output_column(relation, output).unwrap();
-                let mut operation = Operation::source(relation);
+                let reference = graph.derive(root, body, "derived").unwrap();
+                let value = graph.output_column(reference, output).unwrap();
+                let mut operation = graph.read_relation(reference, ReadMode::Raw).unwrap();
                 if position == "join" {
                     let other = graph
                         .scan(root, model.entity_table("Project").unwrap(), "same_hint")
                         .unwrap();
-                    operation = operation.join(
-                        Operation::current(other),
-                        E::equal(
-                            E::Column(value),
-                            E::Column(graph.stored_column(other, "id").unwrap()),
-                        ),
-                    );
+                    operation = graph
+                        .join_relations(
+                            operation,
+                            graph.read_relation(other, ReadMode::Current).unwrap(),
+                            JoinKind::Inner,
+                            E::equal(
+                                E::Column(value),
+                                E::Column(graph.stored_column(other, "id").unwrap()),
+                            ),
+                        )
+                        .unwrap();
                 }
-                *graph.operation_mut(root).unwrap() = operation;
-                graph.project(root, "id", E::Column(value)).unwrap();
+                (operation, E::Column(value))
             }
-        }
+        };
+        let projection = graph
+            .project_values(source, [("id".into(), value)])
+            .unwrap();
+        graph.finish_query(projection).unwrap();
         assert!(check_graph(&graph, root, &context).is_err(), "{position}");
-        let unprotected = graph.operation(body).unwrap().clone();
         apply_graph_security(&mut graph, root, &context).unwrap();
         check_graph(&graph, root, &context).unwrap();
         graph.render(root).unwrap();
-        *graph.operation_mut(body).unwrap() = unprotected;
+        let source = graph.read_relation(scan, ReadMode::Current).unwrap();
+        let (source, value) = if scalar {
+            (graph.aggregate_relation(source, vec![]).unwrap(), E::Count)
+        } else {
+            (source, E::Column(id))
+        };
+        let replacement = graph
+            .project_values(source, [("id".into(), value)])
+            .unwrap();
+        graph.substitute_query(replacement).unwrap();
         assert!(check_graph(&graph, root, &context).is_err(), "{position}");
     }
 }
@@ -136,65 +170,74 @@ fn authorization_covers_every_nested_scan_occurrence() {
 fn authorization_walk_visits_shared_bodies_once_and_ignores_unreachable_blocks() {
     let model = compiler::data_model::clickhouse(super::super::setup::embedded_ontology()).unwrap();
     let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
-    let body = graph.select(Operation::One);
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
+    let body = graph.query();
     let scan = graph
         .scan(body, model.entity_table("Project").unwrap(), "project")
         .unwrap();
-    *graph.operation_mut(body).unwrap() = Operation::current(scan);
-    let id = graph
-        .project(
-            body,
-            "id",
-            E::Column(graph.stored_column(scan, "id").unwrap()),
+    let projection = graph
+        .project_values(
+            graph.read_relation(scan, ReadMode::Current).unwrap(),
+            [(
+                "id".into(),
+                E::Column(graph.stored_column(scan, "id").unwrap()),
+            )],
         )
         .unwrap();
-    let definition = graph.define(root, body, "projects", false).unwrap();
+    let id = projection.outputs().next().unwrap().0;
+    graph.finish_query(projection).unwrap();
+    let definition = graph.define(root, body, "projects").unwrap();
     let left = graph.reference(root, definition, "left").unwrap();
     let right = graph.reference(root, definition, "right").unwrap();
     let left_id = graph.output_column(left, id).unwrap();
     let right_id = graph.output_column(right, id).unwrap();
-    *graph.operation_mut(root).unwrap() = Operation::source(left).join(
-        Operation::source(right),
-        E::equal(E::Column(left_id), E::Column(right_id)),
-    );
-    graph.project(root, "id", E::Column(left_id)).unwrap();
-    let unused = graph.select(Operation::One);
-    let unused_scan = graph
+    let operation = graph
+        .join_relations(
+            graph.read_relation(left, ReadMode::Raw).unwrap(),
+            graph.read_relation(right, ReadMode::Raw).unwrap(),
+            JoinKind::Inner,
+            E::equal(E::Column(left_id), E::Column(right_id)),
+        )
+        .unwrap();
+    let projection = graph
+        .project_values(operation, [("id".into(), E::Column(left_id))])
+        .unwrap();
+    graph.finish_query(projection).unwrap();
+    let unused = graph.query();
+    let scan = graph
         .scan(
             unused,
             model.entity_table("Vulnerability").unwrap(),
             "unused",
         )
         .unwrap();
-    *graph.operation_mut(unused).unwrap() = Operation::current(unused_scan);
-    graph
-        .project(
-            unused,
-            "id",
-            E::Column(graph.stored_column(unused_scan, "id").unwrap()),
+    let projection = graph
+        .project_values(
+            graph.read_relation(scan, ReadMode::Current).unwrap(),
+            [(
+                "id".into(),
+                E::Column(graph.stored_column(scan, "id").unwrap()),
+            )],
         )
         .unwrap();
-
+    graph.finish_query(projection).unwrap();
     apply_graph_security(&mut graph, root, &context).unwrap();
     check_graph(&graph, root, &context).unwrap();
     assert!(matches!(
-        graph.operation(unused).unwrap(),
-        Operation::Source { .. }
+        graph.operation(unused).unwrap().kind(),
+        OperationKind::Source { .. }
     ));
     assert!(check_graph(&graph, unused, &context).is_err());
-    let mut scans = 0;
-    let mut filters = 0;
+    let (mut scans, mut filters) = (0, 0);
     graph
         .walk_operations(root, |_, operation, _| {
-            scans += usize::from(matches!(operation, Operation::Source { .. }));
-            filters += usize::from(matches!(operation, Operation::Filter { .. }));
+            scans += usize::from(matches!(operation.kind(), OperationKind::Source { .. }));
+            filters += usize::from(matches!(operation.kind(), OperationKind::Filter { .. }));
             Ok::<_, compiler::QueryError>(())
         })
         .unwrap();
-    assert_eq!(scans, 3);
-    assert_eq!(filters, 1);
+    assert_eq!((scans, filters), (3, 1));
     graph.render(root).unwrap();
 }
 
@@ -202,23 +245,24 @@ fn authorization_walk_visits_shared_bodies_once_and_ignores_unreachable_blocks()
 fn authorization_rejects_broad_or_disjunctive_guards() {
     let model = compiler::data_model::clickhouse(super::super::setup::embedded_ontology()).unwrap();
     let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
     let scan = graph
         .scan(root, model.entity_table("Project").unwrap(), "project")
         .unwrap();
+    let id = graph.stored_column(scan, "id").unwrap();
     let path = graph.stored_column(scan, "traversal_path").unwrap();
     let allowed = E::StartsWith(
         Box::new(E::Column(path)),
         Box::new(E::Text("1/100/".into())),
     );
-    graph
-        .project(
-            root,
-            "id",
-            E::Column(graph.stored_column(scan, "id").unwrap()),
+    let projection = graph
+        .project_values(
+            graph.read_relation(scan, ReadMode::Current).unwrap(),
+            [("id".into(), E::Column(id))],
         )
         .unwrap();
+    graph.finish_query(projection).unwrap();
     for predicate in [
         E::Boolean(false),
         E::equal(E::Boolean(false), E::Boolean(false)),
@@ -232,13 +276,29 @@ fn authorization_rejects_broad_or_disjunctive_guards() {
         E::StartsWith(Box::new(E::Column(path)), Box::new(E::Text("2/".into()))),
         E::StartsWith(Box::new(E::Column(path)), Box::new(E::Text("1/".into()))),
     ] {
-        *graph.operation_mut(root).unwrap() = Operation::current(scan).filter(predicate);
+        let source = graph
+            .filter_relation(
+                graph.read_relation(scan, ReadMode::Current).unwrap(),
+                predicate,
+            )
+            .unwrap();
+        let replacement = graph
+            .project_values(source, [("id".into(), E::Column(id))])
+            .unwrap();
+        graph.substitute_query(replacement).unwrap();
         assert!(check_graph(&graph, root, &context).is_err());
     }
-    *graph.operation_mut(root).unwrap() = Operation::current(scan).filter(allowed);
-    check_graph(&graph, root, &context).unwrap();
-    let operation = graph.operation_mut(root).unwrap();
-    *operation = std::mem::replace(operation, Operation::One).filter(E::Boolean(true));
+    let source = graph
+        .filter_relation(
+            graph.read_relation(scan, ReadMode::Current).unwrap(),
+            allowed,
+        )
+        .unwrap();
+    let source = graph.filter_relation(source, E::Boolean(true)).unwrap();
+    let replacement = graph
+        .project_values(source, [("id".into(), E::Column(id))])
+        .unwrap();
+    graph.substitute_query(replacement).unwrap();
     check_graph(&graph, root, &context).unwrap();
 }
 
@@ -246,8 +306,8 @@ fn authorization_rejects_broad_or_disjunctive_guards() {
 fn denied_roles_require_a_false_filter_on_the_scan() {
     let model = compiler::data_model::clickhouse(super::super::setup::embedded_ontology()).unwrap();
     let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-    let root = graph.select(Operation::One);
+    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+    let root = graph.query();
     let scan = graph
         .scan(
             root,
@@ -255,14 +315,14 @@ fn denied_roles_require_a_false_filter_on_the_scan() {
             "protected",
         )
         .unwrap();
-    graph
-        .project(
-            root,
-            "id",
-            E::Column(graph.stored_column(scan, "id").unwrap()),
+    let id = graph.stored_column(scan, "id").unwrap();
+    let projection = graph
+        .project_values(
+            graph.read_relation(scan, ReadMode::Current).unwrap(),
+            [("id".into(), E::Column(id))],
         )
         .unwrap();
-    *graph.operation_mut(root).unwrap() = Operation::current(scan);
+    graph.finish_query(projection).unwrap();
     apply_graph_security(&mut graph, root, &context).unwrap();
     check_graph(&graph, root, &context).unwrap();
     assert!(graph.render(root).unwrap().contains("WHERE false"));
@@ -270,7 +330,16 @@ fn denied_roles_require_a_false_filter_on_the_scan() {
         E::equal(E::Boolean(false), E::Boolean(false)),
         E::Or(Box::new(E::Boolean(false)), Box::new(E::Boolean(true))),
     ] {
-        *graph.operation_mut(root).unwrap() = Operation::current(scan).filter(predicate);
+        let source = graph
+            .filter_relation(
+                graph.read_relation(scan, ReadMode::Current).unwrap(),
+                predicate,
+            )
+            .unwrap();
+        let replacement = graph
+            .project_values(source, [("id".into(), E::Column(id))])
+            .unwrap();
+        graph.substitute_query(replacement).unwrap();
         assert!(check_graph(&graph, root, &context).is_err());
     }
     let empty = SecurityContext::new(1, vec![]).unwrap();
@@ -295,24 +364,26 @@ fn role_filtering_precedes_prefix_collapse() {
         ],
     )
     .unwrap();
-    for (entity, expected_paths) in [
+    for (entity, expected) in [
         ("User", vec![]),
         ("Project", vec!["1/"]),
         ("Vulnerability", vec!["1/100/", "1/102/"]),
     ] {
-        let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
-        let root = graph.select(Operation::One);
+        let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
+        let root = graph.query();
         let scan = graph
             .scan(root, model.entity_table(entity).unwrap(), "entity")
             .unwrap();
-        *graph.operation_mut(root).unwrap() = Operation::current(scan);
-        graph
-            .project(
-                root,
-                "id",
-                E::Column(graph.stored_column(scan, "id").unwrap()),
+        let projection = graph
+            .project_values(
+                graph.read_relation(scan, ReadMode::Current).unwrap(),
+                [(
+                    "id".into(),
+                    E::Column(graph.stored_column(scan, "id").unwrap()),
+                )],
             )
             .unwrap();
+        graph.finish_query(projection).unwrap();
         apply_graph_security(&mut graph, root, &context).unwrap();
         check_graph(&graph, root, &context).unwrap();
         let (_, params) = graph.render_parameterized(root).unwrap();
@@ -321,6 +392,6 @@ fn role_filtering_precedes_prefix_collapse() {
             .filter_map(|param| param.value.as_str())
             .collect::<Vec<_>>();
         paths.sort();
-        assert_eq!(paths, expected_paths, "{entity}");
+        assert_eq!(paths, expected, "{entity}");
     }
 }

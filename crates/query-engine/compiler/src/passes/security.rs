@@ -1,10 +1,11 @@
 use crate::error::{QueryError, Result};
 use crate::query_graph::{
-    BlockId, BlockView, Expression, LoweredOperation, QueryGraph, RelationId, Source,
+    BlockId, BlockView, Expression, OperationKind, QueryGraph, RelationId, Source,
 };
 pub use crate::types::SecurityContext;
 use orbit_utils::traversal_path::TraversalPathTrie;
 use query_data_model::QueryDataModel;
+use std::convert::Infallible;
 
 pub(crate) fn require_authorized_paths(context: &SecurityContext) -> Result<()> {
     if context.traversal_paths.is_empty() {
@@ -44,17 +45,22 @@ pub(crate) fn scan_predicate<'a, M: QueryDataModel + ?Sized>(
 }
 
 pub fn apply_graph_security<'a, M: QueryDataModel + ?Sized>(
-    graph: &mut QueryGraph<'a, M, Expression<'a>, LoweredOperation<'a>>,
+    graph: &mut QueryGraph<'a, M, Infallible>,
     root: BlockId,
     context: &SecurityContext,
 ) -> Result<()> {
     require_authorized_paths(context)?;
-    graph.walk_operations_mut(root, |block, operation| {
-        if let LoweredOperation::Source { relation, .. } = operation
+    let mut restrictions = Vec::new();
+    graph.walk_operations(root, |block, operation, _| {
+        if let OperationKind::Source { relation, .. } = operation.kind()
             && let Some(predicate) = scan_predicate(block, *relation, context)?
         {
-            *operation = std::mem::replace(operation, LoweredOperation::One).filter(predicate);
+            restrictions.push((*relation, predicate));
         }
-        Ok(())
-    })
+        Ok::<_, QueryError>(())
+    })?;
+    for (relation, predicate) in restrictions {
+        graph.restrict_scan(relation, predicate)?;
+    }
+    Ok(())
 }

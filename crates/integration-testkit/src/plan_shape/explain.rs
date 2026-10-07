@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use super::operator::Operator;
 use super::pattern::Expression as Tree;
 
+mod graph;
+pub(super) use graph::{graph_hydration, graph_neighbors, graph_pathfinding, query_graph};
+
 fn leaf(label: Operator, text: impl Into<String>) -> Tree {
     Tree::node(label, text, vec![])
 }
@@ -27,7 +30,7 @@ fn filter(predicates: Vec<String>, input: Tree) -> Tree {
 }
 
 pub fn logical(input: &Input) -> Tree {
-    let mut children: Vec<_> = input
+    let mut children = input
         .nodes
         .iter()
         .map(|node| {
@@ -41,7 +44,7 @@ pub fn logical(input: &Input) -> Tree {
                     format!("{}.id <= {}", node.id, range.end),
                 ]);
             }
-            let scan = filter(
+            let source = filter(
                 predicates,
                 leaf(
                     Operator::NodeScan,
@@ -60,15 +63,15 @@ pub fn logical(input: &Input) -> Tree {
                         .map(|column| format!("{}.{column}", node.id))
                         .collect::<Vec<_>>()
                         .join(", "),
-                    vec![scan],
+                    vec![source],
                 ),
                 Some(ColumnSelection::All) => {
-                    Tree::node(Operator::Project, format!("{}.*", node.id), vec![scan])
+                    Tree::node(Operator::Project, format!("{}.*", node.id), vec![source])
                 }
-                None => scan,
+                None => source,
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
     children.extend(input.relationships.iter().enumerate().map(|(index, edge)| {
         let (source, target, arrow) = match edge.direction {
             compiler::input::Direction::Incoming => (&edge.to, &edge.from, "->"),
@@ -123,41 +126,28 @@ pub fn logical(input: &Input) -> Tree {
         );
     }
     if let Some(order) = &input.order_by {
-        tree = Tree::node(
-            Operator::Sort,
-            format!(
-                "{}.{}{}",
-                order.node,
-                order.property,
-                if order.direction == OrderDirection::Desc {
-                    " DESC"
-                } else {
-                    ""
-                }
-            ),
-            vec![tree],
+        tree = sort(
+            tree,
+            std::iter::once((
+                format!("{}.{}", order.node, order.property),
+                order.direction == OrderDirection::Desc,
+            )),
         );
     }
     if let Some(order) = &input.aggregation.sort {
-        tree = Tree::node(
-            Operator::Sort,
-            format!(
-                "{}{}",
-                order.column,
-                if order.direction == OrderDirection::Desc {
-                    " DESC"
-                } else {
-                    ""
-                }
-            ),
-            vec![tree],
+        tree = sort(
+            tree,
+            std::iter::once((
+                order.column.clone(),
+                order.direction == OrderDirection::Desc,
+            )),
         );
     }
     Tree::node(Operator::Limit, input.limit.to_string(), vec![tree])
 }
 
 fn input_filters(alias: &str, filters: &HashMap<String, Vec<InputFilter>>) -> Vec<String> {
-    let mut ordered: Vec<_> = filters.iter().collect();
+    let mut ordered = filters.iter().collect::<Vec<_>>();
     ordered.sort_by_key(|(property, _)| *property);
     ordered
         .into_iter()
@@ -185,19 +175,17 @@ fn property_filter(alias: &str, property: &str, filter: &InputFilter) -> String 
         FilterOp::In => "IN",
         FilterOp::IsNull => return format!("{alias}.{property} IS NULL"),
         FilterOp::IsNotNull => return format!("{alias}.{property} IS NOT NULL"),
-        FilterOp::Contains
-        | FilterOp::StartsWith
-        | FilterOp::EndsWith
-        | FilterOp::TokenMatch
-        | FilterOp::AllTokens
-        | FilterOp::AnyTokens => return format!("{}({alias}.{property}, {value})", op.as_ref()),
+        _ => return format!("{}({alias}.{property}, {value})", op.as_ref()),
     };
     format!("{alias}.{property} {operator} {value}")
 }
 
 pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     let planned = match plan {
-        QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
+        QueryPlan::Traversal(plan) => definitions(
+            &plan.operation.execution,
+            execution_source(&plan.operation.execution),
+        ),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
             let group = |value: &compiler::passes::plan::aggregation::Group| {
@@ -231,14 +219,14 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .map(|(value, name)| format!("{} AS {name}", group(value))),
                 )
                 .chain(result.measures.iter().map(|measure| {
-                    let argument = measure
-                        .argument
-                        .as_ref()
-                        .map(planned_column)
-                        .unwrap_or_default();
                     format!(
-                        "{}({argument}){condition} AS {}",
+                        "{}({}){condition} AS {}",
                         measure.function.to_string().to_uppercase(),
+                        measure
+                            .argument
+                            .as_ref()
+                            .map(planned_column)
+                            .unwrap_or_default(),
                         measure.name
                     )
                 }))
@@ -249,16 +237,18 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 items,
                 vec![execution_source(&plan.operation.execution)],
             );
-            let tree = sort(
-                tree,
-                result.order.iter().map(|order| {
-                    (
-                        order.column.clone(),
-                        order.direction == OrderDirection::Desc,
-                    )
-                }),
-            );
-            definitions(&plan.operation.execution, tree)
+            definitions(
+                &plan.operation.execution,
+                sort(
+                    tree,
+                    result.order.iter().map(|order| {
+                        (
+                            order.column.clone(),
+                            order.direction == OrderDirection::Desc,
+                        )
+                    }),
+                ),
+            )
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -272,27 +262,23 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 },
                 |table| format!("fused table={table}"),
             );
+            let direction = direction_name(operation.direction);
+            let lookup = operation.center_tp_lookup.as_ref().map_or_else(
+                || "none".into(),
+                |(table, column)| format!("{table}.{column}"),
+            );
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] path_lookup={}",
+                    "center={} direction={direction} {access} center_filter={} relationships=[{}] path_lookup={lookup}",
                     operation.center,
-                    match operation.direction {
-                        compiler::input::Direction::Both => "both",
-                        compiler::input::Direction::Incoming => "incoming",
-                        compiler::input::Direction::Outgoing => "outgoing",
-                    },
                     operation.has_non_denorm,
                     operation
                         .edge
                         .rel_type_filter
                         .as_deref()
                         .unwrap_or_default()
-                        .join(", "),
-                    operation.center_tp_lookup.as_ref().map_or_else(
-                        || "none".into(),
-                        |(table, column)| format!("{table}.{column}")
-                    )
+                        .join(", ")
                 ),
                 vec![planned_node(&plan.nodes[&operation.center])],
             )
@@ -394,914 +380,20 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .collect(),
         ),
     };
-    let emitted = match ast {
-        Node::Query(value) => query(value),
-        Node::Insert(_) => leaf(Operator::Insert, ""),
-    };
-    (planned, emitted)
-}
-
-pub(super) trait GraphPhase: std::fmt::Debug {
-    const PLANNED: bool;
-    fn version(&self) -> compiler::query_graph::ColumnRef<'_>;
-}
-
-pub(super) fn graph_pathfinding<'a, M: query_data_model::QueryDataModel + ?Sized>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::PhysicalOperation<'a>,
-    >,
-    root: compiler::query_graph::BlockId,
-    input: &Input,
-) -> Tree {
-    use compiler::query_graph::{Expression, Relational, Source};
-    let path = input.path.as_ref().unwrap();
-    let start = input
-        .nodes
-        .iter()
-        .find(|node| node.id == path.from)
-        .unwrap();
-    let end = input.nodes.iter().find(|node| node.id == path.to).unwrap();
-    let mut tables = Vec::new();
-    let mut forward = 0;
-    let mut backward = 0;
-    let mut scoped = false;
-    for (definition, body) in graph.definitions(root).unwrap() {
-        let name = graph.definition_hint(definition).unwrap();
-        if !matches!(name, "forward" | "backward") {
-            continue;
-        }
-        let arms = graph
-            .union_arms(body)
-            .unwrap()
-            .unwrap_or(std::slice::from_ref(&body));
-        for arm in arms {
-            for output in graph.outputs(*arm).unwrap() {
-                let projection = graph.projection(output).unwrap();
-                if projection.label == "depth"
-                    && let Expression::Integer(depth) = projection.value
-                {
-                    if name == "forward" {
-                        forward = forward.max(depth);
-                    } else {
-                        backward = backward.max(depth);
-                    }
-                }
-                scoped |= projection.label == "traversal_path";
-            }
-        }
-    }
-    graph
-        .validate(root, |block, _, _| {
-            for relation in graph.relations(block)? {
-                let relation = graph.relation(relation)?;
-                if (relation.hint.starts_with('e') || relation.hint == "_e")
-                    && let Source::Stored(table) = relation.source
-                {
-                    tables.push(table.name().to_owned());
-                }
-            }
-            Ok(())
-        })
-        .unwrap();
-    tables.sort();
-    tables.dedup();
-    let kinds = |node: &compiler::InputNode, source| {
-        if path.rel_types.is_any() {
-            graph
-                .catalog()
-                .graph()
-                .relationship_names(
-                    if source { node.entity.as_deref() } else { None },
-                    if source { None } else { node.entity.as_deref() },
-                )
-                .join(", ")
-        } else {
-            String::new()
-        }
-    };
-    let nodes = [start, end]
-        .iter()
-        .map(|node| {
-            let mut predicates = Vec::new();
-            for block in graph.blocks() {
-                let Ok(operation) = graph.operation(block) else {
-                    continue;
-                };
-                let mut operation = operation;
-                let mut filters = Vec::new();
-                while let Relational::Filter { input, predicate } = operation {
-                    filters.extend(graph_conjunction(graph, predicate));
-                    operation = input;
-                }
-                if let Relational::Source { relation, .. } = operation
-                    && graph.relation(*relation).unwrap().hint == node.id
-                {
-                    predicates.extend(filters);
-                }
-            }
-            filter(
-                predicates,
-                leaf(
-                    Operator::NodeScan,
-                    format!("{} AS {}", node.entity.as_deref().unwrap(), node.id),
-                ),
-            )
-        })
-        .collect();
-    Tree::node(
-        Operator::PathFinding,
-        format!(
-            "{}->{} depth={} forward={forward} backward={backward} scoped={scoped} tables=[{}] relationships=[{}] forward_kinds=[{}] backward_kinds=[{}]",
-            path.from,
-            path.to,
-            path.max_depth,
-            tables.join(", "),
-            path.rel_types.join(", "),
-            kinds(start, true),
-            kinds(end, false)
-        ),
-        nodes,
+    (
+        planned,
+        match ast {
+            Node::Query(value) => query(value),
+            Node::Insert(_) => leaf(Operator::Insert, ""),
+        },
     )
 }
 
-pub(super) fn graph_neighbors<'a, M: query_data_model::QueryDataModel + ?Sized>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::PhysicalOperation<'a>,
-    >,
-    root: compiler::query_graph::BlockId,
-    input: &Input,
-) -> Tree {
-    use compiler::query_graph::{Relational, Source};
-    let center = &input.nodes[0];
-    let config = input.neighbors.as_ref().unwrap();
-    let tables = |root| {
-        let mut tables = Vec::new();
-        graph
-            .validate(root, |block, _, _| {
-                for relation in graph.relations(block)? {
-                    let relation = graph.relation(relation)?;
-                    if matches!(relation.hint.as_str(), "e" | "_e")
-                        && let Source::Stored(table) = relation.source
-                    {
-                        tables.push(table.name().to_string());
-                    }
-                }
-                Ok(())
-            })
-            .unwrap();
-        tables.sort();
-        tables.dedup();
-        tables
-    };
-    let Relational::Limit { input: source, .. } = graph.operation(root).unwrap() else {
-        unreachable!()
-    };
-    let fused = matches!(source.as_ref(), Relational::Expand { .. });
-    let access = if fused {
-        format!("fused table={}", tables(root).join(", "))
-    } else {
-        let Relational::Source { relation, .. } = source.as_ref() else {
-            unreachable!()
-        };
-        let Source::Derived(body) = graph.relation(*relation).unwrap().source else {
-            unreachable!()
-        };
-        let arms = graph.union_arms(body).unwrap();
-        let (outgoing, incoming) = if config.direction == compiler::input::Direction::Both {
-            let arms = arms.unwrap();
-            (tables(arms[0]), tables(arms[1]))
-        } else {
-            (tables(body), tables(body))
-        };
-        format!(
-            "directional outgoing=[{}] incoming=[{}]",
-            outgoing.join(", "),
-            incoming.join(", ")
-        )
-    };
-    let mut center_scan = false;
-    graph
-        .validate(root, |block, _, _| {
-            for relation in graph.relations(block)? {
-                center_scan |= graph.relation(relation)?.input
-                    == Some(compiler::query_graph::ScanInput::Node(0));
-            }
-            Ok(())
-        })
-        .unwrap();
-    let direction = match config.direction {
+fn direction_name(direction: compiler::input::Direction) -> &'static str {
+    match direction {
         compiler::input::Direction::Both => "both",
         compiler::input::Direction::Incoming => "incoming",
         compiler::input::Direction::Outgoing => "outgoing",
-    };
-    let lookup = graph
-        .catalog()
-        .traversal_path_lookup(
-            center.entity.as_deref().unwrap(),
-            ontology::TraversalPathKind::Id,
-        )
-        .map_or_else(
-            || "none".into(),
-            |(table, column)| format!("{table}.{column}"),
-        );
-    Tree::node(
-        Operator::Neighbors,
-        format!(
-            "center={} direction={direction} {access} center_filter={} relationships=[{}] path_lookup={lookup}",
-            center.id,
-            center_scan && (!center.filters.is_empty() || center.id_range.is_some()),
-            config.rel_types.join(", ")
-        ),
-        vec![leaf(
-            Operator::NodeScan,
-            format!("{} AS {}", center.entity.as_deref().unwrap(), center.id),
-        )],
-    )
-}
-
-pub(super) fn graph_hydration<'a, M: query_data_model::QueryDataModel + ?Sized>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::PhysicalOperation<'a>,
-    >,
-    root: compiler::query_graph::BlockId,
-) -> Tree {
-    use compiler::query_graph::{Expression, Relational, Source};
-    let Relational::Limit { input, .. } = graph.operation(root).unwrap() else {
-        unreachable!()
-    };
-    let Relational::Source { relation, .. } = input.as_ref() else {
-        unreachable!()
-    };
-    let Source::Derived(body) = graph.relation(*relation).unwrap().source else {
-        unreachable!()
-    };
-    let arms = graph
-        .union_arms(body)
-        .unwrap()
-        .unwrap_or(std::slice::from_ref(&body));
-    Tree::node(
-        Operator::Hydration,
-        "",
-        arms.iter()
-            .map(|arm| {
-                let Relational::Filter { input, predicate } = graph.operation(*arm).unwrap() else {
-                    unreachable!()
-                };
-                let Relational::Source { relation, .. } = input.as_ref() else {
-                    unreachable!()
-                };
-                let Source::Derived(keys) = graph.relation(*relation).unwrap().source else {
-                    unreachable!()
-                };
-                let fields = graph
-                    .outputs(*arm)
-                    .unwrap()
-                    .find_map(|output| match &graph.projection(output).unwrap().value {
-                        Expression::JsonObject(fields) => Some(fields),
-                        _ => None,
-                    })
-                    .unwrap();
-                let projection = fields
-                    .iter()
-                    .map(|(_, value)| match value {
-                        Expression::ToString(value) => graph_expression(graph, value),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Tree::node(
-                    Operator::Project,
-                    projection,
-                    vec![filter(
-                        vec![graph_expression(graph, predicate)],
-                        graph_operation(graph, graph.operation(keys).unwrap()),
-                    )],
-                )
-            })
-            .collect(),
-    )
-}
-
-impl GraphPhase for compiler::query_graph::LatestRows<'_> {
-    const PLANNED: bool = true;
-    fn version(&self) -> compiler::query_graph::ColumnRef<'_> {
-        self.version
-    }
-}
-
-impl GraphPhase for std::convert::Infallible {
-    const PLANNED: bool = false;
-    fn version(&self) -> compiler::query_graph::ColumnRef<'_> {
-        match *self {}
-    }
-}
-
-pub(super) fn query_graph<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::Relational<'a, L>,
-    >,
-    root: compiler::query_graph::BlockId,
-) -> Tree {
-    if let Some(arms) = graph.union_arms(root).unwrap() {
-        return Tree::node(
-            Operator::Union,
-            "ALL",
-            arms.iter().map(|arm| query_graph(graph, *arm)).collect(),
-        );
-    }
-    let projection = graph
-        .outputs(root)
-        .unwrap()
-        .map(|output| {
-            format!(
-                "{} AS {}",
-                graph_expression(graph, &graph.projection(output).unwrap().value),
-                graph.output_label(output).unwrap()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut operation = graph.operation(root).unwrap();
-    let limit = if let compiler::query_graph::Relational::Limit { input, count } = operation {
-        operation = input;
-        Some(*count)
-    } else {
-        None
-    };
-    let dedup = if !L::PLANNED
-        && let compiler::query_graph::Relational::FirstBy { input, keys } = operation
-    {
-        operation = input;
-        Some(keys)
-    } else {
-        None
-    };
-    let sort = if let compiler::query_graph::Relational::Sort { input, keys } = operation {
-        operation = input;
-        Some(keys)
-    } else {
-        None
-    };
-    let tree = if let compiler::query_graph::Relational::Aggregate { input, groups } = operation {
-        let groups = groups
-            .iter()
-            .map(|group| graph_expression(graph, group))
-            .collect::<Vec<_>>();
-        let head = if groups.is_empty() {
-            projection
-        } else {
-            format!("group {}, {projection}", groups.join(", "))
-        };
-        let source = graph_operation(graph, input);
-        Tree::node(
-            Operator::Aggregate,
-            head,
-            vec![if L::PLANNED {
-                Tree::node(Operator::Project, "", vec![source])
-            } else {
-                source
-            }],
-        )
-    } else {
-        Tree::node(
-            Operator::Project,
-            projection,
-            vec![graph_operation(graph, operation)],
-        )
-    };
-    let tree = if !L::PLANNED {
-        let tree = match sort {
-            Some(keys) => Tree::node(Operator::Sort, graph_order(graph, keys), vec![tree]),
-            None => tree,
-        };
-        let tree = match dedup {
-            Some(keys) => Tree::node(
-                Operator::Deduplicate,
-                format!(
-                    "LimitBy 1 BY {}",
-                    keys.iter()
-                        .map(|column| graph_expression(
-                            graph,
-                            &compiler::query_graph::Expression::Column(*column)
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                vec![tree],
-            ),
-            None => tree,
-        };
-        match limit {
-            Some(count) => Tree::node(Operator::Limit, count.to_string(), vec![tree]),
-            None => tree,
-        }
-    } else {
-        tree
-    };
-    let definitions = graph
-        .definitions(root)
-        .unwrap()
-        .map(|(definition, body)| {
-            Tree::node(
-                Operator::Cte,
-                graph.definition_hint(definition).unwrap(),
-                vec![query_graph(graph, body)],
-            )
-        })
-        .collect::<Vec<_>>();
-    if definitions.is_empty() {
-        tree
-    } else {
-        Tree::node(
-            Operator::With,
-            "",
-            definitions.into_iter().chain([tree]).collect(),
-        )
-    }
-}
-
-fn graph_order<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::Relational<'a, L>,
-    >,
-    keys: &[(compiler::query_graph::ColumnRef<'a>, bool)],
-) -> String {
-    keys.iter()
-        .map(|(column, descending)| {
-            format!(
-                "{}{}",
-                graph_expression(graph, &compiler::query_graph::Expression::Column(*column)),
-                if *descending { " DESC" } else { "" }
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn graph_expression<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::Relational<'a, L>,
-    >,
-    value: &compiler::query_graph::Expression<'a>,
-) -> String {
-    use compiler::query_graph::{Expression, Port};
-    match value {
-        Expression::InQuery { value, key } => format!(
-            "{} IN {}",
-            graph_expression(graph, value),
-            graph_expression(graph, &Expression::Column(*key))
-        ),
-        Expression::Add(left, right) => format!(
-            "({} + {})",
-            graph_expression(graph, left),
-            graph_expression(graph, right)
-        ),
-        Expression::Strings(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| text_literal(value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expression::Prefixes {
-            value,
-            paths,
-            array,
-        } => {
-            let value = graph_expression(graph, value);
-            let Expression::Strings(paths) = paths.as_ref() else {
-                unreachable!()
-            };
-            let paths = paths
-                .iter()
-                .map(|path| text_literal(path))
-                .collect::<Vec<_>>();
-            if L::PLANNED {
-                format!(
-                    "{value} PREFIX {} [{}]",
-                    if *array { "SET" } else { "UNION" },
-                    paths.join(", ")
-                )
-            } else if *array {
-                format!(
-                    "ArrayExists(_gkg_path -> StartsWith({value}, _gkg_path), [{}])",
-                    paths.join(", ")
-                )
-            } else {
-                paths
-                    .iter()
-                    .map(|path| format!("StartsWith({value}, {path})"))
-                    .collect::<Vec<_>>()
-                    .join(" OR ")
-            }
-        }
-        Expression::Predicate {
-            operator,
-            value,
-            argument,
-            fold_case,
-        } => {
-            use compiler::input::FilterOp;
-            let value = graph_expression(graph, value);
-            let argument = argument
-                .as_ref()
-                .map(|argument| graph_expression(graph, argument))
-                .unwrap_or_default();
-            let comparison = match operator {
-                FilterOp::Eq => Some("="),
-                FilterOp::Ne => Some("!="),
-                FilterOp::Gt => Some(">"),
-                FilterOp::Lt => Some("<"),
-                FilterOp::Gte => Some(">="),
-                FilterOp::Lte => Some("<="),
-                FilterOp::In => Some("IN"),
-                _ => None,
-            };
-            if let Some(comparison) = comparison {
-                format!("{value} {comparison} {argument}")
-            } else if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) {
-                format!(
-                    "{value} IS {}NULL",
-                    if *operator == FilterOp::IsNotNull {
-                        "NOT "
-                    } else {
-                        ""
-                    }
-                )
-            } else if L::PLANNED {
-                format!("{}({value}, {argument})", operator.as_ref())
-            } else {
-                let fold = |value: String| {
-                    if *fold_case {
-                        format!("Lower({value})")
-                    } else {
-                        value
-                    }
-                };
-                format!("{operator:?}({}, {})", fold(value), fold(argument))
-            }
-        }
-        Expression::Array(values)
-            if values
-                .iter()
-                .all(|value| matches!(value, Expression::Tuple(_))) =>
-        {
-            if L::PLANNED {
-                format!(
-                    "path[{}]",
-                    values
-                        .iter()
-                        .map(|value| match value {
-                            Expression::Tuple(fields) => format!(
-                                "({})",
-                                fields
-                                    .iter()
-                                    .map(|field| graph_expression(graph, field))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                            _ => unreachable!(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                format!(
-                    "Array({})",
-                    values
-                        .iter()
-                        .map(|value| graph_expression(graph, value))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-        }
-        Expression::Tuple(values) => format!(
-            "Tuple({})",
-            values
-                .iter()
-                .map(|value| graph_expression(graph, value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expression::Array(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| graph_expression(graph, value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expression::Bucket { unit, value } => format!(
-            "bucket({}, {})",
-            unit.name(),
-            graph_expression(graph, value)
-        ),
-        Expression::GreaterEqual(left, right) | Expression::LessEqual(left, right) => format!(
-            "{} {} {}",
-            graph_expression(graph, left),
-            if matches!(value, Expression::GreaterEqual(..)) {
-                ">="
-            } else {
-                "<="
-            },
-            graph_expression(graph, right)
-        ),
-        Expression::Count => "COUNT()".into(),
-        Expression::HasAny(value, values) => {
-            let value = graph_expression(graph, value);
-            let Expression::Array(values) = values.as_ref() else {
-                unreachable!()
-            };
-            let values = values
-                .iter()
-                .map(|value| graph_expression(graph, value))
-                .collect::<Vec<_>>();
-            if L::PLANNED {
-                format!("{value} HAS ANY [{}]", values.join(", "))
-            } else if let [element] = values.as_slice() {
-                format!("ArrayContains({value}, {element})")
-            } else {
-                format!("ArrayContainsAny({value}, Array({}))", values.join(", "))
-            }
-        }
-        Expression::CountIf(condition) => {
-            let parts = graph_conjunction(graph, condition);
-            let condition = if L::PLANNED {
-                parts.join(", ")
-            } else {
-                parts
-                    .iter()
-                    .map(|part| format!("({part})"))
-                    .collect::<Vec<_>>()
-                    .join(" AND ")
-            };
-            format!("COUNT() FILTER [{condition}]")
-        }
-        Expression::Column(column) => {
-            let name = match column.port() {
-                Port::Stored(column) => column.name(),
-                Port::Output(output) => graph.output_label(output).unwrap(),
-            };
-            format!("{}.{name}", graph.relation(column.relation()).unwrap().hint)
-        }
-        Expression::Text(value) => text_literal(value),
-        Expression::Integer(value) => value.to_string(),
-        Expression::Boolean(value) => value.to_string(),
-        Expression::Integers(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Expression::In(left, right)
-            if !L::PLANNED
-                && matches!(right.as_ref(), Expression::Integers(values) if values.len() == 1) =>
-        {
-            let Expression::Integers(values) = right.as_ref() else {
-                unreachable!()
-            };
-            format!("{} = {}", graph_expression(graph, left), values[0])
-        }
-        Expression::In(left, right) => format!(
-            "{} IN {}",
-            graph_expression(graph, left),
-            graph_expression(graph, right)
-        ),
-        Expression::Equal(left, right) => format!(
-            "{} = {}",
-            graph_expression(graph, left),
-            graph_expression(graph, right)
-        ),
-        Expression::Or(left, right) => format!(
-            "({}) OR ({})",
-            graph_expression(graph, left),
-            graph_expression(graph, right)
-        ),
-        Expression::And(_, _) => graph_conjunction(graph, value)
-            .iter()
-            .map(|part| {
-                if part.starts_with("ArrayContains") || part.contains(" IN ") {
-                    part.clone()
-                } else {
-                    format!("({part})")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" AND "),
-        value => format!("{value:?}"),
-    }
-}
-
-fn graph_conjunction<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::Relational<'a, L>,
-    >,
-    value: &compiler::query_graph::Expression<'a>,
-) -> Vec<String> {
-    if let compiler::query_graph::Expression::And(left, right) = value {
-        graph_conjunction(graph, left)
-            .into_iter()
-            .chain(graph_conjunction(graph, right))
-            .collect()
-    } else {
-        vec![graph_expression(graph, value)]
-    }
-}
-
-fn graph_operation<'a, M: query_data_model::QueryDataModel + ?Sized, L: GraphPhase>(
-    graph: &compiler::query_graph::QueryGraph<
-        'a,
-        M,
-        compiler::query_graph::Expression<'a>,
-        compiler::query_graph::Relational<'a, L>,
-    >,
-    operation: &compiler::query_graph::Relational<'a, L>,
-) -> Tree {
-    use compiler::query_graph::{JoinKind, ReadMode, Relational, Source};
-    match operation {
-        Relational::One => leaf(Operator::Scan, "One"),
-        Relational::Materialize { input, relation } => {
-            let source = graph_operation(graph, input);
-            Tree::node(
-                Operator::Bind,
-                &graph.relation(*relation).unwrap().hint,
-                vec![if L::PLANNED {
-                    source
-                } else {
-                    Tree::node(Operator::Project, "*", vec![source])
-                }],
-            )
-        }
-        Relational::Source { relation, read } => {
-            let declaration = graph.relation(*relation).unwrap();
-            match declaration.source {
-                Source::Stored(table) => scan(
-                    table.name(),
-                    &declaration.hint,
-                    matches!(read, ReadMode::Current),
-                ),
-                Source::Derived(body) => {
-                    if let Some(arms) = graph.union_arms(body).unwrap()
-                        && matches!(
-                            declaration.input,
-                            Some(compiler::query_graph::ScanInput::Relationship(_))
-                        )
-                    {
-                        Tree::node(
-                            Operator::Union,
-                            format!("ALL AS {}", declaration.hint),
-                            arms.iter().map(|arm| query_graph(graph, *arm)).collect(),
-                        )
-                    } else {
-                        Tree::node(
-                            Operator::Bind,
-                            &declaration.hint,
-                            vec![query_graph(graph, body)],
-                        )
-                    }
-                }
-                Source::Definition(definition) => scan(
-                    graph.definition_hint(definition).unwrap(),
-                    &declaration.hint,
-                    false,
-                ),
-            }
-        }
-        Relational::Filter { input, predicate } => filter(
-            graph_conjunction(graph, predicate),
-            graph_operation(graph, input),
-        ),
-        Relational::Join {
-            left,
-            right,
-            kind: JoinKind::Membership,
-            condition,
-        } => {
-            let compiler::query_graph::Expression::Equal(value, key) = condition else {
-                unreachable!()
-            };
-            let membership = format!(
-                "{} IN {}",
-                graph_expression(graph, value),
-                graph_expression(graph, key)
-            );
-            let Relational::Source { relation, .. } = right.as_ref() else {
-                unreachable!()
-            };
-            if matches!(
-                graph.relation(*relation).unwrap().source,
-                Source::Definition(_)
-            ) {
-                filter(vec![membership], graph_operation(graph, left))
-            } else {
-                let keys = match graph.relation(*relation).unwrap().source {
-                    Source::Derived(body) => query_graph(graph, body),
-                    _ => graph_operation(graph, right),
-                };
-                Tree::node(
-                    Operator::SemiJoin,
-                    format!("{} IN subquery", graph_expression(graph, value)),
-                    vec![graph_operation(graph, left), keys],
-                )
-            }
-        }
-        Relational::Join {
-            left,
-            right,
-            kind,
-            condition,
-        } => Tree::node(
-            if matches!(kind, JoinKind::Semi) {
-                Operator::SemiJoin
-            } else {
-                Operator::Join
-            },
-            format!("ON {}", graph_expression(graph, condition)),
-            vec![graph_operation(graph, left), graph_operation(graph, right)],
-        ),
-        Relational::Aggregate { input, groups } => Tree::node(
-            Operator::Aggregate,
-            format!("{groups:?}"),
-            vec![graph_operation(graph, input)],
-        ),
-        Relational::Latest { input, requirement } => {
-            let relation = graph.relation(requirement.version().relation()).unwrap();
-            let Source::Stored(table) = relation.source else {
-                unreachable!()
-            };
-            Tree::node(
-                Operator::Deduplicate,
-                format!(
-                    "LimitBy {}",
-                    graph
-                        .catalog()
-                        .table_sort_key(table.name())
-                        .unwrap()
-                        .iter()
-                        .map(|name| format!("{}.{name}", relation.hint))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                vec![graph_operation(graph, input)],
-            )
-        }
-        Relational::FirstBy { input, keys } => Tree::node(
-            Operator::Deduplicate,
-            format!(
-                "LimitBy 1 BY {}",
-                keys.iter()
-                    .map(|column| graph_expression(
-                        graph,
-                        &compiler::query_graph::Expression::Column(*column)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            vec![graph_operation(graph, input)],
-        ),
-        Relational::Sort { input, keys } => Tree::node(
-            Operator::Sort,
-            graph_order(graph, keys),
-            vec![graph_operation(graph, input)],
-        ),
-        Relational::Limit { input, count } => Tree::node(
-            Operator::Limit,
-            count.to_string(),
-            vec![graph_operation(graph, input)],
-        ),
-        Relational::Expand { input, column } => Tree::node(
-            Operator::Project,
-            format!(
-                "expand {}",
-                graph_expression(graph, &compiler::query_graph::Expression::Column(*column))
-            ),
-            vec![graph_operation(graph, input)],
-        ),
     }
 }
 
@@ -1320,10 +412,6 @@ fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
             ),
         ),
     )
-}
-
-fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    definitions(execution, execution_source(execution))
 }
 
 fn execution_source(execution: &ExecutionPlan) -> Tree {
@@ -1359,8 +447,8 @@ fn physical_tree(plan: &PhysicalPlan) -> Tree {
     )
 }
 
-fn physical_source(plan: &PhysicalSource) -> Tree {
-    match plan {
+fn physical_source(source: &PhysicalSource) -> Tree {
+    match source {
         PhysicalSource::Union { alias, arms, .. } => Tree::node(
             Operator::Union,
             format!("ALL AS {alias}"),
@@ -1408,34 +496,36 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
             )],
         ),
         PhysicalSource::Join {
-            endpoints,
+            endpoints: (left_key, right_key),
             predicates,
             left,
             right,
-        } => Tree::node(
-            Operator::Join,
-            planned_join(endpoints, predicates),
-            vec![physical_source(left), physical_source(right)],
-        ),
+        } => {
+            let equality = format!(
+                "{} = {}",
+                planned_column(left_key),
+                planned_column(right_key)
+            );
+            let condition = if predicates.is_empty() {
+                equality
+            } else {
+                std::iter::once(equality)
+                    .chain(predicates.iter().flat_map(planned_predicate))
+                    .map(|value| format!("({value})"))
+                    .collect::<Vec<_>>()
+                    .join(" AND ")
+            };
+            Tree::node(
+                Operator::Join,
+                format!("ON {condition}"),
+                vec![physical_source(left), physical_source(right)],
+            )
+        }
     }
 }
 
 fn planned_column(value: &Column) -> String {
     format!("{}.{}", value.source, value.name)
-}
-
-fn planned_join((left, right): &(Column, Column), predicates: &[Predicate]) -> String {
-    let equality = format!("{} = {}", planned_column(left), planned_column(right));
-    let condition = if predicates.is_empty() {
-        equality
-    } else {
-        std::iter::once(equality)
-            .chain(predicates.iter().flat_map(planned_predicate))
-            .map(|value| format!("({value})"))
-            .collect::<Vec<_>>()
-            .join(" AND ")
-    };
-    format!("ON {condition}")
 }
 
 fn planned_predicate(value: &Predicate) -> Vec<String> {
@@ -1512,31 +602,18 @@ fn planned_projections(values: &[Projection]) -> String {
         .join(", ")
 }
 
-fn scan(table: &str, alias: &str, final_: bool) -> Tree {
-    let scan = leaf(Operator::Scan, format!("Table({table}) AS {alias}"));
-    if final_ {
-        Tree::node(Operator::Deduplicate, "Final", vec![scan])
+fn scan(table: &str, alias: &str, current: bool) -> Tree {
+    let source = leaf(Operator::Scan, format!("Table({table}) AS {alias}"));
+    if current {
+        Tree::node(Operator::Deduplicate, "Final", vec![source])
     } else {
-        scan
+        source
     }
-}
-
-fn join_head(kind: &str, condition: &Expr) -> String {
-    format!(
-        "{}ON {}",
-        if kind == "INNER" {
-            String::new()
-        } else {
-            format!("{kind} ")
-        },
-        expression(condition)
-    )
 }
 
 fn text_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
-
 fn literal(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(value) => text_literal(value),
@@ -1655,11 +732,22 @@ fn relation(value: &TableRef) -> Tree {
             left,
             right,
             on,
-        } => Tree::node(
-            Operator::Join,
-            join_head(&join_type.to_string(), on),
-            vec![relation(left), relation(right)],
-        ),
+        } => {
+            let kind = join_type.to_string();
+            Tree::node(
+                Operator::Join,
+                format!(
+                    "{}ON {}",
+                    if kind == "INNER" {
+                        String::new()
+                    } else {
+                        format!("{kind} ")
+                    },
+                    expression(on)
+                ),
+                vec![relation(left), relation(right)],
+            )
+        }
         TableRef::Subquery {
             query: inner,
             alias,
@@ -1678,12 +766,12 @@ fn query(value: &Query) -> Tree {
         tree = query_filter(predicate, tree);
     }
     let projection = projections(&value.select);
-    let aggregate = !value.group_by.is_empty()
-        || value
+    if value.group_by.is_empty()
+        && !value
             .select
             .iter()
-            .any(|value| matches!(value.expr, Expr::Aggregate { .. }));
-    if !aggregate {
+            .any(|value| matches!(value.expr, Expr::Aggregate { .. }))
+    {
         tree = Tree::node(Operator::Project, projection, vec![tree]);
     } else {
         let items = value
@@ -1746,9 +834,9 @@ fn query(value: &Query) -> Tree {
 }
 
 fn sort(input: Tree, keys: impl Iterator<Item = (String, bool)>) -> Tree {
-    let keys: Vec<_> = keys
+    let keys = keys
         .map(|(value, descending)| format!("{value}{}", if descending { " DESC" } else { "" }))
-        .collect();
+        .collect::<Vec<_>>();
     if keys.is_empty() {
         input
     } else {

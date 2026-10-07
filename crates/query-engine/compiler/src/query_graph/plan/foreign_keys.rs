@@ -1,62 +1,53 @@
+use super::access::{AccessPlan, entity};
+use super::keys::KeyRead;
 use super::*;
 use crate::input::{Direction, Input, QueryType};
 use std::collections::HashMap;
 
-use super::access::{AccessPlan, entity};
-
-impl<'catalog, M: QueryDataModel + ?Sized>
-    QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
-{
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
     pub(super) fn narrow_star<'input>(
         &mut self,
         input: &'input Input,
-        plan: &mut AccessPlan<'input, 'catalog>,
+        plan: &mut AccessPlan<'input, 'a>,
     ) -> Result<()> {
-        let root = plan.root;
-        let relations = &mut plan.relations;
-        let node_operations = &mut plan.node_operations;
-        let node_predicates = &mut plan.node_predicates;
-        let elided = &mut plan.elided;
-        let keys = &mut plan.keys;
-        let star_center = plan.star_center;
-        let entity = |alias: &str| entity(input, alias);
-        let center = star_center.expect("FK star holder");
+        let center = plan.star_center.ok_or(GraphError::JoinShape)?;
         let center_node = input
             .nodes
             .iter()
             .find(|node| node.id == center)
-            .expect("center input");
+            .ok_or(GraphError::MissingOutput)?;
         let center_selective = !center_node.node_ids.is_empty()
             || center_node.filters.keys().any(|property| {
                 self.catalog
-                    .property(entity(center).unwrap(), property)
+                    .property(center_node.entity.as_deref().unwrap_or_default(), property)
                     .is_some_and(|property| {
                         self.catalog.property_selectivity(property.id)
                             == ontology::FieldSelectivity::High
                     })
             });
-        let mut candidates = HashMap::new();
-        let mut center_memberships = Vec::new();
+        let center_relation = plan.relations[center];
         let mut targets = input
             .relationships
             .iter()
-            .zip(keys.iter())
+            .zip(&plan.keys)
             .map(|(relationship, key)| {
-                let target = if relationship.from == center {
+                let alias = if relationship.from == center {
                     relationship.to.as_str()
                 } else {
                     relationship.from.as_str()
                 };
-                (target, key.as_ref().expect("star key"))
+                Ok((alias, key.ok_or(GraphError::JoinShape)?))
             })
-            .collect::<Vec<_>>();
-        targets.sort_by_key(|(target, _)| *target);
+            .collect::<Result<Vec<_>>>()?;
+        targets.sort_by_key(|(alias, _)| *alias);
+        let mut candidates = HashMap::new();
+        let mut memberships = Vec::new();
         for (target, key) in &targets {
             let node = input
                 .nodes
                 .iter()
                 .find(|node| node.id == *target)
-                .expect("target input");
+                .ok_or(GraphError::MissingOutput)?;
             let holder_column = self
                 .catalog
                 .property_column(key.property)
@@ -66,100 +57,102 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .property_column(key.referenced_key)
                 .ok_or(GraphError::MissingOutput)?;
             if target_column == "id" && !node.node_ids.is_empty() {
-                node_predicates
+                let predicate = Expression::membership(
+                    self.stored_column(center_relation, holder_column)?,
+                    &node.node_ids,
+                );
+                plan.node_predicates
                     .get_mut(center)
-                    .unwrap()
-                    .push(Expression::membership(
-                        self.stored_column(relations[center], holder_column)?,
-                        &node.node_ids,
-                    ));
+                    .ok_or(GraphError::MissingOutput)?
+                    .push(predicate);
             }
-            if elided.contains(target) {
-                continue;
-            }
-            if !node.filters.is_empty() || !node.node_ids.is_empty() {
+            if !plan.elided.contains(target)
+                && (!node.filters.is_empty() || !node.node_ids.is_empty())
+            {
                 let candidate = self.candidate(
-                    root,
-                    relations[target],
+                    plan.root,
+                    (plan.relations[target], KeyRead::Raw),
                     target_column,
-                    &node_predicates[target],
+                    &plan.node_predicates[target],
                     &[],
                     &format!("_candidate_{target}"),
                 )?;
                 candidates.insert(*target, candidate);
-                center_memberships.push((holder_column, candidate));
+                memberships.push((holder_column, candidate));
             }
         }
-        let mut center_operation = PhysicalOperation::current(relations[center]);
-        for predicate in &node_predicates[center] {
-            center_operation = center_operation.filter(predicate.clone());
+        let mut operation = self.read_relation(center_relation, ReadMode::Current)?;
+        for predicate in &plan.node_predicates[center] {
+            operation = self.filter_relation(operation, predicate.clone())?;
         }
-        if !center_memberships.is_empty() {
+        if !memberships.is_empty() {
             let candidate = self.candidate(
-                root,
-                relations[center],
+                plan.root,
+                (center_relation, KeyRead::Raw),
                 "id",
-                &node_predicates[center],
-                &center_memberships,
+                &plan.node_predicates[center],
+                &memberships,
                 &format!("_candidate_{center}"),
             )?;
-            center_operation = self.narrow(
-                root,
-                center_operation,
-                self.stored_column(relations[center], "id")?,
+            operation = self.narrow(
+                plan.root,
+                operation,
+                self.stored_column(center_relation, "id")?,
                 candidate,
             )?;
         }
-        node_operations.insert(center, center_operation.materialize(relations[center]));
+        plan.node_operations.insert(
+            center,
+            self.materialize_relation(operation, center_relation)?,
+        );
         for (target, key) in targets {
-            let node = input
+            let (index, node) = input
                 .nodes
                 .iter()
-                .find(|node| node.id == target)
-                .expect("target input");
-            if elided.contains(target) {
-                let holder_column = self
-                    .catalog
-                    .property_column(key.property)
-                    .ok_or(GraphError::MissingOutput)?;
-                let holder = self.stored_column(relations[center], holder_column)?;
+                .enumerate()
+                .find(|(_, node)| node.id == target)
+                .ok_or(GraphError::MissingOutput)?;
+            let holder_column = self
+                .catalog
+                .property_column(key.property)
+                .ok_or(GraphError::MissingOutput)?;
+            if plan.elided.contains(target) {
                 if !node.filters.is_empty() || node.id_range.is_some() {
-                    let body = self.select(PhysicalOperation::One);
-                    let relation = self.scan(
-                        body,
-                        self.catalog
-                            .entity_table(entity(target)?)
-                            .ok_or(GraphError::MissingOutput)?,
-                        target,
+                    let body = self.query_in(plan.root)?;
+                    let table = self
+                        .catalog
+                        .entity_table(entity(input, target)?)
+                        .ok_or(GraphError::MissingOutput)?;
+                    let scan = self.scan(body, table, target)?;
+                    self.bind_scan(scan, ScanInput::Node(index))?;
+                    let projection = self.project_values(
+                        self.node_source(scan, node)?,
+                        [(
+                            "id".into(),
+                            Expression::Column(self.stored_column(scan, "id")?),
+                        )],
                     )?;
-                    self.bind_scan(
-                        relation,
-                        ScanInput::Node(
-                            input
-                                .nodes
-                                .iter()
-                                .position(|node| node.id == target)
-                                .unwrap(),
-                        ),
+                    let output = projection
+                        .outputs()
+                        .next()
+                        .ok_or(GraphError::EmptyProjection)?
+                        .0;
+                    self.finish_query(projection)?;
+                    let definition = self.define(plan.root, body, format!("_filter_{target}"))?;
+                    let operation = plan
+                        .node_operations
+                        .remove(center)
+                        .ok_or(GraphError::MissingOutput)?;
+                    let operation = self.narrow(
+                        plan.root,
+                        operation,
+                        self.stored_column(center_relation, holder_column)?,
+                        (definition, output),
                     )?;
-                    let source = self.node_source(relation, node)?;
-                    *self.operation_mut(body)? = source;
-                    let output = self.project(
-                        body,
-                        "id",
-                        Expression::Column(self.stored_column(relation, "id")?),
-                    )?;
-                    let definition = self.define(root, body, format!("_filter_{target}"), false)?;
-                    let source = node_operations.remove(center).expect("center operation");
-                    let source = self.narrow(root, source, holder, (definition, output))?;
-                    node_operations.insert(center, source);
+                    plan.node_operations.insert(center, operation);
                 }
                 continue;
             }
-            let target_column = self
-                .catalog
-                .property_column(key.referenced_key)
-                .ok_or(GraphError::MissingOutput)?;
             let candidate = if let Some(candidate) = candidates.get(target) {
                 Some(*candidate)
             } else if input.query_type == QueryType::Traversal
@@ -167,49 +160,31 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 && node.filters.is_empty()
                 && node.node_ids.is_empty()
             {
-                let holder_column = self
-                    .catalog
-                    .property_column(key.property)
-                    .ok_or(GraphError::MissingOutput)?;
                 Some(self.candidate(
-                    root,
-                    relations[center],
+                    plan.root,
+                    (center_relation, KeyRead::Raw),
                     holder_column,
-                    &node_predicates[center],
-                    &center_memberships,
+                    &plan.node_predicates[center],
+                    &memberships,
                     &format!("_narrow_{target}"),
                 )?)
             } else {
                 None
             };
             if let Some(candidate) = candidate {
-                let relation = relations[target];
-                let mut source = self.narrow(
-                    root,
-                    PhysicalOperation::source(relation),
-                    self.stored_column(relation, target_column)?,
-                    candidate,
-                )?;
-                let table = self
+                let relation = plan.relations[target];
+                let column = self
                     .catalog
-                    .entity_table(entity(target)?)
+                    .property_column(key.referenced_key)
                     .ok_or(GraphError::MissingOutput)?;
-                let sort_key = self
-                    .catalog
-                    .table_sort_key(table)
-                    .ok_or(GraphError::LatestShape)?;
-                for predicate in &node_predicates[target] {
-                    let mut immutable = true;
-                    predicate.columns(&mut |column| { immutable &= matches!(column.port, Port::Stored(stored) if sort_key.iter().any(|key| key == stored.name())); Ok(()) })?;
-                    if immutable {
-                        source = source.filter(predicate.clone());
-                    }
-                }
-                source = source.latest(self.stored_column(relation, "_version")?, None);
-                for predicate in &node_predicates[target] {
-                    source = source.filter(predicate.clone());
-                }
-                node_operations.insert(target, source.materialize(relation));
+                let operation = self.narrowed_node(
+                    plan.root,
+                    relation,
+                    self.stored_column(relation, column)?,
+                    candidate,
+                    &plan.node_predicates[target],
+                )?;
+                plan.node_operations.insert(target, operation);
             }
         }
         Ok(())
@@ -218,23 +193,25 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     pub(super) fn join_foreign_keys<'input>(
         &mut self,
         input: &'input Input,
-        plan: &mut AccessPlan<'input, 'catalog>,
-    ) -> Result<PhysicalOperation<'catalog>> {
-        let relations = &mut plan.relations;
-        let node_operations = &mut plan.node_operations;
-        let elided = &mut plan.elided;
-        let keys = &mut plan.keys;
-        let star_center = plan.star_center;
-        let star = plan.star;
-        let first = if star {
-            star_center.expect("FK star holder")
+        plan: &mut AccessPlan<'input, 'a>,
+    ) -> Result<PhysicalOperation<'a>> {
+        let first = if plan.star {
+            plan.star_center.ok_or(GraphError::JoinShape)?
         } else {
-            input.relationships[0].from.as_str()
+            input
+                .relationships
+                .first()
+                .ok_or(GraphError::JoinShape)?
+                .from
+                .as_str()
         };
-        let mut operation = node_operations.remove(first).expect("declared node");
+        let mut operation = plan
+            .node_operations
+            .remove(first)
+            .ok_or(GraphError::MissingOutput)?;
         let mut reached = HashSet::from([first]);
-        for (relationship, key) in input.relationships.iter().zip(keys.iter()) {
-            let key = key.expect("eligible FK");
+        for (relationship, key) in input.relationships.iter().zip(&plan.keys) {
+            let key = key.ok_or(GraphError::JoinShape)?;
             let holder_is_from = matches!(
                 (relationship.direction, key.holder),
                 (Direction::Outgoing, query_data_model::Endpoint::Source)
@@ -245,15 +222,15 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             } else {
                 (&relationship.to, &relationship.from)
             };
+            if plan.elided.contains(target.as_str()) {
+                reached.insert(target.as_str());
+                continue;
+            }
             let next = if reached.contains(relationship.from.as_str()) {
                 &relationship.to
             } else {
                 &relationship.from
             };
-            if elided.contains(target.as_str()) {
-                reached.insert(target.as_str());
-                continue;
-            }
             let holder_column = self
                 .catalog
                 .property_column(key.property)
@@ -262,19 +239,21 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .catalog
                 .property_column(key.referenced_key)
                 .ok_or(GraphError::MissingOutput)?;
-            let holder =
-                Expression::Column(self.stored_column(relations[holder.as_str()], holder_column)?);
-            let target =
-                Expression::Column(self.stored_column(relations[target.as_str()], target_column)?);
-            let condition = if star {
+            let holder = Expression::Column(
+                self.stored_column(plan.relations[holder.as_str()], holder_column)?,
+            );
+            let target = Expression::Column(
+                self.stored_column(plan.relations[target.as_str()], target_column)?,
+            );
+            let condition = if plan.star {
                 Expression::equal(target, holder)
             } else {
                 Expression::equal(holder, target)
             };
-            operation = if let Some(next) = node_operations.remove(next.as_str()) {
-                operation.join(next, condition)
+            operation = if let Some(source) = plan.node_operations.remove(next.as_str()) {
+                self.join_relations(operation, source, JoinKind::Inner, condition)?
             } else {
-                operation.filter(condition)
+                self.filter_relation(operation, condition)?
             };
             reached.insert(next.as_str());
         }

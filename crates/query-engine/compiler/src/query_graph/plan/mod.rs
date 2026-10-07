@@ -10,6 +10,7 @@ mod keys;
 mod neighbors;
 mod pathfinding;
 mod predicates;
+mod requirements;
 
 struct KeyScan<'a> {
     relation: RelationId,
@@ -17,7 +18,7 @@ struct KeyScan<'a> {
     memberships: Vec<(&'a str, (DefinitionId, OutputId))>,
 }
 
-impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
+impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
     pub(super) fn requires_authorization_scan(&self, entity: &str) -> bool {
         self.catalog
             .entity_minimum_access_level(entity)
@@ -25,10 +26,16 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
     }
 
     pub fn bind_scan(&mut self, relation: RelationId, input: ScanInput) -> Result<()> {
-        let Body::Select { relations, .. } = &mut self.block_mut(relation.block)?.body else {
-            return Err(GraphError::ExpectedSelect);
-        };
-        relations[relation.slot].input = Some(input);
+        self.require_building(relation.block)?;
+        let declaration = self
+            .block_mut(relation.block)?
+            .relations
+            .get_mut(relation.slot)
+            .ok_or(GraphError::MissingOutput)?;
+        if declaration.input.is_some() {
+            return Err(GraphError::ReusedRelation);
+        }
+        declaration.input = Some(input);
         Ok(())
     }
 
@@ -46,16 +53,19 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         root: BlockId,
         input: &crate::input::Input,
         index: usize,
-    ) -> Result<ColumnRef<'catalog>> {
+    ) -> Result<ColumnRef<'a>> {
         if let Ok(relation) = self.input_node(root, index) {
             return self.stored_column(relation, "id");
         }
-        let node = &input.nodes[index];
+        let node = input.nodes.get(index).ok_or(GraphError::MissingOutput)?;
         for relation in self.relations(root)? {
             let Some(ScanInput::Relationship(index)) = self.relation(relation)?.input else {
                 continue;
             };
-            let relationship = &input.relationships[index];
+            let relationship = input
+                .relationships
+                .get(index)
+                .ok_or(GraphError::MissingOutput)?;
             let (start, end) = relationship.direction.edge_columns();
             if relationship.from == node.id {
                 return self.column(relation, start);
@@ -68,9 +78,7 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
     }
 }
 
-impl<'catalog, M: QueryDataModel + ?Sized>
-    QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
-{
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
     pub fn plan(&mut self, input: &crate::input::Input) -> Result<BlockId> {
         self.plan_with_options(
             input,
@@ -83,12 +91,19 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         input: &crate::input::Input,
         options: crate::passes::plan::HydrationCompileOptions,
     ) -> Result<BlockId> {
-        match input.query_type {
-            crate::input::QueryType::PathFinding => self.pathfinding(input),
-            crate::input::QueryType::Neighbors => self.neighbors(input),
-            crate::input::QueryType::Hydration => self.hydration(input, options),
-            crate::input::QueryType::Aggregation => self.aggregation(input),
-            _ => self.traversal(input),
+        use crate::input::{NodeExistence, QueryType};
+        let mut prepared = input.clone();
+        for (node, original) in prepared.nodes.iter_mut().zip(&input.nodes) {
+            if requirements::node_requirements(self.catalog, input, original)?.needs_stored_row() {
+                node.existence = NodeExistence::CurrentRow;
+            }
+        }
+        match prepared.query_type {
+            QueryType::PathFinding => self.pathfinding(&prepared),
+            QueryType::Neighbors => self.neighbors(&prepared),
+            QueryType::Hydration => self.hydration(&prepared, options),
+            QueryType::Aggregation => self.aggregation(&prepared),
+            QueryType::Traversal => self.traversal(&prepared),
         }
     }
 

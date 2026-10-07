@@ -11,7 +11,7 @@ impl<'catalog, M: QueryDataModel + ?Sized> BlockView<'_, 'catalog, M> {
         if id.block != self.id {
             return Err(GraphError::OutsideBlock);
         }
-        Ok(&self.relations[id.slot])
+        self.relations.get(id.slot).ok_or(GraphError::MissingOutput)
     }
 
     pub fn stored_column(&self, relation: RelationId, name: &str) -> Result<ColumnRef<'catalog>> {
@@ -28,7 +28,7 @@ impl<'catalog, M: QueryDataModel + ?Sized> BlockView<'_, 'catalog, M> {
     }
 }
 
-impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
+impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
     pub fn reachable_blocks(&self, root: BlockId) -> Result<Vec<BlockId>> {
         let mut pending = vec![root];
         let mut visited = HashSet::new();
@@ -39,19 +39,17 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
                 continue;
             }
             blocks.push(id);
-            match &block.body {
-                Body::Select { relations, .. } => {
-                    for relation in relations.iter().rev() {
-                        match relation.source {
-                            Source::Derived(body) => pending.push(body),
-                            Source::Definition(definition) => {
-                                pending.push(self.definition(definition)?.body)
-                            }
-                            Source::Stored(_) => {}
-                        }
+            for relation in block.relations.iter().rev() {
+                match relation.source {
+                    Source::Derived(body) => pending.push(body),
+                    Source::Definition(definition) => {
+                        pending.push(self.definition(definition)?.body)
                     }
+                    Source::Stored(_) => {}
                 }
-                Body::UnionAll { arms, .. } => pending.extend(arms.iter().rev().copied()),
+            }
+            if let QueryKind::UnionAll(arms) = &self.query_operation(id)?.kind {
+                pending.extend(arms.iter().rev().copied());
             }
             pending.extend(
                 block
@@ -63,31 +61,34 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
         }
         Ok(blocks)
     }
-}
 
-impl<'catalog, M: QueryDataModel + ?Sized, E, L>
-    QueryGraph<'catalog, M, E, Relational<'catalog, L>>
-{
+    pub fn walk_blocks<Error: From<GraphError>>(
+        &self,
+        root: BlockId,
+        mut visit: impl FnMut(BlockId, &QueryOperation<'a, L>) -> std::result::Result<(), Error>,
+    ) -> std::result::Result<(), Error> {
+        for id in self.reachable_blocks(root)? {
+            visit(id, self.query_operation(id)?)?;
+        }
+        Ok(())
+    }
+
     pub fn walk_operations<Error: From<GraphError>>(
         &self,
         root: BlockId,
         mut visit: impl FnMut(
-            &BlockView<'_, 'catalog, M>,
-            &Relational<'catalog, L>,
-            Option<&Relational<'catalog, L>>,
+            &BlockView<'_, 'a, M>,
+            &Relational<'a, L>,
+            Option<&Relational<'a, L>>,
         ) -> std::result::Result<(), Error>,
     ) -> std::result::Result<(), Error> {
         for id in self.reachable_blocks(root)? {
-            if let Body::Select {
-                relations,
-                operation,
-                ..
-            } = &self.block(id)?.body
-            {
+            let block = self.block(id)?;
+            if let QueryKind::Project(operation) = &self.query_operation(id)?.kind {
                 let view = BlockView {
                     catalog: self.catalog,
                     id,
-                    relations,
+                    relations: &block.relations,
                 };
                 operation.walk(None, &mut |operation, parent| {
                     visit(&view, operation, parent)
@@ -96,64 +97,37 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, L>
         }
         Ok(())
     }
-
-    pub fn walk_operations_mut<Error: From<GraphError>>(
-        &mut self,
-        root: BlockId,
-        mut visit: impl FnMut(
-            &BlockView<'_, 'catalog, M>,
-            &mut Relational<'catalog, L>,
-        ) -> std::result::Result<(), Error>,
-    ) -> std::result::Result<(), Error> {
-        let catalog = self.catalog;
-        for id in self.reachable_blocks(root)? {
-            if let Body::Select {
-                relations,
-                operation,
-                ..
-            } = &mut self.block_mut(id)?.body
-            {
-                let view = BlockView {
-                    catalog,
-                    id,
-                    relations,
-                };
-                operation.walk_mut(&mut |operation| visit(&view, operation))?;
-            }
-        }
-        Ok(())
-    }
 }
 
-impl<'catalog, L> Relational<'catalog, L> {
+impl<'a, L> Relational<'a, L> {
     pub fn inputs(&self) -> impl Iterator<Item = &Self> {
-        let inputs = match self {
-            Self::Join { left, right, .. } => [Some(left.as_ref()), Some(right.as_ref())],
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => [Some(input.as_ref()), None],
-            Self::One | Self::Source { .. } => [None, None],
+        let inputs = match &self.kind {
+            OperationKind::Join { left, right, .. } => [Some(left.as_ref()), Some(right.as_ref())],
+            OperationKind::Filter { input, .. }
+            | OperationKind::Aggregate { input, .. }
+            | OperationKind::Expand { input, .. }
+            | OperationKind::Materialize { input, .. }
+            | OperationKind::Latest { input, .. }
+            | OperationKind::Sort { input, .. }
+            | OperationKind::FirstBy { input, .. }
+            | OperationKind::Limit { input, .. } => [Some(input.as_ref()), None],
+            OperationKind::One | OperationKind::Source { .. } => [None, None],
         };
         inputs.into_iter().flatten()
     }
 
-    pub fn inputs_mut(&mut self) -> impl Iterator<Item = &mut Self> {
-        let inputs = match self {
-            Self::Join { left, right, .. } => [Some(left.as_mut()), Some(right.as_mut())],
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => [Some(input.as_mut()), None],
-            Self::One | Self::Source { .. } => [None, None],
+    pub(super) fn inputs_mut(&mut self) -> impl Iterator<Item = &mut Self> {
+        let inputs = match &mut self.kind {
+            OperationKind::Join { left, right, .. } => [Some(left.as_mut()), Some(right.as_mut())],
+            OperationKind::Filter { input, .. }
+            | OperationKind::Aggregate { input, .. }
+            | OperationKind::Expand { input, .. }
+            | OperationKind::Materialize { input, .. }
+            | OperationKind::Latest { input, .. }
+            | OperationKind::Sort { input, .. }
+            | OperationKind::FirstBy { input, .. }
+            | OperationKind::Limit { input, .. } => [Some(input.as_mut()), None],
+            OperationKind::One | OperationKind::Source { .. } => [None, None],
         };
         inputs.into_iter().flatten()
     }
@@ -167,15 +141,5 @@ impl<'catalog, L> Relational<'catalog, L> {
             input.walk(Some(self), visit)?;
         }
         visit(self, parent)
-    }
-
-    pub fn walk_mut<Error>(
-        &mut self,
-        visit: &mut impl FnMut(&mut Self) -> std::result::Result<(), Error>,
-    ) -> std::result::Result<(), Error> {
-        for input in self.inputs_mut() {
-            input.walk_mut(visit)?;
-        }
-        visit(self)
     }
 }
