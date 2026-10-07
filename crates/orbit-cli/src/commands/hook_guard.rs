@@ -1,7 +1,8 @@
-//! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard installed by `orbit setup`.
-//! Reads a tool call from stdin and nudges the agent to use `orbit grep` instead of grep or
-//! rg. Fails open: on any error it prints nothing and exits 0, never blocking a tool call.
-//! `read` is accepted for installs that still register it, and never nudges.
+//! Hidden `orbit hook-guard` — the agent hook installed by `orbit setup`. `search` reads a
+//! PreToolUse tool call from stdin and nudges the agent to use `orbit grep` instead of grep or
+//! rg. `session` returns a SessionStart reminder. Fails open: on any error it prints nothing
+//! and exits 0, never blocking a tool call. `read` is accepted for installs that still
+//! register it, and never nudges.
 
 use std::io::Read;
 use std::path::Path;
@@ -16,6 +17,7 @@ use crate::workspace;
 pub(crate) enum Kind {
     Search,
     Read,
+    Session,
 }
 
 const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
@@ -41,14 +43,14 @@ pub(crate) fn run(kind: Kind) {
 }
 
 fn respond(kind: Kind, call: &Value) -> Option<Value> {
-    (matches!(kind, Kind::Search) && should_nudge(call)).then(|| {
-        json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "additionalContext": spec::search_nudge_text(),
-            }
-        })
-    })
+    let (event, text) = match kind {
+        Kind::Search if should_nudge(call) => ("PreToolUse", spec::search_nudge_text()),
+        Kind::Session => ("SessionStart", spec::session_start_text()),
+        Kind::Search | Kind::Read => return None,
+    };
+    Some(json!({
+        "hookSpecificOutput": {"hookEventName": event, "additionalContext": text}
+    }))
 }
 
 fn local_graph_exists() -> bool {
@@ -157,5 +159,15 @@ mod tests {
         assert!(respond(Kind::Search, &glob).is_none());
         let read = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
         assert!(respond(Kind::Read, &read).is_none());
+    }
+
+    #[test]
+    fn session_start_returns_the_reminder() {
+        let out = respond(Kind::Session, &json!({"hook_event_name": "SessionStart"})).unwrap();
+        assert_eq!(out["hookSpecificOutput"]["hookEventName"], "SessionStart");
+        assert_eq!(
+            out["hookSpecificOutput"]["additionalContext"],
+            spec::session_start_text()
+        );
     }
 }

@@ -57,6 +57,7 @@ pub(super) struct Outcome {
 pub(super) struct Report {
     group: String,
     pub(super) outcomes: Vec<Outcome>,
+    pub(super) next_steps: Vec<String>,
 }
 
 impl Report {
@@ -128,14 +129,14 @@ fn write_unless_unchanged(
     contents: &str,
     action: &str,
     report: &mut Report,
-) -> Result<()> {
+) -> Result<bool> {
     if std::fs::read(path).is_ok_and(|current| current == contents.as_bytes()) {
         report.note(label, "unchanged");
-        return Ok(());
+        return Ok(false);
     }
     write_file(path, contents)?;
     report.note(label, action);
-    Ok(())
+    Ok(true)
 }
 
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {

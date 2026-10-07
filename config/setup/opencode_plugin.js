@@ -1,19 +1,19 @@
-import { existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-
-const REMINDER = "{{reminder}}";
+{{hook_client}}
 
 export const OrbitPlugin = async () => {
-  let reminded = false;
-  const root = process.env.ORBIT_DATA_DIR || join(homedir(), ".gitlab", "orbit");
+  const names = { bash: "Bash", shell: "Bash", read: "Read", grep: "Grep", glob: "Glob" };
+  const notes = new Map();
   return {
+    "tool.execute.before": async (input, output) => {
+      const args = output.args ?? {};
+      const note = await nudge(names[input.tool], { ...args, file_path: args.filePath });
+      if (note) notes.set(input.callID, note);
+    },
     "tool.execute.after": async (input, output) => {
-      if (reminded) return;
-      if (input.tool !== "bash") return;
-      if (!existsSync(join(root, "graph.duckdb"))) return;
-      output.output = output.output + "\n\n" + REMINDER;
-      reminded = true;
+      const note = notes.get(input.callID);
+      if (!note) return;
+      notes.delete(input.callID);
+      output.output = (output.output ?? "") + "\n\n" + note;
     },
   };
 };

@@ -40,18 +40,7 @@ pub fn check() -> Result<()> {
         "SKILL.md version differs"
     );
     for catalog in CATALOGS {
-        let market = read_json(&root.join(catalog))?;
-        let entry = &market["plugins"][0];
-        let source = entry["source"]
-            .as_str()
-            .or(entry["source"]["path"].as_str());
-        ensure!(
-            market["plugins"].as_array().map(Vec::len) == Some(1)
-                && entry["name"] == portable["name"]
-                && fs::canonicalize(root.join(source.unwrap_or("-")))?
-                    == fs::canonicalize(&plugin)?,
-            "{catalog} must list only {PLUGIN}"
-        );
+        check_catalog(&root, catalog, &portable["name"])?;
     }
     #[cfg(unix)]
     check_hooks(
@@ -60,6 +49,23 @@ pub fn check() -> Result<()> {
         claude["hooks"].as_str().unwrap_or("-"),
     )?;
     println!("Agent plugin manifests, archive, and hooks are valid.");
+    Ok(())
+}
+
+fn check_catalog(root: &Path, catalog: &str, name: &Value) -> Result<()> {
+    let plugin = fs::canonicalize(root.join(PLUGIN))?;
+    let market = read_json(&root.join(catalog))?;
+    let entry = &market["plugins"][0];
+    let source = entry["source"]
+        .as_str()
+        .or(entry["source"]["path"].as_str())
+        .and_then(|source| fs::canonicalize(root.join(source)).ok());
+    ensure!(
+        market["plugins"].as_array().map(Vec::len) == Some(1)
+            && entry["name"] == *name
+            && source.as_ref() == Some(&plugin),
+        "{catalog} must list only {PLUGIN}"
+    );
     Ok(())
 }
 
@@ -157,4 +163,27 @@ fn skill_version(skill: &str) -> Option<&str> {
 fn read_json(path: &Path) -> Result<Value> {
     let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_source_errors_identify_the_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(PLUGIN)).unwrap();
+        let catalog = CATALOGS[0];
+        let path = dir.path().join(catalog);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for source in [Value::Null, json!("missing"), json!({"path": "missing"})] {
+            let market = json!({"plugins": [{"name": "orbit", "source": source}]});
+            fs::write(&path, market.to_string()).unwrap();
+            let error = check_catalog(dir.path(), catalog, &json!("orbit")).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("{catalog} must list only {PLUGIN}")
+            );
+        }
+    }
 }

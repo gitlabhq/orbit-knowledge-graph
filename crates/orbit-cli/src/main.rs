@@ -1050,6 +1050,7 @@ mod tests {
             &["orbit", "hook-guard", "search", "--mode", "remote"],
             &["orbit", "hook-guard", "read", "--mode", "local"],
             &["orbit", "hook-guard", "read", "--graph-first"],
+            &["orbit", "hook-guard", "session"],
         ] {
             assert!(
                 matches!(Cli::parse_from(argv).command, Commands::HookGuard { .. }),

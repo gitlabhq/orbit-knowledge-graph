@@ -204,11 +204,12 @@ For every agent it configures, `orbit setup`:
   scan that directory, so it also gets a `.claude/skills/orbit-cli` link.
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
-- Adds entries to that agent's JSON configuration, where the agent
-  supports it. For Claude Code this is a `PreToolUse` hook in
-  `settings.json`; for OpenCode it is a plugin file and its registration.
-  Entries carry an `orbit` marker, and only marked entries are ever replaced or
-  removed.
+- Adds a hook that reminds the agent to use `orbit grep` when a local graph
+  exists. Claude Code, Codex, OpenCode, and Pi get the reminder on code
+  searches and source reads. GitLab Duo gets it at session start. Codex runs
+  the hook after you trust it in `/hooks`, and GitLab Duo runs project hooks
+  only with `--enable-project-hooks`. Hook entries carry an `orbit` marker, and
+  only marked entries are ever replaced or removed.
 
 By default it writes to your user-global configuration, such as
 `~/.claude/CLAUDE.md`. Pass `--project` to write into the current project

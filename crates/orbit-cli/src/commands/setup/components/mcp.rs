@@ -125,6 +125,7 @@ fn install_json(
         &registered,
         report,
     )
+    .map(|_| ())
 }
 
 fn orbit_owns_json_entry(servers: &serde_json::Map<String, Value>, name: &str) -> bool {
@@ -203,7 +204,7 @@ fn install_toml(
     servers.insert(server.name, Item::Table(entry));
 
     let registered = format!("mcp server {} registered", server.name);
-    write_unless_unchanged(path, label, &document.to_string(), &registered, report)
+    write_unless_unchanged(path, label, &document.to_string(), &registered, report).map(|_| ())
 }
 
 fn orbit_owns_toml_entry(servers: &Table, name: &str) -> bool {

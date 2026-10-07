@@ -70,7 +70,15 @@ fn install_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resu
         json::replace_marked_entries(&mut root, &merge.path, &merge.marker, &entries)
             .with_context(|| format!("failed to update {}", path.display()))?;
         let installed = json::render(&path, &root)?;
-        write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
+        let changed =
+            write_unless_unchanged(&path, &label, &installed, "orbit entries installed", report)?;
+        let note = merge.note.as_ref().and_then(|note| match target {
+            Target::Project(_) => note.project.as_deref(),
+            Target::Global => note.global.as_deref(),
+        });
+        if changed && let Some(note) = note {
+            report.next_steps.push(format!("{}: {note}", agent.title));
+        }
     }
 
     for template_file in &agent.template_files {

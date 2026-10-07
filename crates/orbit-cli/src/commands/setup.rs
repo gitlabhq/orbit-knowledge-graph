@@ -105,10 +105,13 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
         return Ok(finish(&selection, Outcome::DryRun, false));
     }
 
-    apply_and_report(&options, |report| {
+    let report = apply_and_report(&options, |report| {
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    if !report.next_steps.is_empty() {
+        tui::card("Before the hooks run", report.next_steps.join("\n"))?;
+    }
 
     let index_outcome = match index_repo::current_repository_root() {
         None => IndexOutcome::OutsideRepository,
@@ -454,7 +457,7 @@ mod tests {
 
         assert!(dir.path().join("CLAUDE.md").is_file());
         assert!(!dir.path().join(".mcp.json").exists());
-        assert!(!dir.path().join(".codex").exists());
+        assert!(!dir.path().join(".codex/config.toml").exists());
         assert!(!dir.path().join("opencode.json").exists());
 
         install_with_mcp(&["claude"], dir.path());
@@ -891,7 +894,50 @@ mod tests {
 
         let plugin =
             std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
-        assert!(plugin.contains("run orbit grep"));
+        assert!(plugin.contains(r#"const LAUNCHER = "orbit".split(" ");"#));
         assert!(!plugin.contains("{{"));
+    }
+
+    #[test]
+    fn setup_reaches_every_agent_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = [
+            ".claude/settings.json",
+            ".codex/hooks.json",
+            ".gitlab/duo/hooks.json",
+            ".opencode/plugins/orbit.js",
+            ".pi/extensions/orbit.ts",
+        ];
+        for changed in [true, false] {
+            let options = options_for(&["claude", "codex", "duo", "opencode", "pi"]);
+            let selection = Selection::from_setup_options(&options, &[]).unwrap();
+            let mut report = Report::default();
+            components::install(&selection, &project(dir.path()), &mut report).unwrap();
+            let expected = if changed {
+                vec![
+                    "Codex: trust the orbit hook in /hooks",
+                    "GitLab Duo: start it with --enable-project-hooks",
+                ]
+            } else {
+                vec![]
+            };
+            assert_eq!(report.next_steps, expected);
+            for file in files {
+                let contents = std::fs::read_to_string(dir.path().join(file)).unwrap();
+                assert!(contents.contains("hook-guard"), "{file}: {contents}");
+            }
+        }
+        let codex = read_json(&dir.path().join(".codex/hooks.json"));
+        assert_eq!(codex["hooks"]["PreToolUse"][0]["matcher"], "Bash");
+        let duo = read_json(&dir.path().join(".gitlab/duo/hooks.json"));
+        assert_eq!(
+            duo["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "orbit hook-guard session"
+        );
+
+        uninstall_named(&["codex", "duo", "opencode", "pi"], dir.path());
+        for file in &files[1..] {
+            assert!(!dir.path().join(file).exists(), "{file} survived uninstall");
+        }
     }
 }

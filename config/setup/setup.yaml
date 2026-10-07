@@ -1,7 +1,6 @@
 # yaml-language-server: $schema=../schemas/setup.schema.json
 # Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
-# two hook nudges, the MCP server entry, and the `template_vars` that fill `{{name}}` placeholders
-# in the templates assistants declare.
+# hook guard texts, and the MCP server entry.
 mcp_server:
   name: orbit
   command: "{{orbit}} mcp serve"
@@ -14,5 +13,5 @@ instructions: |
 
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
-template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. Every matching line, one row per file."
+session_start: |
+  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. `{{orbit}} context <name>` shows callers and callees.
