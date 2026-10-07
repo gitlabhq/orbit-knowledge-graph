@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use limits::{CapExceeded, Limits};
-pub use loading::{Loading, Put};
+pub use loading::{ContentReader, Loading, Put};
 pub use policy::{Decision, File, Pass, Tag, Then};
 pub use store::{Kind, Stat, Vfs};
 

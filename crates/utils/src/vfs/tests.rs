@@ -23,9 +23,23 @@ fn load<T: Tag>(inputs: Vec<(&str, Put<'_>)>, pass: impl Pass<Tag = T> + 'static
 }
 
 fn rejected(size: u64) -> Put<'static> {
+    read_and_store(size, || panic!("rejected reader"))
+}
+
+fn read_and_store(size: u64, read: impl FnOnce() -> io::Result<Vec<u8>> + 'static) -> Put<'static> {
     Put::ReadAndStore {
         size,
-        read: Box::new(|| panic!("rejected reader")),
+        read: Box::new(read),
+    }
+}
+
+fn read_on_demand(
+    size: u64,
+    read: impl Fn(u64) -> io::Result<Vec<u8>> + Send + Sync + 'static,
+) -> Put<'static> {
+    Put::ReadOnDemand {
+        size,
+        read: Arc::new(read),
     }
 }
 
@@ -270,22 +284,16 @@ fn policy_composition_preserves_laziness_and_borrowed_content() {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = reads.clone();
         let input = if deferred {
-            Put::ReadOnDemand {
-                size: 0,
-                read: Arc::new(move |max| {
-                    assert_eq!(max, 0);
-                    counter.fetch_add(1, SeqCst);
-                    Ok(vec![])
-                }),
-            }
+            read_on_demand(0, move |max| {
+                assert_eq!(max, 0);
+                counter.fetch_add(1, SeqCst);
+                Ok(vec![])
+            })
         } else {
-            Put::ReadAndStore {
-                size: 0,
-                read: Box::new(move || {
-                    counter.fetch_add(1, SeqCst);
-                    Ok(vec![])
-                }),
-            }
+            read_and_store(0, move || {
+                counter.fetch_add(1, SeqCst);
+                Ok(vec![])
+            })
         };
         let vfs = Vfs::load(
             Inputs(vec![("empty", input)]),
@@ -318,28 +326,18 @@ fn reader_failures_remain_cataloged_and_later_failures_are_retryable() {
         Inputs(vec![
             (
                 "failed",
-                Put::ReadAndStore {
-                    size: 4,
-                    read: Box::new(|| Err(io::Error::new(ErrorKind::PermissionDenied, "denied"))),
-                },
+                read_and_store(4, || {
+                    Err(io::Error::new(ErrorKind::PermissionDenied, "denied"))
+                }),
             ),
-            (
-                "mismatch",
-                Put::ReadAndStore {
-                    size: 4,
-                    read: Box::new(|| Ok(vec![])),
-                },
-            ),
+            ("mismatch", read_and_store(4, || Ok(vec![]))),
             (
                 "retry",
-                Put::ReadOnDemand {
-                    size: 4,
-                    read: Arc::new(move |_| match reads.fetch_add(1, SeqCst) {
-                        0 => Err(ErrorKind::NotFound.into()),
-                        1 | 2 => Ok(b"data".to_vec()),
-                        _ => Ok(b"large".to_vec()),
-                    }),
-                },
+                read_on_demand(4, move |_| match reads.fetch_add(1, SeqCst) {
+                    0 => Err(ErrorKind::NotFound.into()),
+                    1 | 2 => Ok(b"data".to_vec()),
+                    _ => Ok(b"large".to_vec()),
+                }),
             ),
         ]),
         Filter(calls.clone()),
@@ -397,13 +395,7 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
                     });
                 }
             });
-            into.put(
-                "lazy",
-                Put::ReadOnDemand {
-                    size: 1,
-                    read: Arc::new(|_| Ok(vec![0])),
-                },
-            )
+            into.put("lazy", read_on_demand(1, |_| Ok(vec![0])))
         }
     }
     let calls = Arc::new(AtomicUsize::new(0));
@@ -418,12 +410,9 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
         Options::default(),
     )
     .unwrap();
+    let usage = vfs.usage();
     assert_eq!(
-        (
-            vfs.usage().files,
-            vfs.usage().spilled,
-            vfs.usage().deduped_bytes
-        ),
+        (usage.files, usage.spilled, usage.deduped_bytes),
         (9, 128, 896)
     );
     let start = Barrier::new(8);

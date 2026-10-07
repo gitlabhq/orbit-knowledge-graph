@@ -19,6 +19,8 @@ use super::path::key;
 use super::scratch::Scratch;
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
 
+pub type ContentReader = Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>;
+
 pub enum Put<'a> {
     Bytes(Vec<u8>),
     /// Called synchronously at most once, only for `Keep` or `Pending`.
@@ -28,7 +30,7 @@ pub enum Put<'a> {
     },
     ReadOnDemand {
         size: u64,
-        read: Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>,
+        read: ContentReader,
     },
     Symlink(String),
 }
@@ -60,7 +62,7 @@ pub(super) enum Content {
     Failed(Arc<io::Error>),
     Memory(super::Bytes),
     Spilled { offset: u64, len: u64, raw_len: u64 },
-    ReadOnDemand(Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>),
+    ReadOnDemand(ContentReader),
     Symlink(String),
 }
 
@@ -122,7 +124,7 @@ impl<T: Tag> Loading<T> {
                 self.put_bytes(
                     file,
                     read(self.limits.file_bytes.unwrap_or(u64::MAX)),
-                    Some(Content::ReadOnDemand(read)),
+                    Some(read),
                 )?;
             }
             (_, Put::Symlink(_)) => unreachable!("symlinks return above"),
@@ -134,7 +136,7 @@ impl<T: Tag> Loading<T> {
         &self,
         file: File<'static, T>,
         bytes: io::Result<Vec<u8>>,
-        backing: Option<Content>,
+        reader: Option<ContentReader>,
     ) -> Result<(), SourceError> {
         let bytes = match bytes.and_then(|bytes| {
             if bytes.len() as u64 != file.size {
@@ -153,8 +155,8 @@ impl<T: Tag> Loading<T> {
             }
         };
         file.classify(&*self.passes, &bytes);
-        let content = match (file.decision(), backing) {
-            (Decision::Keep(_), Some(content)) => content,
+        let content = match (file.decision(), reader) {
+            (Decision::Keep(_), Some(read)) => Content::ReadOnDemand(read),
             (Decision::Keep(_), None) => self.store(bytes)?,
             _ => Content::Unavailable,
         };
