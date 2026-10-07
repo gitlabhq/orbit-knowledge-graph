@@ -1,6 +1,6 @@
-//! Keeps the local graph in step with the working tree. Files that `git status` reports as
-//! edited, added, or deleted since the indexed commit are re-parsed on their own and swapped
-//! into the graph before a query runs. Cross-file edges into an edited file return on the
+//! Keeps the local graph's definitions in step with the working tree. Files that `git status`
+//! reports as edited, added, or deleted since the indexed commit are re-parsed on their own
+//! and swapped into the graph before a query runs. Cross-file edges into an edited file return on the
 //! next full index.
 
 use std::collections::BTreeMap;
@@ -34,60 +34,61 @@ const STAGED_TABLES: &[&str] = &[
 
 type Fingerprints = BTreeMap<String, String>;
 
-pub(crate) fn refresh_worktree(git: &GitInfo, db: &Path) -> Result<usize> {
+pub(crate) fn refresh_worktree(git: &GitInfo, db: &Path, touched: &[String]) -> Result<usize> {
     let key = format!("worktree:{}", git.project_id);
-    let edited = edited_files(&git.repo_path)?;
+    let tracked = edited_files(&git.repo_path)?;
     let stored: Fingerprints = {
         let client = DuckDbClient::open_read_only(db)?;
         workspace::stored_meta(&client, &key)?
             .and_then(|value| serde_json::from_str(&value).ok())
             .unwrap_or_default()
     };
-    let current: Fingerprints = edited
-        .iter()
+    let others: Vec<&str> = stored
+        .keys()
+        .chain(touched)
+        .filter(|path| !tracked.contains(path))
+        .map(String::as_str)
+        .collect();
+    let new: std::collections::BTreeSet<String> =
+        untracked(&git.repo_path, &others).into_iter().collect();
+    let candidates: std::collections::BTreeSet<&String> =
+        tracked.iter().chain(stored.keys()).chain(&new).collect();
+    let current: Fingerprints = candidates
+        .into_iter()
         .map(|path| (path.clone(), fingerprint(&git.repo_path.join(path))))
+        .filter(|(path, print)| {
+            print != "deleted" || tracked.contains(path) || stored.contains_key(path)
+        })
         .collect();
     let stale: Vec<String> = current
-        .keys()
-        .chain(stored.keys())
-        .filter(|path| current.get(*path) != stored.get(*path))
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>()
+        .iter()
+        .filter(|(path, print)| stored.get(*path) != Some(print))
+        .map(|(path, _)| path.clone())
+        .collect();
+    let kept: Fingerprints = current
         .into_iter()
+        .filter(|(path, _)| tracked.contains(path) || new.contains(path))
         .collect();
     if stale.is_empty() {
-        return Ok(current.len());
+        return Ok(kept.len());
     }
     let batches = parse(git, &stale)?;
     let client = DuckDbClient::open(db).context("failed to open DuckDB to refresh edits")?;
     swap(&client, git, &stale, &batches)?;
-    let readable: Vec<String> = stale
-        .iter()
-        .filter(|path| {
-            std::fs::metadata(git.repo_path.join(path))
-                .is_ok_and(|meta| duckdb_client::search::is_indexed_text_file(path, meta.len()))
-        })
-        .cloned()
-        .collect();
-    duckdb_client::search::append_text_lines(
-        &client,
-        &duckdb_client::search::text_line_table(git.project_id),
-        &git.repo_path,
-        &git.commit_sha,
-        &readable,
-    )?;
     client.execute(
         "INSERT OR REPLACE INTO _orbit_meta (key, value) VALUES (?1, ?2)",
-        &[json!(key), json!(serde_json::to_string(&current)?)],
+        &[json!(key), json!(serde_json::to_string(&kept)?)],
     )?;
-    Ok(current.len())
+    Ok(kept.len())
 }
 
+/// Files `git status` reports as changed relative to the indexed commit, tracked files only:
+/// listing untracked files walks the whole tree, so callers pass the new files they touch.
 fn edited_files(repo: &Path) -> Result<Vec<String>> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=no"])
         .output()
         .context("failed to run git status")?;
     anyhow::ensure!(output.status.success(), "git status failed");
@@ -102,6 +103,34 @@ fn edited_files(repo: &Path) -> Result<Vec<String>> {
         files.push(path.to_string());
     }
     Ok(files)
+}
+
+/// The files among `files` that exist but git does not track. Asks git about these paths only,
+/// so it never walks the tree.
+pub(crate) fn untracked(repo: &Path, files: &[&str]) -> Vec<String> {
+    let mut known = std::collections::HashSet::new();
+    for chunk in files.chunks(500) {
+        let Ok(output) = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["ls-files", "-z", "--"])
+            .args(chunk)
+            .stderr(std::process::Stdio::null())
+            .output()
+        else {
+            return Vec::new();
+        };
+        known.extend(
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .map(str::to_string),
+        );
+    }
+    files
+        .iter()
+        .filter(|file| !known.contains(**file) && repo.join(file).is_file())
+        .map(|file| file.to_string())
+        .collect()
 }
 
 fn fingerprint(path: &Path) -> String {
@@ -242,10 +271,6 @@ fn swap(
     statements.push(format!(
         "INSERT INTO gl_edge SELECT * FROM _orbit_refresh_gl_edge WHERE source_id IN ({new}) OR target_id IN ({new})",
         new = ids("_orbit_refresh_")
-    ));
-    statements.push(format!(
-        "DELETE FROM {} WHERE file_path IN (SELECT path FROM _orbit_refresh_files)",
-        duckdb_client::search::text_line_table(git.project_id)
     ));
     for statement in &statements {
         let params: &[serde_json::Value] = match statement.contains("?1") {

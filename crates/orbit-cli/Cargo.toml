@@ -32,6 +32,10 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
 regex = { workspace = true }
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+ignore = { workspace = true }
+globset = { workspace = true }
 reqwest = { workspace = true }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }

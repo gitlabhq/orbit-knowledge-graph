@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
+use std::path::Path;
+use std::sync::Mutex;
+
 use anyhow::Result;
-use duckdb_client::search::{NodeHydrator, path_scope, text_line_table};
+use duckdb_client::search::NodeHydrator;
 use duckdb_client::{DuckDbClient, i64_column, sql_lit, string_column};
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{BinaryDetection, SearcherBuilder, sinks};
 
 use crate::workspace::GitInfo;
 
@@ -23,10 +28,6 @@ pub(super) struct Hit {
     pub(super) line: usize,
     pub(super) text: String,
     pub(super) def: Option<Def>,
-}
-
-fn normalized(expr: &str) -> String {
-    format!("lower(regexp_replace({expr}, '[_\\-\\s]', '', 'g'))")
 }
 
 pub(super) struct Term {
@@ -59,24 +60,14 @@ impl Term {
         }
     }
 
-    fn sql(&self, column: &str, param: &str) -> String {
+    fn pattern(&self) -> String {
         match self.regex {
-            Some(_) => format!("regexp_matches({column}, {param})"),
-            None => format!("contains({}, {})", normalized(column), normalized(param)),
-        }
-    }
-
-    fn sql_name(&self, column: &str, param: &str) -> String {
-        match self.regex {
-            Some(_) => format!("regexp_full_match({column}, {param})"),
-            None => format!("{} = {}", normalized(column), normalized(param)),
-        }
-    }
-
-    fn param(&self) -> String {
-        match self.regex {
-            Some(_) => format!("(?i){}", self.raw),
-            None => self.raw.clone(),
+            Some(_) => self.raw.clone(),
+            None => compact(&self.raw)
+                .chars()
+                .map(|c| regex::escape(&c.to_string()))
+                .collect::<Vec<_>>()
+                .join("[-_\\t ]*"),
         }
     }
 
@@ -102,140 +93,180 @@ fn compact(text: &str) -> String {
         .collect()
 }
 
-pub(super) fn hits(
+const LINE_TEXT_CHARS: usize = 400;
+const DEF_FILES_PER_QUERY: usize = 500;
+
+pub(super) fn matcher(alternatives: &[Term]) -> Result<grep_regex::RegexMatcher> {
+    let pattern = alternatives
+        .iter()
+        .map(|term| format!("(?:{})", term.pattern()))
+        .collect::<Vec<_>>()
+        .join("|");
+    Ok(RegexMatcherBuilder::new()
+        .case_insensitive(true)
+        .line_terminator(Some(b'\n'))
+        .build(&pattern)?)
+}
+
+pub(super) fn scan(
+    repo: &Path,
+    paths: &[String],
+    matcher: &grep_regex::RegexMatcher,
+) -> Result<Vec<Hit>> {
+    let globbed = paths.iter().any(|p| p.contains(['*', '?', '[']));
+    let roots: Vec<std::path::PathBuf> = match paths.is_empty() || globbed {
+        true => vec![repo.to_path_buf()],
+        false => paths.iter().map(|p| repo.join(p)).collect(),
+    };
+    let mut walk = ignore::WalkBuilder::new(&roots[0]);
+    for root in &roots[1..] {
+        walk.add(root);
+    }
+    walk.hidden(false)
+        .require_git(false)
+        .filter_entry(|entry| entry.file_name() != ".git");
+    let found = Mutex::new(Vec::new());
+    walk.build_parallel().run(|| {
+        let mut searcher = SearcherBuilder::new()
+            .binary_detection(BinaryDetection::quit(0))
+            .line_number(true)
+            .build();
+        let found = &found;
+        Box::new(move |entry| {
+            let Ok(entry) = entry else {
+                return ignore::WalkState::Continue;
+            };
+            if !entry.file_type().is_some_and(|t| t.is_file()) {
+                return ignore::WalkState::Continue;
+            }
+            let Ok(relative) = entry.path().strip_prefix(repo) else {
+                return ignore::WalkState::Continue;
+            };
+            let file = relative.to_string_lossy().replace('\\', "/");
+            if globbed && !in_scope(&file, paths) {
+                return ignore::WalkState::Continue;
+            }
+            let mut local = Vec::new();
+            let _ = searcher.search_path(
+                matcher,
+                entry.path(),
+                sinks::Lossy(|line, text| {
+                    local.push(Hit {
+                        file: file.clone(),
+                        line: line as usize,
+                        text: text.trim().chars().take(LINE_TEXT_CHARS).collect(),
+                        def: None,
+                    });
+                    Ok(true)
+                }),
+            );
+            if !local.is_empty() {
+                found.lock().unwrap().extend(local);
+            }
+            ignore::WalkState::Continue
+        })
+    });
+    Ok(found.into_inner().unwrap())
+}
+
+fn in_scope(path: &str, paths: &[String]) -> bool {
+    paths.iter().any(|scope| {
+        let scope = scope.trim_end_matches('/');
+        match scope.contains(['*', '?', '[']) {
+            true => globset::Glob::new(scope).is_ok_and(|g| g.compile_matcher().is_match(path)),
+            false => path == scope || path.starts_with(&format!("{scope}/")),
+        }
+    })
+}
+
+struct Candidate {
+    def: Def,
+    kind: String,
+    id: i64,
+}
+
+pub(super) fn attach_definitions(
     client: &DuckDbClient,
     git: &GitInfo,
+    hits: &mut Vec<Hit>,
     alternatives: &[Term],
-    paths: &[String],
     kinds: &[String],
-) -> Result<Vec<Hit>> {
-    let table = text_line_table(git.project_id);
-    let present = client.query_arrow_json(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_tables() WHERE table_name = ?1",
-        &[table.clone().into()],
-    )?;
-    if i64_column(&present, "n").first().copied().unwrap_or(0) == 0 || alternatives.is_empty() {
-        return Ok(Vec::new());
+) -> Result<()> {
+    let node = NodeHydrator::embedded("Definition")?;
+    let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+    files.dedup();
+    let mut by_file: HashMap<String, Vec<Candidate>> = HashMap::new();
+    for chunk in files.chunks(DEF_FILES_PER_QUERY) {
+        let batches = client.query_arrow_json(
+            &format!(
+                "SELECT {file} AS file_path, {name} AS name, {kind} AS kind, {id} AS id,
+       CAST({start} AS BIGINT) AS def_start, CAST({end} AS BIGINT) AS def_end
+FROM {table}
+WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({list})",
+                file = node.column("file_path")?,
+                name = node.column("name")?,
+                kind = node.column("definition_type")?,
+                id = node.column("id")?,
+                start = node.column("start_line")?,
+                end = node.column("end_line")?,
+                table = node.table(),
+                project = node.column("project_id")?,
+                commit = node.column("commit_sha")?,
+                fqn = node.column("fqn")?,
+                list = chunk
+                    .iter()
+                    .map(|f| sql_lit(f))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            &[git.project_id.into(), git.commit_sha.clone().into()],
+        )?;
+        let (paths, names, kinds_col) = (
+            string_column(&batches, "file_path"),
+            string_column(&batches, "name"),
+            string_column(&batches, "kind"),
+        );
+        let (ids, starts, ends) = (
+            i64_column(&batches, "id"),
+            i64_column(&batches, "def_start"),
+            i64_column(&batches, "def_end"),
+        );
+        for i in 0..paths.len() {
+            by_file
+                .entry(paths[i].clone())
+                .or_default()
+                .push(Candidate {
+                    def: Def {
+                        name: names[i].clone(),
+                        start: starts[i] as usize,
+                        end: ends[i] as usize,
+                    },
+                    kind: kinds_col[i].to_lowercase(),
+                    id: ids[i],
+                });
+        }
     }
-    let def = NodeHydrator::embedded("Definition")?;
-    let filter = alternatives
-        .iter()
-        .enumerate()
-        .map(|(i, term)| term.sql("h.text", &format!("?{}", i + 2)))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let project = alternatives.len() + 2;
-    let kind_filter = match kinds.is_empty() {
-        true => String::new(),
-        false => format!(
-            "WHERE lower(kind) IN ({})",
-            kinds
-                .iter()
-                .map(|k| sql_lit(&k.to_lowercase()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    };
-    let mut params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
-        .chain(alternatives.iter().map(|a| a.param().into()))
-        .collect();
-    params.push(git.project_id.into());
-    let batches = client.query_arrow_json(
-        &format!(
-            "SELECT * FROM (
-  SELECT h.file_path, h.line_no, h.text, d.{name} AS def, d.{kind} AS kind,
-         CAST(d.{start} AS BIGINT) AS def_start, CAST(d.{end} AS BIGINT) AS def_end
-  FROM {table} h
-  LEFT JOIN {dtable} d ON d.{project_col} = ?{project} AND d.{commit} = ?1
-    AND d.{file} = h.file_path AND h.line_no BETWEEN d.{start} AND d.{end}
-    AND d.{fqn} NOT LIKE '%@%'
-  WHERE h.commit_sha = ?1 AND ({filter})
-  {scope}QUALIFY row_number() OVER (
-    PARTITION BY h.file_path, h.line_no
-    ORDER BY (d.{start} = h.line_no AND ({named})) DESC, d.{end} > d.{start} DESC,
-             d.{end} - d.{start} NULLS LAST, d.{id}
-  ) = 1
-) {kind_filter}
-ORDER BY file_path, line_no",
-            name = def.column("name")?,
-            kind = def.column("definition_type")?,
-            start = def.column("start_line")?,
-            end = def.column("end_line")?,
-            dtable = def.table(),
-            project_col = def.column("project_id")?,
-            commit = def.column("commit_sha")?,
-            file = def.column("file_path")?,
-            fqn = def.column("fqn")?,
-            id = def.column("id")?,
-            scope = path_scope("h.file_path", paths, true),
-            named = alternatives
-                .iter()
-                .enumerate()
-                .map(|(i, term)| term.sql_name(
-                    &format!("d.{}", def.column("name").unwrap_or("name")),
-                    &format!("?{}", i + 2)
-                ))
-                .collect::<Vec<_>>()
-                .join(" OR "),
-        ),
-        &params,
-    )?;
-    let files = string_column(&batches, "file_path");
-    let lines = i64_column(&batches, "line_no");
-    let texts = string_column(&batches, "text");
-    let names = optional_strings(&batches, "def");
-    let starts = optional_i64s(&batches, "def_start");
-    let ends = optional_i64s(&batches, "def_end");
-    Ok((0..files.len())
-        .map(|i| Hit {
-            file: files[i].clone(),
-            line: lines[i] as usize,
-            text: texts[i].trim().to_string(),
-            def: match (&names[i], starts[i], ends[i]) {
-                (Some(name), Some(start), Some(end)) => Some(Def {
-                    name: name.clone(),
-                    start: start as usize,
-                    end: end as usize,
-                }),
-                _ => None,
-            },
-        })
-        .collect())
-}
-
-fn optional_strings(
-    batches: &[arrow::record_batch::RecordBatch],
-    name: &str,
-) -> Vec<Option<String>> {
-    use arrow::array::{Array, StringArray};
-    batches
-        .iter()
-        .filter_map(|b| b.column_by_name(name))
-        .flat_map(|column| {
-            let values = column.as_any().downcast_ref::<StringArray>();
-            (0..column.len())
-                .map(|i| {
-                    values
-                        .filter(|v| !v.is_null(i))
-                        .map(|v| v.value(i).to_string())
+    let wanted: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();
+    hits.retain_mut(|hit| {
+        let best = by_file.get(&hit.file).and_then(|defs| {
+            defs.iter()
+                .filter(|c| c.def.start <= hit.line && hit.line <= c.def.end)
+                .min_by_key(|c| {
+                    let named = c.def.start == hit.line
+                        && alternatives.iter().any(|a| a.names(&c.def.name));
+                    (
+                        !named,
+                        c.def.end <= c.def.start,
+                        c.def.end - c.def.start,
+                        c.id,
+                    )
                 })
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
-fn optional_i64s(batches: &[arrow::record_batch::RecordBatch], name: &str) -> Vec<Option<i64>> {
-    use arrow::array::{Array, Int64Array};
-    batches
-        .iter()
-        .filter_map(|b| b.column_by_name(name))
-        .flat_map(|column| {
-            let values = column.as_any().downcast_ref::<Int64Array>();
-            (0..column.len())
-                .map(|i| values.filter(|v| !v.is_null(i)).map(|v| v.value(i)))
-                .collect::<Vec<_>>()
-        })
-        .collect()
+        });
+        let keep = wanted.is_empty() || best.is_some_and(|c| wanted.contains(&c.kind));
+        hit.def = best.map(|c| c.def.clone());
+        keep
+    });
+    Ok(())
 }
 
 fn is_code(path: &str) -> bool {
@@ -614,5 +645,41 @@ mod tests {
         assert!(!Term::parse("^rand").matches("x.rand = 1"));
         assert!(Term::parse("mark_in_sync").matches("markInSync()"));
         assert!(Term::parse("on.*Login").names("onLogin"));
+    }
+
+    #[test]
+    fn scan_reads_the_working_tree_like_ripgrep() {
+        let repo = tempfile::tempdir().unwrap();
+        let write = |path: &str, body: &str| {
+            let full = repo.path().join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, body).unwrap();
+        };
+        write(".gitignore", "dist/\n");
+        write("src/a.rs", "fn mark_in_sync() {}\nlet x = 1;\n");
+        write("src/nested/b.ts", "markInSync();\n");
+        write("dist/c.js", "markInSync();\n");
+        write(".github/ci.yml", "run: mark-in-sync\n");
+        let term = Term::parse("markInSync");
+        let matcher = matcher(&[term]).unwrap();
+        let files = |paths: &[&str]| {
+            let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+            let mut found: Vec<String> = scan(repo.path(), &paths, &matcher)
+                .unwrap()
+                .into_iter()
+                .map(|h| format!("{}:{}", h.file, h.line))
+                .collect();
+            found.sort();
+            found
+        };
+        assert_eq!(
+            files(&[]),
+            [".github/ci.yml:1", "src/a.rs:1", "src/nested/b.ts:1"]
+        );
+        assert_eq!(files(&["src/nested"]), ["src/nested/b.ts:1"]);
+        assert_eq!(
+            files(&["src/**/*.ts", ".github"]),
+            [".github/ci.yml:1", "src/nested/b.ts:1"]
+        );
     }
 }
