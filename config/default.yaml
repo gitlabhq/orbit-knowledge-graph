@@ -214,11 +214,11 @@ analytics:
 billing:
   enabled: false
   collector_url: "http://localhost:9090"
-  auth_mode: oidc
+  auth_mode: cloud_connector             # cloud_connector (self-managed, Dedicated) | oidc (.com)
   quota:
     enabled: false
     customers_dot_url: "http://localhost:5000"
-    auth_mode: admin_token                 # admin_token (.com) | license_checksum (self-managed, Dedicated)
+    auth_mode: license_checksum            # license_checksum (self-managed, Dedicated) | admin_token (.com)
     request_timeout_ms: 1000
     fallback_cache_ttl_secs: 3600
     # api_user: ""

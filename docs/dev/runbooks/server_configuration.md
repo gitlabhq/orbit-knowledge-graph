@@ -528,7 +528,7 @@ Controls Snowplow billing-event emission and the CDot quota gate that enforces G
 |-------------|---------|-------------|
 | `billing.enabled` | `false` | Enable Snowplow billing-event emission |
 | `billing.collector_url` | `""` | Snowplow collector endpoint. On Self-Managed / Dedicated, point at the host matching the Cloud Connector token audience (`https://billing.prdsub.gitlab.net` / `https://billing.stgsub.gitlab.net`). |
-| `billing.auth_mode` | `oidc` | Authentication for emission. `oidc` uses GCP workload-identity (GitLab.com only). `cloud_connector` pulls the Cloud Connector instance token from Rails and caches it in memory (Self-Managed / Dedicated). |
+| `billing.auth_mode` | `cloud_connector` | Authentication for emission. `cloud_connector` pulls the Cloud Connector instance token from Rails and caches it in memory (Self-Managed / Dedicated). `oidc` uses GCP workload-identity and must be set explicitly on GitLab.com. |
 
 ### Quota gate
 
@@ -538,7 +538,7 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 |-------------|---------|-------------|
 | `billing.quota.enabled` | `false` | Enable the CDot quota gate |
 | `billing.quota.customers_dot_url` | `http://localhost:5000` | CDot base URL (e.g. `https://customers.gitlab.com`) |
-| `billing.quota.auth_mode` | `admin_token` | How the gate authenticates to CDot: `admin_token` (GitLab.com) or `license_checksum` (self-managed and Dedicated) |
+| `billing.quota.auth_mode` | `license_checksum` | How the gate authenticates to CDot: `license_checksum` (self-managed and Dedicated) or `admin_token`, which GitLab.com must set explicitly |
 | `billing.quota.request_timeout_ms` | `1000` | CDot request timeout in milliseconds |
 | `billing.quota.api_user` | None | CDot admin email, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_user`. |
 | `billing.quota.api_token` | None | CDot admin token, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_token`. |

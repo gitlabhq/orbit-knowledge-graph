@@ -239,7 +239,7 @@ mod tests {
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
     use axum::routing::head;
-    use orbit_server_config::{AppConfig, QuotaConfig};
+    use orbit_server_config::{AppConfig, BillingAuthMode, QuotaConfig};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
 
@@ -305,7 +305,7 @@ mod tests {
         BillingConfig {
             enabled: true,
             collector_url: String::new(),
-            auth_mode: Default::default(),
+            auth_mode: BillingAuthMode::Oidc,
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url,
@@ -334,7 +334,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: false,
             collector_url: String::new(),
-            auth_mode: Default::default(),
+            auth_mode: BillingAuthMode::Oidc,
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
@@ -357,7 +357,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: true,
             collector_url: String::new(),
-            auth_mode: Default::default(),
+            auth_mode: BillingAuthMode::Oidc,
             quota: QuotaConfig {
                 enabled: false,
                 ..AppConfig::embedded_defaults().billing.quota
@@ -373,7 +373,7 @@ mod tests {
         let cfg = BillingConfig {
             enabled: true,
             collector_url: String::new(),
-            auth_mode: Default::default(),
+            auth_mode: BillingAuthMode::Oidc,
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
