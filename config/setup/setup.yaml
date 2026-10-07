@@ -8,13 +8,11 @@ mcp_server:
 instructions: |
   ## Orbit
 
-  - MANDATORY: `{{orbit}} grep` must be used for search instead of the bash tools grep, rg, find, and ls. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
+  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
   - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
   - Reuse shown source instead of rereading unchanged files.
 
 nudge_search: |
-  Grep means `{{orbit}} grep 'words'`. Every matching line, one row per file. `a|b` OR. Add --path/--kind.
-nudge_read: |
-  Do not reread unchanged files. Reuse shown source. Callers/callees? `{{orbit}} context <name>`.
+  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
 template_vars:
   reminder: "[orbit] Grep means run {{orbit}} grep 'words'. Every matching line, one row per file."

@@ -1,7 +1,7 @@
 //! Hidden `orbit hook-guard` — the Claude Code PreToolUse guard installed by `orbit setup`.
-//! Reads a tool call from stdin and nudges the agent to query the graph before grepping or
-//! reading source. Fails open: on any error it prints nothing and exits 0, never blocking a
-//! tool call.
+//! Reads a tool call from stdin and nudges the agent to use `orbit grep` instead of grep or
+//! rg. Fails open: on any error it prints nothing and exits 0, never blocking a tool call.
+//! `read` is accepted for installs that still register it, and never nudges.
 
 use std::io::Read;
 
@@ -17,19 +17,10 @@ pub(crate) enum Kind {
     Read,
 }
 
-const SEARCH_COMMANDS: &[&str] = &[
-    "ack", "ag", "egrep", "fd", "fgrep", "find", "grep", "rg", "ripgrep",
-];
-
-const READ_COMMANDS: &[&str] = &["bat", "cat", "head", "less", "more", "sed", "tail"];
+const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
     "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
-];
-
-const SOURCE_EXTS: &[&str] = &[
-    "py", "js", "cjs", "mjs", "ts", "tsx", "jsx", "vue", "svelte", "go", "rs", "java", "rb", "c",
-    "h", "cpp", "hpp", "cc", "cs", "kt", "kts", "swift", "php", "scala", "lua", "sh", "pl",
 ];
 
 pub(crate) fn run(kind: Kind) {
@@ -49,11 +40,11 @@ pub(crate) fn run(kind: Kind) {
 }
 
 fn respond(kind: Kind, call: &Value) -> Option<Value> {
-    should_nudge(kind, call).then(|| {
+    (matches!(kind, Kind::Search) && should_nudge(call)).then(|| {
         json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "additionalContext": nudge_text(kind),
+                "additionalContext": spec::search_nudge_text(),
             }
         })
     })
@@ -65,42 +56,22 @@ fn local_graph_exists() -> bool {
         .unwrap_or(false)
 }
 
-fn nudge_text(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Search => spec::search_nudge_text(),
-        Kind::Read => spec::read_nudge_text(),
-    }
-}
-
-fn should_nudge(kind: Kind, call: &Value) -> bool {
+fn should_nudge(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
-    match kind {
-        Kind::Search => {
-            let command = tool_input
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let is_pattern_tool = command.is_empty()
-                && tool_input
-                    .get("pattern")
-                    .and_then(Value::as_str)
-                    .is_some_and(|p| !p.is_empty());
-            is_pattern_tool || invokes_search(command) || reads_source(command)
-        }
-        Kind::Read => {
-            let path = tool_input
-                .get("file_path")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            is_source_path(path)
-        }
-    }
-}
-
-fn invokes_search(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(segment_invokes_search)
+    let command = tool_input
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let is_grep_tool = command.is_empty()
+        && call.get("tool_name").and_then(Value::as_str) != Some("Glob")
+        && tool_input
+            .get("pattern")
+            .and_then(Value::as_str)
+            .is_some_and(|p| !p.is_empty());
+    is_grep_tool
+        || command
+            .split(['|', ';', '&', '\n', '(', ')', '`'])
+            .any(segment_invokes_search)
 }
 
 fn segment_invokes_search(segment: &str) -> bool {
@@ -108,7 +79,7 @@ fn segment_invokes_search(segment: &str) -> bool {
         if token.starts_with('-') || token.contains('=') {
             continue;
         }
-        let name = basename(token);
+        let name = token.rsplit('/').next().unwrap_or(token);
         if COMMAND_WRAPPERS.contains(&name) {
             continue;
         }
@@ -117,49 +88,15 @@ fn segment_invokes_search(segment: &str) -> bool {
     false
 }
 
-fn reads_source(command: &str) -> bool {
-    command
-        .split(['|', ';', '&', '\n', '(', ')', '`'])
-        .any(|segment| {
-            let mut tokens = segment.split_whitespace().filter(|t| !t.starts_with('-'));
-            let is_reader = tokens
-                .find(|t| !COMMAND_WRAPPERS.contains(&basename(t)))
-                .is_some_and(|t| READ_COMMANDS.contains(&basename(t)));
-            is_reader && tokens.any(is_source_path)
-        })
-}
-
-fn basename(token: &str) -> &str {
-    token.rsplit('/').next().unwrap_or(token)
-}
-
-fn is_source_path(path: &str) -> bool {
-    let normalized = path.replace('\\', "/");
-    let name = normalized.rsplit('/').next().unwrap_or("");
-    match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => {
-            SOURCE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn grep_tool_pattern_nudges() {
-        let call = json!({"tool_input": {"pattern": "fn main"}});
-        assert!(should_nudge(Kind::Search, &call));
-    }
-
-    #[test]
-    fn bash_search_commands_nudge() {
+    fn grep_family_and_the_grep_tool_nudge() {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
-            "find . -name '*.rs'",
             "sudo rg foo",
             "xargs -n1 grep foo",
             "/usr/bin/rg foo",
@@ -168,90 +105,28 @@ mod tests {
             "RUST_LOG=debug rg foo",
         ] {
             let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
+            assert!(respond(Kind::Search, &call).is_some(), "{command}");
         }
+        let tool = json!({"tool_name": "Grep", "tool_input": {"pattern": "fn main"}});
+        assert!(respond(Kind::Search, &tool).is_some());
     }
 
     #[test]
-    fn bash_source_reads_nudge() {
+    fn reads_listings_and_other_commands_never_nudge() {
         for command in [
             "cat src/main.rs",
-            "head -50 crates/foo/src/lib.rs",
             "sed -n '1,40p' app/models/user.rb",
-            "cd repo && cat lib/x.py",
-        ] {
-            let call = json!({"tool_input": {"command": command}});
-            assert!(should_nudge(Kind::Search, &call), "{command}");
-        }
-    }
-
-    #[test]
-    fn non_search_bash_does_not_nudge() {
-        for command in [
-            "cargo build",
+            "find . -name '*.rs'",
             "ls -la",
-            "git status",
-            "git tag -a v1.0",
-            "docker tag img repo/img",
-            "npm run build --flag foo",
+            "cargo build",
             "git log --grep=foo",
-            "echo storage",
-            "cat README.md",
-            "cat Cargo.toml",
-            "tail -f server.log",
         ] {
             let call = json!({"tool_input": {"command": command}});
-            assert!(!should_nudge(Kind::Search, &call), "{command}");
+            assert!(respond(Kind::Search, &call).is_none(), "{command}");
         }
-    }
-
-    #[test]
-    fn source_reads_nudge_but_docs_do_not() {
-        let source = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
-        assert!(should_nudge(Kind::Read, &source));
-
-        for path in [
-            "/repo/README.md",
-            "/repo/config.yaml",
-            "/repo/.env",
-            "/repo/Cargo.toml",
-        ] {
-            let call = json!({"tool_input": {"file_path": path}});
-            assert!(!should_nudge(Kind::Read, &call), "{path}");
-        }
-    }
-
-    #[test]
-    fn dotfiles_are_not_source() {
-        assert!(!is_source_path("/repo/.rs"));
-        assert!(!is_source_path(""));
-        assert!(is_source_path("C:\\repo\\src\\main.RS"));
-    }
-
-    #[test]
-    fn missing_tool_input_falls_back_to_root() {
-        let call = json!({"pattern": "foo"});
-        assert!(should_nudge(Kind::Search, &call));
-    }
-
-    #[test]
-    fn searches_and_source_reads_get_a_nudge_and_nothing_is_denied() {
-        let search = json!({"tool_input": {"command": "rg foo src"}});
-        let out = respond(Kind::Search, &search).unwrap();
-        assert!(out["hookSpecificOutput"]["permissionDecision"].is_null());
-        assert_eq!(
-            out["hookSpecificOutput"]["additionalContext"],
-            nudge_text(Kind::Search)
-        );
-        let build = json!({"tool_input": {"command": "cargo build"}});
-        assert!(respond(Kind::Search, &build).is_none());
+        let glob = json!({"tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
+        assert!(respond(Kind::Search, &glob).is_none());
         let read = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
-        assert!(respond(Kind::Read, &read).is_some());
-    }
-
-    #[test]
-    fn nudge_text_names_the_launcher_verbs() {
-        assert!(nudge_text(Kind::Search).contains("`orbit grep"));
-        assert!(nudge_text(Kind::Read).contains("`orbit context"));
+        assert!(respond(Kind::Read, &read).is_none());
     }
 }
