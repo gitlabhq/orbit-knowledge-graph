@@ -282,7 +282,7 @@ WHERE d.def_id = s.def_id"
 }
 
 pub const TEXT_LINE_PREFIX: &str = "gl_doc_line_";
-const TEXT_FILE_MAX_BYTES: u64 = 256 * 1024;
+const TEXT_FILE_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const TEXT_LINES_MAX: usize = 3_000_000;
 const TEXT_LINE_MAX_CHARS: usize = 400;
 const TEXT_EXTS: &[&str] = &[

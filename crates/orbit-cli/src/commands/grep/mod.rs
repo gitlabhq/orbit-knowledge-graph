@@ -63,6 +63,20 @@ pub(crate) fn run(
         }
     };
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
+    let skipped: Vec<&String> = paths
+        .iter()
+        .filter(|path| {
+            std::fs::metadata(backend.git().repo_path.join(path)).is_ok_and(|meta| {
+                meta.is_file() && !duckdb_client::search::is_indexed_text_file(path, meta.len())
+            })
+        })
+        .collect();
+    for path in skipped {
+        writeln!(
+            out,
+            "Not searched: {path} is excluded from the line index (size, type, or generated)"
+        )?;
+    }
     write!(out, "{}", text::render(&hits, &alternatives))?;
     write!(
         out,
