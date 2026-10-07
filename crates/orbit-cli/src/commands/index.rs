@@ -231,7 +231,14 @@ pub(crate) fn grep_command_line(definition_name: &str) -> String {
 }
 
 pub(crate) fn index_command_line(path: &str) -> String {
-    format!("{} index {path}", spec::launcher())
+    let is_plain_path = path
+        .chars()
+        .all(|c| c.is_alphanumeric() || "_-./~:\\".contains(c));
+    let argument = match is_plain_path {
+        true => path.to_string(),
+        false => format!("'{}'", path.replace('\'', "'\\''")),
+    };
+    format!("{} index {argument}", spec::launcher())
 }
 
 pub(crate) fn example_repository_path() -> &'static str {

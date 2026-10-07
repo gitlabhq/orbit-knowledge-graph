@@ -29,9 +29,14 @@ pub(super) fn repository_root(target: &Target) -> Option<PathBuf> {
 }
 
 pub(super) fn index_path_for(target: &Target, repo_root: &Path) -> String {
+    let working_folder = std::env::current_dir()
+        .ok()
+        .and_then(|folder| dunce::canonicalize(folder).ok());
     match target {
-        Target::Project(_) => repo_root.display().to_string(),
-        Target::Global => ".".to_string(),
+        Target::Project(_) if working_folder.as_deref() != Some(repo_root) => {
+            repo_root.display().to_string()
+        }
+        _ => ".".to_string(),
     }
 }
 

@@ -95,13 +95,17 @@ fn run_orbit_with_home(folder: &Path, home: &Path, args: &[&str]) -> Output {
 #[test]
 fn index_from_a_repository_subdirectory_indexes_the_repository() {
     let home = tempfile::tempdir().unwrap();
-    let (_, subdirectory) = repository_with_subdirectory(home.path());
+    let (repository, subdirectory) = repository_with_subdirectory(home.path());
 
     let output = run_orbit_with_home(&subdirectory, home.path(), &["index", "."]);
 
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
-    assert!(!printed.contains("no git repository"), "{printed}");
+    let indexed = dunce::canonicalize(&repository).unwrap();
+    assert!(
+        printed.contains(&format!("\"path\": {:?}", indexed.display().to_string())),
+        "{printed}"
+    );
 }
 
 #[test]
