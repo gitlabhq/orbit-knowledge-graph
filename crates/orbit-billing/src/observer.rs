@@ -40,6 +40,7 @@ struct BillingMetadata<'a> {
     source_type: &'a str,
     coding_agent: Option<&'a str>,
     is_gitlab_team_member: Option<bool>,
+    orbit_version: &'static str,
 }
 
 pub struct BillingObserver {
@@ -69,6 +70,7 @@ impl BillingObserver {
             source_type: &self.inputs.source_type,
             coding_agent: self.inputs.coding_agent.as_deref(),
             is_gitlab_team_member: self.inputs.is_gitlab_team_member,
+            orbit_version: orbit_utils::version::get(),
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "failed to serialize billing metadata");
@@ -298,6 +300,7 @@ mod tests {
         assert_eq!(metadata["source_type"], "mcp");
         assert_eq!(metadata["coding_agent"], "claude-code");
         assert_eq!(metadata["is_gitlab_team_member"], true);
+        assert_eq!(metadata["orbit_version"], orbit_utils::version::get());
     }
 
     #[test]
@@ -323,6 +326,7 @@ mod tests {
             "source_type",
             "coding_agent",
             "is_gitlab_team_member",
+            "orbit_version",
         ];
         let metrics = serde_json::to_value(ExecMetrics::default()).unwrap();
         let metrics = metrics.as_object().unwrap();

@@ -390,7 +390,7 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 | `instance_id` / `unique_instance_id` | JWT claims | attribution on self-managed and Dedicated |
 | `feature_qualified_name` | derived from `source_type` | `orbit_{source_type}`, for example `orbit_mcp` |
 | `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
-| `metadata` | pipeline context | `query_type` plus execution metrics (compile and execute ms, rows) |
+| `metadata` | pipeline context and server build | `query_type`, `orbit_version`, plus execution metrics (compile and execute ms, rows) |
 
 **Indexer events (planned for GB-based deployments).** Emitted per indexing batch from the existing `EngineMetrics` at `crates/indexer/src/metrics.rs`:
 
