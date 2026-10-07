@@ -197,6 +197,19 @@ mod tests {
     }
 
     #[test]
+    fn wrapper_skill_description_matches_orbit_skill() {
+        let wrapper_manifest = include_str!(concat!(env!("SKILLS_DIR"), "/orbit-wrapper/SKILL.md"));
+        let wrapper = orbit_prompts::parse_skill_frontmatter(wrapper_manifest, "orbit-wrapper")
+            .expect("skills/orbit-wrapper/SKILL.md frontmatter must parse");
+        let orbit = list_skills(Frontend::JsonDsl).remove(0);
+        assert_eq!(
+            wrapper.description, orbit.description,
+            "skills/orbit-wrapper/SKILL.md description drifted from skills/orbit/SKILL.md: \
+             copy the orbit description into the wrapper and bump the wrapper `version`"
+        );
+    }
+
+    #[test]
     fn gql_callers_get_the_gql_manifest() {
         let json = list_skills(Frontend::JsonDsl).remove(0);
         let tree = get_skill("orbit", Frontend::Gql, false).unwrap();
