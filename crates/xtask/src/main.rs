@@ -158,6 +158,10 @@ enum Command {
         /// Per-request gRPC deadline, in seconds.
         #[arg(long, default_value_t = 30)]
         timeout: u64,
+
+        /// Print each scenario's `<entity>\t<node id>\t<label>` and exit without connecting.
+        #[arg(long)]
+        list_node_ids: bool,
     },
 }
 
@@ -379,7 +383,11 @@ async fn main() -> Result<()> {
             query,
             no_admin,
             timeout,
+            list_node_ids,
         } => {
+            if list_node_ids {
+                return loadtest::list_node_ids(&scenarios, query.as_deref());
+            }
             loadtest::run(loadtest::Options {
                 endpoint,
                 concurrency,

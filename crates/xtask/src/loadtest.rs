@@ -215,13 +215,14 @@ pub async fn run(opts: Options) -> Result<()> {
     let runs = run_pass(&ctx, &queries, measured).await;
     let summaries = queries.iter().zip(runs);
     let summaries = summaries.map(|(q, r)| summarize(&q.label, r)).collect();
+    let sent = opts.rounds * opts.concurrency * queries.len();
 
     let (server, server_note) = match &opts.clickhouse {
         None => (
             None,
             Some("Server-side (ClickHouse) stats not collected: no --clickhouse-url.".to_string()),
         ),
-        Some(ch) => match fetch_server_stats(ch, &run_id).await {
+        Some(ch) => match fetch_server_stats(ch, &run_id, sent).await {
             Ok((stats, note)) => (Some(stats), note),
             Err(e) => (
                 None,
@@ -245,7 +246,21 @@ pub async fn run(opts: Options) -> Result<()> {
     };
     print!("{}", render_report(&report));
 
+    // After the report, so CI still publishes it; a failing exit marks the job.
+    if let Some(reason) = failure(&report.queries) {
+        bail!("{reason}");
+    }
     Ok(())
+}
+
+/// Why the run failed: any request errored or a query had no successful request.
+fn failure(queries: &[QuerySummary]) -> Option<String> {
+    let bad: Vec<String> = queries
+        .iter()
+        .filter(|q| q.err > 0 || q.n == 0)
+        .map(|q| format!("{} ({} ok, {} errors)", q.label, q.n, q.err))
+        .collect();
+    (!bad.is_empty()).then(|| format!("failed requests: {}", bad.join(", ")))
 }
 
 fn to_base36(mut n: u64) -> String {
@@ -450,7 +465,8 @@ struct Report {
     queries: Vec<QuerySummary>,
     /// ClickHouse stats per scenario index; `None` when not collected.
     server: Option<BTreeMap<usize, ServerStats>>,
-    /// One-line note about the ClickHouse columns (not collected, unavailable, partial).
+    /// One-line note about the ClickHouse columns (not collected, unavailable,
+    /// flush failed, or fewer requests matched than sent).
     server_note: Option<String>,
 }
 
@@ -565,15 +581,17 @@ fn render_table(report: &Report) -> String {
     for (i, q) in report.queries.iter().enumerate() {
         let ch = report.server.as_ref().and_then(|s| s.get(&i));
         let cell = |f: fn(&ServerStats) -> String| ch.map_or_else(|| "-".to_string(), f);
+        // No successful request means no latency, not a latency of 0.
+        let ms = |v: f64| if q.n == 0 { "-".to_string() } else { fmt_ms(v) };
         table.push_record([
             q.label.clone(),
             q.n.to_string(),
             q.err.to_string(),
-            fmt_ms(q.med),
+            ms(q.med),
             cell(|s| s.med_ms.to_string()),
-            fmt_ms(q.p90),
+            ms(q.p90),
             cell(|s| s.p90_ms.to_string()),
-            fmt_ms(q.max),
+            ms(q.max),
             fmt_spread(&q.round_medians, q.med),
             cell(|s| fmt_thousands(s.med_read_rows)),
             cell(|s| fmt_bytes(s.peak_memory.max(0) as f64)),
@@ -641,9 +659,15 @@ fn server_stats_sql(run_id: &str) -> String {
     )
 }
 
+/// Per-scenario ClickHouse stats and how many distinct requests they cover.
+struct ServerAggregate {
+    stats: BTreeMap<usize, ServerStats>,
+    matched: usize,
+}
+
 /// Fold stage rows into requests, then requests into per-scenario stats.
 /// Rows that are not this run's measured pass are ignored.
-fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<usize, ServerStats> {
+fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> ServerAggregate {
     #[derive(Default)]
     struct Req {
         rows: u64,
@@ -661,11 +685,12 @@ fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<usize, Serve
         req.ms += row.query_duration_ms;
     }
 
+    let matched = requests.len();
     let mut grouped: BTreeMap<usize, Vec<Req>> = BTreeMap::new();
     for ((idx, _), req) in requests {
         grouped.entry(idx).or_default().push(req);
     }
-    grouped
+    let stats = grouped
         .into_iter()
         .map(|(idx, reqs)| {
             let sorted = |f: fn(&Req) -> u64| {
@@ -682,14 +707,32 @@ fn aggregate_server(run_id: &str, rows: &[QueryLogRow]) -> BTreeMap<usize, Serve
             };
             (idx, stats)
         })
-        .collect()
+        .collect();
+    ServerAggregate { stats, matched }
 }
 
-/// Flush and read `system.query_log`. A failed flush is reported as a note
-/// (rows may lag) rather than an error; a failed connection or read is an error.
+/// Note for the ClickHouse columns when the flush failed or rows are missing.
+fn server_note(flush_error: Option<&str>, matched: usize, sent: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(e) = flush_error {
+        parts.push(format!(
+            "Server-side (ClickHouse): SYSTEM FLUSH LOGS failed ({e}); counts may be incomplete."
+        ));
+    }
+    if matched < sent {
+        parts.push(format!(
+            "Server-side (ClickHouse): matched {matched} of {sent} requests."
+        ));
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// Flush and read `system.query_log`. A failed flush or fewer matched requests
+/// than `sent` is reported as a note; a failed connection or read is an error.
 async fn fetch_server_stats(
     opts: &ClickHouseOptions,
     run_id: &str,
+    sent: usize,
 ) -> Result<(BTreeMap<usize, ServerStats>, Option<String>)> {
     let mut client = clickhouse::Client::default()
         .with_url(&opts.url)
@@ -717,12 +760,9 @@ async fn fetch_server_stats(
     .context("timed out reading system.query_log")?
     .context("reading system.query_log")?;
 
-    let note = flush_error.map(|e| {
-        format!(
-            "Server-side (ClickHouse): SYSTEM FLUSH LOGS failed ({e}); counts may be incomplete."
-        )
-    });
-    Ok((aggregate_server(run_id, &rows), note))
+    let agg = aggregate_server(run_id, &rows);
+    let note = server_note(flush_error.as_deref(), agg.matched, sent);
+    Ok((agg.stats, note))
 }
 
 /// Index-based percentile over a pre-sorted slice (no interpolation), matching
@@ -835,6 +875,48 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
             label,
             body: body.clone(),
         });
+    }
+    Ok(())
+}
+
+/// Minimal view of a query body: the entity and pinned ids of each node.
+#[derive(Deserialize)]
+struct QueryNodes {
+    #[serde(default)]
+    nodes: Vec<QueryNode>,
+}
+
+#[derive(Deserialize)]
+struct QueryNode {
+    entity: String,
+    #[serde(default)]
+    node_ids: Vec<i64>,
+}
+
+/// `(entity, id)` for every pinned node id in a query body, deduplicated.
+fn node_refs(body: &str) -> Result<Vec<(String, i64)>> {
+    let parsed: QueryNodes = serde_json::from_str(body).context("parsing query.json")?;
+    let mut refs: Vec<(String, i64)> = parsed
+        .nodes
+        .into_iter()
+        .flat_map(|n| n.node_ids.into_iter().map(move |id| (n.entity.clone(), id)))
+        .collect();
+    refs.sort();
+    refs.dedup();
+    Ok(refs)
+}
+
+/// Print `<entity>\t<id>\t<label>` per pinned node id, so CI can check the ids exist.
+pub fn list_node_ids(scenarios: &Path, filter: Option<&str>) -> Result<()> {
+    let queries = load_scenarios(scenarios)
+        .with_context(|| format!("loading scenarios from {}", scenarios.display()))?;
+    for q in queries
+        .iter()
+        .filter(|q| filter.is_none_or(|f| q.label.contains(f)))
+    {
+        for (entity, id) in node_refs(&q.body).with_context(|| q.label.clone())? {
+            println!("{entity}\t{id}\t{}", q.label);
+        }
     }
     Ok(())
 }
@@ -978,6 +1060,75 @@ mod tests {
     }
 
     #[test]
+    fn rows_without_successes_dash_latency_cells() {
+        let queries = vec![
+            summarize("dead", run_of(vec![vec![], vec![]], &[("boom", 40)])),
+            summarize("ok", run_of(vec![vec![5.0]], &[])),
+        ];
+        let out = render_report(&report_with(queries, None));
+        assert_eq!(
+            row(&out, "dead"),
+            ["dead", "0", "40", "-", "-", "-", "-", "-", "-", "-", "-"]
+        );
+        assert_eq!(row(&out, "ok")[3], "5");
+    }
+
+    #[test]
+    fn failure_flags_any_error_or_zero_successes() {
+        let ok = summarize("ok", run_of(vec![vec![5.0]], &[]));
+        assert_eq!(failure(&[ok]), None);
+        assert_eq!(failure(&[]), None);
+        let queries = [
+            summarize("ok", run_of(vec![vec![5.0]], &[])),
+            summarize("flaky", run_of(vec![vec![5.0]], &[("x", 1)])),
+            summarize("empty", run_of(vec![vec![]], &[])),
+        ];
+        assert_eq!(
+            failure(&queries).as_deref(),
+            Some("failed requests: flaky (1 ok, 1 errors), empty (0 ok, 0 errors)")
+        );
+    }
+
+    #[test]
+    fn server_note_reports_flush_failure_and_partial_matches() {
+        assert_eq!(server_note(None, 40, 40), None);
+        assert_eq!(
+            server_note(None, 0, 40).as_deref(),
+            Some("Server-side (ClickHouse): matched 0 of 40 requests.")
+        );
+        assert_eq!(
+            server_note(Some("boom"), 39, 40).as_deref(),
+            Some(
+                "Server-side (ClickHouse): SYSTEM FLUSH LOGS failed (boom); counts may be \
+                 incomplete. Server-side (ClickHouse): matched 39 of 40 requests."
+            )
+        );
+        assert!(
+            server_note(Some("boom"), 40, 40)
+                .unwrap()
+                .contains("FLUSH LOGS failed")
+        );
+    }
+
+    #[test]
+    fn node_refs_lists_pinned_ids_per_entity() {
+        let body = r#"{"query_type":"path_finding","nodes":[
+            {"id":"u1","entity":"User","node_ids":[2,1]},
+            {"id":"u2","entity":"User","node_ids":[2]},
+            {"id":"p","entity":"Project"}]}"#;
+        assert_eq!(
+            node_refs(body).unwrap(),
+            [("User".to_string(), 1), ("User".to_string(), 2)]
+        );
+        assert!(
+            node_refs(r#"{"query_type":"traversal"}"#)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(node_refs("not json").is_err());
+    }
+
+    #[test]
     fn read_rows_use_thousands_separators() {
         assert_eq!(fmt_thousands(0), "0");
         assert_eq!(fmt_thousands(999), "999");
@@ -1108,7 +1259,9 @@ mod tests {
             log_row("lt-r2-t-q00-1-base", 9999, 9999, 9999),
             log_row("01JABCDEF0123456789ABCDEFG-base", 9999, 9999, 9999),
         ];
-        let stats = aggregate_server("r1", &rows);
+        let agg = aggregate_server("r1", &rows);
+        assert_eq!(agg.matched, 4);
+        let stats = agg.stats;
         assert_eq!(stats.len(), 2);
         // Requests: (15 rows, 900 mem, 8 ms), (30, 700, 20), (20, 600, 10).
         assert_eq!(

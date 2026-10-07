@@ -31,13 +31,29 @@ cap() { mise -C "$CAPRONI_DIR" exec -- caproni -c "$CAPRONI_DIR/caproni.yaml" "$
 kc()  { cap kubectl "$@"; }
 chq() { cap kubectl -n gitlab-dev-stack exec -i gitlab-dev-stack-clickhouse-0 -c clickhouse -- clickhouse-client "$@"; }
 
+# Scratch files, removed on every exit; loadtest-results.md is the only output.
+UP_LOG="$ROOT/caproni-up.log"
+MAP_FILE="$ROOT/.synth_table_map"
+NODE_IDS="$ROOT/.loadtest_node_ids"
+FAILED="$ROOT/.synth_load_failed"
+OPT_FAILED="$ROOT/.synth_optimize_failed"
+PF_LOG="$ROOT/.gkg-pf.log"
+CH_PF_LOG="$ROOT/.ch-pf.log"
+SAMPLE_KUBECONFIG="$ROOT/.loadtest_kubeconfig"
+MEM_PEAK="$ROOT/.loadtest_mem_peak"
+LT_OUT="$ROOT/.loadtest_stdout"
+PF_PID="" CH_PF_PID="" MEM_PID=""
+cleanup() {
+  kill ${PF_PID:+"$PF_PID"} ${CH_PF_PID:+"$CH_PF_PID"} ${MEM_PID:+"$MEM_PID"} 2>/dev/null || true
+  rm -f "$UP_LOG" "$MAP_FILE" "$NODE_IDS" "$FAILED" "$OPT_FAILED" "$PF_LOG" "$CH_PF_LOG" \
+    "$SAMPLE_KUBECONFIG" "$MEM_PEAK" "$MEM_PEAK.tmp" "$LT_OUT"
+}
+trap cleanup EXIT
+
 # Runner hardware, so a shift in numbers can be matched to a different machine.
 CPU_MODEL="$(grep -m1 '^model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')" || true
 CPU_COUNT="$(nproc 2>/dev/null)" || true
-MACHINE_TYPE="$(curl -fsS --max-time 2 -H 'Metadata-Flavor: Google' \
-  http://169.254.169.254/computeMetadata/v1/instance/machine-type 2>/dev/null)" || true
-MACHINE_TYPE="${MACHINE_TYPE##*/}"
-RUNNER_INFO="${MACHINE_TYPE:-unknown} · ${CPU_COUNT:-?} vCPU · ${CPU_MODEL:-unknown CPU}"
+RUNNER_INFO="${CPU_COUNT:-?} vCPU · ${CPU_MODEL:-unknown CPU}"
 log "runner: ${RUNNER_INFO}"
 
 # ---------------------------------------------------------------------------
@@ -85,14 +101,14 @@ quiet_cluster() {
     sleep 2
   done
   [ "$gone" = 1 ] || { echo "dispatcher pod still present after 120s" >&2; return 1; }
-  kc -n gitlab-dev-stack patch statefulset gitlab-dev-stack-clickhouse --type=json -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/resources\",\"value\":{\"requests\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"},\"limits\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"}}}]"
+  # Strategic merge keyed by container name, so a sidecar cannot shift the target.
+  kc -n gitlab-dev-stack patch statefulset gitlab-dev-stack-clickhouse --type=strategic -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"clickhouse\",\"resources\":{\"requests\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"},\"limits\":{\"cpu\":\"${CH_CPU}\",\"memory\":\"${CH_MEMORY}\"}}}]}}}}"
   kc -n gitlab-dev-stack rollout status statefulset/gitlab-dev-stack-clickhouse --timeout=600s
   # The schema watch runs over NATS, so the webserver should stay Ready; check anyway.
   kc wait -n gitlab --for=condition=Ready pod -l "$GKG_SELECTOR" --timeout=300s
   # Refreshable views would refresh mid-test; STOP VIEWS does not survive a restart, so it goes last.
   chq -q "SYSTEM STOP VIEWS" </dev/null
 }
-UP_LOG="$ROOT/caproni-up.log"
 # fd 3 keeps the image-wait messages in the live job log; the rest goes to UP_LOG.
 exec 3>&2
 (
@@ -114,12 +130,13 @@ OUT_DIR="${OUT_DIR:-gl_synthetic_data}"
 ORG_DIR="$ROOT/$OUT_DIR/org_1"
 [ -d "$ORG_DIR" ] || { echo "synth output not found at $ORG_DIR" >&2; exit 1; }
 log "     synth output: $ORG_DIR ($(ls "$ORG_DIR" | tr '\n' ' ')) "
+# Node ids the scenarios pin, as <entity> TAB <id> TAB <label>; checked after the load.
+xtask loadtest --list-node-ids > "$NODE_IDS"
 
 # Authoritative parquet-file -> ClickHouse table map, straight from the ontology
 # the generator used. filename = node_type.lower()+'.parquet'; table =
 # destination_table (explicit) or the gl_<name> default. edges.parquet -> gl_edge.
 # Pure shell (the rust build image ships no python3).
-MAP_FILE="$ROOT/.synth_table_map"
 {
   echo "edges=gl_edge"
   find "$ROOT/config/ontology/nodes" -name '*.yaml' | while read -r f; do
@@ -160,7 +177,6 @@ done
 log "     discovered gkg table prefix: $PFX"
 
 INSERT_SETTINGS="input_format_skip_unknown_fields=1, input_format_parquet_allow_missing_columns=1"
-FAILED="$ROOT/.synth_load_failed"
 : > "$FAILED"
 
 # Streams one Parquet into the pod's clickhouse-client over `exec -i` stdin
@@ -197,7 +213,6 @@ fi
 # Merge every table down to its final parts, so background merges cannot run
 # during the load test and every run reads the same part layout.
 # OPTIMIZE can outlast clickhouse-client's default 300s receive timeout.
-OPT_FAILED="$ROOT/.synth_optimize_failed"
 : > "$OPT_FAILED"
 optimize_one() {
   local tbl="$1"
@@ -259,25 +274,47 @@ for t in gl_merge_request gl_note gl_edge gl_project gl_group gl_user; do
   log "       ${PFX}_${t} = ${n}"
 done
 
+# Every pinned id must be a row of its entity's table, or its scenario measures an empty lookup.
+MISSING=()
+while IFS=$'\t' read -r entity id; do
+  lc="$(printf '%s' "$entity" | tr '[:upper:]' '[:lower:]')"
+  suffix="$(grep -E "^${lc}=" "$MAP_FILE" | head -1 | cut -d= -f2)" || true
+  labels="$(awk -F'\t' -v e="$entity" -v i="$id" '$1 == e && $2 == i { printf "%s%s", s, $3; s = ", " }' "$NODE_IDS")"
+  if [ -z "$suffix" ]; then
+    MISSING+=("$entity $id ($labels): no table for entity $entity")
+    continue
+  fi
+  n="$(chq -q "SELECT count() FROM gkg.\`${PFX}_${suffix}\` WHERE id = ${id}" </dev/null | tr -d '[:space:]')" || n=""
+  if [ -z "$n" ]; then
+    MISSING+=("$entity $id ($labels): lookup in gkg.${PFX}_${suffix} failed")
+  elif [ "$n" = 0 ]; then
+    MISSING+=("$entity $id ($labels): no row in gkg.${PFX}_${suffix}")
+  fi
+done < <(cut -f1,2 "$NODE_IDS" | sort -u)
+if [ "${#MISSING[@]}" -gt 0 ]; then
+  echo "scenario node ids missing from the loaded graph (fix the scenario or the synth config):" >&2
+  printf '  %s\n' "${MISSING[@]}" >&2
+  exit 1
+fi
+log "     scenario node ids present: $(cut -f1,2 "$NODE_IDS" | sort -u | wc -l | tr -d ' ') checked"
+
 # ---------------------------------------------------------------------------
 # 4. Port-forward gkg gRPC + run the gRPC load test (xtask loadtest).
 # ---------------------------------------------------------------------------
 log "[4/4] running gRPC load test (rounds=$ROUNDS concurrency=$CONCURRENCY warmup_rounds=$WARMUP_ROUNDS seed=$SEED)"
 
-kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >/tmp/gkg-pf.log 2>&1 &
+kc -n gitlab port-forward svc/gkg-webserver 50054:50054 >"$PF_LOG" 2>&1 &
 PF_PID=$!
 # ClickHouse HTTP for the load test's server-side query stats; best effort, not checked.
-kc -n gitlab-dev-stack port-forward svc/gitlab-dev-stack-clickhouse 8123:8123 >/tmp/ch-pf.log 2>&1 &
+kc -n gitlab-dev-stack port-forward svc/gitlab-dev-stack-clickhouse 8123:8123 >"$CH_PF_LOG" 2>&1 &
 CH_PF_PID=$!
-MEM_PID=""
-trap 'kill "$PF_PID" "$CH_PF_PID" ${MEM_PID:+"$MEM_PID"} 2>/dev/null || true' EXIT
 
 # Fail fast rather than load-testing a dead endpoint.
 ready=0
 for _ in $(seq 1 30); do
   if ! kill -0 "$PF_PID" 2>/dev/null; then
     echo "port-forward exited early; log follows:" >&2
-    cat /tmp/gkg-pf.log >&2
+    cat "$PF_LOG" >&2
     exit 1
   fi
   if (exec 3<>/dev/tcp/127.0.0.1/50054) 2>/dev/null; then
@@ -289,7 +326,7 @@ for _ in $(seq 1 30); do
 done
 if [ "$ready" != 1 ]; then
   echo "gRPC port 50054 never became reachable after 30s; log follows:" >&2
-  cat /tmp/gkg-pf.log >&2
+  cat "$PF_LOG" >&2
   exit 1
 fi
 
@@ -300,7 +337,10 @@ GKG_JWT_SECRET="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpa
 # The image's only ClickHouse user (it replaces `default`); it reads system.query_log and can SYSTEM FLUSH LOGS.
 export ORBIT_PERF_CLICKHOUSE_URL=http://127.0.0.1:8123 ORBIT_PERF_CLICKHOUSE_USER=gitlab-dev-stack ORBIT_PERF_CLICKHOUSE_PASSWORD
 ORBIT_PERF_CLICKHOUSE_PASSWORD="$(kc -n gitlab get secret gitlab-dev-stack-gkg-secrets -o jsonpath='{.data.graph-password}' | base64 -d)" \
-  || { ORBIT_PERF_CLICKHOUSE_PASSWORD=""; log "     could not read the ClickHouse password; server-side stats may be missing"; }
+  || ORBIT_PERF_CLICKHOUSE_PASSWORD=""
+# A missing key reads as empty with exit 0, so check the value too.
+[ -n "$ORBIT_PERF_CLICKHOUSE_PASSWORD" ] \
+  || log "     could not read the ClickHouse password; server-side stats may be missing"
 
 # Peak container memory during the load test, from the kubelet Summary API (the
 # gkg image may have no shell to read cgroups from). Best effort: never fails the job.
@@ -314,7 +354,6 @@ GKG_NODE="$(pod_field "$GKG_NS" "$GKG_POD" '{.spec.nodeName}')"
 CH_LIMIT="$(mem_limit "$CH_NS" "$CH_POD" "$CH_CONTAINER")"
 GKG_LIMIT="$(mem_limit "$GKG_NS" "$GKG_POD" "$GKG_CONTAINER")"
 # Sample with the kubectl binary directly: mise + caproni per call cost CPU on the measured runner.
-SAMPLE_KUBECONFIG="$ROOT/.loadtest_kubeconfig"
 KUBECTL_BIN="$(mise -C "$CAPRONI_DIR" which kubectl 2>/dev/null)" || KUBECTL_BIN=""
 mise -C "$CAPRONI_DIR" exec -- k3d kubeconfig get caproni > "$SAMPLE_KUBECONFIG" 2>/dev/null || true
 if [ -n "$KUBECTL_BIN" ] && "$KUBECTL_BIN" --kubeconfig "$SAMPLE_KUBECONFIG" get --raw /healthz >/dev/null 2>&1; then
@@ -337,7 +376,6 @@ working_set() {
       exit
     }' <<< "$1"
 }
-MEM_PEAK="$ROOT/.loadtest_mem_peak"
 # Keeps the max of each container in MEM_PEAK, sampling about every 5s until killed.
 sample_memory() {
   local ch_max="" gkg_max="" json ch gkg
@@ -358,8 +396,12 @@ to_bytes() {
     if (!match(q, /^[0-9.]+/)) exit
     n = substr(q, 1, RLENGTH); u = substr(q, RLENGTH + 1)
     split("Ki Mi Gi Ti", b); split("k M G T", d)
-    for (i = 1; i <= 4; i++) { if (u == b[i]) n *= 1024 ^ i; if (u == d[i]) n *= 1000 ^ i }
-    printf "%.0f\n", n
+    known = (u == "")
+    for (i = 1; i <= 4; i++) {
+      if (u == b[i]) { n *= 1024 ^ i; known = 1 }
+      if (u == d[i]) { n *= 1000 ^ i; known = 1 }
+    }
+    if (known) printf "%.0f\n", n
   }'
 }
 # Same units as the report's Peak mem column: B, else KiB/MiB/GiB/TiB with one decimal.
@@ -383,7 +425,6 @@ mem_cell() {
   fi
 }
 
-LT_OUT="$ROOT/.loadtest_stdout"
 LT_STATUS=0
 rm -f "$MEM_PEAK"
 sample_memory &
@@ -417,7 +458,6 @@ REPORT="$ROOT/loadtest-results.md"
   echo "$MEM_LINE"
   tail -n +2 "$LT_OUT"
 } > "$REPORT"
-rm -f "$LT_OUT" "$MEM_PEAK" "$SAMPLE_KUBECONFIG"
 
 # Report the partial results above, then fail like before if the load test did.
 [ "$LT_STATUS" = 0 ] || { echo "xtask loadtest failed (exit $LT_STATUS)" >&2; exit "$LT_STATUS"; }
