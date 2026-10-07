@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
-use super::limits::add_capped;
+use super::limits::{LimitKind, add_capped};
 use super::loading::Content;
 use super::{Bytes, Options, SourceError};
 
@@ -47,7 +47,7 @@ impl Scratch {
             false => bytes,
         };
         let len = bytes.len() as u64;
-        let offset = add_capped(&self.end, "spilled_bytes", len, self.cap)?;
+        let offset = add_capped(&self.end, LimitKind::SpilledBytes, len, self.cap)?;
         self.file()?.write_all_at(bytes, offset)?;
         Ok(Content::Spilled {
             offset,
