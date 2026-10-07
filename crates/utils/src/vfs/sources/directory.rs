@@ -1,7 +1,7 @@
 //! Directory walks with git ignore rules; Changeset loads explicit relative paths without walking.
 //! Metadata and link targets are read through pinned parent descriptors without following links.
 //! Missing files are skipped; other I/O errors fail loading. Real host paths remain separate from
-//! lossy inventory keys. Relative roots are canonicalized once so later reads do not depend on cwd.
+//! inventory keys. Relative roots are canonicalized once so later reads do not depend on cwd.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use ignore::{WalkBuilder, WalkState};
 use rayon::prelude::*;
 use tracing::warn;
+use typed_path::Utf8UnixPathBuf;
 
 use super::{Loading, Put, Source, SourceError, Tag, is_safe_relative_path};
 use crate::safe_fs;
@@ -65,7 +66,10 @@ impl Source for Directory<'_> {
                     if !is_file_or_link {
                         return WalkState::Continue;
                     }
-                    let key = path.to_string_lossy().into_owned();
+                    let key = match virtual_path(path) {
+                        Ok(key) => key,
+                        Err(error) => return fail(error.into()),
+                    };
                     match put(entry.into_path(), &key, into) {
                         Ok(()) => WalkState::Continue,
                         Err(e) => fail(e),
@@ -88,7 +92,7 @@ impl Source for Changeset<'_> {
                     std::io::Error::new(ErrorKind::InvalidInput, "invalid changeset path").into(),
                 );
             }
-            put(root.join(&path), &path, into)
+            put(root.join(&path), &virtual_path(Path::new(&path))?, into)
         })
     }
 }
@@ -108,8 +112,28 @@ fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), So
             },
         ),
         Some(safe_fs::Entry::Symlink(target)) => {
-            into.put(path, Put::Symlink(target.to_string_lossy().into_owned()))
+            into.put(path, Put::Symlink(virtual_path(&target)?))
         }
         None => Ok(()),
     }
+}
+
+fn virtual_path(path: &Path) -> std::io::Result<String> {
+    let mut virtual_path = Utf8UnixPathBuf::new();
+    for component in path.components() {
+        let part = match component {
+            std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "host prefix cannot name a virtual path",
+                ));
+            }
+            std::path::Component::RootDir => "/",
+            _ => component.as_os_str().to_str().ok_or_else(|| {
+                std::io::Error::new(ErrorKind::InvalidData, "source path is not UTF-8")
+            })?,
+        };
+        virtual_path.push(part);
+    }
+    Ok(virtual_path.into_string())
 }
