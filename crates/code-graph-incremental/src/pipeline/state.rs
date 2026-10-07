@@ -42,6 +42,68 @@ impl State {
             configs: Vec::new(),
         }
     }
+
+    pub fn compact_symbols(
+        &mut self,
+        env: &mut Env,
+        eligible: impl Fn(&str) -> bool,
+    ) -> Result<SymbolCompaction, crate::LoadError> {
+        let before = (env.lang.syms.len(), env.lang.syms.text_bytes());
+        let fresh = Env::with_lang(
+            env.lang_id,
+            Lang {
+                kinds: env.lang.kinds.clone(),
+                fields: env.lang.fields.clone(),
+                syms: Interner::default(),
+            },
+            env.limits,
+        )?;
+        let mut mapping = vec![0; before.0 as usize + 1];
+        for (symbol, text) in env.lang.syms.rodeo.iter() {
+            if !eligible(text) {
+                mapping[symbol.into_usize() + 1] = fresh.lang.syms.intern(text);
+            }
+        }
+        let mut remap = |symbol: &mut u32| {
+            if *symbol == 0 {
+                return;
+            }
+            let mapped = &mut mapping[*symbol as usize];
+            if *mapped == 0 {
+                *mapped = fresh.lang.syms.intern(env.lang.syms.resolve(*symbol));
+            }
+            *symbol = *mapped;
+        };
+        for tree in &mut self.trees {
+            for node in tree.arena.iter_mut().filter(|node| !node.is_removed()) {
+                remap(&mut node.get_mut().sym);
+            }
+            for tag in tree.tags.values_mut().flatten() {
+                remap(&mut tag.key);
+                remap(&mut tag.val);
+            }
+        }
+        let mut resolver = self.resolver.to_snapshot();
+        for (symbol, _) in resolver.visible.iter_mut().flatten() {
+            remap(symbol);
+        }
+        self.resolver = Resolver::from_snapshot(resolver, &fresh.lang);
+        let report = SymbolCompaction {
+            symbols_before: before.0,
+            symbols_after: fresh.lang.syms.len(),
+            text_bytes_before: before.1,
+            text_bytes_after: fresh.lang.syms.text_bytes(),
+        };
+        *env = fresh;
+        Ok(report)
+    }
+}
+
+pub struct SymbolCompaction {
+    pub symbols_before: u32,
+    pub symbols_after: u32,
+    pub text_bytes_before: usize,
+    pub text_bytes_after: usize,
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

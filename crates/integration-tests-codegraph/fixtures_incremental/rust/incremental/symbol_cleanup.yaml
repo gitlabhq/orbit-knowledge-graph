@@ -1,0 +1,115 @@
+name: "Rust: symbol cleanup preserves graph and reindexing"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "symbol_cleanup"
+      version = "0.1.0"
+      edition = "2021"
+  - path: src/lib.rs
+    content: |
+      mod target;
+      use target::{helper, obsolete_live};
+
+      pub fn run() {
+          let pair = (helper, obsolete_live);
+          let (callback, _) = pair;
+          callback();
+      }
+
+      pub fn retained() {
+          obsolete_live();
+      }
+  - path: src/target.rs
+    content: |
+      pub fn helper() {}
+
+      pub fn obsolete_live() {}
+
+      pub fn obsolete_alpha() {}
+      pub fn obsolete_beta() {}
+      pub fn obsolete_gamma() {}
+tests:
+  - name: "Initial import resolves"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: helper } }
+steps:
+  - name: remove old declarations and compact eligible names
+    modify:
+      - path: src/target.rs
+        content: |
+          pub fn helper() {}
+          pub fn obsolete_live() {}
+    compact_symbols:
+      prefixes: [obsolete_]
+      minimum_removed: 3
+    tests:
+      - name: "Prefix cleanup preserves live imports and calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS target
+        assert:
+          - { row_count: 1 }
+          - { row: { target: helper } }
+      - name: "The classifier cannot remove a referenced symbol"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'retained'
+          RETURN target.name AS target
+        assert:
+          - { row_count: 1 }
+          - { row: { target: obsolete_live } }
+  - name: compact all unreachable names after snapshot reload
+    snapshot: true
+    compact_symbols: {}
+    tests:
+      - name: "Full cleanup preserves definition names and call edges"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS target
+        assert:
+          - { row_count: 1 }
+          - { row: { target: helper } }
+  - name: reindex the dependency after cleanup and snapshot reload
+    snapshot: true
+    modify:
+      - path: src/target.rs
+        content: |
+          pub fn helper() {
+              replacement();
+          }
+
+          pub fn replacement() {}
+          pub fn obsolete_live() {}
+    compact_symbols: {}
+    tests:
+      - name: "Reindex preserves retained callers and resolves new calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['run', 'helper']
+          RETURN caller.name AS caller, target.name AS target
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: run, target: helper } }
+          - { row: { caller: helper, target: replacement } }
+  - name: compact an already compacted graph
+    snapshot: true
+    compact_symbols: {}
+    tests:
+      - name: "Repeated cleanup and reload retain callable fields and live names"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['run', 'helper', 'retained']
+          RETURN caller.name AS caller, target.name AS target
+        assert:
+          - { row_count: 3 }
+          - { row: { caller: run, target: helper } }
+          - { row: { caller: helper, target: replacement } }
+          - { row: { caller: retained, target: obsolete_live } }
