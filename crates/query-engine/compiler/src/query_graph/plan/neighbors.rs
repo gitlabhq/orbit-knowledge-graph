@@ -76,6 +76,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         let fused = config.direction == Direction::Both
             && !center_filter
             && redaction == "id"
+            && !self.requires_authorization_scan(&entity.name)
             && routes
                 .iter()
                 .all(|(_, tables)| tables.len() == 1 && tables[0] == routes[0].1[0]);
@@ -126,10 +127,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 let mut authorization = identity;
                 if center_filter
                     || redaction != "id"
-                    || self
-                        .catalog
-                        .entity_minimum_access_level(&entity.name)
-                        .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+                    || self.requires_authorization_scan(&entity.name)
                 {
                     let scan = self.scan(
                         block,

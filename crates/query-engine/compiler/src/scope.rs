@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 mod application;
 mod preparation;
 
-pub use application::apply;
 pub use application::apply_graph;
 pub use preparation::prepare;
 
@@ -23,11 +22,8 @@ impl QueryScope {
     }
 }
 
-use ontology::TraversalPathKind;
-use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
-
-use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
+use ontology::TraversalPathKind;
 
 const LOOKUP_ALIAS: &str = "_scope";
 pub(crate) const UNRESOLVED_PATH: &str = "0/";
@@ -69,59 +65,6 @@ impl ScopeProof {
     pub fn with_depth(mut self, min: u32, max: u32) -> Self {
         self.depth = Some((min, max));
         self
-    }
-}
-
-pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
-    let values: Vec<Expr> = proof.sources.iter().map(scope_value_expr).collect();
-    let matches = values.iter().map(|path| {
-        let column = Expr::col(alias, TRAVERSAL_PATH_COLUMN);
-        Some(match proof.depth {
-            Some((0, 0)) => Expr::eq(column, path.clone()),
-            Some((min, max)) => Expr::and(
-                Expr::func(Function::StartsWith, vec![column.clone(), path.clone()]),
-                depth_between(column, path, min, max),
-            ),
-            None => Expr::func(Function::StartsWith, vec![column, path.clone()]),
-        })
-    });
-    let unresolved = values
-        .iter()
-        .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
-    Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
-}
-
-pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
-    Expr::and_all(proof.sources.iter().map(|source| {
-        Some(Expr::binary(
-            Op::Ne,
-            scope_value_expr(source),
-            Expr::string(UNRESOLVED_PATH),
-        ))
-    }))
-    .expect("scope proof has at least one source")
-}
-
-fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
-    let segments =
-        |expr: Expr| Expr::func(Function::CountSubstrings, vec![expr, Expr::string("/")]);
-    let depth = segments(column);
-    let base = segments(path.clone());
-    let bound = |hops: u32| Expr::binary(Op::Add, base.clone(), Expr::int(i64::from(hops)));
-    Expr::and(
-        Expr::binary(Op::Ge, depth.clone(), bound(min)),
-        Expr::binary(Op::Le, depth, bound(max)),
-    )
-}
-
-fn scope_value_expr(source: &ScopeSource) -> Expr {
-    match source {
-        ScopeSource::Literal(path) => Expr::string(path),
-        ScopeSource::Lookup {
-            source_table,
-            key_column,
-            value,
-        } => lookup_expr(source_table, key_column, value),
     }
 }
 
@@ -218,48 +161,6 @@ fn propagate_scope_proofs(
         }
     }
     result
-}
-
-fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
-    let (key, from) = match value {
-        PathScopeId::Numeric(id) => (
-            Expr::param(SqlType::Int64, *id),
-            TableRef::scan(source_table, LOOKUP_ALIAS),
-        ),
-        PathScopeId::Text(text) => (
-            Expr::param(SqlType::String, text.clone()),
-            TableRef::scan_final(source_table, LOOKUP_ALIAS),
-        ),
-    };
-    let latest = |column: &str| {
-        Expr::func(
-            Function::ArgMaxOrNull,
-            vec![
-                Expr::col(LOOKUP_ALIAS, column),
-                Expr::col(LOOKUP_ALIAS, VERSION_COLUMN),
-            ],
-        )
-    };
-    let path = Expr::func(
-        Function::Coalesce,
-        vec![
-            Expr::func(
-                Function::If,
-                vec![
-                    latest(DELETED_COLUMN),
-                    Expr::Literal(serde_json::Value::Null),
-                    latest(TRAVERSAL_PATH_COLUMN),
-                ],
-            ),
-            Expr::string(UNRESOLVED_PATH),
-        ],
-    );
-    Expr::Scalar(Box::new(Query {
-        select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
-        from,
-        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
-        ..Default::default()
-    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

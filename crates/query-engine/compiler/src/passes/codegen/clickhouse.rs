@@ -78,8 +78,7 @@ pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
 
 /// # Trust boundary
 ///
-/// This function bypasses the compiler security pipeline (`apply_security_context`,
-/// `check_ast`, `enforce_return`). It must only be used for trusted, internally
+/// This function bypasses compiler authorization and result enforcement. Use it only for trusted, internally
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {

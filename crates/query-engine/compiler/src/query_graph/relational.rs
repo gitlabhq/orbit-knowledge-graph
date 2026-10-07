@@ -75,50 +75,30 @@ impl<'a, L> Relational<'a, L> {
         &mut self,
         bindings: &mut orbit_utils::query_types::ParamBindings,
     ) {
-        match self {
-            Self::Filter { input, predicate } => {
-                predicate.bind_parameters(bindings);
-                input.bind_parameters(bindings);
-            }
-            Self::Aggregate { input, groups } => {
-                for group in groups {
-                    group.bind_parameters(bindings);
+        self.walk_mut(&mut |operation| {
+            match operation {
+                Self::Filter { predicate, .. } => {
+                    predicate.bind_parameters(bindings);
                 }
-                input.bind_parameters(bindings);
+                Self::Aggregate { groups, .. } => {
+                    for group in groups {
+                        group.bind_parameters(bindings);
+                    }
+                }
+                Self::Join { condition, .. } => {
+                    condition.bind_parameters(bindings);
+                }
+                _ => {}
             }
-            Self::Join {
-                left,
-                right,
-                condition,
-                ..
-            } => {
-                condition.bind_parameters(bindings);
-                left.bind_parameters(bindings);
-                right.bind_parameters(bindings);
-            }
-            Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.bind_parameters(bindings),
-            Self::One | Self::Source { .. } => {}
-        }
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap();
     }
 
     pub fn reads_current(&self) -> bool {
         match self {
             Self::Source { read, .. } => matches!(read, ReadMode::Current),
-            Self::Join { left, right, .. } => left.reads_current() || right.reads_current(),
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.reads_current(),
-            Self::One => false,
+            _ => self.inputs().any(Self::reads_current),
         }
     }
     pub fn source(relation: RelationId) -> Self {
@@ -199,21 +179,8 @@ impl<'a, L> Relational<'a, L> {
     }
 
     pub(super) fn fuse_filters(&mut self) {
-        match self {
-            Self::Source { .. } | Self::One => return,
-            Self::Join { left, right, .. } => {
-                left.fuse_filters();
-                right.fuse_filters();
-                return;
-            }
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.fuse_filters(),
+        for input in self.inputs_mut() {
+            input.fuse_filters();
         }
         let Self::Filter { input, predicate } = self else {
             return;
@@ -236,15 +203,7 @@ impl<'a, L> Relational<'a, L> {
                 input,
                 column: expanded,
             } => *expanded == column || input.expands(column),
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.expands(column),
-            Self::Join { left, right, .. } => left.expands(column) || right.expands(column),
-            _ => false,
+            _ => self.inputs().any(|input| input.expands(column)),
         }
     }
 
@@ -264,54 +223,12 @@ impl<'a, L> Relational<'a, L> {
         }
     }
 
-    pub fn filter_source(&mut self, relation: RelationId, predicate: &Expression<'a>) -> usize {
-        let Some(source) = self.source_mut(relation) else {
-            return 0;
-        };
-        *source = std::mem::replace(source, Self::One).filter(predicate.clone());
-        1
-    }
-
     pub fn source_mut(&mut self, relation: RelationId) -> Option<&mut Self> {
-        match self {
-            Self::Source {
-                relation: source, ..
-            } if *source == relation => Some(self),
-            Self::Join { left, right, .. } => left
-                .source_mut(relation)
-                .or_else(|| right.source_mut(relation)),
-            Self::Filter { input, .. }
-            | Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.source_mut(relation),
-            _ => None,
+        if matches!(self, Self::Source { relation: source, .. } if *source == relation) {
+            return Some(self);
         }
-    }
-
-    pub fn has_source_filter(&self, relation: RelationId, expected: &Expression<'a>) -> bool {
-        match self {
-            Self::Filter { input, predicate } => {
-                (predicate == expected
-                    && matches!(input.as_ref(), Self::Source { relation: source, .. } if *source == relation))
-                    || input.has_source_filter(relation, expected)
-            }
-            Self::Join { left, right, .. } => {
-                left.has_source_filter(relation, expected)
-                    || right.has_source_filter(relation, expected)
-            }
-            Self::Aggregate { input, .. }
-            | Self::Expand { input, .. }
-            | Self::Materialize { input, .. }
-            | Self::Latest { input, .. }
-            | Self::Sort { input, .. }
-            | Self::FirstBy { input, .. }
-            | Self::Limit { input, .. } => input.has_source_filter(relation, expected),
-            _ => false,
-        }
+        self.inputs_mut()
+            .find_map(|input| input.source_mut(relation))
     }
 }
 

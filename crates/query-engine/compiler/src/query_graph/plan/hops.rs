@@ -65,10 +65,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 || input.join_predicates.iter().any(|predicate| {
                     predicate.lhs_node == node.id || predicate.rhs_node == node.id
                 })
-                || self
-                    .catalog
-                    .entity_minimum_access_level(entity)
-                    .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+                || self.requires_authorization_scan(entity);
             if needs_scan {
                 let relation = self.scan(
                     root,

@@ -14,6 +14,7 @@ pub(super) struct AccessPlan<'input, 'catalog> {
     pub(super) star_center: Option<&'input str>,
     pub(super) star: bool,
     pub(super) eligible: bool,
+    pub(super) aggregate_condition: Option<Expression<'catalog>>,
 }
 
 pub(super) fn entity<'a>(input: &'a Input, alias: &str) -> Result<&'a str> {
@@ -29,6 +30,13 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
 {
     pub(super) fn access(&mut self, input: &Input) -> Result<BlockId> {
+        self.plan_access(input).map(|(root, _)| root)
+    }
+
+    pub(super) fn plan_access(
+        &mut self,
+        input: &Input,
+    ) -> Result<(BlockId, Option<Expression<'catalog>>)> {
         let mut plan = self.prepare_access(input)?;
         if plan.star {
             self.narrow_star(input, &mut plan)?;
@@ -42,7 +50,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         } else {
             self.join_edges(input, &mut plan)?
         };
-        self.finish_access(input, plan, operation)
+        let condition = plan.aggregate_condition.take();
+        Ok((self.finish_access(input, plan, operation)?, condition))
     }
 
     fn prepare_access<'input>(
@@ -172,10 +181,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                         self.catalog.property_column(key.referenced_key) == Some("id")
                     })
                 });
-            let requires_authorization_scan = self
-                .catalog
-                .entity_minimum_access_level(entity)
-                .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+            let requires_authorization_scan = self.requires_authorization_scan(entity);
             if !star
                 && !eligible
                 && !input.relationships.is_empty()
@@ -205,10 +211,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 && !needed
                 && primary_key_target
                 && node.id_property == "id"
-                && !self
-                    .catalog
-                    .entity_minimum_access_level(entity)
-                    .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+                && !requires_authorization_scan
             {
                 elided.insert(node.id.as_str());
                 continue;
@@ -261,6 +264,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             star_center,
             star,
             eligible,
+            aggregate_condition: None,
         })
     }
 

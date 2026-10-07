@@ -63,24 +63,7 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
 impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, LoweredOperation<'catalog>>
 {
-    fn source_columns(&self, relation: RelationId) -> Result<Vec<ColumnRef<'catalog>>> {
-        match self.relation(relation)?.source {
-            Source::Stored(table) => table
-                .columns()
-                .map(|column| self.stored_port(relation, column))
-                .collect(),
-            Source::Derived(body) => self
-                .outputs(body)?
-                .map(|output| self.output_column(relation, output))
-                .collect(),
-            Source::Definition(definition) => self
-                .outputs(self.definition(definition)?.body)?
-                .map(|output| self.output_column(relation, output))
-                .collect(),
-        }
-    }
-
-    pub(super) fn operation_columns(
+    fn check_operation(
         &self,
         block: BlockId,
         operation: &LoweredOperation<'catalog>,
@@ -111,125 +94,99 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             Ok(())
         };
-        match operation {
-            One => Ok(vec![]),
-            Source { relation, read } => {
-                if relation.block != block {
-                    return Err(GraphError::OutsideBlock);
-                }
-                if !used.insert(*relation) {
-                    return Err(GraphError::ReusedRelation);
-                }
-                if matches!(read, ReadMode::Current)
-                    && !matches!(
-                        self.relation(*relation)?.source,
-                        crate::query_graph::Source::Stored(_)
-                    )
-                {
-                    return Err(GraphError::LatestShape);
-                }
-                self.source_columns(*relation)
-            }
-            Filter { input, predicate } => {
-                let columns = self.operation_columns(block, input, used)?;
-                check(predicate, &columns, used)?;
-                Ok(columns)
-            }
-            Join {
-                left,
-                right,
-                kind,
-                condition,
-            } => {
-                let left = self.operation_columns(block, left, used)?;
-                let right = self.operation_columns(block, right, used)?;
-                if matches!(kind, JoinKind::Membership) {
-                    let Expression::Equal(value, key) = condition else {
-                        return Err(GraphError::JoinShape);
-                    };
-                    let (Expression::Column(value), Expression::Column(key)) =
-                        (value.as_ref(), key.as_ref())
-                    else {
-                        return Err(GraphError::JoinShape);
-                    };
-                    if !left.contains(value) || !right.contains(key) {
-                        return Err(GraphError::JoinShape);
+        self.visit_operation_outputs(operation, &mut |operation, left, right| {
+            match operation {
+                One => {}
+                Source { relation, read } => {
+                    if relation.block != block {
+                        return Err(GraphError::OutsideBlock);
                     }
-                    if self.column_type(*value, &mut HashSet::new())?
-                        != self.column_type(*key, &mut HashSet::new())?
+                    if !used.insert(*relation) {
+                        return Err(GraphError::ReusedRelation);
+                    }
+                    if matches!(read, ReadMode::Current)
+                        && !matches!(
+                            self.relation(*relation)?.source,
+                            crate::query_graph::Source::Stored(_)
+                        )
                     {
-                        return Err(GraphError::ExpressionType);
+                        return Err(GraphError::LatestShape);
                     }
                 }
-                let mut all = left.clone();
-                all.extend(right);
-                check(condition, &all, used)?;
-                Ok(if matches!(kind, JoinKind::Semi | JoinKind::Membership) {
-                    left
-                } else {
-                    all
-                })
-            }
-            Aggregate { input, groups } => {
-                let columns = self.operation_columns(block, input, used)?;
-                for group in groups {
-                    if group.aggregate() {
-                        return Err(GraphError::AggregatePlacement);
-                    }
-                    self.expression_type(group, &mut HashSet::new())?;
-                    group.columns(&mut |column| {
-                        if columns.contains(&column) {
-                            Ok(())
-                        } else {
-                            Err(GraphError::Grouping)
+                Filter { predicate, .. } => {
+                    check(predicate, left, used)?;
+                }
+                Join {
+                    kind, condition, ..
+                } => {
+                    if matches!(kind, JoinKind::Membership) {
+                        let Expression::Equal(value, key) = condition else {
+                            return Err(GraphError::JoinShape);
+                        };
+                        let (Expression::Column(value), Expression::Column(key)) =
+                            (value.as_ref(), key.as_ref())
+                        else {
+                            return Err(GraphError::JoinShape);
+                        };
+                        if !left.contains(value) || !right.contains(key) {
+                            return Err(GraphError::JoinShape);
                         }
-                    })?;
+                        if self.column_type(*value, &mut HashSet::new())?
+                            != self.column_type(*key, &mut HashSet::new())?
+                        {
+                            return Err(GraphError::ExpressionType);
+                        }
+                    }
+                    let mut all = left.to_vec();
+                    all.extend_from_slice(right);
+                    check(condition, &all, used)?;
                 }
-                Ok(groups
-                    .iter()
-                    .filter_map(|group| match group {
-                        Expression::Column(column) => Some(*column),
-                        _ => None,
-                    })
-                    .collect())
+                Aggregate { groups, .. } => {
+                    for group in groups {
+                        if group.aggregate() {
+                            return Err(GraphError::AggregatePlacement);
+                        }
+                        self.expression_type(group, &mut HashSet::new())?;
+                        group.columns(&mut |column| {
+                            if left.contains(&column) {
+                                Ok(())
+                            } else {
+                                Err(GraphError::Grouping)
+                            }
+                        })?;
+                    }
+                }
+                Expand { column, .. } => {
+                    if !left.contains(column) {
+                        return Err(GraphError::OperationVisibility);
+                    }
+                    if !matches!(
+                        self.column_type(*column, &mut HashSet::new())?,
+                        ValueType::Array(_)
+                    ) {
+                        return Err(GraphError::ExpectedArray);
+                    }
+                }
+                Materialize { input, relation } => {
+                    if !used.contains(relation) || input.aggregate_input().is_some() {
+                        return Err(GraphError::OperationVisibility);
+                    }
+                }
+                Sort { keys, .. } => {
+                    if keys.iter().any(|(column, _)| !left.contains(column)) {
+                        return Err(GraphError::OperationVisibility);
+                    }
+                }
+                FirstBy { keys, .. } => {
+                    if keys.is_empty() || keys.iter().any(|column| !left.contains(column)) {
+                        return Err(GraphError::LatestShape);
+                    }
+                }
+                Limit { .. } => {}
+                Latest { requirement, .. } => match *requirement {},
             }
-            Expand { input, column } => {
-                let columns = self.operation_columns(block, input, used)?;
-                if !columns.contains(column) {
-                    return Err(GraphError::OperationVisibility);
-                }
-                if !matches!(
-                    self.column_type(*column, &mut HashSet::new())?,
-                    ValueType::Array(_)
-                ) {
-                    return Err(GraphError::ExpectedArray);
-                }
-                Ok(columns)
-            }
-            Materialize { input, relation } => {
-                let columns = self.operation_columns(block, input, used)?;
-                if !used.contains(relation) || input.aggregate_input().is_some() {
-                    return Err(GraphError::OperationVisibility);
-                }
-                Ok(columns)
-            }
-            Sort { input, keys } => {
-                let columns = self.operation_columns(block, input, used)?;
-                if keys.iter().any(|(column, _)| !columns.contains(column)) {
-                    return Err(GraphError::OperationVisibility);
-                }
-                Ok(columns)
-            }
-            FirstBy { input, keys } => {
-                let columns = self.operation_columns(block, input, used)?;
-                if keys.is_empty() || keys.iter().any(|column| !columns.contains(column)) {
-                    return Err(GraphError::LatestShape);
-                }
-                Ok(columns)
-            }
-            Limit { input, .. } => self.operation_columns(block, input, used),
-            Latest { requirement, .. } => match *requirement {},
-        }
+            Ok(())
+        })
     }
 
     fn expression_type(
@@ -637,10 +594,10 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 self.expression_type(&output.value, &mut HashSet::new())?;
             }
             let mut used = HashSet::new();
-            let available = self.operation_columns(block, operation, &mut used)?;
+            let available = self.check_operation(block, operation, &mut used)?;
             let aggregate_input = operation
                 .aggregate_input()
-                .map(|input| self.operation_columns(block, input, &mut HashSet::new()))
+                .map(|input| self.operation_outputs(input))
                 .transpose()?;
             let Body::Select { relations, .. } = &self.block(block)?.body else {
                 unreachable!()
@@ -672,26 +629,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         aggregate_input: Option<&[ColumnRef<'catalog>]>,
     ) -> Result<()> {
         match expression {
-            Expression::ScalarQuery(_) => Ok(()),
-            Expression::PathDepth(value) => {
-                self.check_projection(value, available, aggregate_input)
-            }
-            Expression::InQuery { value, .. } => {
-                self.check_projection(value, available, aggregate_input)
-            }
-            Expression::Predicate {
-                value, argument, ..
-            } => {
-                self.check_projection(value, available, aggregate_input)?;
-                if let Some(argument) = argument {
-                    self.check_projection(argument, available, aggregate_input)?;
+            Expression::Column(column) => {
+                if available.contains(column) {
+                    Ok(())
+                } else {
+                    Err(GraphError::OperationVisibility)
                 }
-                Ok(())
-            }
-            Expression::Excerpt { value, .. }
-            | Expression::Bucket { value, .. }
-            | Expression::ToString(value) => {
-                self.check_projection(value, available, aggregate_input)
             }
             Expression::Count
             | Expression::Aggregate { .. }
@@ -707,38 +650,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     }
                 })
             }
-            Expression::Equal(left, right)
-            | Expression::And(left, right)
-            | Expression::Or(left, right)
-            | Expression::In(left, right)
-            | Expression::HasAny(left, right)
-            | Expression::Greater(left, right)
-            | Expression::GreaterEqual(left, right)
-            | Expression::LessEqual(left, right)
-            | Expression::StartsWith(left, right) => {
-                self.check_projection(left, available, aggregate_input)?;
-                self.check_projection(right, available, aggregate_input)
-            }
-            Expression::Tuple(values) | Expression::Array(values) | Expression::Concat(values) => {
-                for value in values {
-                    self.check_projection(value, available, aggregate_input)?;
+            _ => {
+                for child in expression.children() {
+                    self.check_projection(child, available, aggregate_input)?;
                 }
                 Ok(())
             }
-            Expression::Field { tuple, .. } => {
-                self.check_projection(tuple, available, aggregate_input)
-            }
-            Expression::Keep { condition, value } => {
-                self.check_projection(condition, available, aggregate_input)?;
-                self.check_projection(value, available, aggregate_input)
-            }
-            _ => expression.columns(&mut |column| {
-                if available.contains(&column) {
-                    Ok(())
-                } else {
-                    Err(GraphError::OperationVisibility)
-                }
-            }),
         }
     }
 }

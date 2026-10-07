@@ -3,7 +3,6 @@ use crate::input::{Direction, Input};
 use std::collections::HashMap;
 
 use super::access::{AccessPlan, entity};
-use crate::input::FilterOp;
 
 impl<'catalog, M: QueryDataModel + ?Sized>
     QueryGraph<'catalog, M, Expression<'catalog>, PhysicalOperation<'catalog>>
@@ -63,10 +62,18 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             } else {
                 PhysicalOperation::current(edge)
             };
-            let mut scan = read.filter(Expression::equal(
-                Expression::Column(self.column(edge, "_deleted")?),
-                Expression::Boolean(false),
-            ));
+            let mut scan = read;
+            if !crate::passes::normalize::is_wildcard(&relationship.types) {
+                let column = Expression::Column(self.column(edge, "relationship_kind")?);
+                scan = scan.filter(if let [kind] = relationship.types.as_slice() {
+                    Expression::equal(column, Expression::Text(kind.clone()))
+                } else {
+                    Expression::In(
+                        Box::new(column),
+                        Box::new(Expression::Strings(relationship.types.clone())),
+                    )
+                });
+            }
             for (column, kind) in [
                 (
                     "source_kind",
@@ -90,47 +97,22 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     Expression::Text(kind.into()),
                 ));
             }
-            if crate::passes::normalize::is_wildcard(&relationship.types) {
-            } else if let [kind] = relationship.types.as_slice() {
-                scan = scan.filter(Expression::equal(
-                    Expression::Column(self.column(edge, "relationship_kind")?),
-                    Expression::Text(kind.clone()),
-                ));
-            } else {
-                scan = scan.filter(Expression::In(
-                    Box::new(Expression::Column(self.column(edge, "relationship_kind")?)),
-                    Box::new(Expression::Strings(relationship.types.clone())),
-                ));
-            }
+            scan = scan.filter(Expression::equal(
+                Expression::Column(self.column(edge, "_deleted")?),
+                Expression::Boolean(false),
+            ));
             for (column, filters) in &relationship.filters {
                 for filter in filters {
-                    let value = filter
-                        .value
-                        .as_ref()
-                        .ok_or_else(|| GraphError::UnsupportedInput("edge predicate".into()))?;
-                    let value = match value {
-                        serde_json::Value::String(value) => Expression::Text(value.clone()),
-                        serde_json::Value::Number(value) if value.as_i64().is_some() => {
-                            Expression::Integer(value.as_i64().unwrap())
-                        }
-                        _ => {
-                            return Err(GraphError::UnsupportedInput(
-                                "edge predicate value".into(),
-                            ));
-                        }
-                    };
-                    let column = Expression::Column(self.column(edge, column)?);
-                    let operator = filter.op.unwrap_or(FilterOp::Eq);
-                    scan = scan.filter(if operator == FilterOp::Eq {
-                        Expression::equal(column, value)
-                    } else {
-                        Expression::Predicate {
-                            operator,
-                            value: Box::new(column),
-                            argument: Some(Box::new(value)),
-                            fold_case: false,
-                        }
-                    });
+                    scan = scan.filter(
+                        self.filter_predicate(
+                            self.column(edge, column)?,
+                            self.catalog
+                                .stored_table(table)
+                                .and_then(|table| table.column(column))
+                                .ok_or(GraphError::MissingOutput)?,
+                            filter,
+                        )?,
+                    );
                 }
             }
             let endpoints = [
@@ -357,6 +339,46 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .map(|(name, key, _)| (*name, *key))
                     .collect(),
             });
+            if input.query_type == crate::input::QueryType::Aggregation
+                && input.relationships.len() == 1
+                && !variable
+            {
+                let deleted = self.stored_column(edge, "_deleted")?;
+                let deletion =
+                    Expression::equal(Expression::Column(deleted), Expression::Boolean(false));
+                let predicates = &key_scans[index].predicates;
+                plan.aggregate_condition = predicates
+                    .iter()
+                    .cloned()
+                    .reduce(|left, right| Expression::And(Box::new(left), Box::new(right)));
+                let mut current = PhysicalOperation::source(edge);
+                let mut recheck = Vec::new();
+                for predicate in predicates {
+                    if *predicate == deletion {
+                        continue;
+                    }
+                    let mut immutable = true;
+                    predicate.columns(&mut |column| {
+                        immutable &= matches!(column.port, Port::Stored(stored) if self.catalog.in_sort_key(table, stored.name()));
+                        Ok(())
+                    })?;
+                    if immutable {
+                        current = current.filter(predicate.clone());
+                    } else {
+                        recheck.push(predicate.clone());
+                    }
+                }
+                for (column, (_, output), relation) in &memberships {
+                    current = current.membership(
+                        self.stored_column(edge, column)?,
+                        self.output_column(*relation, *output)?,
+                    );
+                }
+                scan = current.latest(self.stored_column(edge, "_version")?, Some(deleted));
+                for predicate in recheck {
+                    scan = scan.filter(predicate);
+                }
+            }
             if input.relationships.len() > 1 && !variable {
                 let deletion = Expression::equal(
                     Expression::Column(self.stored_column(edge, "_deleted")?),

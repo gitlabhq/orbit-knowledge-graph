@@ -1,0 +1,15 @@
+description: Relationship membership and null predicates preserve matching endpoint pairs
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g","filters":{"target_id":{"in":[100,101]},"source_id":{"is_not_null":true}}}]}
+  gql: |
+    MATCH (u:User {id: 1})-[r:MEMBER_OF]->(g:Group)
+    WHERE r.target_id IN [100, 101] AND r.source_id IS NOT NULL
+    RETURN u, g
+expect:
+  node_count: 2
+  edges:
+    MEMBER_OF: [[1, 100]]
+  nodes:
+    User: {ids: [1]}
+    Group: {ids: [100]}

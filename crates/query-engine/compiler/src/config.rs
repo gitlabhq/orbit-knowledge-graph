@@ -125,7 +125,7 @@ fn compile_graph_context(
         let scope = crate::scope::QueryScope::nodes(security_context.scope_proofs.clone());
         crate::scope::apply_graph(&mut graph, &scope, &input)?;
     }
-    security::apply_graph_security(&mut graph, &security_context)?;
+    security::apply_graph_security(&mut graph, root, &security_context)?;
     let (root, key_count) = cursor::apply_graph(&mut graph, root, &input, pagination.query_hash)?;
     pagination.key_count = key_count;
     check::check_graph(&graph, root, &security_context)?;

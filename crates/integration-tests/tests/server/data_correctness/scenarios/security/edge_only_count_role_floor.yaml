@@ -1,0 +1,15 @@
+description: Edge-only aggregation retains the protected endpoint authorization requirement
+config:
+  security: {org_id: 1, paths: ["1/100/"], access_level: 20}
+  extra_seed:
+    gl_edge:
+      - {traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: []}
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"v","entity":"Vulnerability","node_ids":[8000]},{"id":"n","entity":"Note"}],"relationships":[{"type":"HAS_NOTE","from":"v","to":"n"}],"aggregations":[{"count":"n","as":"c"}]}
+  gql: |
+    MATCH (v:Vulnerability {id: 8000})-[:HAS_NOTE]->(n:Note) RETURN count(n) AS c
+expect:
+  row_count: 1
+  row_values: [{c: 0}]
+  skip_requirements: [node_ids]

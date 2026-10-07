@@ -1,0 +1,16 @@
+description: Relationship null predicates exclude non-null endpoint identities
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g","filters":{"target_id":{"is_null":true}}}]}
+  gql: |
+    MATCH (u:User {id: 1})-[r:MEMBER_OF]->(g:Group)
+    WHERE r.target_id IS NULL
+    RETURN u, g
+expect:
+  node_count: 0
+  total_edge_count: 0
+  nodes:
+    User: {ids: []}
+    Group: {ids: []}
+  edges:
+    MEMBER_OF: []

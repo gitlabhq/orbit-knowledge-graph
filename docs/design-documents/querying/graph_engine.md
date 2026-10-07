@@ -106,6 +106,14 @@ Names resolve at construction and SQL rendering; they are not stored identities.
 Self-joins share stored column identities while retaining separate relation occurrences. Internal column names derive from ordinals.
 UNION declares its own outputs and maps them positionally to its arms. It does not inherit first-arm provenance.
 Structural validation checks block ownership and CTE visibility. Each phase supplies its expression and operation checks.
+Root-based walks follow declared CTE bodies, derived relations, definition references, and UNION arms. They visit each block once and exclude unattached arena blocks.
+Read-only operation walks expose the immediate parent. Mutable walks visit children before parents and do not revisit inserted operations.
+Walk callbacks borrow block declarations and the catalog while editing operations; they cannot allocate blocks or change relation declarations.
+Security wraps stored scans through the mutable walk. The authorization checker uses the read-only walk to verify each scan's immediate filter.
+Neither policy pass invokes structural validation. SQL rendering retains structural validation at its boundary.
+Operation output discovery belongs to the graph and supports both physical and lowered operations.
+The renderer uses these output contracts to route join columns. Validation adds checks to the same traversal instead of supplying renderer metadata.
+Parameterized rendering validates once before binding literals and emitting SQL.
 Wrapping creates a new block around an existing block. No persistent scope-parent registry needs updating.
 The consuming `lower` operation preserves declaration identities while translating expressions and operations.
 Each SELECT block contains a composable relational tree: sources, filters, joins, grouping, expansion, ordering, and limits.

@@ -28,7 +28,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 operation.bind_parameters(&mut bindings);
             }
         }
-        Ok((self.render(root)?, bindings.into_map()))
+        Ok((self.render_block(root, true)?, bindings.into_map()))
     }
 
     fn render_block(&self, id: BlockId, public: bool) -> Result<String> {
@@ -209,8 +209,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 kind,
                 condition,
             } => {
-                let left_columns = self.operation_columns(block, left, &mut HashSet::new())?;
-                let right_columns = self.operation_columns(block, right, &mut HashSet::new())?;
+                let left_columns = self.operation_outputs(left)?;
+                let right_columns = self.operation_outputs(right)?;
                 let mut required = needed.to_vec();
                 collect_columns(condition, &mut required)?;
                 let left_needed = required

@@ -31,9 +31,7 @@ pub enum NodeBinding {
         table_alias: Option<String>,
         traversal_path: Option<Expr>,
     },
-    Projected {
-        role_identity: Option<Expr>,
-    },
+    Projected,
 }
 
 impl NodeBinding {
@@ -43,23 +41,6 @@ impl NodeBinding {
             table_alias,
             traversal_path: Some(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
         }
-    }
-
-    pub fn role_identity(&self) -> Result<Option<&Expr>> {
-        Ok(match self {
-            Self::Values {
-                identity,
-                table_alias: None,
-                ..
-            } => Some(identity),
-            Self::Projected { role_identity } => role_identity.as_ref(),
-            Self::Filtered => {
-                return Err(QueryError::Lowering(
-                    "protected filtered node requires a visible identity".into(),
-                ));
-            }
-            _ => None,
-        })
     }
 
     fn identity(&self) -> &Expr {

@@ -1,3 +1,5 @@
+mod security;
+
 #[test]
 fn yaml_plan_shapes() {
     let directory =
@@ -161,6 +163,79 @@ fn query_graph_scalar_subquery_contract() {
         graph.render(foreign),
         Err(GraphError::OutsideBlock)
     ));
+}
+
+#[test]
+fn query_graph_rebinds_nested_computations_between_blocks() {
+    use query_data_model::QueryDataModel;
+    use query_engine::compiler::{
+        self,
+        query_graph::{
+            Expression as E, GraphError, LoweredOperation as Operation, Port, QueryGraph,
+        },
+    };
+    let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
+    let mut graph = QueryGraph::<_, E<'_>, Operation<'_>>::new(model.as_ref());
+    let original = graph.select(Operation::One);
+    let first = graph
+        .scan(original, model.entity_table("Project").unwrap(), "project")
+        .unwrap();
+    let id = E::Column(graph.stored_column(first, "id").unwrap());
+    let condition = E::Or(
+        Box::new(E::equal(id.clone(), E::Integer(1))),
+        Box::new(E::Greater(
+            Box::new(E::Add(Box::new(id.clone()), Box::new(E::Integer(2)))),
+            Box::new(E::Integer(10)),
+        )),
+    );
+    let value = E::JsonObject(vec![
+        (
+            "count".into(),
+            E::ToString(Box::new(E::CountIf(Box::new(condition.clone())))),
+        ),
+        (
+            "sum".into(),
+            E::ToString(Box::new(E::Sum {
+                value: Box::new(id),
+                condition: Some(Box::new(condition)),
+            })),
+        ),
+        (
+            "path".into(),
+            E::LatestPath {
+                path: graph.stored_column(first, "traversal_path").unwrap(),
+                version: graph.stored_column(first, "_version").unwrap(),
+                deletion: graph.stored_column(first, "_deleted").unwrap(),
+            },
+        ),
+    ]);
+    graph.project(original, "summary", value.clone()).unwrap();
+    *graph.operation_mut(original).unwrap() = Operation::source(first).aggregate(vec![]);
+    let root = graph.select(Operation::One);
+    let second = graph
+        .scan(root, model.entity_table("Project").unwrap(), "project")
+        .unwrap();
+    *graph.operation_mut(root).unwrap() = Operation::source(second).aggregate(vec![]);
+    let output = graph.project(root, "summary", value.clone()).unwrap();
+    assert!(matches!(
+        graph.validate_lowered(root),
+        Err(GraphError::OutsideBlock)
+    ));
+    let rebound = value
+        .rebind(&|column| {
+            let Port::Stored(stored) = column.port() else {
+                panic!("stored source")
+            };
+            graph.stored_port(second, stored)
+        })
+        .unwrap();
+    graph.replace_output(output, rebound).unwrap();
+    let (sql, params) = graph.render_parameterized(root).unwrap();
+    assert!(
+        sql.contains("argMaxOrNull") && sql.contains("countIf") && sql.contains("sumIf"),
+        "{sql}"
+    );
+    assert!(params.values().any(|parameter| parameter.value == 10));
 }
 
 #[test]

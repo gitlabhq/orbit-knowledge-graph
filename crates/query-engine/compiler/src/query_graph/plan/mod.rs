@@ -18,6 +18,12 @@ struct KeyScan<'a> {
 }
 
 impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
+    pub(super) fn requires_authorization_scan(&self, entity: &str) -> bool {
+        self.catalog
+            .entity_minimum_access_level(entity)
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+    }
+
     pub fn bind_scan(&mut self, relation: RelationId, input: ScanInput) -> Result<()> {
         let Body::Select { relations, .. } = &mut self.block_mut(relation.block)?.body else {
             return Err(GraphError::ExpectedSelect);

@@ -280,21 +280,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         arm.limit = Some(input.limit);
         arm
     };
-    let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
-        query
-            .select
-            .iter()
-            .find(|select| {
-                select.alias.as_deref() == Some(redaction_id_column(center_alias).as_str())
-            })
-            .expect("neighbors emits its center identity")
-            .expr
-            .clone()
-    });
-    Ok((
-        Node::Query(Box::new(query)),
-        NodeBinding::Projected { role_identity },
-    ))
+    Ok((Node::Query(Box::new(query)), NodeBinding::Projected))
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

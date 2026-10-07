@@ -84,6 +84,148 @@ pub enum Expression<'catalog> {
 }
 
 impl<'catalog> Expression<'catalog> {
+    pub fn children(&self) -> impl Iterator<Item = &Self> {
+        let mut pair = [None, None];
+        let mut values: &[Self] = &[];
+        let mut fields: &[(String, Self)] = &[];
+        match self {
+            Self::Equal(left, right)
+            | Self::And(left, right)
+            | Self::Or(left, right)
+            | Self::In(left, right)
+            | Self::HasAny(left, right)
+            | Self::Greater(left, right)
+            | Self::GreaterEqual(left, right)
+            | Self::LessEqual(left, right)
+            | Self::StartsWith(left, right)
+            | Self::Add(left, right)
+            | Self::Prefixes {
+                value: left,
+                paths: right,
+                ..
+            }
+            | Self::Keep {
+                condition: left,
+                value: right,
+            } => pair = [Some(left.as_ref()), Some(right.as_ref())],
+            Self::Predicate {
+                value, argument, ..
+            }
+            | Self::Sum {
+                value,
+                condition: argument,
+            } => pair = [Some(value.as_ref()), argument.as_deref()],
+            Self::InQuery { value, .. }
+            | Self::PathDepth(value)
+            | Self::Reverse(value)
+            | Self::CountIf(value)
+            | Self::Aggregate { value, .. }
+            | Self::Field { tuple: value, .. }
+            | Self::Bucket { value, .. }
+            | Self::Excerpt { value, .. }
+            | Self::ToString(value) => pair[0] = Some(value.as_ref()),
+            Self::Tuple(items) | Self::Array(items) | Self::Concat(items) => values = items,
+            Self::JsonObject(items) => fields = items,
+            Self::Column(_)
+            | Self::Integer(_)
+            | Self::Boolean(_)
+            | Self::Text(_)
+            | Self::Literal { .. }
+            | Self::Strings(_)
+            | Self::Count
+            | Self::ScalarQuery(_)
+            | Self::EmptyArray(_)
+            | Self::LatestPath { .. }
+            | Self::Integers(_)
+            | Self::Parameter { .. } => {}
+        }
+        pair.into_iter()
+            .flatten()
+            .chain(values)
+            .chain(fields.iter().map(|(_, value)| value))
+    }
+
+    pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Self> {
+        let mut pair = [None, None];
+        let mut values: &mut [Self] = &mut [];
+        let mut fields: &mut [(String, Self)] = &mut [];
+        match self {
+            Self::Equal(left, right)
+            | Self::And(left, right)
+            | Self::Or(left, right)
+            | Self::In(left, right)
+            | Self::HasAny(left, right)
+            | Self::Greater(left, right)
+            | Self::GreaterEqual(left, right)
+            | Self::LessEqual(left, right)
+            | Self::StartsWith(left, right)
+            | Self::Add(left, right)
+            | Self::Prefixes {
+                value: left,
+                paths: right,
+                ..
+            }
+            | Self::Keep {
+                condition: left,
+                value: right,
+            } => pair = [Some(left.as_mut()), Some(right.as_mut())],
+            Self::Predicate {
+                value, argument, ..
+            }
+            | Self::Sum {
+                value,
+                condition: argument,
+            } => pair = [Some(value.as_mut()), argument.as_deref_mut()],
+            Self::InQuery { value, .. }
+            | Self::PathDepth(value)
+            | Self::Reverse(value)
+            | Self::CountIf(value)
+            | Self::Aggregate { value, .. }
+            | Self::Field { tuple: value, .. }
+            | Self::Bucket { value, .. }
+            | Self::Excerpt { value, .. }
+            | Self::ToString(value) => pair[0] = Some(value.as_mut()),
+            Self::Tuple(items) | Self::Array(items) | Self::Concat(items) => values = items,
+            Self::JsonObject(items) => fields = items,
+            Self::Column(_)
+            | Self::Integer(_)
+            | Self::Boolean(_)
+            | Self::Text(_)
+            | Self::Literal { .. }
+            | Self::Strings(_)
+            | Self::Count
+            | Self::ScalarQuery(_)
+            | Self::EmptyArray(_)
+            | Self::LatestPath { .. }
+            | Self::Integers(_)
+            | Self::Parameter { .. } => {}
+        }
+        pair.into_iter()
+            .flatten()
+            .chain(values)
+            .chain(fields.iter_mut().map(|(_, value)| value))
+    }
+
+    pub fn walk<Error>(
+        &self,
+        visit: &mut impl FnMut(&Self) -> std::result::Result<(), Error>,
+    ) -> std::result::Result<(), Error> {
+        for child in self.children() {
+            child.walk(visit)?;
+        }
+        visit(self)
+    }
+
+    pub fn walk_mut<Error>(
+        &mut self,
+        visit: &mut impl FnMut(&mut Self) -> std::result::Result<(), Error>,
+    ) -> std::result::Result<(), Error> {
+        for child in self.children_mut() {
+            child.walk_mut(visit)?;
+        }
+        visit(self)
+    }
+
     pub(super) fn membership(column: ColumnRef<'catalog>, values: &[i64]) -> Self {
         if let [value] = values {
             Self::equal(Self::Column(column), Self::Integer(*value))
@@ -94,6 +236,7 @@ impl<'catalog> Expression<'catalog> {
             )
         }
     }
+
     pub(super) fn identity_predicates(
         column: ColumnRef<'catalog>,
         node: &crate::input::InputNode,
@@ -114,104 +257,31 @@ impl<'catalog> Expression<'catalog> {
         }
         predicates
     }
+
     pub(super) fn bind_parameters(
         &mut self,
         bindings: &mut orbit_utils::query_types::ParamBindings,
     ) {
+        if let Self::Prefixes {
+            paths,
+            array: false,
+            ..
+        } = self
+            && let Self::Strings(values) = paths.as_ref()
+        {
+            **paths = Self::Array(values.iter().cloned().map(Self::Text).collect());
+        }
+        for child in self.children_mut() {
+            child.bind_parameters(bindings);
+        }
         let literal = match self {
             Self::Literal { data_type, value } => Some((*data_type, value.clone())),
-            Self::InQuery { value, .. } => {
-                value.bind_parameters(bindings);
-                None
-            }
             Self::Strings(values) => Some((SqlType::String.to_array(), serde_json::json!(values))),
-            Self::JsonObject(fields) => {
-                for (_, value) in fields {
-                    value.bind_parameters(bindings);
-                }
-                None
-            }
-            Self::Prefixes {
-                value,
-                paths,
-                array,
-            } => {
-                value.bind_parameters(bindings);
-                if !*array && let Self::Strings(values) = paths.as_ref() {
-                    **paths = Self::Array(values.iter().cloned().map(Self::Text).collect());
-                }
-                paths.bind_parameters(bindings);
-                None
-            }
-            Self::Predicate {
-                value, argument, ..
-            } => {
-                value.bind_parameters(bindings);
-                if let Some(argument) = argument {
-                    argument.bind_parameters(bindings);
-                }
-                None
-            }
             Self::Integer(value) => Some((SqlType::Int64, serde_json::json!(*value))),
             Self::Boolean(value) => Some((SqlType::Bool, serde_json::json!(*value))),
             Self::Text(value) => Some((SqlType::String, serde_json::json!(value))),
             Self::Integers(values) => Some((SqlType::Int64.to_array(), serde_json::json!(values))),
-            Self::Equal(left, right)
-            | Self::And(left, right)
-            | Self::Or(left, right)
-            | Self::In(left, right)
-            | Self::HasAny(left, right)
-            | Self::Greater(left, right)
-            | Self::GreaterEqual(left, right)
-            | Self::LessEqual(left, right)
-            | Self::StartsWith(left, right) => {
-                left.bind_parameters(bindings);
-                right.bind_parameters(bindings);
-                None
-            }
-            Self::Add(left, right) => {
-                left.bind_parameters(bindings);
-                right.bind_parameters(bindings);
-                None
-            }
-            Self::Reverse(value) => {
-                value.bind_parameters(bindings);
-                None
-            }
-            Self::EmptyArray(_) => None,
-            Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
-                for value in values {
-                    value.bind_parameters(bindings);
-                }
-                None
-            }
-            Self::Excerpt { value, .. }
-            | Self::PathDepth(value)
-            | Self::Aggregate { value, .. }
-            | Self::Bucket { value, .. }
-            | Self::ToString(value)
-            | Self::CountIf(value)
-            | Self::Field { tuple: value, .. } => {
-                value.bind_parameters(bindings);
-                None
-            }
-            Self::Keep { condition, value } => {
-                condition.bind_parameters(bindings);
-                value.bind_parameters(bindings);
-                None
-            }
-            Self::Sum { value, condition } => {
-                value.bind_parameters(bindings);
-                if let Some(condition) = condition {
-                    condition.bind_parameters(bindings);
-                }
-                None
-            }
-            Self::Column(_)
-            | Self::ScalarQuery(_)
-            | Self::Count
-            | Self::LatestPath { .. }
-            | Self::Parameter { .. } => None,
+            _ => None,
         };
         if let Some((data_type, value)) = literal {
             *self = Self::Parameter {
@@ -220,131 +290,51 @@ impl<'catalog> Expression<'catalog> {
             };
         }
     }
+
     pub fn equal(left: Self, right: Self) -> Self {
         Self::Equal(Box::new(left), Box::new(right))
     }
 
-    pub(super) fn rebind(
+    pub fn rebind(
         &self,
         map: &impl Fn(ColumnRef<'catalog>) -> Result<ColumnRef<'catalog>>,
     ) -> Result<Self> {
-        Ok(match self {
-            Self::Prefixes {
-                value,
-                paths,
-                array,
-            } => Self::Prefixes {
-                value: Box::new(value.rebind(map)?),
-                paths: Box::new(paths.rebind(map)?),
-                array: *array,
-            },
-            Self::Strings(_) => self.clone(),
-            Self::Predicate {
-                operator,
-                value,
-                argument,
-                fold_case,
-            } => Self::Predicate {
-                operator: *operator,
-                value: Box::new(value.rebind(map)?),
-                argument: argument
-                    .as_ref()
-                    .map(|argument| argument.rebind(map).map(Box::new))
-                    .transpose()?,
-                fold_case: *fold_case,
-            },
-            Self::Array(values) => Self::Array(
-                values
-                    .iter()
-                    .map(|value| value.rebind(map))
-                    .collect::<Result<_>>()?,
-            ),
-            Self::Column(column) => Self::Column(map(*column)?),
-            Self::Equal(left, right) => Self::equal(left.rebind(map)?, right.rebind(map)?),
-            Self::In(left, right) => {
-                Self::In(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
+        let mut expression = self.clone();
+        expression.walk_mut(&mut |expression| {
+            match expression {
+                Self::Column(column)
+                | Self::ScalarQuery(column)
+                | Self::InQuery { key: column, .. } => *column = map(*column)?,
+                Self::LatestPath {
+                    path,
+                    version,
+                    deletion,
+                } => {
+                    *path = map(*path)?;
+                    *version = map(*version)?;
+                    *deletion = map(*deletion)?;
+                }
+                _ => {}
             }
-            Self::HasAny(left, right) => {
-                Self::HasAny(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::And(left, right) => {
-                Self::And(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::Greater(left, right) => {
-                Self::Greater(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::GreaterEqual(left, right) => {
-                Self::GreaterEqual(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::LessEqual(left, right) => {
-                Self::LessEqual(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::Bucket { unit, value } => Self::Bucket {
-                unit: *unit,
-                value: Box::new(value.rebind(map)?),
-            },
-            Self::StartsWith(left, right) => {
-                Self::StartsWith(Box::new(left.rebind(map)?), Box::new(right.rebind(map)?))
-            }
-            Self::Integer(_)
-            | Self::Boolean(_)
-            | Self::Text(_)
-            | Self::Integers(_)
-            | Self::Literal { .. } => self.clone(),
-            _ => {
-                return Err(GraphError::UnsupportedInput(
-                    "non-scalar candidate predicate".into(),
-                ));
-            }
-        })
+            Ok(())
+        })?;
+        Ok(expression)
     }
 
     pub(super) fn columns(
         &self,
         visit: &mut impl FnMut(ColumnRef<'catalog>) -> Result<()>,
     ) -> Result<()> {
-        self.references(&mut |column, subquery| {
-            if subquery { Ok(()) } else { visit(column) }
-        })
+        self.references(&mut |column, subquery| if subquery { Ok(()) } else { visit(column) })
     }
 
     pub(super) fn references(
         &self,
         visit: &mut impl FnMut(ColumnRef<'catalog>, bool) -> Result<()>,
     ) -> Result<()> {
-        match self {
-            Self::Predicate {
-                value, argument, ..
-            } => {
-                value.references(visit)?;
-                if let Some(argument) = argument {
-                    argument.references(visit)?;
-                }
-                Ok(())
-            }
+        self.walk(&mut |expression| match expression {
             Self::Column(column) => visit(*column, false),
-            Self::ScalarQuery(column) => visit(*column, true),
-            Self::PathDepth(value) => value.references(visit),
-            Self::InQuery { value, key } => {
-                value.references(visit)?;
-                visit(*key, true)
-            }
-            Self::EmptyArray(_) => Ok(()),
-            Self::Add(left, right) => {
-                left.references(visit)?;
-                right.references(visit)
-            }
-            Self::Reverse(value) => value.references(visit),
-            Self::Prefixes { value, paths, .. } => {
-                value.references(visit)?;
-                paths.references(visit)
-            }
-            Self::JsonObject(fields) => {
-                for (_, value) in fields {
-                    value.references(visit)?;
-                }
-                Ok(())
-            }
+            Self::ScalarQuery(column) | Self::InQuery { key: column, .. } => visit(*column, true),
             Self::LatestPath {
                 path,
                 version,
@@ -354,85 +344,19 @@ impl<'catalog> Expression<'catalog> {
                 visit(*version, false)?;
                 visit(*deletion, false)
             }
-            Self::Excerpt { value, .. } | Self::Bucket { value, .. } | Self::ToString(value) => {
-                value.references(visit)
-            }
-            Self::Aggregate { value, .. } => value.references(visit),
-            Self::CountIf(condition) => condition.references(visit),
-            Self::Sum { value, condition } => {
-                value.references(visit)?;
-                if let Some(condition) = condition {
-                    condition.references(visit)?;
-                }
-                Ok(())
-            }
-            Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
-                for value in values {
-                    value.references(visit)?;
-                }
-                Ok(())
-            }
-            Self::Field { tuple, .. } => tuple.references(visit),
-            Self::Keep { condition, value } => {
-                condition.references(visit)?;
-                value.references(visit)
-            }
-            Self::Equal(left, right)
-            | Self::And(left, right)
-            | Self::Or(left, right)
-            | Self::In(left, right)
-            | Self::HasAny(left, right)
-            | Self::Greater(left, right)
-            | Self::GreaterEqual(left, right)
-            | Self::LessEqual(left, right)
-            | Self::StartsWith(left, right) => {
-                left.references(visit)?;
-                right.references(visit)
-            }
             _ => Ok(()),
-        }
+        })
     }
 
     pub(super) fn aggregate(&self) -> bool {
-        match self {
-            Self::InQuery { value, .. } => value.aggregate(),
-            Self::PathDepth(value) => value.aggregate(),
-            Self::Add(left, right) => left.aggregate() || right.aggregate(),
-            Self::Reverse(value) => value.aggregate(),
-            Self::Prefixes { value, paths, .. } => value.aggregate() || paths.aggregate(),
-            Self::JsonObject(fields) => fields.iter().any(|(_, value)| value.aggregate()),
-            Self::Predicate {
-                value, argument, ..
-            } => {
-                value.aggregate()
-                    || argument
-                        .as_ref()
-                        .is_some_and(|argument| argument.aggregate())
-            }
+        matches!(
+            self,
             Self::Count
-            | Self::CountIf(_)
-            | Self::Sum { .. }
-            | Self::Aggregate { .. }
-            | Self::LatestPath { .. } => true,
-            Self::Tuple(values) | Self::Array(values) | Self::Concat(values) => {
-                values.iter().any(Self::aggregate)
-            }
-            Self::Field { tuple, .. } => tuple.aggregate(),
-            Self::Excerpt { value, .. } | Self::Bucket { value, .. } | Self::ToString(value) => {
-                value.aggregate()
-            }
-            Self::Keep { condition, value } => condition.aggregate() || value.aggregate(),
-            Self::Equal(left, right)
-            | Self::And(left, right)
-            | Self::Or(left, right)
-            | Self::In(left, right)
-            | Self::HasAny(left, right)
-            | Self::Greater(left, right)
-            | Self::GreaterEqual(left, right)
-            | Self::LessEqual(left, right)
-            | Self::StartsWith(left, right) => left.aggregate() || right.aggregate(),
-            _ => false,
-        }
+                | Self::CountIf(_)
+                | Self::Sum { .. }
+                | Self::Aggregate { .. }
+                | Self::LatestPath { .. }
+        ) || self.children().any(Self::aggregate)
     }
 }
 

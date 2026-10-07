@@ -566,10 +566,14 @@ impl<'catalog, M: QueryDataModel + ?Sized, E, O> QueryGraph<'catalog, M, E, O> {
 mod explain;
 mod expression;
 mod lower;
+mod outputs;
 mod plan;
 mod relational;
 mod render;
 mod validate;
+mod walk;
+
+pub use walk::BlockView;
 
 pub use expression::{Expression, ValueType};
 pub use relational::{
