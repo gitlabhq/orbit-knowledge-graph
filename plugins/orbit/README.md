@@ -56,7 +56,7 @@ Review any files uninstall keeps for duplicate Orbit instructions or hooks.
 
 Run `mise test:plugins` and `mise plugins:package` from the checkout.
 Try a single session with `claude --plugin-dir ./plugins/orbit` or
-`pi -e ./plugins/orbit`. `skills/orbit-wrapper/SKILL.md` is a copy of
-`skills/orbit-wrapper/SKILL.md` at the repository root, because plugins cannot
+`pi -e ./plugins/orbit`. `plugins/orbit/skills/orbit-wrapper/SKILL.md` is a copy
+of `skills/orbit-wrapper/SKILL.md` at the repository root, because plugins cannot
 reference files outside their directory. `mise test:plugins` fails when the two
 differ. Bump both plugin manifest versions when the plugin changes.
