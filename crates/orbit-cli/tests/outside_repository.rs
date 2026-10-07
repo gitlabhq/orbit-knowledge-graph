@@ -148,8 +148,9 @@ fn setup_with_dir_judges_the_project_root_not_the_working_folder() {
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
     assert!(!printed.contains("not a git repository"), "{printed}");
+    let project_root = dunce::canonicalize(&repository).unwrap();
     assert!(
-        printed.contains(&format!("orbit index {}", repository.display())),
+        printed.contains(&format!("orbit index {}", project_root.display())),
         "{printed}"
     );
 }
