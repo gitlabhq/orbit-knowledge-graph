@@ -74,7 +74,7 @@ stages:
       - match: '(permits (type_list $$$T:type_identifier))'
         replace: '(java_permits $$$T->__decorator)'
       - match: '(annotation name: $N:identifier arguments: $A)'
-        replace: '(__decorator @$N $A)'
+        replace: '(__decorator @$N (__args $A))'
 
       # x instanceof T [name] → type reference plus a typed pattern binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
@@ -133,7 +133,7 @@ stages:
       - match: '(marker_annotation name: $N:__member)'
         replace: '(__decorator $N)'
       - match: '(annotation name: $N:__member arguments: $A)'
-        replace: '(__decorator $N $A)'
+        replace: '(__decorator $N (__args $A))'
 
 
   - name: retag-expressions

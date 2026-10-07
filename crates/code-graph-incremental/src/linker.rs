@@ -1045,8 +1045,15 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         f.run.check().and_then(|()| f.file.check())?;
         for c in tree.cursor(dn).children().filter(|c| c.is(C::Decorator)) {
             for target in f.lookup_chain(c) {
-                if let Value::LocalDef(target) = target {
-                    f.edges.push(Edge::local(dn, target, EdgeKind::Calls));
+                match target {
+                    Value::LocalDef(target) => {
+                        f.edges.push(Edge::local(dn, target, EdgeKind::Calls))
+                    }
+                    Value::ImportRef(target) => f.edges.push(Edge {
+                        site: Some(c.index()),
+                        ..Edge::local(dn, target, EdgeKind::Imports)
+                    }),
+                    _ => {}
                 }
             }
         }

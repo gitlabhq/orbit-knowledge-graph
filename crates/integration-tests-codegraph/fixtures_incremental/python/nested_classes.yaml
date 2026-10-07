@@ -11,11 +11,11 @@ fixtures:
 
 tests:
   - name: Inner class is contained in Outer
-    skip: true
+    skip: false
     query: |
-      MATCH (outer:Definition)-[:CALLS|DEFINES|EXTENDS]->(inner:Definition)
-      WHERE outer.name = 'Outer' AND inner.name = 'Inner'
-      RETURN outer.fqn AS parent, inner.fqn AS child
+      MATCH (parent_class:Definition)-[:CALLS|DEFINES|EXTENDS]->(nested_class:Definition)
+      WHERE parent_class.name = 'Outer' AND nested_class.name = 'Inner'
+      RETURN parent_class.fqn AS parent, nested_class.fqn AS child
     assert:
       - { row_count: 1 }
       - { row: { parent: "main.Outer", child: "main.Outer.Inner" } }

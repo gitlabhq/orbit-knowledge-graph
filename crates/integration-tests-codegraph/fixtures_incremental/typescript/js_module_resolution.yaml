@@ -583,17 +583,22 @@ tests:
       - { row: { caller: "runToolkit", callee: "normalize" } }
 
   - name: Missing default and named exports stay unresolved
-    skip: true
-    query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'unresolved/main.ts'
-        AND i.has_target = false
-      RETURN i.import_type AS import_type, i.identifier_name AS name, i.has_target AS has_target
-      ORDER BY import_type, name
-    assert:
-      - { row_count: 2 }
-      - { row: { import_type: "DefaultImport", name: "default", has_target: false } }
-      - { row: { import_type: "NamedImport", name: "missingNamed", has_target: false } }
+    skip: false
+    queries:
+      - query: |
+          MATCH (i:ImportedSymbol)
+          WHERE i.file_path = 'unresolved/main.ts'
+          RETURN i.import_type AS import_type, i.identifier_name AS name
+        assert:
+          - { row_count: 2 }
+          - { row: { import_type: "DefaultImport", name: "default" } }
+          - { row: { import_type: "NamedImport", name: "missingNamed" } }
+      - query: |
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+          WHERE i.file_path = 'unresolved/main.ts'
+          RETURN target.fqn
+        assert:
+          - { empty: true }
 
   - name: Missing default and named export calls point at imported symbols
     query: |
@@ -668,13 +673,18 @@ tests:
       - { empty: true }
 
   - name: Ambiguous star reexports do not pick an arbitrary target
-    skip: true
-    query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'ambiguous/main.ts'
-        AND i.identifier_name = 'shared'
-        AND i.has_target = false
-      RETURN i.identifier_name AS name, i.has_target AS has_target
-    assert:
-      - { row_count: 1 }
-      - { row: { name: "shared", has_target: false } }
+    skip: false
+    queries:
+      - query: |
+          MATCH (i:ImportedSymbol)
+          WHERE i.file_path = 'ambiguous/main.ts' AND i.identifier_name = 'shared'
+          RETURN i.identifier_name AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { name: "shared" } }
+      - query: |
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+          WHERE i.file_path = 'ambiguous/main.ts' AND i.identifier_name = 'shared'
+          RETURN target.fqn
+        assert:
+          - { empty: true }
