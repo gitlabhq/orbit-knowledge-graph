@@ -148,10 +148,16 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
+                        if alias.is_some() {
                             return Err(invalid(
                                 span,
-                                "property projections require traversal or neighbors and cannot be renamed",
+                                "remove AS; only aggregated results can be renamed",
+                            ));
+                        }
+                        if self.input.query_type == QueryType::PathFinding {
+                            return Err(invalid(
+                                span,
+                                "property projections require traversal or neighbors",
                             ));
                         }
                         let input_node = self
