@@ -8,6 +8,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
 const PLUGIN: &str = "plugins/orbit";
+const WRAPPER: &str = "skills/orbit-wrapper/SKILL.md";
 const CATALOGS: [&str; 2] = [
     ".claude-plugin/marketplace.json",
     ".agents/plugins/marketplace.json",
@@ -34,10 +35,9 @@ pub fn check() -> Result<()> {
         keys.iter().all(|key| portable[key] == claude[key]),
         "plugin manifests differ"
     );
-    let skill = fs::read_to_string(plugin.join("skills/orbit-cli/SKILL.md"))?;
     ensure!(
-        skill_version(&skill) == portable["version"].as_str(),
-        "SKILL.md version differs"
+        fs::read(plugin.join(WRAPPER)).ok() == Some(fs::read(WRAPPER)?),
+        "{PLUGIN}/{WRAPPER} differs from {WRAPPER}"
     );
     for catalog in CATALOGS {
         check_catalog(&root, catalog, &portable["name"])?;
@@ -76,45 +76,56 @@ fn check_hooks(scratch: &Path, plugin: &Path, hooks_file: &str) -> Result<()> {
     let config = read_json(&plugin.join(hooks_file))?;
     let hooks = config["hooks"]["PreToolUse"]
         .as_array()
-        .filter(|hooks| hooks.len() == 2);
-    let hooks = hooks.context("expected search and read PreToolUse hooks")?;
-    let (bin, orbit, input) = (
-        scratch.join("bin"),
-        scratch.join("bin/orbit"),
-        scratch.join("in"),
-    );
+        .filter(|hooks| hooks.len() == 1);
+    let command = hooks.context("expected one search PreToolUse hook")?[0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap_or("-");
+    let (bin, input) = (scratch.join("bin"), scratch.join("in"));
     fs::create_dir(&bin)?;
     symlink("/bin/sh", bin.join("sh"))?;
     let payload = json!({"tool_input": {"command": "rg function src"}}).to_string();
     fs::write(&input, &payload)?;
-    let success = "printf \"%s\\n\" \"$*\"; /bin/cat";
-    for (case, body) in [
-        ("missing", ""),
-        ("success", success),
-        ("failure", "echo x >&2; exit 1"),
+    let echo = "printf \"%s\\n\" \"$*\"; /bin/cat";
+    let fail = "echo x >&2; exit 1";
+    for (case, orbit, glab, expected) in [
+        ("missing", None, None, String::new()),
+        (
+            "orbit",
+            Some(echo),
+            Some(fail),
+            format!("hook-guard search\n{payload}"),
+        ),
+        (
+            "glab",
+            None,
+            Some(echo),
+            format!("orbit hook-guard search\n{payload}"),
+        ),
+        ("failing", Some(fail), None, String::new()),
     ] {
-        if !body.is_empty() {
-            fs::write(&orbit, format!("#!/bin/sh\n{body}\n"))?;
-            fs::set_permissions(&orbit, fs::Permissions::from_mode(0o755))?;
+        for (name, body) in [("orbit", orbit), ("glab", glab)] {
+            let path = bin.join(name);
+            match body {
+                Some(body) => {
+                    fs::write(&path, format!("#!/bin/sh\n{body}\n"))?;
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+                }
+                None if path.exists() => fs::remove_file(&path)?,
+                None => {}
+            }
         }
-        for (hook, kind) in hooks.iter().zip(["search", "read"]) {
-            let output = std::process::Command::new("/bin/sh")
-                .args(["-c", hook["hooks"][0]["command"].as_str().unwrap_or("-")])
-                .env("PATH", &bin)
-                .env("CLAUDE_PLUGIN_ROOT", plugin)
-                .stdin(fs::File::open(&input)?)
-                .output()?;
-            let expected = match case {
-                "success" => format!("hook-guard {kind}\n{payload}"),
-                _ => String::new(),
-            };
-            ensure!(
-                output.status.success()
-                    && output.stdout == expected.as_bytes()
-                    && output.stderr.is_empty(),
-                "{kind} hook misbehaves when orbit is {case}: {output:?}"
-            );
-        }
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", command])
+            .env("PATH", &bin)
+            .env("CLAUDE_PLUGIN_ROOT", plugin)
+            .stdin(fs::File::open(&input)?)
+            .output()?;
+        ensure!(
+            output.status.success()
+                && output.stdout == expected.as_bytes()
+                && output.stderr.is_empty(),
+            "search hook misbehaves when {case}: {output:?}"
+        );
     }
     Ok(())
 }
@@ -150,14 +161,6 @@ fn archive() -> Result<Vec<u8>> {
         zip.write_all(&fs::read(&path)?)?;
     }
     Ok(zip.finish()?.into_inner())
-}
-
-fn skill_version(skill: &str) -> Option<&str> {
-    let frontmatter = skill.strip_prefix("---\n")?.split("\n---").next()?;
-    let version = frontmatter
-        .lines()
-        .find_map(|line| line.strip_prefix("version:"))?;
-    Some(version.trim().trim_matches(['"', '\'']))
 }
 
 fn read_json(path: &Path) -> Result<Value> {

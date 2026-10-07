@@ -205,8 +205,8 @@ For every agent it configures, `orbit setup`:
 - With `--mcp`, adds the `orbit` MCP server to the agent's MCP configuration.
   Existing servers and comments are preserved.
 - Adds a hook that reminds the agent to use `orbit grep` when a local graph
-  exists. Claude Code, Codex, OpenCode, and Pi get the reminder on code
-  searches and source reads. GitLab Duo gets it at session start. Codex runs
+  exists. Claude Code, Codex, OpenCode, and Pi get the reminder when they
+  search the tree with grep or rg. GitLab Duo gets it at session start. Codex runs
   the hook after you trust it in `/hooks`, and GitLab Duo runs project hooks
   only with `--enable-project-hooks`. Hook entries carry an `orbit` marker, and
   only marked entries are ever replaced or removed.

@@ -7,12 +7,12 @@ const LAUNCHER = "{{orbit}}".split(" ");
 const GRAPH = join(process.env.ORBIT_DATA_DIR || join(homedir(), ".gitlab", "orbit"), "graph.duckdb");
 const shown = new Set();
 
-async function nudge(tool_name, tool_input) {
+async function nudge(tool_name, tool_input, cwd) {
   try {
-    if (!tool_name || !existsSync(GRAPH)) return null;
-    const kind = tool_name === "Read" ? "read" : "search";
+    if ((tool_name !== "Bash" && tool_name !== "Grep") || !existsSync(GRAPH)) return null;
     const stdout = await new Promise((resolve) => {
-      const child = spawn(LAUNCHER[0], [...LAUNCHER.slice(1), "hook-guard", kind], {
+      const child = spawn(LAUNCHER[0], [...LAUNCHER.slice(1), "hook-guard", "search"], {
+        cwd,
         stdio: ["pipe", "pipe", "ignore"],
       });
       let output = "";
@@ -21,7 +21,7 @@ async function nudge(tool_name, tool_input) {
       child.stdout.on("data", (chunk) => { output += chunk; });
       child.on("close", () => { clearTimeout(timer); resolve(output); });
       child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify({ tool_name, tool_input }));
+      child.stdin.end(JSON.stringify({ tool_name, tool_input, cwd }));
     });
     const text = JSON.parse(String(stdout)).hookSpecificOutput?.additionalContext;
     if (!text || shown.has(text)) return null;

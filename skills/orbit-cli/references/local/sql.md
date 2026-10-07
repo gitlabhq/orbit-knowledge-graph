@@ -1,4 +1,4 @@
-# Orbit CLI SQL reference
+# Orbit local SQL reference
 
 `orbit sql "QUERY"` runs SQL against the local DuckDB graph. `orbit schema [TABLE…]` lists live columns.
 

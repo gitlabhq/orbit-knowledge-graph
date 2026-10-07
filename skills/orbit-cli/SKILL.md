@@ -26,10 +26,8 @@ every matching line in code, tests, config, and docs, labeled with its enclosing
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
-The binary is `orbit`, or `glab orbit` through the wrapper.
-Run `orbit <command> --help` before you guess a flag. Use `--yes` only when
-that command's help lists it, such as `orbit setup`. Search commands do not
-accept `--yes`.
+The binary is `orbit`, or `glab orbit` through the wrapper. Add `--yes` in
+non-interactive shells. Run `orbit <command> --help` before you guess a flag.
 Run `orbit skills` to list available skills. Use `orbit skills get orbit [path]`
 to print the composed skill (`SKILL.md` by default), or specify a path to print
 a file from the skill tree.
@@ -60,8 +58,6 @@ Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
-For caller/callee questions, follow the matching Definition ID with
-`orbit context`. Grep body matches do not prove a call edge.
 
 <!-- orbit:section quick-start -->
 ## Query and map
@@ -83,10 +79,6 @@ Gotchas:
   returns zero rows.
 - The graph holds every indexed checkout. `sql` scopes to the current commit,
   and `--all` spans them all. Re-index after you check out a different commit.
-- An empty result does not prove that code is absent. The index can be stale
-  or miss a language, so verify critical findings in source.
-- If `orbit list` shows no index for the repository, ask before you run
-  `orbit index .`.
 
 ## References
 

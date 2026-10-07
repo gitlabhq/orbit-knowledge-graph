@@ -102,8 +102,9 @@ first invocation pays the compile cost.
 
 ## Agent plugins
 
-Claude Code, Codex, and Pi can install the same Orbit CLI plugin. The package
-reuses the skill embedded in the binary and needs no server services.
+Claude Code, Codex, and Pi can install the same Orbit plugin. It ships the
+`orbit-wrapper` skill, which loads the skill from the installed CLI, and needs
+no server services.
 See the [plugin guide](../../plugins/orbit/README.md) for installation, migration
 from `orbit setup`, and local validation.
 

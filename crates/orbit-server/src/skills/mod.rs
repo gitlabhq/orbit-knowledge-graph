@@ -282,7 +282,7 @@ mod tests {
             }
             orbit_prompts::validate_skill_pair(
                 remote.path(),
-                std::path::Path::new(env!("LOCAL_SKILLS_DIR")).join("orbit-cli"),
+                std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli"),
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../orbit-cli/src/main.rs"),
             )
             .unwrap_or_else(|error| panic!("{frontend:?}: {error}"));
