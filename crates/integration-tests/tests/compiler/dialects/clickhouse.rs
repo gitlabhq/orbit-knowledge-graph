@@ -1348,7 +1348,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN u; DEBUG",
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
-        "MATCH (u:User) RETURN u.username AS renamed",
+        "MATCH (u:User {id: 1}) RETURN u.username AS a, u.name AS a",
+        "MATCH (u:User {id: 1}) RETURN u.username ORDER BY missing",
         "MATCH (u:User) RETURN u{.username}, u.state",
         "MATCH (u:User) RETURN u.username, u{.state}",
         "MATCH (u:User) RETURN date_trunc('month', u.created_at)",
@@ -1687,6 +1688,27 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "edge source must be the User side: {}",
         compiled.base.sql
     );
+}
+
+#[test]
+fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    let plain = compile(
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    for query in [
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5",
+        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5",
+    ] {
+        let aliased = compile(query, Frontend::Gql, &ontology, &ctx).unwrap();
+        assert_eq!(plain.base.render(), aliased.base.render(), "{query}");
+        assert_eq!(plain.hydration, aliased.hydration, "{query}");
+    }
 }
 
 #[test]

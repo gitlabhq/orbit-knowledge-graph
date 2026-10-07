@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::input::{
     Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
-    QueryType,
+    PropertyRef, QueryType,
 };
 use crate::passes::cursor;
 use crate::{Input, InputNode, QueryError, Result};
@@ -19,6 +19,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
         edges: HashMap::new(),
         path: None,
         neighbor: None,
+        aliases: HashMap::new(),
     };
     lowering.pattern(query.pattern)?;
     for predicate in query.predicates {
@@ -64,6 +65,7 @@ struct Lowering {
     edges: HashMap<String, usize>,
     path: Option<String>,
     neighbor: Option<String>,
+    aliases: HashMap<String, PropertyRef>,
 }
 
 impl Lowering {

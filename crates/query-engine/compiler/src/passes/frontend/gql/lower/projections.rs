@@ -106,12 +106,6 @@ impl Lowering {
                     if property_set.len() != columns.len() {
                         return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
-                    if !aggregate && alias.is_some() {
-                        return Err(invalid(
-                            span,
-                            "traversal node projections cannot be renamed",
-                        ));
-                    }
                     let node = self
                         .input
                         .nodes
@@ -148,12 +142,6 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() {
-                            return Err(invalid(
-                                span,
-                                "remove AS; only aggregated results can be renamed",
-                            ));
-                        }
                         if self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
@@ -168,6 +156,15 @@ impl Lowering {
                             .ok_or_else(|| {
                                 invalid(span, "property projection references an undefined node")
                             })?;
+                        if let Some(alias) = alias {
+                            let target = PropertyRef {
+                                node: node.clone(),
+                                property: property.clone(),
+                            };
+                            if self.aliases.insert(alias, target).is_some() {
+                                return Err(invalid(span, "duplicate alias"));
+                            }
+                        }
                         if selected.insert(node.clone()) {
                             property_nodes.insert(node.clone());
                             input_node.columns = Some(ColumnSelection::List(Vec::new()));
@@ -274,11 +271,6 @@ impl Lowering {
                 node: variable,
                 alias,
             });
-        } else if alias.is_some() {
-            return Err(invalid(
-                span,
-                "traversal node projections cannot be renamed",
-            ));
         }
         Ok(())
     }
@@ -315,16 +307,17 @@ impl Lowering {
                 });
             }
             QueryType::Traversal => {
-                let key = match sort.key {
-                    Target::Property(key) => key,
+                let PropertyRef { node, property } = match sort.key {
+                    Target::Property(key) => key.into(),
                     Target::Variable(name) => {
-                        return Err(invalid(
-                            name.span,
-                            "traversal ORDER BY requires node.property",
-                        ));
+                        self.aliases.get(&name.value).cloned().ok_or_else(|| {
+                            invalid(
+                                name.span,
+                                "traversal ORDER BY requires node.property or a returned alias",
+                            )
+                        })?
                     }
                 };
-                let PropertyRef { node, property } = key.into();
                 self.input.order_by = Some(InputOrderBy {
                     node,
                     property,
