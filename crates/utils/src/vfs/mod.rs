@@ -21,7 +21,6 @@
 
 mod limits;
 mod loading;
-mod path;
 mod policy;
 mod scratch;
 mod store;

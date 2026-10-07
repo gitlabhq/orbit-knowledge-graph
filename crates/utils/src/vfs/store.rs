@@ -4,12 +4,11 @@
 //! Virtual links resolve within `/`. Missing paths return NotFound and listed files Unsupported.
 
 use std::io;
-use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
+use typed_path::{Utf8UnixComponent, Utf8UnixPath, Utf8UnixPathBuf};
 
 use super::loading::{Content, Loading, VfsEntry};
-use super::path::{MAX_LINK_DEPTH, follow_first_link, key, not_found};
 use super::scratch::Scratch;
 use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
 
@@ -21,11 +20,11 @@ pub enum Kind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stat<T> {
-    pub path: PathBuf,
+    pub path: Utf8UnixPathBuf,
     pub kind: Kind,
     pub len: u64,
     pub decision: Option<Decision<T>>,
-    pub link: Option<PathBuf>,
+    pub link: Option<Utf8UnixPathBuf>,
 }
 
 pub struct Vfs<T> {
@@ -49,7 +48,7 @@ impl<T: Tag> Vfs<T> {
         Ok(loading.finish())
     }
 
-    pub fn read(&self, path: impl AsRef<Path>) -> io::Result<Bytes> {
+    pub fn read(&self, path: impl AsRef<str>) -> io::Result<Bytes> {
         let (key, _) = self.resolve(path.as_ref())?;
         let Some(entry) = self.entry(&key) else {
             return Err(match self.is_dir(&key) {
@@ -95,7 +94,7 @@ impl<T: Tag> Vfs<T> {
         }
     }
 
-    pub fn read_dir(&self, path: impl AsRef<Path>) -> io::Result<Vec<String>> {
+    pub fn read_dir(&self, path: impl AsRef<str>) -> io::Result<Vec<String>> {
         let (key, _) = self.resolve(path.as_ref())?;
         if self.entry(&key).is_some() {
             return Err(io::Error::new(
@@ -119,7 +118,7 @@ impl<T: Tag> Vfs<T> {
         Ok(names)
     }
 
-    pub fn stat(&self, path: impl AsRef<Path>) -> io::Result<Stat<T>> {
+    pub fn stat(&self, path: impl AsRef<str>) -> io::Result<Stat<T>> {
         let (key, link) = self.resolve(path.as_ref())?;
         let (kind, len, decision) = match self.entry(&key) {
             Some(entry) => (Kind::File, entry.file.size, Some(entry.file.decision())),
@@ -127,11 +126,11 @@ impl<T: Tag> Vfs<T> {
             None => return Err(not_found()),
         };
         Ok(Stat {
-            path: Path::new("/").join(&key),
+            path: Utf8UnixPath::new("/").join(&key),
             kind,
             len,
             decision,
-            link: link.map(PathBuf::from),
+            link: link.map(Utf8UnixPathBuf::from),
         })
     }
 
@@ -139,7 +138,7 @@ impl<T: Tag> Vfs<T> {
         self.entries.iter().map(|entry| &entry.file)
     }
 
-    pub fn subtree<P: AsRef<Path>>(
+    pub fn subtree<P: AsRef<str>>(
         &self,
         dir: P,
     ) -> impl Iterator<Item = &File<'static, T>> + use<'_, T, P> {
@@ -183,26 +182,53 @@ impl<T: Tag> Vfs<T> {
         key.is_empty() || self.subtree_of(key).next().is_some()
     }
 
-    fn resolve(&self, path: &Path) -> io::Result<(String, Option<&str>)> {
+    fn resolve(&self, path: &str) -> io::Result<(String, Option<&str>)> {
         let mut key = key(path).ok_or_else(not_found)?;
         if self.links.is_empty() {
             return Ok((key, None));
         }
         let mut link = None;
         let mut hops = 0;
-        while let Some((next, target)) = follow_first_link(&key, &self.links) {
-            key = next?;
-            link = link.or(target);
+        while let Some((end, target)) = key
+            .match_indices('/')
+            .map(|(index, _)| index)
+            .chain(std::iter::once(key.len()))
+            .find_map(|end| self.links.get(&key[..end]).map(|target| (end, target)))
+        {
+            let prefix = Utf8UnixPath::new(&key[..end]);
+            let rest = &key[end..];
+            link = link.or_else(|| rest.is_empty().then_some(target.as_str()));
+            let resolved = prefix
+                .parent()
+                .unwrap_or(Utf8UnixPath::new(""))
+                .join(target)
+                .join(rest.trim_start_matches('/'));
+            key = self::key(resolved.as_str()).ok_or_else(not_found)?;
             hops += 1;
-            if hops > MAX_LINK_DEPTH {
+            if hops > 40 {
                 return Err(io::Error::other(format!(
-                    "{} passes through more than {MAX_LINK_DEPTH} symlinks",
-                    path.display()
+                    "{path} passes through more than 40 symlinks"
                 )));
             }
         }
         Ok((key, link))
     }
+}
+
+pub(super) fn key(path: &str) -> Option<String> {
+    let mut key = Utf8UnixPathBuf::new();
+    for component in Utf8UnixPath::new(path).components() {
+        match component {
+            Utf8UnixComponent::Normal(part) => key.push(part),
+            Utf8UnixComponent::ParentDir if !key.pop() => return None,
+            _ => {}
+        }
+    }
+    Some(key.into_string())
+}
+
+fn not_found() -> io::Error {
+    io::Error::new(io::ErrorKind::NotFound, "no such file in the repository")
 }
 
 impl<T> std::fmt::Debug for Vfs<T> {

@@ -6,7 +6,6 @@
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -15,8 +14,8 @@ use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
 use super::limits::{LimitKind, add_capped};
-use super::path::key;
 use super::scratch::Scratch;
+use super::store::key;
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
 
 pub type ContentReader = Arc<dyn Fn(u64) -> io::Result<Vec<u8>> + Send + Sync>;
@@ -90,11 +89,9 @@ impl<T: Tag> Loading<T> {
         if self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
             return Err(SourceError::Cancelled);
         }
-        let key = key(Path::new(path))
-            .filter(|key| !key.is_empty())
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
-            })?;
+        let key = key(path).filter(|key| !key.is_empty()).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid repository file path")
+        })?;
         let size = match &what {
             Put::Bytes(bytes) => bytes.len() as u64,
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,

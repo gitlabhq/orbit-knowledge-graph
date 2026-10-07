@@ -1,5 +1,4 @@
 use std::io::{self, ErrorKind};
-use std::path::Path;
 use std::sync::{
     Arc, Barrier,
     atomic::{AtomicUsize, Ordering::SeqCst},
@@ -125,13 +124,55 @@ fn virtual_links_resolve_only_inside_the_catalog() {
     assert_eq!(vfs.read_dir("alias").unwrap(), ["file", "link"]);
     assert_eq!(vfs.subtree("chain").count(), 2);
     let stat = vfs.stat("chain/link").unwrap();
-    assert_eq!(stat.path, Path::new("/dir/file"));
-    assert_eq!(stat.link.as_deref(), Some(Path::new("file")));
+    assert_eq!(stat.path.as_str(), "/dir/file");
+    assert_eq!(stat.link.as_ref().map(|path| path.as_str()), Some("file"));
     assert!(vfs.stat("alias/file").unwrap().link.is_none());
     for path in ["escape", "escape/file", "host", "dangling"] {
         assert_eq!(vfs.stat(path).unwrap_err().kind(), ErrorKind::NotFound);
     }
     assert_eq!(vfs.read("ping").unwrap_err().kind(), ErrorKind::Other);
+}
+
+#[test]
+fn virtual_paths_have_the_same_syntax_on_every_platform() {
+    let vfs = load(
+        [
+            (r"dir\name/file", Put::Bytes(b"backslash".to_vec())),
+            ("dir/name/file", Put::Bytes(b"slash".to_vec())),
+            (r"C:\repo\file", Put::Bytes(b"drive".to_vec())),
+            (r"\\server\share\file", Put::Bytes(b"unc".to_vec())),
+            ("dir/relative", Put::Symlink(r"../dir\name/file".into())),
+            ("dir/rooted", Put::Symlink(r"/dir\name/file".into())),
+            ("escape", Put::Symlink("../dir/name/file".into())),
+        ],
+        (),
+    );
+    for path in [
+        r"dir\name/file",
+        r"//dir\name/./file",
+        "dir/relative",
+        "dir/rooted",
+    ] {
+        assert_eq!(&*vfs.read(path).unwrap(), b"backslash");
+        assert_eq!(vfs.stat(path).unwrap().path.as_str(), r"/dir\name/file");
+    }
+    assert_eq!(&*vfs.read("dir/name/file").unwrap(), b"slash");
+    assert_eq!(&*vfs.read(r"C:\repo\file").unwrap(), b"drive");
+    assert_eq!(&*vfs.read(r"\\server\share\file").unwrap(), b"unc");
+    assert_eq!(vfs.read_dir(r"dir\name").unwrap(), ["file"]);
+    assert_eq!(vfs.subtree(r"dir\name").count(), 1);
+    assert_eq!(vfs.read("escape").unwrap_err().kind(), ErrorKind::NotFound);
+    for path in [
+        "../dir/name/file",
+        "/../dir/name/file",
+        "dir/../../dir/name/file",
+    ] {
+        assert_eq!(vfs.read(path).unwrap_err().kind(), ErrorKind::NotFound);
+        assert!(
+            matches!(Vfs::load([(path, Put::Bytes(vec![]))], (), Limits::default(), Options::default()),
+            Err(SourceError::Io(error)) if error.kind() == ErrorKind::InvalidInput)
+        );
+    }
 }
 
 #[test]
