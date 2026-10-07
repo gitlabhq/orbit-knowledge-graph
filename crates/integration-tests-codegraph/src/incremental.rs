@@ -83,6 +83,29 @@ pub fn run_incremental_suite(yaml: &str) {
         let (next, step_failures) = check(graph, &ontology, &step.tests);
         state = next;
         failures.extend(step_failures);
+        if let Some(cleanup) = &step.compact_symbols {
+            let report = state
+                .compact_symbols(&mut env, |text| {
+                    cleanup.prefixes.is_empty()
+                        || cleanup
+                            .prefixes
+                            .iter()
+                            .any(|prefix| text.starts_with(prefix))
+                })
+                .expect("compact symbols");
+            assert!(
+                report.symbols_before.saturating_sub(report.symbols_after)
+                    >= cleanup.minimum_removed,
+                "symbol cleanup removed fewer than {} entries: {} -> {}",
+                cleanup.minimum_removed,
+                report.symbols_before,
+                report.symbols_after
+            );
+            let graph = Pipeline::new(Context::new(&env), Resolved { state });
+            let (next, compacted_failures) = check(graph, &ontology, &step.tests);
+            state = next;
+            failures.extend(compacted_failures);
+        }
     }
     report(&suite, &failures);
 }
