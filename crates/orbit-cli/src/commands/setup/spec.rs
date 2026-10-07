@@ -22,7 +22,6 @@ struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
     nudge_search: String,
-    nudge_read: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -65,9 +64,6 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instruc
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
-
-static RENDERED_NUDGE_READ: LazyLock<String> =
-    LazyLock::new(|| substitute_launcher(TEXTS.nudge_read.trim_end(), launcher()));
 
 fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -114,10 +110,6 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
-}
-
-pub(crate) fn read_nudge_text() -> &'static str {
-    &RENDERED_NUDGE_READ
 }
 
 #[derive(Debug, Deserialize)]
@@ -331,8 +323,7 @@ mod tests {
             }
             assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
-        assert!(search_nudge_text().contains("one row per file"));
-        assert!(read_nudge_text().contains("Do not reread unchanged files"));
+        assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
     }
