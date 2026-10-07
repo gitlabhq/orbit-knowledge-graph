@@ -1,9 +1,21 @@
 name: "TSX: parameter and iteration bindings"
 fixtures:
   - path: parameter/main.tsx
-    content: "function first() {} function run(first: () => void) { first(); }"
+    content: |
+      function first() {}
+
+      function run(first: () => void) {
+          first();
+      }
   - path: iteration/main.tsx
-    content: "function first() {} function run() { for (let first of [() => {}]) { first(); } }"
+    content: |
+      function first() {}
+
+      function run() {
+          for (let first of [() => {}]) {
+              first();
+          }
+      }
 tests:
   - name: "Parameters and loop bindings block outer function fallback"
     query: |

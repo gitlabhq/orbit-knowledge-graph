@@ -1,13 +1,62 @@
 name: "Scala: lexical binding ownership"
 fixtures:
   - path: local/main.scala
-    content: "object Main { def first(): Unit = {} ; def second(): Unit = {}; def run(): Unit = { val f = first _; { val f = second _; () }; f() } }"
+    content: |
+      object Main {
+        def first(): Unit = {}
+        def second(): Unit = {}
+
+        def run(): Unit = {
+          val f = first _;
+          {
+            val f = second _
+            ()
+          }
+          f()
+        }
+      }
   - path: callable/main.scala
-    content: "object Main { def first(): Unit = {}; def run(): Unit = { val f = first _; f() } }"
+    content: |
+      object Main {
+        def first(): Unit = {}
+
+        def run(): Unit = {
+          val f = first _
+          f()
+        }
+      }
   - path: shadow/main.scala
-    content: "class First { def ping(): Unit = {} }\nclass Second { def pong(): Unit = {} }\nobject Main { def run(): Unit = { val f = new First(); { val f = new Second(); () }; f.ping() } }"
+    content: |
+      class First {
+        def ping(): Unit = {}
+      }
+
+      class Second {
+        def pong(): Unit = {}
+      }
+
+      object Main {
+        def run(): Unit = {
+          val f = new First();
+          {
+            val f = new Second()
+            ()
+          }
+          f.ping()
+        }
+      }
   - path: control/main.scala
-    content: "class First { def ping(): Unit = {} }\nobject Main { def run(): Unit = { val f = new First(); f.ping() } }"
+    content: |
+      class First {
+        def ping(): Unit = {}
+      }
+
+      object Main {
+        def run(): Unit = {
+          val f = new First()
+          f.ping()
+        }
+      }
 tests:
   - name: "Callable aliases and receiver types survive inner declarations"
     query: |

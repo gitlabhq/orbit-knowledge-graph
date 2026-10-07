@@ -1,9 +1,33 @@
 name: "C: lexical binding ownership"
 fixtures:
   - path: local/main.c
-    content: "void first() {} void second() {} typedef void (*Fn)(); void run() { Fn f = first; { Fn f = second; } f(); }"
+    content: |
+      void first() {}
+      void second() {}
+
+      typedef void (*Fn)();
+
+      void run() {
+          Fn f = first;
+          {
+              Fn f = second;
+          }
+          f();
+      }
   - path: assignment/main.c
-    content: "void first() {} void second() {} typedef void (*Fn)(); void run() { Fn f = first; { f = second; } f(); }"
+    content: |
+      void first() {}
+      void second() {}
+
+      typedef void (*Fn)();
+
+      void run() {
+          Fn f = first;
+          {
+              f = second;
+          }
+          f();
+      }
 tests:
   - name: "Declarations stay local while assignments update outer bindings"
     query: |

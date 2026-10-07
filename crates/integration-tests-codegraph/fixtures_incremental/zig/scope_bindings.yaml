@@ -1,11 +1,38 @@
 name: "Zig: lexical binding ownership"
 fixtures:
   - path: siblings/main.zig
-    content: "fn first() void {} fn second() void {} fn run() void { { const f = first; f(); } { const f = second; f(); } }"
+    content: |
+      fn first() void {}
+      fn second() void {}
+
+      fn run() void {
+          {
+              const f = first;
+              f();
+          }
+          {
+              const f = second;
+              f();
+          }
+      }
   - path: control/main.zig
-    content: "fn first() void {} fn run() void { const f = first; f(); }"
+    content: |
+      fn first() void {}
+
+      fn run() void {
+          const f = first;
+          f();
+      }
   - path: inaccessible/main.zig
-    content: "fn run() void { { const hidden = struct { fn ping() void {} }; } hidden.ping(); }"
+    content: |
+      fn run() void {
+          {
+              const hidden = struct {
+                  fn ping() void {}
+              };
+          }
+          hidden.ping();
+      }
 tests:
   - name: "Sibling bindings resolve independently and local containers do not escape"
     query: |

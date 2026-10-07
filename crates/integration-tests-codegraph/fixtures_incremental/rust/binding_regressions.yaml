@@ -3,11 +3,23 @@ fixtures:
   - path: main.rs
     content: |
       #[derive(Clone, Copy)]
-      struct Holder { callback: fn(), other: fn() }
+      struct Holder {
+          callback: fn(),
+          other: fn(),
+      }
+
       struct Pair(fn(), fn());
+
       fn first() {}
       fn second() {}
-      fn make() -> Holder { Holder { callback: first, other: second } }
+
+      fn make() -> Holder {
+          Holder {
+              callback: first,
+              other: second,
+          }
+      }
+
       fn swapped() {
           let (first, second) = (second, first);
           first();
@@ -25,15 +37,23 @@ fixtures:
       }
       fn before(again: bool) {
           let mut callback: fn() = first;
-          while again { callback(); callback = second; }
+          while again {
+              callback();
+              callback = second;
+          }
       }
       fn after(again: bool) {
           let mut callback: fn() = first;
-          while again { callback = second; callback(); }
+          while again {
+              callback = second;
+              callback();
+          }
       }
       fn unchanged(again: bool) {
           let callback: fn() = first;
-          while again { callback(); }
+          while again {
+              callback();
+          }
       }
       fn copied() {
           let mut h = Holder { callback: first, other: second };
@@ -51,7 +71,9 @@ fixtures:
           h.callback = callback;
           (h.callback)();
       }
-      fn separate(h: Holder) { (h.callback)(); }
+      fn separate(h: Holder) {
+          (h.callback)();
+      }
       fn record_alias() {
           let holder = Holder { callback: first, other: second };
           let Holder { callback: holder, .. } = holder;
@@ -60,7 +82,8 @@ fixtures:
       fn repeated_patterns() {
           let (a, _) = (first, second);
           let (_, b) = (first, second);
-          a(); b();
+          a();
+          b();
       }
       fn source_is_evaluated_once() {
           let Holder { callback, .. } = make();
@@ -83,7 +106,13 @@ fixtures:
       }
       fn capture_in_order() {
           let mut f: fn() = first;
-          let holder = Holder { callback: f, other: { f = second; second } };
+          let holder = Holder {
+              callback: f,
+              other: {
+                  f = second;
+                  second
+              },
+          };
           (holder.callback)();
       }
       fn replaced_nested_fields() {

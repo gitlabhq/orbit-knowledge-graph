@@ -1,9 +1,29 @@
 name: "C++: lexical binding ownership"
 fixtures:
   - path: local/main.cpp
-    content: "void first() {} void second() {} void run() { auto f = first; { auto f = second; } f(); }"
+    content: |
+      void first() {}
+      void second() {}
+
+      void run() {
+          auto f = first;
+          {
+              auto f = second;
+          }
+          f();
+      }
   - path: assignment/main.cpp
-    content: "void first() {} void second() {} void run() { auto f = first; { f = second; } f(); }"
+    content: |
+      void first() {}
+      void second() {}
+
+      void run() {
+          auto f = first;
+          {
+              f = second;
+          }
+          f();
+      }
 tests:
   - name: "Declarations stay local while assignments update outer bindings"
     query: |

@@ -1,19 +1,101 @@
 name: "Python: lexical binding ownership"
 fixtures:
   - path: global_read/main.py
-    content: "def first(): pass\ndef second(): pass\nf = first\ndef run():\n global f\n f()\n f = second\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      f = first
+
+      def run():
+          global f
+          f()
+          f = second
   - path: nonlocal/main.py
-    content: "def first(): pass\ndef second(): pass\ndef outer():\n f = first\n def run():\n  nonlocal f\n  f()\n  f = second\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      def outer():
+          f = first
+
+          def run():
+              nonlocal f
+              f()
+              f = second
   - path: class_local/main.py
-    content: "def first(): pass\ndef second(): pass\ndef run():\n class Local:\n  first = second\n first()\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      def run():
+          class Local:
+              first = second
+
+          first()
   - path: before_assignment/main.py
-    content: "def first(): pass\ndef second(): pass\ndef run():\n    first()\n    first = second\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      def run():
+          first()
+          first = second
   - path: branch/main.py
-    content: "def first(): pass\ndef second(): pass\ndef run(flag):\n    f = first\n    if flag:\n        f = second\n    f()\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      def run(flag):
+          f = first
+          if flag:
+              f = second
+          f()
   - path: global_write/main.py
-    content: "def first(): pass\ndef second(): pass\nf = first\ndef run():\n global f\n f = second\n f()\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      f = first
+
+      def run():
+          global f
+          f = second
+          f()
   - path: global_nested/main.py
-    content: "def first(): pass\ndef second(): pass\nf = first\ndef outer():\n f = second\n def run():\n  global f\n  f()\n"
+    content: |
+      def first():
+          pass
+
+      def second():
+          pass
+
+      f = first
+
+      def outer():
+          f = second
+
+          def run():
+              global f
+              f()
 tests:
   - name: "Function locals block global fallback before assignment"
     query: |

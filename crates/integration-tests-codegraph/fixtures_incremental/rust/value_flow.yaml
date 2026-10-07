@@ -42,53 +42,89 @@ fixtures:
       }
 
       pub fn copied_before_replacement() {
-          let mut callbacks = Callbacks { selected: first, other: unused };
+          let mut callbacks = Callbacks {
+              selected: first,
+              other: unused,
+          };
           let saved = callbacks;
-          callbacks = Callbacks { selected: second, other: unused };
+          callbacks = Callbacks {
+              selected: second,
+              other: unused,
+          };
           (saved.selected)();
       }
 
       pub fn replacement_after_copy() {
-          let mut callbacks = Callbacks { selected: first, other: unused };
+          let mut callbacks = Callbacks {
+              selected: first,
+              other: unused,
+          };
           let saved = callbacks;
-          callbacks = Callbacks { selected: second, other: unused };
+          callbacks = Callbacks {
+              selected: second,
+              other: unused,
+          };
           (callbacks.selected)();
       }
 
       pub fn field_strong_update() {
-          let mut callbacks = Callbacks { selected: first, other: unused };
+          let mut callbacks = Callbacks {
+              selected: first,
+              other: unused,
+          };
           callbacks.selected = second;
           (callbacks.selected)();
       }
 
       pub fn sibling_field_survives() {
-          let mut callbacks = Callbacks { selected: first, other: unused };
+          let mut callbacks = Callbacks {
+              selected: first,
+              other: unused,
+          };
           callbacks.selected = second;
           (callbacks.other)();
       }
 
       pub fn aggregate_branch(flag: bool) {
           let callbacks = if flag {
-              Callbacks { selected: first, other: unused }
+              Callbacks {
+                  selected: first,
+                  other: unused,
+              }
           } else {
-              Callbacks { selected: second, other: unused }
+              Callbacks {
+                  selected: second,
+                  other: unused,
+              }
           };
           (callbacks.selected)();
       }
 
       pub fn aggregate_match(flag: bool) {
           let callbacks = match flag {
-              true => Callbacks { selected: first, other: unused },
-              false => Callbacks { selected: second, other: unused },
+              true => Callbacks {
+                  selected: first,
+                  other: unused,
+              },
+              false => Callbacks {
+                  selected: second,
+                  other: unused,
+              },
           };
           (callbacks.selected)();
       }
 
       pub fn aggregate_loop(again: bool) {
-          let mut callbacks = Callbacks { selected: first, other: unused };
+          let mut callbacks = Callbacks {
+              selected: first,
+              other: unused,
+          };
           while again {
               (callbacks.selected)();
-              callbacks = Callbacks { selected: second, other: unused };
+              callbacks = Callbacks {
+                  selected: second,
+                  other: unused,
+              };
           }
       }
 

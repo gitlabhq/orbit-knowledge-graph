@@ -1,9 +1,30 @@
 name: "Bash: command and variable namespaces"
 fixtures:
   - path: braces/main.sh
-    content: "first() { :; }\nrun() { { first; }; }"
+    content: |
+      first() {
+          :
+      }
+
+      run() {
+          {
+              first
+          }
+      }
   - path: variable/main.sh
-    content: "first() { :; }\nsecond() { :; }\nrun() { local first=second; first; }"
+    content: |
+      first() {
+          :
+      }
+
+      second() {
+          :
+      }
+
+      run() {
+          local first=second
+          first
+      }
 tests:
   - name: "Literal commands resolve independently of variable bindings"
     query: |

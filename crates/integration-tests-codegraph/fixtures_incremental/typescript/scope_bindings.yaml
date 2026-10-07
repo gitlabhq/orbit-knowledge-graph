@@ -1,25 +1,106 @@
 name: "TypeScript: lexical binding ownership"
 fixtures:
   - path: optional_parameter/main.ts
-    content: "function first() {} function run(first?: () => void) { first!(); }"
+    content: |
+      function first() {}
+
+      function run(first?: () => void) {
+          first!();
+      }
   - path: for_initializer/main.ts
-    content: "function first() {} function run() { for (let first = () => {}; false;) {} first(); }"
+    content: |
+      function first() {}
+
+      function run() {
+          for (let first = () => {}; false;) {}
+          first();
+      }
   - path: for_binding/main.ts
-    content: "function first() {} function run() { for (let first of [() => {}]) { first(); } }"
+    content: |
+      function first() {}
+
+      function run() {
+          for (let first of [() => {}]) {
+              first();
+          }
+      }
   - path: let/main.ts
-    content: "function first() {} function second() {} function run() { let f = first; { let f = second; } f(); }"
+    content: |
+      function first() {}
+      function second() {}
+
+      function run() {
+          let f = first;
+          {
+              let f = second;
+          }
+          f();
+      }
   - path: var/main.ts
-    content: "function first() {} function second() {} function run() { var f = first; { var f = second; } f(); }"
+    content: |
+      function first() {}
+      function second() {}
+
+      function run() {
+          var f = first;
+          {
+              var f = second;
+          }
+          f();
+      }
   - path: parameter/main.ts
-    content: "function first() {} function run(first: () => void) { first(); }"
+    content: |
+      function first() {}
+
+      function run(first: () => void) {
+          first();
+      }
   - path: temporal_dead_zone/main.ts
-    content: "function first() {} function run() { { first(); let first = () => {}; } }"
+    content: |
+      function first() {}
+
+      function run() {
+          {
+              first();
+              let first = () => {};
+          }
+      }
   - path: var_redeclaration/main.ts
-    content: "function first() {} function second() {} function run() { var f = first; { var f; } f(); }"
+    content: |
+      function first() {}
+      function second() {}
+
+      function run() {
+          var f = first;
+          {
+              var f;
+          }
+          f();
+      }
   - path: loop_source/main.ts
-    content: "function first() {} function source() { return [() => {}]; } function run() { for (const first of source()) { first(); } first(); }"
+    content: |
+      function first() {}
+
+      function source() {
+          return [() => {}];
+      }
+
+      function run() {
+          for (const first of source()) {
+              first();
+          }
+          first();
+      }
   - path: loop_var/main.ts
-    content: "function first() {} function run() { var f = first; for (var f of [() => {}]) { f(); } }"
+    content: |
+      function first() {}
+
+      function run() {
+          var f = first;
+          for (var f of [() => {}]) {
+              f();
+          }
+      }
 tests:
   - name: "Unknown locals and loop values do not fall back to outer functions"
     query: |

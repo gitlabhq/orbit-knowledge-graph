@@ -1,13 +1,74 @@
 name: "Java: lexical binding ownership"
 fixtures:
   - path: shadow/Main.java
-    content: "class First { void ping() {} } class Main { First f; void run() { { String f = null; } f.ping(); } }"
+    content: |
+      class First {
+          void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              {
+                  String f = null;
+              }
+              f.ping();
+          }
+      }
   - path: control/Main.java
-    content: "class First { void ping() {} } class Main { First f; void run() { f.ping(); } }"
+    content: |
+      class First {
+          void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              f.ping();
+          }
+      }
   - path: siblings/Main.java
-    content: "class First { void ping() {} } class Second { void pong() {} } class Main { void run() { { First f = new First(); f.ping(); } { Second f = new Second(); f.pong(); } } }"
+    content: |
+      class First {
+          void ping() {}
+      }
+
+      class Second {
+          void pong() {}
+      }
+
+      class Main {
+          void run() {
+              {
+                  First f = new First();
+                  f.ping();
+              }
+              {
+                  Second f = new Second();
+                  f.pong();
+              }
+          }
+      }
   - path: local_class/Main.java
-    content: "class First { void ping() {} } class Main { void run() { { class Local { void ping() {} } Local f = new Local(); } First f = new First(); f.ping(); } }"
+    content: |
+      class First {
+          void ping() {}
+      }
+
+      class Main {
+          void run() {
+              {
+                  class Local {
+                      void ping() {}
+                  }
+                  Local f = new Local();
+              }
+              First f = new First();
+              f.ping();
+          }
+      }
 tests:
   - name: "Local classes and variables do not escape their blocks"
     query: |

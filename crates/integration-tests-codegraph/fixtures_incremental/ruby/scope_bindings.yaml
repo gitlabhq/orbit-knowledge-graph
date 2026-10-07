@@ -1,9 +1,24 @@
 name: "Ruby: block parameter ownership"
 fixtures:
   - path: shadow/main.rb
-    content: "def first; end\ndef run\n f = -> { first() }\n [1].each { |f| f.to_s }\n f.call\nend"
+    content: |
+      def first
+      end
+
+      def run
+        f = -> { first() }
+        [1].each { |f| f.to_s }
+        f.call
+      end
   - path: control/main.rb
-    content: "def first; end\ndef run\n f = -> { first() }\n f.call\nend"
+    content: |
+      def first
+      end
+
+      def run
+        f = -> { first() }
+        f.call
+      end
 tests:
   - name: "Block parameters do not replace outer callable bindings"
     query: |

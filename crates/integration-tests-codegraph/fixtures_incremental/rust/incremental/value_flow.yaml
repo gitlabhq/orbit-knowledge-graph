@@ -11,7 +11,9 @@ fixtures:
     content: |
       pub fn first() {}
       pub fn second() {}
-      pub struct Holder { pub callback: fn() }
+      pub struct Holder {
+          pub callback: fn(),
+      }
 
       pub fn record_call() {
           let holder = Holder { callback: first };
@@ -55,7 +57,9 @@ steps:
         content: |
           pub fn first() {}
           pub fn second() {}
-          pub struct Holder { pub callback: fn() }
+          pub struct Holder {
+              pub callback: fn(),
+          }
 
           pub fn record_call() {
               let holder = Holder { callback: second };
@@ -84,7 +88,9 @@ steps:
         content: |
           pub fn first() {}
           pub fn second() {}
-          pub struct Holder { pub callback: fn() }
+          pub struct Holder {
+              pub callback: fn(),
+          }
 
           pub fn record_call(callback: fn()) {
               let holder = Holder { callback };

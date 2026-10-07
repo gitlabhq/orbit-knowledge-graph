@@ -1,9 +1,35 @@
 name: "Lua: lexical binding ownership"
 fixtures:
   - path: local/main.lua
-    content: "function first() end\nfunction second() end\nfunction run() local f = first; do local f = second end; f() end"
+    content: |
+      function first()
+      end
+
+      function second()
+      end
+
+      function run()
+          local f = first
+          do
+              local f = second
+          end
+          f()
+      end
   - path: assignment/main.lua
-    content: "function first() end\nfunction second() end\nfunction run() local f = first; do f = second end; f() end"
+    content: |
+      function first()
+      end
+
+      function second()
+      end
+
+      function run()
+          local f = first
+          do
+              f = second
+          end
+          f()
+      end
 tests:
   - name: "Local declarations stay inside blocks while assignments survive"
     query: |

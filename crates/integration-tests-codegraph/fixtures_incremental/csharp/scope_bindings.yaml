@@ -1,13 +1,68 @@
 name: "C#: lexical binding ownership"
 fixtures:
   - path: siblings/main.cs
-    content: "class First { public void ping() {} } class Second { public void pong() {} } class Main { void run() { { var f = new First(); f.ping(); } { var f = new Second(); f.pong(); } } }"
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Second {
+          public void pong() {}
+      }
+
+      class Main {
+          void run() {
+              {
+                  var f = new First();
+                  f.ping();
+              }
+              {
+                  var f = new Second();
+                  f.pong();
+              }
+          }
+      }
   - path: local_function/main.cs
-    content: "class Main { static void target() {} void run() { { void target() {} } target(); } }"
+    content: |
+      class Main {
+          static void target() {}
+
+          void run() {
+              {
+                  void target() {}
+              }
+              target();
+          }
+      }
   - path: control/main.cs
-    content: "class First { public void ping() {} } class Main { First f; void run() { f.ping(); } }"
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              f.ping();
+          }
+      }
   - path: shadow/main.cs
-    content: "class First { public void ping() {} } class Main { First f; void run() { { string f = null; } f.ping(); } }"
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              {
+                  string f = null;
+              }
+              f.ping();
+          }
+      }
 tests:
   - name: "Sibling blocks and field shadows retain their own targets"
     query: |

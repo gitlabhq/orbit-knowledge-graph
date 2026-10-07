@@ -1,31 +1,161 @@
 name: "Rust: lexical binding ownership"
 fixtures:
   - path: parameters/main.rs
-    content: "fn first() {} fn run(first: fn()) { first(); }"
+    content: |
+      fn first() {}
+
+      fn run(first: fn()) {
+          first();
+      }
   - path: uninitialized/main.rs
-    content: "fn first() {} fn run() { let first; first(); }"
+    content: |
+      fn first() {}
+
+      fn run() {
+          let first;
+          first();
+      }
   - path: closure/main.rs
-    content: "fn first() {} fn second() {} fn run() { let mut f: fn() = first; let unused = || { f = second; }; f(); }"
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run() {
+          let mut f: fn() = first;
+          let unused = || {
+              f = second;
+          };
+          f();
+      }
   - path: hoisting/main.rs
-    content: "fn first() {} fn run() { target(); fn target() {} }"
+    content: |
+      fn first() {}
+
+      fn run() {
+          target();
+          fn target() {}
+      }
   - path: constructor_shadow/main.rs
-    content: "struct First; impl First { fn ping(&self) {} } struct Second; impl Second { fn pong(&self) {} } fn run() { let f = First; { let f = Second; } f.ping(); }"
+    content: |
+      struct First;
+
+      impl First {
+          fn ping(&self) {}
+      }
+
+      struct Second;
+
+      impl Second {
+          fn pong(&self) {}
+      }
+
+      fn run() {
+          let f = First;
+          {
+              let f = Second;
+          }
+          f.ping();
+      }
   - path: constructor_control/main.rs
-    content: "struct First; impl First { fn ping(&self) {} } fn run() { let f = First; f.ping(); }"
+    content: |
+      struct First;
+
+      impl First {
+          fn ping(&self) {}
+      }
+
+      fn run() {
+          let f = First;
+          f.ping();
+      }
   - path: branch/main.rs
-    content: "fn first() {} fn second() {} fn run(flag: bool) { let f: fn() = first; if flag { let f: fn() = second; } f(); }"
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run(flag: bool) {
+          let f: fn() = first;
+          if flag {
+              let f: fn() = second;
+          }
+          f();
+      }
   - path: assignment/main.rs
-    content: "fn first() {} fn second() {} fn run() { let mut f: fn() = first; { f = second; } f(); }"
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run() {
+          let mut f: fn() = first;
+          {
+              f = second;
+          }
+          f();
+      }
   - path: import/main.rs
-    content: "fn first() {} mod dep { pub fn second() {} } fn run() { let f = first; { use crate::dep::second as f; } f(); }"
+    content: |
+      fn first() {}
+
+      mod dep {
+          pub fn second() {}
+      }
+
+      fn run() {
+          let f = first;
+          {
+              use crate::dep::second as f;
+          }
+          f();
+      }
   - path: branch_initializer/main.rs
-    content: "fn first() {} fn second() {} fn run(flag: bool) { let f: fn() = first; { let f = if flag { second } else { first }; } f(); }"
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run(flag: bool) {
+          let f: fn() = first;
+          {
+              let f = if flag {
+                  second
+              } else {
+                  first
+              };
+          }
+          f();
+      }
   - path: initializer/main.rs
-    content: "fn first() {} fn run() { let f = first; let f = f; f(); }"
+    content: |
+      fn first() {}
+
+      fn run() {
+          let f = first;
+          let f = f;
+          f();
+      }
   - path: block_value/main.rs
-    content: "fn first() {} fn run() { let f = { let local = first; local }; f(); }"
+    content: |
+      fn first() {}
+
+      fn run() {
+          let f = {
+              let local = first;
+              local
+          };
+          f();
+      }
   - path: field_copy/main.rs
-    content: "struct H { callback: fn() } fn first() {} fn run() { let h = H { callback: first }; let h = h; (h.callback)(); }"
+    content: |
+      struct H {
+          callback: fn(),
+      }
+
+      fn first() {}
+
+      fn run() {
+          let h = H { callback: first };
+          let h = h;
+          (h.callback)();
+      }
 tests:
   - name: "Parameters and uninitialized locals block outer function lookup"
     query: |

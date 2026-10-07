@@ -1,9 +1,21 @@
 name: "JavaScript: parameter and iteration bindings"
 fixtures:
   - path: parameter/main.js
-    content: "function first() {} function run(first) { first(); }"
+    content: |
+      function first() {}
+
+      function run(first) {
+          first();
+      }
   - path: iteration/main.js
-    content: "function first() {} function run() { for (let first of [() => {}]) { first(); } }"
+    content: |
+      function first() {}
+
+      function run() {
+          for (let first of [() => {}]) {
+              first();
+          }
+      }
 tests:
   - name: "Parameters and loop bindings block outer function fallback"
     query: |

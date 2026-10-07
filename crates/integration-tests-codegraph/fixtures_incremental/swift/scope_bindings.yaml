@@ -1,17 +1,77 @@
 name: "Swift: lexical binding ownership"
 fixtures:
   - path: local/main.swift
-    content: "func first() {}\nfunc second() {}\nfunc run() { let f = first; do { let f = second }; f() }"
+    content: |
+      func first() {}
+      func second() {}
+
+      func run() {
+          let f = first
+          do {
+              let f = second
+          }
+          f()
+      }
   - path: callable/main.swift
-    content: "func first() {}\nfunc run() { let f = first; f() }"
+    content: |
+      func first() {}
+
+      func run() {
+          let f = first
+          f()
+      }
   - path: shadow/main.swift
-    content: "class First { func ping() {} }\nclass Second { func pong() {} }\nfunc run() { let f = First(); do { let f = Second() }; f.ping() }"
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      class Second {
+          func pong() {}
+      }
+
+      func run() {
+          let f = First()
+          do {
+              let f = Second()
+          }
+          f.ping()
+      }
   - path: control/main.swift
-    content: "class First { func ping() {} }\nfunc run() { let f = First(); f.ping() }"
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      func run() {
+          let f = First()
+          f.ping()
+      }
   - path: typed/main.swift
-    content: "class First { func ping() {} }\nfunc run(f: First) { f.ping() }"
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      func run(f: First) {
+          f.ping()
+      }
   - path: parameter/main.swift
-    content: "class First { func ping() {} }\nclass Second { func pong() {} }\nfunc run(f: First) { do { let f: Second = Second() }; f.ping() }"
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      class Second {
+          func pong() {}
+      }
+
+      func run(f: First) {
+          do {
+              let f: Second = Second()
+          }
+          f.ping()
+      }
 tests:
   - name: "Local shadows preserve callable and receiver bindings"
     query: |

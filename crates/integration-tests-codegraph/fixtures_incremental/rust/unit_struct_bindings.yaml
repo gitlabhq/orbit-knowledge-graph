@@ -13,16 +13,19 @@ fixtures:
       use external::Unknown;
 
       struct lowercase;
+
       impl lowercase {
           fn ping(&self) {}
       }
 
       struct Uppercase;
+
       impl Uppercase {
           fn pong(&self) {}
       }
 
       fn Callback() {}
+
       struct Tuple(i32);
 
       fn constructor_references() {
@@ -81,10 +84,13 @@ fixtures:
   - path: src/dep.rs
     content: |
       pub struct imported_lowercase;
+
       impl imported_lowercase {
           pub fn imported_ping(&self) {}
       }
+
       pub fn ImportedCallback() {}
+
       pub struct ImportedTuple(pub i32);
 tests:
   - name: "Unit struct method targets do not depend on capitalization"

@@ -8,7 +8,9 @@ fixtures:
       }
       fn in_loop() {
           use external::*;
-          loop { missing(); }
+          loop {
+              missing();
+          }
       }
       fn inner_import() {
           loop {
@@ -19,17 +21,23 @@ fixtures:
       fn shadowed() {
           use external::*;
           let missing = || {};
-          loop { missing(); }
+          loop {
+              missing();
+          }
       }
       fn builtin() {
           use external::*;
-          loop { drop(1); }
+          loop {
+              drop(1);
+          }
       }
       fn target() {}
       fn known() {
           use external::*;
           let callback = target;
-          loop { callback(); }
+          loop {
+              callback();
+          }
       }
 tests:
   - name: "Undefined calls use the wildcard visible at their call site"
