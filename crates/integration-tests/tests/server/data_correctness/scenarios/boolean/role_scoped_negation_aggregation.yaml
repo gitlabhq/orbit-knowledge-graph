@@ -1,4 +1,4 @@
-description: A matching project OR branch cannot bypass the vulnerability role requirement
+description: A matching grouped negation cannot bypass the vulnerability role requirement
 
 config:
   security:
@@ -11,7 +11,7 @@ query:
   gql: |
     MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability)
     WHERE p.id >= 1000 AND p.id <= 1004
-      AND (p.id = 1000 OR v.severity IN ['high', 'critical'])
+      AND NOT (NOT p.id = 1000 AND NOT v.severity IN ['high', 'critical'])
     RETURN p{.name}, count(v) AS vuln_count LIMIT 10
 
 expect:

@@ -610,18 +610,11 @@ fn boolean_text<T>(
     match expression {
         BooleanExpression::Leaf(value) => leaf(value),
         BooleanExpression::Not(child) => format!("NOT ({})", boolean_text(child, leaf)),
-        BooleanExpression::And(children) | BooleanExpression::Or(children) => {
-            let separator = if matches!(expression, BooleanExpression::And(_)) {
-                " AND "
-            } else {
-                " OR "
-            };
-            children
-                .iter()
-                .map(|child| format!("({})", boolean_text(child, leaf)))
-                .collect::<Vec<_>>()
-                .join(separator)
-        }
+        BooleanExpression::And(children) => children
+            .iter()
+            .map(|child| format!("({})", boolean_text(child, leaf)))
+            .collect::<Vec<_>>()
+            .join(" AND "),
     }
 }
 

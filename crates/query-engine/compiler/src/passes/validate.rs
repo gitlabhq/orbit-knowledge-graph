@@ -195,12 +195,6 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
-fn predicate_has_selectivity(
-    expression: &crate::input::BooleanExpression<crate::input::PropertyPredicate>,
-) -> bool {
-    expression.local_node().is_some() && expression.has_positive_literal()
-}
-
 #[derive(Default)]
 pub struct Skip {
     pub selectivity: bool,
@@ -1048,8 +1042,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 ));
             }
             QueryType::Traversal | QueryType::Aggregation
-                if !input.nodes.iter().any(node_has_selectivity)
-                    && !input.predicates.iter().any(predicate_has_selectivity) =>
+                if !input.nodes.iter().any(node_has_selectivity) =>
             {
                 return Err(QueryError::Validation(
                     "traversal and aggregation queries require node_ids or filters on \

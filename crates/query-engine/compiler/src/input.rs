@@ -58,7 +58,6 @@ pub struct Input {
 pub enum BooleanExpression<T> {
     Leaf(T),
     And(Vec<Self>),
-    Or(Vec<Self>),
     Not(Box<Self>),
 }
 
@@ -69,9 +68,7 @@ impl<T> BooleanExpression<T> {
             while let Some(expression) = pending.pop() {
                 match expression {
                     Self::Leaf(leaf) => return Some(leaf),
-                    Self::And(children) | Self::Or(children) => {
-                        pending.extend(children.iter().rev())
-                    }
+                    Self::And(children) => pending.extend(children.iter().rev()),
                     Self::Not(child) => pending.push(child),
                 }
             }
@@ -91,12 +88,6 @@ impl<T> BooleanExpression<T> {
                     .map(|child| child.try_map(map))
                     .collect::<Result<_, _>>()?,
             ),
-            Self::Or(children) => BooleanExpression::Or(
-                children
-                    .into_iter()
-                    .map(|child| child.try_map(map))
-                    .collect::<Result<_, _>>()?,
-            ),
             Self::Not(child) => BooleanExpression::Not(Box::new(child.try_map(map)?)),
         })
     }
@@ -104,9 +95,7 @@ impl<T> BooleanExpression<T> {
     pub fn depth(&self) -> usize {
         match self {
             Self::Leaf(_) => 0,
-            Self::And(children) | Self::Or(children) => {
-                1 + children.iter().map(Self::depth).max().unwrap_or(0)
-            }
+            Self::And(children) => 1 + children.iter().map(Self::depth).max().unwrap_or(0),
             Self::Not(child) => 1 + child.depth(),
         }
     }
@@ -140,17 +129,6 @@ impl BooleanExpression<PropertyPredicate> {
                         .is_none_or(|(node, _)| node == alias)
             })
             .then_some(alias)
-    }
-
-    pub fn has_positive_literal(&self) -> bool {
-        match self {
-            Self::Leaf(leaf) => leaf.filter.rhs_column.is_none(),
-            Self::And(children) => children.iter().any(Self::has_positive_literal),
-            Self::Or(children) => {
-                !children.is_empty() && children.iter().all(Self::has_positive_literal)
-            }
-            Self::Not(_) => false,
-        }
     }
 }
 

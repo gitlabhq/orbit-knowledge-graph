@@ -1,10 +1,10 @@
-description: Cross-node OR counts each matching merge request once even when both branches match
+description: Cross-node negation counts each matching merge request once
 
 query:
   gql: |
     MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
     WHERE u.id >= 1 AND u.id <= 7
-      AND (u.username = 'alice' OR mr.id IN [2000, 2002])
+      AND NOT (NOT u.username = 'alice' AND NOT mr.id IN [2000, 2002])
     RETURN u{.username}, count(mr) AS mr_count LIMIT 10
 
 expect:

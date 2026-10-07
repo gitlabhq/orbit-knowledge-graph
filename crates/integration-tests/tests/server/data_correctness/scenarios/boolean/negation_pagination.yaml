@@ -1,10 +1,10 @@
-description: Cursor bounds apply to the whole OR expression without repeats or missing matches
+description: Cursor bounds apply to grouped negation without repeats or missing matches
 
 query:
   gql: |
     MATCH (wi:WorkItem)
     WHERE wi.id >= 4000 AND wi.id <= 4010
-      AND (wi.id = 4001 OR NOT wi.state = 'closed')
+      AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
     RETURN wi.state ORDER BY wi.id PAGE 2
 
 expect:

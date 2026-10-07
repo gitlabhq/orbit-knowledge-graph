@@ -17,16 +17,51 @@ fn remote(query: &str) -> crate::CompiledQueryContext {
 }
 
 #[test]
+fn or_predicates_reject_in_every_position() {
+    for predicate in [
+        "a.id = 1 OR a.id = 2",
+        "(a.id = 1 OR a.id = 2)",
+        "NOT (a.id = 1 OR a.id = 2)",
+        "a.id = 1 AND (a.id = 2 OR a.id = 3)",
+        "a.id = 1 OR a.id = 2 AND NOT a.id = 3",
+        "NOT (a.id = 1 AND (a.id = 2 OR a.id = 3))",
+        "a.id = 1 OR b.id = 2",
+        "NOT (a.id = 1 OR edge.target_id = 2)",
+        "a.id = 1 or a.id = 2",
+    ] {
+        let query = format!(
+            "MATCH (a:Definition {{id: 1}})-[edge:CALLS]->(b:Definition) WHERE {predicate} RETURN b.id"
+        );
+        for result in [
+            compile(
+                &query,
+                Frontend::Gql,
+                &ONTOLOGY,
+                &crate::testkit::non_admin_ctx(),
+            ),
+            compile_local(&query, Frontend::Gql, &ONTOLOGY),
+        ] {
+            let error = result.expect_err("OR must reject").to_string();
+            assert!(error.contains("Orbit query syntax"), "{query}: {error}");
+            assert!(
+                error.contains("predicates support AND, NOT, and parentheses"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn boolean_precedence_groups_and_id_promotion() {
-    let query = "MATCH (n:Definition) WHERE n.id IN [1, 2] AND NOT n.name IN ['skip', 'omit'] AND (n.name = 'left' OR n.id IN [3, 4] AND NOT n.name = 'right') RETURN n.name";
+    let query = "MATCH (n:Definition) WHERE (n.id IN [1, 2]) AND NOT n.name IN ['skip', 'omit'] AND NOT (n.name = 'left' AND n.id IN [3, 4] AND NOT n.name = 'right') RETURN n.name";
     let input = validate_normalize_gql(query, &ONTOLOGY).unwrap();
     assert_eq!(input.nodes[0].node_ids, [1, 2]);
     assert!(input.nodes[0].filters.is_empty());
     assert!(matches!(&input.predicates[0], BooleanExpression::Not(_)));
-    let BooleanExpression::Or(arms) = &input.predicates[1] else {
-        panic!("OR group missing")
+    let BooleanExpression::Not(group) = &input.predicates[1] else {
+        panic!("negated group missing")
     };
-    assert!(matches!(&arms[1], BooleanExpression::And(_)));
+    assert!(matches!(group.as_ref(), BooleanExpression::And(_)));
     assert_eq!(
         input
             .predicate_leaves()
@@ -35,7 +70,7 @@ fn boolean_precedence_groups_and_id_promotion() {
         2
     );
     let sql = remote(query).base.render();
-    assert!(sql.contains("NOT") && sql.contains(" OR "), "{sql}");
+    assert!(sql.contains("(NOT (((n.name = 'left') AND"), "{sql}");
     assert!(
         sql.contains("n.id IN [1, 2]") || sql.contains("n.id IN (1, 2)"),
         "{sql}"
@@ -46,13 +81,13 @@ fn boolean_precedence_groups_and_id_promotion() {
 fn boolean_comparisons_compile_for_both_backends() {
     for predicate in [
         "NOT n.name IN ['skip', 'omit']",
-        "NOT (n.name CONTAINS 'skip' OR n.name STARTS WITH 'omit')",
-        "n.name ENDS WITH 'tail' OR NOT n.name IS NULL",
+        "NOT (n.name CONTAINS 'skip' AND n.name STARTS WITH 'omit')",
+        "NOT n.name ENDS WITH 'tail' AND NOT n.name IS NULL",
         "NOT NOT n.name IS NOT NULL",
         "NOT(NOT(n.name IS NULL))",
-        "n.id < 10 OR n.id >= 20 AND NOT n.id <> 30",
+        "NOT (n.id < 10 AND n.id >= 20 AND NOT n.id <> 30)",
         "NOT n.id IN []",
-        "n.name = 'one' OR (n.name = 'two' AND NOT n.name = 'three')",
+        "n.name = 'one' AND (n.name = 'two' AND NOT n.name = 'three')",
     ] {
         let query = format!("MATCH (n:Definition {{id: 1}}) WHERE {predicate} RETURN n.name");
         let remote = remote(&query);
@@ -79,14 +114,14 @@ fn boolean_membership_preserves_null_and_empty_list_semantics() {
 #[test]
 fn boolean_cross_alias_predicates_keep_nodes_and_named_edges_visible() {
     for query in [
-        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT b.name IN ['skip'] OR call.source_id = 3 RETURN b.name",
-        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT call.branch STARTS WITH 'main' OR call.target_id IN [3, 4] RETURN b.name",
-        "MATCH (u:User {id: 1})-[authored:AUTHORED]->(m:MergeRequest) WHERE u.username = 'alice' OR NOT m.state = 3 OR authored.target_id = 7 RETURN m.title",
-        "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) WHERE a.name = b.name OR NOT b.name = 'skip' RETURN b.name",
-        "MATCH (a:Definition)-[first:CALLS]->(b:Definition)-[second:CALLS]->(c:Definition {id: 7}) WHERE first.source_id = 3 OR second.target_id = 4 RETURN a.name",
+        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT (b.name IN ['skip'] AND call.source_id = 3) RETURN b.name",
+        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT (call.branch STARTS WITH 'main' AND call.target_id IN [3, 4]) RETURN b.name",
+        "MATCH (u:User {id: 1})-[authored:AUTHORED]->(m:MergeRequest) WHERE NOT (u.username = 'alice' AND NOT m.state = 3 AND authored.target_id = 7) RETURN m.title",
+        "MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) WHERE NOT (a.name = b.name AND NOT b.name = 'skip') RETURN b.name",
+        "MATCH (a:Definition)-[first:CALLS]->(b:Definition)-[second:CALLS]->(c:Definition {id: 7}) WHERE NOT (first.source_id = 3 AND second.target_id = 4) RETURN a.name",
     ] {
         let sql = remote(query).base.render();
-        assert!(sql.contains(" OR "), "{sql}");
+        assert!(sql.contains("(NOT (") && sql.contains(" AND "), "{sql}");
         assert!(sql.contains("startsWith("), "{sql}");
         if query.contains(":Definition") && !query.contains("call.branch") {
             compile_local(query, Frontend::Gql, &ONTOLOGY).unwrap();
@@ -97,12 +132,12 @@ fn boolean_cross_alias_predicates_keep_nodes_and_named_edges_visible() {
 #[test]
 fn boolean_aggregation_keeps_filter_dependencies() {
     for query in [
-        "MATCH (m:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE m.state = 3 OR NOT p.name = 'skip' RETURN count(m)",
-        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT b.name = 'skip' OR call.target_id = 3 RETURN count(b)",
+        "MATCH (m:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) WHERE NOT (m.state = 3 AND NOT p.name = 'skip') RETURN count(m)",
+        "MATCH (a:Definition {id: 1})-[call:CALLS]->(b:Definition) WHERE NOT (b.name = 'skip' AND call.target_id = 3) RETURN count(b)",
     ] {
         let sql = remote(query).base.render();
         assert!(
-            sql.contains(" OR ") && sql.to_lowercase().contains("count"),
+            sql.contains("(NOT (") && sql.to_lowercase().contains("count"),
             "{sql}"
         );
         assert!(sql.contains("gl_"), "{sql}");
@@ -114,7 +149,7 @@ fn boolean_aggregation_keeps_filter_dependencies() {
 
 #[test]
 fn boolean_normalization_and_parameterization() {
-    let query = "MATCH (m:MergeRequest {id: 1}) WHERE NOT m.state IN [1, 3] OR m.title = 'x\\\' OR 1=1 --' RETURN m.id";
+    let query = "MATCH (m:MergeRequest {id: 1}) WHERE NOT (m.state IN [1, 3] AND m.title = 'x\\\' OR 1=1 --') RETURN m.id";
     let compiled = remote(query);
     assert!(!compiled.base.sql.contains("OR 1=1 --"));
     let sql = compiled.base.render();
@@ -124,9 +159,15 @@ fn boolean_normalization_and_parameterization() {
 #[test]
 fn boolean_validation_checks_every_branch() {
     for (predicate, expected) in [
-        ("n.name = 'okay' OR NOT n.missing = 'bad'", "does not exist"),
+        (
+            "NOT (n.name = 'okay' AND n.missing = 'bad')",
+            "does not exist",
+        ),
         ("NOT n.id IN ['bad']", "not an integer"),
-        ("n.name = 'okay' OR NOT n.name CONTAINS 'x'", "at least 3"),
+        (
+            "NOT (n.name = 'okay' AND n.name CONTAINS 'x')",
+            "at least 3",
+        ),
         ("NOT n.id CONTAINS 'bad'", "string operators"),
         ("NOT token_match(n.id, 'word')", "text index"),
         ("NOT n.traversal_path STARTS WITH '2/'", "authorized"),
@@ -144,7 +185,7 @@ fn boolean_validation_checks_every_branch() {
         assert!(error.to_string().contains(expected), "{query}: {error}");
     }
     let error = compile(
-        "MATCH (u:User {id: 1}) WHERE u.username = 'alice' OR NOT u.is_admin = true RETURN u.id",
+        "MATCH (u:User {id: 1}) WHERE NOT (u.username = 'alice' AND u.is_admin = true) RETURN u.id",
         Frontend::Gql,
         &ONTOLOGY,
         &crate::testkit::non_admin_ctx(),
@@ -155,15 +196,19 @@ fn boolean_validation_checks_every_branch() {
 }
 
 #[test]
-fn boolean_selectivity_does_not_promote_disjunctive_or_negated_ids() {
+fn boolean_selectivity_does_not_promote_negated_ids() {
     let input = validate_normalize_gql(
-        "MATCH (n:Definition) WHERE n.id IN [1] OR n.id IN [2] RETURN n.id",
+        "MATCH (n:Definition) WHERE n.name = 'anchor' AND NOT (n.id IN [1] AND n.id >= 2 AND n.id <= 4) RETURN n.id",
         &ONTOLOGY,
     )
     .unwrap();
     assert!(input.nodes[0].node_ids.is_empty());
     assert!(input.nodes[0].id_range.is_none());
-    for predicate in ["NOT n.id IN [1]", "n.id IN [1] OR NOT n.id IN [2]"] {
+    for predicate in [
+        "NOT n.id IN [1]",
+        "NOT (n.id IN [1] AND n.id IN [2])",
+        "NOT NOT n.id IN [1]",
+    ] {
         let query = format!("MATCH (n:Definition) WHERE {predicate} RETURN n.id");
         let error = validate_normalize_gql(&query, &ONTOLOGY).unwrap_err();
         assert!(
@@ -226,7 +271,8 @@ fn positive_conjuncts_keep_pushdown_and_id_ranges() {
 #[test]
 fn boolean_predicates_keep_authorization_and_cursor_requirements() {
     use crate::types::{AccessLevel, AuthorizedPath, SecurityContext};
-    let query = "MATCH (v:Vulnerability {id: 1}) WHERE v.id = 1 OR NOT v.id = 2 RETURN v.id PAGE 2";
+    let query =
+        "MATCH (v:Vulnerability {id: 1}) WHERE NOT (v.id = 1 AND NOT v.id = 2) RETURN v.id PAGE 2";
     let sql = remote(query).base.render();
     assert!(
         sql.contains("false") && sql.contains("ORDER BY") && sql.contains("LIMIT 3"),
@@ -263,7 +309,7 @@ fn boolean_tokens_and_edge_validation() {
     for (predicate, expected) in [
         ("NOT call._deleted = true", "private edge"),
         (
-            "call.source_id = 1 OR NOT call.missing = 1",
+            "NOT (call.source_id = 1 AND call.missing = 1)",
             "unknown edge column",
         ),
         ("NOT call.target_id = 'bad'", "not an integer"),
@@ -292,16 +338,16 @@ fn empty_membership_remains_a_filter_and_multiple_matches_conjoin_groups() {
     ] {
         assert!(remote(query).base.render().contains("false"));
     }
-    let query = "MATCH (a:Definition {id: 1}) WHERE a.name = 'one' OR a.name = 'two' MATCH (a)-[:CALLS]->(b:Definition) WHERE b.name = 'three' OR NOT b.name = 'four' RETURN b.name";
+    let query = "MATCH (a:Definition {id: 1}) WHERE NOT (a.name = 'one' AND a.name = 'two') MATCH (a)-[:CALLS]->(b:Definition) WHERE NOT (b.name = 'three' AND NOT b.name = 'four') RETURN b.name";
     let input = validate_normalize_gql(query, &ONTOLOGY).unwrap();
     assert_eq!(input.predicates.len(), 2);
     let sql = remote(query).base.render();
     assert!(
-        sql.contains("((a.name = 'one') OR (a.name = 'two'))"),
+        sql.contains("(NOT ((a.name = 'one') AND (a.name = 'two')))"),
         "{sql}"
     );
     assert!(
-        sql.contains("((b.name = 'three') OR (NOT (b.name = 'four')))"),
+        sql.contains("(NOT ((b.name = 'three') AND (NOT (b.name = 'four'))))"),
         "{sql}"
     );
 }
@@ -345,7 +391,7 @@ fn traversal_path_property_comparisons_fail_as_client_errors() {
     for predicate in [
         "a.traversal_path = b.name",
         "NOT a.traversal_path = b.name",
-        "a.name = b.traversal_path OR a.id = 1",
+        "NOT (a.name = b.traversal_path AND a.id = 1)",
         "NOT a.traversal_path = a.name",
         "a.traversal_path = a.name",
     ] {
@@ -370,17 +416,17 @@ fn traversal_path_property_comparisons_fail_as_client_errors() {
 }
 
 #[test]
-fn same_node_disjunction_narrows_edges_before_dedup() {
+fn same_node_negation_narrows_edges_before_dedup() {
     for projection in ["b.id", "count(b)"] {
         let query = format!(
-            "MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE a.id = 1 OR a.id = 2 RETURN {projection}"
+            "MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE a.name = 'anchor' AND NOT (a.id >= 1 AND a.id <= 2) RETURN {projection}"
         );
         let input = validate_normalize_gql(&query, &ONTOLOGY).unwrap();
         assert!(input.nodes[0].node_ids.is_empty());
         let sql = remote(&query).base.render();
         let frontier_end = sql.find(") SELECT ").expect("frontier CTE");
         assert!(
-            sql[..frontier_end].contains("((a.id = 1) OR (a.id = 2))"),
+            sql[..frontier_end].contains("(NOT ((a.id >= 1) AND (a.id <= 2)))"),
             "{sql}"
         );
         assert!(
@@ -395,8 +441,7 @@ fn same_node_disjunction_narrows_edges_before_dedup() {
             assert!(dedup.is_some(), "frontier must precede edge dedup: {sql}");
         }
     }
-    let query =
-        "MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE a.id = 1 OR b.id = 2 RETURN b.id";
+    let query = "MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE NOT (a.id = 1 AND b.id = 2) RETURN b.id";
     assert!(
         validate_normalize_gql(query, &ONTOLOGY)
             .unwrap_err()
@@ -405,14 +450,14 @@ fn same_node_disjunction_narrows_edges_before_dedup() {
     );
     for (query, frontier, predicate) in [
         (
-            "MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) WHERE a.name = 'first' OR a.name = 'second' RETURN c.id",
+            "MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) WHERE a.id >= 1 AND NOT (a.name = 'first' AND a.id <= 2) RETURN c.id",
             "_filter_a",
-            "((a.name = 'first') OR (a.name = 'second'))",
+            "(NOT ((a.name = 'first') AND (a.id <= 2)))",
         ),
         (
-            "MATCH (m:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 OR p.id = 2 RETURN m.id",
+            "MATCH (m:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.name = 'anchor' AND NOT (p.id >= 1 AND p.id <= 2) RETURN m.id",
             "_candidate_p",
-            "((p.id = 1) OR (p.id = 2))",
+            "(NOT ((p.id >= 1) AND (p.id <= 2)))",
         ),
     ] {
         let sql = remote(query).base.render();

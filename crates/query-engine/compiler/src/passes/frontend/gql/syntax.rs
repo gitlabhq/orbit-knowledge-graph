@@ -12,19 +12,6 @@ use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, Trunc
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
 
-fn boolean_group<T>(
-    mut children: Vec<BooleanExpression<T>>,
-    conjunction: bool,
-) -> BooleanExpression<T> {
-    if children.len() == 1 {
-        children.pop().expect("one predicate")
-    } else if conjunction {
-        BooleanExpression::And(children)
-    } else {
-        BooleanExpression::Or(children)
-    }
-}
-
 #[pest_consume::parser]
 impl QueryParser {
     fn EOI(_input: Node) -> Result<()> {
@@ -236,22 +223,19 @@ impl QueryParser {
 
     fn Where(input: Node) -> Result<BooleanExpression<Comparison>> {
         Ok(match_nodes!(input.into_children();
-            [OrExpression(predicate)] => predicate,
+            [AndExpression(predicate)] => predicate,
         ))
     }
 
-    fn OrExpression(input: Node) -> Result<BooleanExpression<Comparison>> {
-        let children = match_nodes!(input.into_children();
-            [AndExpression(children)..] => children.collect(),
-        );
-        Ok(boolean_group(children, false))
-    }
-
     fn AndExpression(input: Node) -> Result<BooleanExpression<Comparison>> {
-        let children = match_nodes!(input.into_children();
+        let mut children: Vec<_> = match_nodes!(input.into_children();
             [NotExpression(children)..] => children.collect(),
         );
-        Ok(boolean_group(children, true))
+        Ok(if children.len() == 1 {
+            children.pop().expect("one predicate")
+        } else {
+            BooleanExpression::And(children)
+        })
     }
 
     fn NotExpression(input: Node) -> Result<BooleanExpression<Comparison>> {
@@ -271,7 +255,7 @@ impl QueryParser {
     #[alias(predicate)]
     fn ParenthesizedExpression(input: Node) -> Result<BooleanExpression<Comparison>> {
         Ok(match_nodes!(input.into_children();
-            [OrExpression(predicate)] => predicate,
+            [AndExpression(predicate)] => predicate,
         ))
     }
 

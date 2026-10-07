@@ -1,4 +1,4 @@
-description: Neither OR branch can expose projects outside the authorized namespace and organization
+description: Grouped negation cannot expose projects outside the authorized namespace and organization
 
 config:
   security:
@@ -9,7 +9,7 @@ query:
   gql: |
     MATCH (p:Project)
     WHERE p.id >= 1000 AND p.id <= 9000
-      AND (p.id IN [1000, 1001, 9000] OR NOT p.visibility_level = 'private')
+      AND NOT (NOT p.id IN [1000, 1001, 9000] AND p.visibility_level = 'private')
     RETURN p.name ORDER BY p.id LIMIT 10
 
 expect:

@@ -1,9 +1,9 @@
-description: AND binds before OR so the first branch can include a closed work item
+description: Grouping AND makes NOT negate both conditions and includes the closed work item
 
 query:
   gql: |
     MATCH (wi:WorkItem)
-    WHERE wi.id = 4001 OR wi.id = 4000 AND NOT wi.state = 'closed'
+    WHERE wi.id IN [4000, 4001] AND NOT (wi.state = 'closed' AND wi.weight = 3)
     RETURN wi.state ORDER BY wi.id LIMIT 10
 
 expect:

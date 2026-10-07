@@ -18,7 +18,7 @@ config:
 query:
   gql: |
     MATCH (wi:WorkItem)
-    WHERE wi.id IN [9400, 9401, 9402, 9403] AND (NOT wi.state = 'closed' OR wi.weight = 13)
+    WHERE wi.id IN [9400, 9401, 9402, 9403] AND NOT (wi.state = 'closed' AND NOT wi.weight = 13)
     RETURN wi.title, wi.state, wi.weight LIMIT 10
 
 expect:

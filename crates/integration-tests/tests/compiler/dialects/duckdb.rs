@@ -558,31 +558,35 @@ fn gql_boolean_predicates_execute_with_nulls_groups_and_cross_aliases() {
         ("NOT u.name IN []", vec!["1", "2", "3", "4"]),
         ("u.name IN []", vec![]),
         (
-            "u.name = 'alice' OR u.name = 'bob' AND NOT u.definition_type = 'blocked'",
+            "u.name = 'alice' AND NOT u.definition_type = 'blocked'",
             vec!["1"],
         ),
         (
-            "(u.name = 'alice' OR u.name = 'bob') AND NOT u.definition_type = 'blocked'",
-            vec!["1"],
+            "NOT (u.name = 'alice' AND u.definition_type = 'active')",
+            vec!["2", "4"],
         ),
         (
-            "u.name = 'alice' OR u.name = 'bob' AND u.definition_type = 'blocked'",
-            vec!["1", "2"],
-        ),
-        (
-            "(u.name = 'alice' OR u.name = 'bob') AND u.definition_type = 'blocked'",
-            vec!["2"],
-        ),
-        (
-            "NOT (u.name = 'alice' OR u.definition_type = 'blocked')",
+            "NOT u.name = 'alice' AND u.definition_type = 'active'",
             vec![],
         ),
         (
-            "u.name IS NULL OR NOT u.definition_type IS NOT NULL",
+            "(u.name = 'bob' AND NOT u.definition_type = 'active')",
+            vec!["2"],
+        ),
+        (
+            "NOT (u.name = 'alice' AND NOT (u.id = 1 AND u.definition_type = 'active'))",
+            vec!["1", "2", "4"],
+        ),
+        (
+            "NOT (u.name IS NOT NULL AND u.definition_type IS NOT NULL)",
             vec!["3", "4"],
         ),
         ("NOT NOT u.name = 'alice'", vec!["1"]),
         ("NOT u.name CONTAINS 'ali'", vec!["2", "4"]),
+        ("NOT u.name STARTS WITH 'ali'", vec!["2", "4"]),
+        ("NOT u.name ENDS WITH 'rol'", vec!["1", "2"]),
+        ("NOT u.name IS NULL", vec!["1", "2", "4"]),
+        ("NOT u.id >= 3", vec!["1", "2"]),
         ("NOT u.id IN [1, 2] AND u.id < 4", vec!["3"]),
     ] {
         let query = format!(
@@ -591,26 +595,32 @@ fn gql_boolean_predicates_execute_with_nulls_groups_and_cross_aliases() {
         assert_eq!(ids(&query), expected, "{query}");
     }
     for (predicate, expected) in [
-        ("u.name = 'alice' OR p.name = 'second'", vec!["1", "2", "4"]),
         (
-            "NOT u.name IN ['alice'] OR edge.target_id = 10",
+            "NOT (u.name = 'alice' AND p.name = 'first')",
+            vec!["2", "4"],
+        ),
+        (
+            "NOT (u.name IN ['alice'] AND edge.target_id = 10)",
+            vec!["2", "4"],
+        ),
+        (
+            "NOT (u.name = 'alice' AND edge.target_id = 20)",
             vec!["1", "2", "3", "4"],
         ),
-        ("NOT (u.name = 'alice' OR edge.target_id = 20)", vec![]),
     ] {
         let query = format!(
             "MATCH (u:Definition)-[edge:CALLS]->(p:Definition) WHERE {predicate} RETURN u.id, p.id ORDER BY u.id"
         );
         assert_eq!(ids(&query), expected, "{query}");
     }
-    let sql = compile_query("MATCH (u:Definition)-[edge:CALLS]->(p:Definition) WHERE NOT u.name IN ['alice'] OR edge.target_id = 10 RETURN count(u) AS total").base.render();
+    let sql = compile_query("MATCH (u:Definition)-[edge:CALLS]->(p:Definition) WHERE NOT (u.name IN ['alice'] AND edge.target_id = 10) RETURN count(u) AS total").base.render();
     let batches = database
         .query_arrow(&sql)
         .unwrap_or_else(|error| panic!("{error}: {sql}"));
     assert_eq!(
         arrow::util::display::array_value_to_string(batches[0].column_by_name("total").unwrap(), 0)
             .unwrap(),
-        "4"
+        "2"
     );
 }
 

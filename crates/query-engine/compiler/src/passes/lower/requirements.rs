@@ -92,11 +92,6 @@ fn boolean_expression(expression: &crate::input::BooleanExpression<Box<Predicate
             Expr::conjoin(children.iter().map(boolean_expression).collect())
                 .unwrap_or_else(|| Expr::lit(true))
         }
-        BooleanExpression::Or(children) => children
-            .iter()
-            .map(boolean_expression)
-            .reduce(|left, right| Expr::binary(Op::Or, left, right))
-            .unwrap_or_else(|| Expr::lit(false)),
         BooleanExpression::Not(child) => Expr::unary(Op::Not, boolean_expression(child)),
     }
 }

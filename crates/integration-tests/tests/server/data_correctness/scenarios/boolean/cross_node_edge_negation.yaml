@@ -1,10 +1,10 @@
-description: OR combines user and group properties with a membership property
+description: Nested negation combines user and group properties with a membership property
 
 query:
   gql: |
     MATCH (u:User)-[membership:MEMBER_OF]->(g:Group)
     WHERE u.id >= 1 AND u.id <= 7
-      AND (u.username = 'alice' OR g.visibility_level = 'private' AND membership.source_id = 3)
+      AND NOT (NOT u.username = 'alice' AND NOT (g.visibility_level = 'private' AND membership.source_id = 3))
     RETURN u.username, g.visibility_level LIMIT 20
 
 expect:

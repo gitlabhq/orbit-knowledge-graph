@@ -148,7 +148,7 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
                 LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
             };
             QueryError::Validation(format!(
-                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, OR, NOT, and parentheses; patterns require named nodes and bounded paths.",
+                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, NOT, and parentheses; patterns require named nodes and bounded paths.",
                 error.variant.message()
             ))
         })?
