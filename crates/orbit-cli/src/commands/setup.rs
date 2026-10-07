@@ -783,7 +783,7 @@ mod tests {
 
         let settings = read_json(&dir.path().join(".claude/settings.json"));
         assert_eq!(settings["permissions"]["allow"][0], "Bash");
-        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
 
         uninstall_named(&["claude"], dir.path());
 
@@ -818,7 +818,8 @@ mod tests {
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(!settings.contains("--graph-first"), "{settings}");
         assert!(!settings.contains("mcp__orbit__"), "{settings}");
-        assert!(settings.contains("hook-guard read"), "{settings}");
+        assert!(!settings.contains("hook-guard read"), "{settings}");
+        assert!(settings.contains("hook-guard search"), "{settings}");
     }
 
     #[test]
