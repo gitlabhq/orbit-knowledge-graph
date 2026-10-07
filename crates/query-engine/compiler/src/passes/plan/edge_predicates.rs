@@ -82,7 +82,7 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
         alias: &str,
         tagged: &mut HashSet<(String, String)>,
     ) {
-        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+        if hop.rel_types.is_any() || hop.rel_types.is_empty() {
             return;
         }
         let (start, end) = hop.direction.edge_columns();

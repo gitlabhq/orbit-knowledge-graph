@@ -469,7 +469,7 @@ pub(super) fn graph_pathfinding<'a, M: query_data_model::QueryDataModel + ?Sized
     tables.sort();
     tables.dedup();
     let kinds = |node: &compiler::InputNode, source| {
-        if path.rel_types.is_empty() || path.rel_types.iter().any(|kind| kind == "*") {
+        if path.rel_types.is_any() {
             graph
                 .catalog()
                 .graph()

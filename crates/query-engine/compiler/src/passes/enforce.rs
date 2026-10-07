@@ -259,6 +259,7 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
                 "type",
                 relationship
                     .types
+                    .as_slice()
                     .first()
                     .map(String::as_str)
                     .unwrap_or("*"),
@@ -284,7 +285,7 @@ pub fn enforce_graph_return<'a, M: query_data_model::QueryDataModel + ?Sized>(
             dst_type_column: format!("{prefix}dst_type"),
             path_column: (relationship.hops.max > 1).then(|| format!("{prefix}path_nodes")),
             column_prefix: prefix,
-            rel_types: relationship.types.clone(),
+            rel_types: relationship.types.as_slice().to_vec(),
             from_alias: relationship.from.clone(),
             to_alias: relationship.to.clone(),
         });

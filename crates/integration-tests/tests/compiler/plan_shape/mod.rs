@@ -1,6 +1,41 @@
 mod security;
 
 #[test]
+fn wildcard_selection_preserves_empty_resolution() {
+    use query_engine::compiler::{self, Frontend, SecurityContext, input::RelationshipSelection};
+    let ontology = super::setup::embedded_ontology();
+    let model = compiler::data_model::clickhouse(ontology.clone()).unwrap();
+    let security = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    for (frontend, query) in [
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1]},{"id":"r","entity":"Runner"}],"relationships":[{"type":"*","from":"n","to":"r"}]}"#,
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (n:Note {id: 1})-->(r:Runner) RETURN n, r",
+        ),
+    ] {
+        let compiled = compiler::compile_graph(query, frontend, &model, &security).unwrap();
+        assert_eq!(
+            compiled.input.relationships[0].types,
+            RelationshipSelection::Kinds(vec![])
+        );
+        assert!(compiled.base.render().contains("IN []"));
+    }
+    let mut query = serde_json::json!({"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both"}});
+    let expected =
+        compiler::compile_graph(&query.to_string(), Frontend::JsonDsl, &model, &security).unwrap();
+    for selection in [serde_json::json!([]), serde_json::json!(["*"])] {
+        query["neighbors"]["rel_types"] = selection;
+        let compiled =
+            compiler::compile_graph(&query.to_string(), Frontend::JsonDsl, &model, &security)
+                .unwrap();
+        assert_eq!(compiled.base.render(), expected.base.render());
+    }
+}
+
+#[test]
 fn yaml_plan_shapes() {
     let directory =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/compiler/plan_shape/fixtures");

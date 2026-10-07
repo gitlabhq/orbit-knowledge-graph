@@ -155,7 +155,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         };
         let table = self
             .catalog
-            .relationship_table_for_query(&relationship.types);
+            .relationship_table_for_query(relationship.types.as_slice());
         let mut arms = Vec::new();
         for depth in relationship.hops.min.max(1)..=relationship.hops.max {
             let arm = self.select(PhysicalOperation::One);

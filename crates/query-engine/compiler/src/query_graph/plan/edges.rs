@@ -49,7 +49,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             }
             let table = self
                 .catalog
-                .relationship_table_for_query(&relationship.types);
+                .relationship_table_for_query(relationship.types.as_slice());
             let edge = if relationship.hops.max > 1 {
                 self.hop_relation(root, relationship, input_index)?
             } else {
@@ -63,14 +63,14 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 PhysicalOperation::current(edge)
             };
             let mut scan = read;
-            if !crate::passes::normalize::is_wildcard(&relationship.types) {
+            if let crate::input::RelationshipSelection::Kinds(kinds) = &relationship.types {
                 let column = Expression::Column(self.column(edge, "relationship_kind")?);
-                scan = scan.filter(if let [kind] = relationship.types.as_slice() {
+                scan = scan.filter(if let [kind] = kinds.as_slice() {
                     Expression::equal(column, Expression::Text(kind.clone()))
                 } else {
                     Expression::In(
                         Box::new(column),
-                        Box::new(Expression::Strings(relationship.types.clone())),
+                        Box::new(Expression::Strings(kinds.clone())),
                     )
                 });
             }

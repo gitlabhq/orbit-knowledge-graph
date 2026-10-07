@@ -33,9 +33,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 .catalog
                 .graph()
                 .relationships()
-                .filter(|relationship| {
-                    config.rel_types.is_empty() || config.rel_types.contains(&relationship.name)
-                })
+                .filter(|relationship| config.rel_types.matches(&relationship.name))
                 .filter_map(|relationship| self.catalog.relationship_route(&relationship.name))
                 .filter(|route| {
                     if direction == Direction::Outgoing {
@@ -53,9 +51,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                     .catalog
                     .graph()
                     .relationships()
-                    .filter(|relationship| {
-                        config.rel_types.is_empty() || config.rel_types.contains(&relationship.name)
-                    })
+                    .filter(|relationship| config.rel_types.matches(&relationship.name))
                     .filter_map(|relationship| self.catalog.relationship_table(&relationship.name))
                     .collect();
                 tables.sort_unstable();
@@ -205,7 +201,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         property: &str,
         filters: &[crate::input::InputFilter],
         direction: Direction,
-        kinds: &[String],
+        kinds: &crate::input::RelationshipSelection,
     ) -> Option<(&'catalog str, Vec<Vec<String>>)> {
         let property = self.catalog.property(center.entity.as_deref()?, property)?;
         let direction = if direction == Direction::Outgoing {
@@ -217,7 +213,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             property: property.id,
             direction,
         })?;
-        if kinds.is_empty()
+        if kinds.is_any()
+            || kinds.is_empty()
             || !kinds.iter().any(|kind| {
                 self.catalog
                     .graph()
@@ -243,7 +240,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
         edge: RelationId,
         center: &InputNode,
         direction: Direction,
-        kinds: &[String],
+        kinds: &crate::input::RelationshipSelection,
     ) -> Result<Expression<'catalog>> {
         let (id, kind, _, _) = neighbor_columns(direction);
         let mut parts = vec![Expression::equal(
@@ -285,12 +282,12 @@ impl<'catalog, M: QueryDataModel + ?Sized>
     fn neighbor_edge_filters(
         &self,
         edge: RelationId,
-        kinds: &[String],
+        kinds: &crate::input::RelationshipSelection,
         mut operation: PhysicalOperation<'catalog>,
     ) -> Result<PhysicalOperation<'catalog>> {
-        if !kinds.is_empty() {
+        if let crate::input::RelationshipSelection::Kinds(kinds) = kinds {
             let column = Expression::Column(self.stored_column(edge, "relationship_kind")?);
-            operation = operation.filter(if let [kind] = kinds {
+            operation = operation.filter(if let [kind] = kinds.as_slice() {
                 Expression::equal(column, Expression::Text(kind.clone()))
             } else {
                 Expression::In(

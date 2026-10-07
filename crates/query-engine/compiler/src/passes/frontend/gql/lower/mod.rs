@@ -153,7 +153,7 @@ impl Lowering {
 
     fn edge(&mut self, relationship: Relationship<'_>, from: String, to: String) -> Result<()> {
         let mut edge = InputRelationship {
-            types: vec!["*".into()],
+            types: crate::input::RelationshipSelection::Any,
             from,
             to,
             direction: relationship.direction,
@@ -183,11 +183,13 @@ impl Lowering {
             return Err(invalid(alias.span, "relationship variables must be unique"));
         }
         if !relationship.types.is_empty() {
-            edge.types = relationship
-                .types
-                .into_iter()
-                .map(|name| name.value)
-                .collect();
+            edge.types = crate::input::RelationshipSelection::Kinds(
+                relationship
+                    .types
+                    .into_iter()
+                    .map(|name| name.value)
+                    .collect(),
+            );
         }
         if let Some(range) = relationship.range {
             edge.hops = hop_range(range)?;

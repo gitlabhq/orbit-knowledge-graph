@@ -72,10 +72,6 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
     Ok(input)
 }
 
-pub(crate) fn is_wildcard(types: &[String]) -> bool {
-    types.is_empty() || (types.len() == 1 && types[0] == "*")
-}
-
 fn infer_wildcard_relationship_kinds(
     input: &mut Input,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
@@ -135,9 +131,9 @@ fn infer_wildcard_relationship_kinds(
     }
 }
 
-fn specialize_wildcard(types: &mut Vec<String>, inferred: Vec<String>) {
-    if is_wildcard(types) && !inferred.is_empty() {
-        *types = inferred;
+fn specialize_wildcard(types: &mut crate::input::RelationshipSelection, inferred: Vec<String>) {
+    if types.is_any() {
+        *types = crate::input::RelationshipSelection::Kinds(inferred);
     }
 }
 

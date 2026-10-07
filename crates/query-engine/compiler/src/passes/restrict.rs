@@ -366,7 +366,7 @@ mod tests {
 
     fn rel(from: &str, to: &str) -> crate::input::InputRelationship {
         crate::input::InputRelationship {
-            types: vec!["MEMBER_OF".into()],
+            types: crate::input::RelationshipSelection::Kinds(vec!["MEMBER_OF".into()]),
             from: from.into(),
             to: to.into(),
             hops: crate::input::HopRange::default(),
@@ -1155,7 +1155,9 @@ mod tests {
 
     fn rel_kind(types: &[&str], from: &str, to: &str) -> crate::input::InputRelationship {
         crate::input::InputRelationship {
-            types: types.iter().map(|s| (*s).into()).collect(),
+            types: crate::input::RelationshipSelection::Kinds(
+                types.iter().map(|s| (*s).into()).collect(),
+            ),
             from: from.into(),
             to: to.into(),
             hops: crate::input::HopRange::default(),

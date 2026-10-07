@@ -225,7 +225,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             LoweredEdge {
                 path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
                 column_prefix: prefix,
-                rel_types: hop.rel_types.clone(),
+                rel_types: hop.rel_types.as_slice().to_vec(),
             }
         })
         .collect();

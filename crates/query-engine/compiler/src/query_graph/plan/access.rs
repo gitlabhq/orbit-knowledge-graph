@@ -88,7 +88,7 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             };
             let key = self
                 .catalog
-                .foreign_key(&relationship.types, source, target);
+                .foreign_key(relationship.types.as_slice(), source, target);
             let holder = key.as_ref().map(|key| {
                 if matches!(
                     (relationship.direction, key.holder),
@@ -109,7 +109,8 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 && relationship.hops.min == 1
                 && relationship.hops.max == 1
                 && relationship.filters.is_empty();
-            let scope_preserving = !relationship.types.is_empty()
+            let scope_preserving = !relationship.types.is_any()
+                && !relationship.types.is_empty()
                 && relationship.types.iter().all(|kind| {
                     self.catalog
                         .variant_scope(kind, from, to)

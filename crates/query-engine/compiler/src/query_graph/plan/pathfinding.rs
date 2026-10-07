@@ -281,16 +281,16 @@ impl<'catalog, M: QueryDataModel + ?Sized>
             .entity
             .as_deref()
             .ok_or(GraphError::MissingOutput)?;
-        let wildcard = crate::passes::normalize::is_wildcard(&path.rel_types);
+        let wildcard = path.rel_types.is_any();
         let first_kinds = if wildcard {
             self.catalog.graph().relationship_names(
                 (!frontier.backward).then_some(entity),
                 frontier.backward.then_some(entity),
             )
         } else {
-            path.rel_types.clone()
+            path.rel_types.as_slice().to_vec()
         };
-        let tables = self.catalog.relationship_tables(&path.rel_types);
+        let tables = self.catalog.relationship_tables(path.rel_types.as_slice());
         let (anchor, next, anchor_kind, next_kind) = if frontier.backward {
             ("target_id", "source_id", "target_kind", "source_kind")
         } else {
@@ -315,9 +315,9 @@ impl<'catalog, M: QueryDataModel + ?Sized>
                 } else if wildcard {
                     &[]
                 } else {
-                    &path.rel_types[..]
+                    path.rel_types.as_slice()
                 };
-                let kind_filter = if kinds.is_empty() {
+                let kind_filter = if step > 1 && wildcard {
                     None
                 } else {
                     let column = Expression::Column(self.column(scan, "relationship_kind")?);

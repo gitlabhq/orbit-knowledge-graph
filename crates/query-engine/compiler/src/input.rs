@@ -377,8 +377,8 @@ fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<Inpu
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputRelationship {
-    #[serde(rename = "type", deserialize_with = "deserialize_rel_types")]
-    pub types: Vec<String>,
+    #[serde(rename = "type")]
+    pub types: RelationshipSelection,
     pub from: String,
     pub to: String,
     #[serde(default)]
@@ -441,21 +441,85 @@ fn parse_hops(value: Value) -> Result<HopRange, String> {
     Ok(HopRange { min, max })
 }
 
-fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Value::deserialize(deserializer)? {
-        Value::String(s) => Ok(vec![s]),
-        Value::Array(arr) => arr
-            .into_iter()
-            .map(|v| {
-                v.as_str()
-                    .map(String::from)
-                    .ok_or_else(|| serde::de::Error::custom("expected string"))
-            })
-            .collect(),
-        _ => Err(serde::de::Error::custom("type must be string or array")),
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum RelationshipSelection {
+    #[default]
+    Any,
+    Kinds(Vec<String>),
+}
+
+impl RelationshipSelection {
+    pub fn as_slice(&self) -> &[String] {
+        match self {
+            Self::Any => &[],
+            Self::Kinds(kinds) => kinds,
+        }
+    }
+
+    pub fn is_any(&self) -> bool {
+        matches!(self, Self::Any)
+    }
+
+    pub fn matches(&self, kind: &str) -> bool {
+        self.is_any() || self.as_slice().iter().any(|name| name == kind)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, String> {
+        self.as_slice().iter()
+    }
+
+    pub fn join(&self, separator: &str) -> String {
+        match self {
+            Self::Any => "*".into(),
+            Self::Kinds(kinds) => kinds.join(separator),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Any => 1,
+            Self::Kinds(kinds) => kinds.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Kinds(kinds) if kinds.is_empty())
+    }
+}
+
+impl<'de> Deserialize<'de> for RelationshipSelection {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let kinds = match Value::deserialize(deserializer)? {
+            Value::String(kind) => vec![kind],
+            Value::Array(values) => values
+                .into_iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| serde::de::Error::custom("expected string"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => return Err(serde::de::Error::custom("type must be string or array")),
+        };
+        if kinds.iter().any(|kind| kind == "*") {
+            if kinds.len() != 1 {
+                return Err(serde::de::Error::custom(
+                    "wildcard must be the only relationship kind",
+                ));
+            }
+            Ok(Self::Any)
+        } else {
+            Ok(Self::Kinds(kinds))
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a RelationshipSelection {
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -847,8 +911,8 @@ pub struct InputPath {
     pub from: String,
     pub to: String,
     pub max_depth: u32,
-    #[serde(default)]
-    pub rel_types: Vec<String>,
+    #[serde(default = "empty_relationship_selection")]
+    pub rel_types: RelationshipSelection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
@@ -862,8 +926,23 @@ pub enum PathType {
 pub struct InputNeighbors {
     #[serde(default)]
     pub direction: Direction,
-    #[serde(default)]
-    pub rel_types: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_neighbor_selection")]
+    pub rel_types: RelationshipSelection,
+}
+
+fn deserialize_neighbor_selection<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<RelationshipSelection, D::Error> {
+    let selection = RelationshipSelection::deserialize(deserializer)?;
+    Ok(if selection.is_empty() {
+        RelationshipSelection::Any
+    } else {
+        selection
+    })
+}
+
+fn empty_relationship_selection() -> RelationshipSelection {
+    RelationshipSelection::Kinds(vec![])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1344,7 +1423,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(input.relationships[0].types, vec!["BLOCKS", "RELATES_TO"]);
+        assert_eq!(
+            input.relationships[0].types,
+            RelationshipSelection::Kinds(vec!["BLOCKS".into(), "RELATES_TO".into()])
+        );
     }
 
     #[test]

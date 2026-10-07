@@ -26,7 +26,7 @@ where
     let edge = EdgeTableConfig::from_model(model, &path.rel_types);
 
     let endpoint_kinds = |entity: &str, source: bool| {
-        if !crate::passes::normalize::is_wildcard(&path.rel_types) {
+        if !path.rel_types.is_any() {
             return None;
         }
         let relationships = if source {

@@ -217,7 +217,13 @@ fn edge_outputs(
     [
         (
             EDGE_TYPE_SUFFIX,
-            OutputValue::Text(hop.rel_types.first().cloned().unwrap_or_default()),
+            OutputValue::Text(
+                hop.rel_types
+                    .as_slice()
+                    .first()
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
         ),
         (EDGE_SRC_SUFFIX, OutputValue::Column(source_id)),
         (

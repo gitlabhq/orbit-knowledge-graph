@@ -314,7 +314,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     "relationships require types and ordered hop bounds between 1 and {MAX_HOPS_CAP}"
                 )));
             }
-            self.check_relationship_types(&edge.types)?;
+            self.check_relationship_types(edge.types.as_slice())?;
             check_filters(&edge.filters)?;
         }
         if let Some(path) = &input.path {
@@ -323,10 +323,10 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     "path max_depth must be between 1 and {MAX_DEPTH_CAP}"
                 )));
             }
-            self.check_relationship_types(&path.rel_types)?;
+            self.check_relationship_types(path.rel_types.as_slice())?;
         }
         if let Some(neighbors) = &input.neighbors {
-            self.check_relationship_types(&neighbors.rel_types)?;
+            self.check_relationship_types(neighbors.rel_types.as_slice())?;
         }
         if input.query_type == QueryType::Neighbors && input.nodes.len() != 1 {
             return Err(QueryError::Validation(
@@ -745,6 +745,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             let model = self.model.get();
             let edge_table = rel
                 .types
+                .as_slice()
                 .first()
                 .and_then(|kind| model.relationship_table(kind))
                 .unwrap_or_else(|| model.default_edge_table());

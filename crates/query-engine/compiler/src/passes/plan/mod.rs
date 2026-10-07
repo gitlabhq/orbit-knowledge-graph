@@ -136,7 +136,11 @@ pub struct EdgeTableConfig {
 }
 
 impl EdgeTableConfig {
-    pub fn from_model(model: &(impl QueryDataModel + ?Sized), rel_types: &[String]) -> Self {
+    pub fn from_model(
+        model: &(impl QueryDataModel + ?Sized),
+        selection: &crate::input::RelationshipSelection,
+    ) -> Self {
+        let rel_types = selection.as_slice();
         use std::collections::BTreeSet;
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
@@ -156,7 +160,7 @@ impl EdgeTableConfig {
         }
         let tables = model.relationship_tables(rel_types);
         Self {
-            rel_type_filter: if rel_types.is_empty() {
+            rel_type_filter: if selection.is_any() {
                 None
             } else {
                 Some(rel_types.to_vec())

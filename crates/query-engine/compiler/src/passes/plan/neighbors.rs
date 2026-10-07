@@ -43,7 +43,7 @@ where
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
-        let relationships: Vec<&str> = if config.rel_types.is_empty() {
+        let relationships: Vec<&str> = if config.rel_types.is_any() {
             model
                 .graph()
                 .relationships()

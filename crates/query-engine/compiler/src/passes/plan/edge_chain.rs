@@ -15,7 +15,7 @@ use query_data_model::QueryDataModel;
 
 pub struct Hop {
     pub input_index: usize,
-    pub rel_types: Vec<String>,
+    pub rel_types: crate::input::RelationshipSelection,
     pub relationships: Vec<query_data_model::RelationshipId>,
     pub edge_table: String,
     pub from_node: String,
@@ -292,7 +292,9 @@ where
         .iter()
         .enumerate()
         .map(|(input_index, rel)| {
-            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
+            let edge_table = model
+                .relationship_table_for_query(rel.types.as_slice())
+                .to_string();
             let from_entity = input
                 .nodes
                 .iter()
@@ -306,8 +308,8 @@ where
             let fk = from_entity
                 .zip(to_entity)
                 .and_then(|(from, to)| match rel.direction {
-                    Direction::Outgoing => model.foreign_key(&rel.types, from, to),
-                    Direction::Incoming => model.foreign_key(&rel.types, to, from),
+                    Direction::Outgoing => model.foreign_key(rel.types.as_slice(), from, to),
+                    Direction::Incoming => model.foreign_key(rel.types.as_slice(), to, from),
                     Direction::Both => None,
                 })
                 .and_then(|foreign_key| {
@@ -334,7 +336,8 @@ where
                 });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
-            let scope_preserving = !rel.types.is_empty()
+            let scope_preserving = !rel.types.is_any()
+                && !rel.types.is_empty()
                 && rel.types.iter().all(|kind| {
                     model
                         .variant_scope(kind, from_entity, to_entity)
@@ -663,7 +666,7 @@ fn filter_covered_by_denorm(
         return false;
     };
     hops.iter().any(|hop| {
-        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+        if hop.rel_types.is_any() || hop.rel_types.is_empty() {
             return false;
         }
         let (start_col, end_col) = hop.direction.edge_columns();
@@ -805,7 +808,7 @@ mod tests {
 
     fn fk_hop(from: &str, to: &str, scope_preserving: bool) -> Hop {
         Hop {
-            rel_types: vec!["REL".to_string()],
+            rel_types: crate::input::RelationshipSelection::Kinds(vec!["REL".to_string()]),
             relationships: Vec::new(),
             edge_table: "gl_edge".to_string(),
             from_node: from.to_string(),

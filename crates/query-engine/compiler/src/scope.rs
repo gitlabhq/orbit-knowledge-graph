@@ -275,16 +275,20 @@ fn scope_edges<'a>(
             ScopeEdge {
                 from,
                 to,
-                scope_preserving: relationship.types.iter().all(|kind| {
-                    model
-                        .variant_scope(kind, source_kind, target_kind)
-                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
-                }),
-                propagates_to_source: relationship.types.iter().all(|kind| {
-                    model
-                        .variant_scope(kind, source_kind, target_kind)
-                        .is_some_and(|scope| scope.propagates_to_source(kind, source_kind))
-                }),
+                scope_preserving: !relationship.types.is_any()
+                    && !relationship.types.is_empty()
+                    && relationship.types.iter().all(|kind| {
+                        model
+                            .variant_scope(kind, source_kind, target_kind)
+                            .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
+                    }),
+                propagates_to_source: !relationship.types.is_any()
+                    && !relationship.types.is_empty()
+                    && relationship.types.iter().all(|kind| {
+                        model
+                            .variant_scope(kind, source_kind, target_kind)
+                            .is_some_and(|scope| scope.propagates_to_source(kind, source_kind))
+                    }),
             }
         })
         .collect()

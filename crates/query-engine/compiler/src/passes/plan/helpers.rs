@@ -60,7 +60,7 @@ pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
 }
 
 pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
-    (!crate::passes::normalize::is_wildcard(types)).then(|| types.to_vec())
+    (!types.is_empty()).then(|| types.to_vec())
 }
 
 fn tag_value(value: &serde_json::Value) -> Option<String> {

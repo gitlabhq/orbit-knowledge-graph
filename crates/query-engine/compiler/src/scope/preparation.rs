@@ -28,8 +28,11 @@ pub fn prepare(
         .iter()
         .enumerate()
         .filter(|(_, relationship)| {
-            endpoints(input, relationship)
-                .is_none_or(|(from, to)| model.foreign_key(&relationship.types, from, to).is_none())
+            endpoints(input, relationship).is_none_or(|(from, to)| {
+                model
+                    .foreign_key(relationship.types.as_slice(), from, to)
+                    .is_none()
+            })
         })
         .collect();
     let [(index, relationship)] = non_fk.as_slice() else {
@@ -41,7 +44,8 @@ pub fn prepare(
     let Some((from, to)) = endpoints(input, relationship) else {
         return scope;
     };
-    let scope_preserving = !relationship.types.is_empty()
+    let scope_preserving = !relationship.types.is_any()
+        && !relationship.types.is_empty()
         && relationship.types.iter().all(|kind| {
             model
                 .variant_scope(kind, from, to)

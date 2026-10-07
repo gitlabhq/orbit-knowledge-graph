@@ -526,7 +526,9 @@ fn build_frontier_arm(
 }
 
 fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {
-    rel_kind_filter(alias, type_filter.as_deref().unwrap_or(&[]))
+    type_filter
+        .as_ref()
+        .and_then(|types| rel_kind_filter(alias, types))
 }
 
 fn build_denorm_tags(

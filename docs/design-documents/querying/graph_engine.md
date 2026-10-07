@@ -176,6 +176,9 @@ Joined-node key queries retain upstream cascades. Elided node identities come fr
 CTE materialization preferences, broader endpoint-elision eligibility, and execution-result equivalence remain unfinished.
 
 The graph pipeline reuses parsing, validation, normalization, field restrictions, and scope preparation in their existing order.
+Relationship selection is explicit: `Any` or `Kinds`. Frontends resolve wildcard syntax before planning.
+Normalization specializes traversal and neighbor wildcards from catalog endpoint metadata. An empty resolved set matches no relationships; it does not become a wildcard.
+Pathfinding retains `Any` for intermediate hops and derives endpoint kind restrictions separately.
 Response policy, result enforcement, scope application, authorization, pagination, and post-checks operate on the graph after lowering.
 Scan declarations retain their input-node or relationship index. Later phases use that index to attach policy to each occurrence, including candidate scans.
 All traversal nodes retain stored scans, so authorization can apply each table's role floor directly.

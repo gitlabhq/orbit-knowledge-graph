@@ -9,7 +9,8 @@ pub(super) fn edge_tag<'a>(
 ) -> Option<(&'a str, Vec<Vec<String>>)> {
     use query_data_model::{DenormalizedDirection, DenormalizedKey};
     if relationship.direction == crate::input::Direction::Both
-        || crate::passes::normalize::is_wildcard(&relationship.types)
+        || relationship.types.is_any()
+        || relationship.types.is_empty()
     {
         return None;
     }

@@ -26,11 +26,14 @@ fn check_direction(
     let (Some(source), Some(target)) = (entity(&edge.from), entity(&edge.to)) else {
         return Ok(());
     };
-    if edge.direction != Direction::Outgoing || edge.hops != HopRange::default() {
+    if edge.types.is_any()
+        || edge.direction != Direction::Outgoing
+        || edge.hops != HopRange::default()
+    {
         return Ok(());
     }
     let (mut reversed, mut unconnected) = (Vec::new(), Vec::new());
-    for kind in &edge.types {
+    for kind in edge.types.iter() {
         let graph = model.graph();
         let Some(relationship) = graph.relationship_id(kind) else {
             return Ok(());
