@@ -32,6 +32,7 @@ pub(crate) fn run(
     };
 
     let backend = LocalBackend::open(repo, db, &paths)?;
+    let paths = backend.paths().to_vec();
 
     let mut out = std::io::stdout().lock();
     let Some(query) = query else {
@@ -44,17 +45,24 @@ pub(crate) fn run(
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    let hits = text::hits(
-        backend.search().client(),
-        backend.git(),
-        &alternatives,
-        &paths,
-        &filter.kinds,
-    )?;
-    let alternatives: Vec<String> = alternatives
-        .iter()
-        .map(|a| text::anchored(a).0.to_string())
-        .collect();
+    let mut alternatives: Vec<text::Term> =
+        alternatives.iter().map(|a| text::Term::parse(a)).collect();
+    let search = |terms: &[text::Term]| {
+        text::hits(
+            backend.search().client(),
+            backend.git(),
+            terms,
+            &paths,
+            &filter.kinds,
+        )
+    };
+    let hits = match search(&alternatives) {
+        Ok(hits) => hits,
+        Err(_) => {
+            alternatives = alternatives.iter().map(text::Term::literal).collect();
+            search(&alternatives)?
+        }
+    };
     write!(out, "{}", text::render(&hits, &alternatives))?;
     write!(
         out,
