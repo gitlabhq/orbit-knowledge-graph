@@ -20,11 +20,11 @@ pub enum Kind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stat<T> {
-    pub path: Utf8UnixPathBuf,
+    pub path: String,
     pub kind: Kind,
     pub len: u64,
     pub decision: Option<Decision<T>>,
-    pub link: Option<Utf8UnixPathBuf>,
+    pub link: Option<String>,
 }
 
 pub struct Vfs<T> {
@@ -126,11 +126,11 @@ impl<T: Tag> Vfs<T> {
             None => return Err(not_found()),
         };
         Ok(Stat {
-            path: Utf8UnixPath::new("/").join(&key),
+            path: format!("/{key}"),
             kind,
             len,
             decision,
-            link: link.map(Utf8UnixPathBuf::from),
+            link: link.map(str::to_owned),
         })
     }
 
