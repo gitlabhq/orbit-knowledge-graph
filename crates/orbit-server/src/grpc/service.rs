@@ -15,7 +15,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, instrument};
+use tracing::{Instrument, info, instrument, warn};
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -243,7 +243,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
         let schema = inline_catalog
-            .then(|| self.active_schema.snapshot().ok())
+            .then(|| {
+                self.active_schema
+                    .snapshot()
+                    .inspect_err(|error| {
+                        warn!(error = %error.message(), "Inlining the command catalog without relationship patterns");
+                    })
+                    .ok()
+            })
             .flatten();
         let tools = ToolRegistry::tools_with_catalog(
             frontend,
