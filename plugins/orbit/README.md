@@ -9,11 +9,12 @@ CLI with `glab orbit skills get orbit`, so its guidance always matches your bina
 Its hook reminds the agent to use `orbit grep` when it reaches for grep or rg. The
 hook runs `orbit` when it is on `PATH`, and `glab orbit` otherwise.
 
-In Claude Code's default permission mode, the wrapper cannot run its command and
-fails to load. Allow it in `settings.json`:
+In Claude Code's default permission mode, Claude Code asks you to approve the
+skill the first time it runs. To skip the prompt, for example with `claude -p`,
+allow it in `settings.json`:
 
 ```json
-{ "permissions": { "allow": ["Bash(glab orbit skills get orbit)"] } }
+{ "permissions": { "allow": ["Skill(orbit:orbit-wrapper)"] } }
 ```
 
 ## Install
