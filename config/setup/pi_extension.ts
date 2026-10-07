@@ -1,11 +1,10 @@
 {{hook_client}}
 
 export default function (pi: any) {
-  const names = { bash: "Bash", read: "Read", grep: "Grep", find: "Glob" };
+  const names = { bash: "Bash", grep: "Grep" };
   const notes = new Map<string, string>();
-  pi.on("tool_call", async (event: any) => {
-    const input = event.input ?? {};
-    const note = await nudge(names[event.toolName], { ...input, file_path: input.path });
+  pi.on("tool_call", async (event: any, ctx: any) => {
+    const note = await nudge(names[event.toolName], event.input ?? {}, ctx.cwd);
     if (note) notes.set(event.toolCallId, note);
   });
   pi.on("tool_result", async (event: any) => {

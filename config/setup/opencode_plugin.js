@@ -1,12 +1,14 @@
 {{hook_client}}
+import { resolve } from "node:path";
 
-export const OrbitPlugin = async () => {
-  const names = { bash: "Bash", shell: "Bash", read: "Read", grep: "Grep", glob: "Glob" };
+export const OrbitPlugin = async ({ directory }) => {
+  const names = { bash: "Bash", shell: "Bash", grep: "Grep" };
   const notes = new Map();
   return {
     "tool.execute.before": async (input, output) => {
       const args = output.args ?? {};
-      const note = await nudge(names[input.tool], { ...args, file_path: args.filePath });
+      const cwd = args.workdir ? resolve(directory, args.workdir) : directory;
+      const note = await nudge(names[input.tool], args, cwd);
       if (note) notes.set(input.callID, note);
     },
     "tool.execute.after": async (input, output) => {

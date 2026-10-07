@@ -79,9 +79,9 @@ typed `/orbit/skills` endpoints are the only consumer. The methods deliberately
 sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
 
 The server embeds only `skills/orbit`; Orbit Local continues to own
-`plugins/orbit/skills/orbit-cli`, which the agent plugins share. A skill is
-identified by its frontmatter `name` and top-level `version`. The merge request
-check requires a version bump for changes under that skill's tree. It is not a content-identity
+`skills/orbit-cli`. A skill is identified by its frontmatter `name` and
+top-level `version`. The merge request check requires a version bump for changes
+under the corresponding `skills/<name>/` tree. It is not a content-identity
 guarantee: concurrent changes can choose the same next version, and an explicit
 `[skip skill-version-bump-check]` bypass exists. Both manifests include
 `compatibility` for environment discovery.

@@ -12,5 +12,4 @@ NAMED_QUERIES_DIR = { value = "config/named_queries", relative = true }
 PROMPTS_DIR = { value = "config/prompts", relative = true }
 SEEDS_DIR = { value = "config/seeds", relative = true }
 SKILLS_DIR = { value = "skills", relative = true }
-LOCAL_SKILLS_DIR = { value = "plugins/orbit/skills", relative = true }
 XTASK_DIR = { value = "crates/xtask", relative = true }

@@ -38,7 +38,7 @@ Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents 
 
 ### Agent Skill Source Trees
 
-Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `plugins/orbit/skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees form a collision-free path union. `orbit skills` lists the selected instance's deployed skills. `orbit skills get <name> [path]` conditionally downloads and validates the named whole tree, composes it in memory with local guidance, and prints `SKILL.md` by default. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
+Orbit maintains two independently usable agent skill trees. `skills/orbit/` documents Orbit Remote, while `skills/orbit-cli/` documents the local capabilities embedded in the `orbit` binary. Local reference files use the `references/local/` namespace so the two trees form a collision-free path union. `orbit skills` lists the selected instance's deployed skills. `orbit skills get <name> [path]` conditionally downloads and validates the named whole tree, composes it in memory with local guidance, and prints `SKILL.md` by default. The previous `orbit skills <name> [path]` form and path shorthand remain as hidden compatibility aliases. The singular `skill` spelling is also a hidden compatibility alias.
 
 The CLI uses only the complete `ORBIT_API_BASE_URL`, `ORBIT_AUTH_HEADER_NAME`, and `ORBIT_AUTH_HEADER_VALUE` tuple exported by glab for skill requests. An absent or incomplete tuple selects the embedded local tree without invoking a credential helper. A `404` or unreachable instance also falls back with a warning on stderr. So do `401` and `403`, which serve the embedded tree because the skill is documentation and query commands still fail loudly on auth. `429` and `5xx` use the last validated tree for that instance, or the embedded tree when no cached tree exists. Other statuses, such as `400`, remain errors. Skill requests give up after 15 seconds, so a dead host does not stall the command. A `200` response without an ETag uses the last validated tree, or the embedded tree when no cache exists.
 
@@ -51,8 +51,10 @@ The remote manifest uses line-oriented HTML placeholders to show where the local
 
 ### Agent plugin distribution
 
-`plugins/orbit/` shares the CLI skill with Claude Code, Codex, and Pi.
-OpenCode uses `orbit setup`. Tag releases include a self-contained plugin ZIP.
+`plugins/orbit/` packages the `orbit-wrapper` skill and the hook guard for
+Claude Code, Codex, and Pi. The wrapper loads the skill from the installed CLI,
+so the plugin never ships a copy that can drift from the binary. OpenCode uses
+`orbit setup`. Tag releases include a self-contained plugin ZIP.
 See the [plugin guide](../../../plugins/orbit/README.md) for installation and migration.
 
 ### Named Queries

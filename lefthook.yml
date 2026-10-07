@@ -65,9 +65,7 @@ pre-commit:
         - "rust-toolchain.toml"
     - name: skill-version-bump
       run: python3 scripts/checks/check-skill-version-bump.py --ci --staged
-      glob:
-        - "skills/**/*"
-        - "plugins/orbit/**/*"
+      glob: "skills/**/*"
     - name: prompt-version-bump
       run: bash ./scripts/checks/check-prompt-version-bump.sh
       glob: "config/prompts/**/*.yml"
