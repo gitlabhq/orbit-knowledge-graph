@@ -1,11 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BillingAuthMode {
     /// GCP workload-identity OIDC. Only works on GitLab.com (SaaS).
-    #[default]
     Oidc,
     /// Cloud Connector instance token, pulled from Rails and cached in memory.
     /// Used on Self-Managed / Dedicated.
@@ -124,9 +123,12 @@ mod tests {
     }
 
     #[test]
-    fn embedded_default_is_admin_token_and_disabled() {
-        let quota = AppConfig::embedded_defaults().billing.quota;
-        assert_eq!(quota.auth_mode, QuotaAuthMode::AdminToken);
-        assert_eq!(quota.validate(), Ok(()));
+    fn embedded_defaults_are_the_self_managed_pair_and_disabled() {
+        let billing = AppConfig::embedded_defaults().billing;
+        assert_eq!(billing.auth_mode, BillingAuthMode::CloudConnector);
+        assert_eq!(billing.quota.auth_mode, QuotaAuthMode::LicenseChecksum);
+        assert!(!billing.enabled);
+        assert!(!billing.quota.enabled);
+        assert_eq!(billing.quota.validate(), Ok(()));
     }
 }
