@@ -54,7 +54,8 @@ center node, and a shortest path needs both endpoints bounded.
 - Lists: `x.state IN ['opened', 'merged']`.
 - Strings: `STARTS WITH`, `ENDS WITH`, `CONTAINS`. The pattern needs at least
   3 characters. Matching ignores ASCII case, except on sort-key columns such as
-  `branch`.
+  `branch`. The server folds ASCII letters only, so `STARTS WITH 'ÄRG'` does
+  not match `ärger` there. Local queries fold Unicode and do match.
 - Nulls: `IS NULL`, `IS NOT NULL`.
 
 Values are literals. There are no query parameters, so never splice untrusted

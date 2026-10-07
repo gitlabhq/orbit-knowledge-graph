@@ -21,7 +21,7 @@ query:
 
 expect:
   sql_contains: ["startsWith(lower(u.username), lower('ALI'))"]
-  indexes_used: [idx_username_ngram]
+  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:

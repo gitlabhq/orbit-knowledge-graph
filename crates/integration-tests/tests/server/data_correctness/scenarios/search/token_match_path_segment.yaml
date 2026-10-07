@@ -21,7 +21,7 @@ query:
     RETURN d.file_path ORDER BY d.id LIMIT 10
 
 expect:
-  indexes_used: [idx_file_path]
+  indexes_used: [{ table: gl_definition, index: idx_file_path }]
   skip_requirements: ["filter:file_path"]
   node_count: 2
   nodes:
