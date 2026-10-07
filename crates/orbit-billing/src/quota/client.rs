@@ -42,11 +42,11 @@ pub(crate) enum QuotaOutcome {
         decision: QuotaDecision,
         ttl: Duration,
     },
-    FailOpen(FailOpenReason),
+    Failed(FailureReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FailOpenReason {
+pub(crate) enum FailureReason {
     Unreachable,
     Unauthorized,
     UnexpectedResponse,
@@ -100,8 +100,8 @@ impl QuotaClient {
 
         let mut builder = self.http.head(&url).query(&params);
         if self.license_auth {
-            // Without the header CDot can only answer 401, so an unusable claim fails open here
-            // instead of sending an unauthenticated request.
+            // Without the header CDot can only answer 401, so an unusable claim fails closed
+            // here instead of sending an unauthenticated request.
             let Some(mut token) = request
                 .license_checksum
                 .as_ref()
@@ -112,9 +112,9 @@ impl QuotaClient {
                     instance_id = %request.key.instance_id,
                     unique_instance_id = %request.key.unique_instance_id,
                     feature_qualified_name = %request.key.feature_qualified_name,
-                    "license_checksum claim is missing or not a valid header value; failing open"
+                    "license_checksum claim is missing or not a valid header value; failing closed"
                 );
-                return QuotaOutcome::FailOpen(FailOpenReason::Unauthorized);
+                return QuotaOutcome::Failed(FailureReason::Unauthorized);
             };
             token.set_sensitive(true);
             builder = builder.header(X_LICENSE_TOKEN, token);
@@ -132,9 +132,9 @@ impl QuotaClient {
                     instance_id = %request.key.instance_id,
                     unique_instance_id = %request.key.unique_instance_id,
                     feature_qualified_name = %request.key.feature_qualified_name,
-                    "quota check request failed; failing open"
+                    "quota check request failed; failing closed"
                 );
-                return QuotaOutcome::FailOpen(FailOpenReason::Unreachable);
+                return QuotaOutcome::Failed(FailureReason::Unreachable);
             }
         };
 
@@ -160,14 +160,14 @@ impl QuotaClient {
                     instance_id = %request.key.instance_id,
                     unique_instance_id = %request.key.unique_instance_id,
                     feature_qualified_name = %request.key.feature_qualified_name,
-                    "unexpected quota check response; failing open"
+                    "unexpected quota check response; failing closed"
                 );
                 let reason = if other == StatusCode::UNAUTHORIZED {
-                    FailOpenReason::Unauthorized
+                    FailureReason::Unauthorized
                 } else {
-                    FailOpenReason::UnexpectedResponse
+                    FailureReason::UnexpectedResponse
                 };
-                QuotaOutcome::FailOpen(reason)
+                QuotaOutcome::Failed(reason)
             }
         }
     }
@@ -362,7 +362,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_403_fails_open_as_unexpected_response() {
+    async fn status_403_fails_closed_as_unexpected_response() {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
         let client = QuotaClient::new(
             url,
@@ -373,12 +373,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::UnexpectedResponse)
+            QuotaOutcome::Failed(FailureReason::UnexpectedResponse)
         );
     }
 
     #[tokio::test]
-    async fn connection_error_fails_open_as_unreachable() {
+    async fn connection_error_fails_closed_as_unreachable() {
         // Port 1 is reserved and unroutable; the TCP connect fails before any HTTP exchange.
         install_crypto();
         let client = QuotaClient::new(
@@ -390,7 +390,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unreachable)
+            QuotaOutcome::Failed(FailureReason::Unreachable)
         );
     }
 
@@ -440,29 +440,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn license_mode_with_unencodable_checksum_fails_open_without_calling_cdot() {
+    async fn license_mode_with_unencodable_checksum_fails_closed_without_calling_cdot() {
         let (url, seen) = recording_server(AxumStatus::OK).await;
         let mut request = license_request();
         request.license_checksum = Some("bad\nvalue".into());
 
         assert_eq!(
             license_client(url).check(&request).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            QuotaOutcome::Failed(FailureReason::Unauthorized)
         );
         assert!(seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn license_mode_401_fails_open_as_unauthorized() {
+    async fn license_mode_401_fails_closed_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         assert_eq!(
             license_client(url).check(&license_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            QuotaOutcome::Failed(FailureReason::Unauthorized)
         );
     }
 
     #[tokio::test]
-    async fn admin_mode_401_fails_open_as_unauthorized() {
+    async fn admin_mode_401_fails_closed_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         let client = QuotaClient::new(
             url,
@@ -473,7 +473,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            QuotaOutcome::Failed(FailureReason::Unauthorized)
         );
     }
 

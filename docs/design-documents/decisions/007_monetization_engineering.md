@@ -203,7 +203,7 @@ end note
 rails -[#2E7D32]> gkg : gRPC call + JWT\n(source_type in claims)
 activate gkg #C8E6C9
 
-gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-open
+gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-closed
 cdot --[#E65100]> gkg : allow / deny
 
 gkg -[#E65100]> ch : execute query
@@ -427,11 +427,11 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 // A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
 ```
 
-**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
+**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails closed and is not cached. Orbit never logs or re-serializes the claim.
 
-**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
+**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; failed checks are not, so the next request retries CustomersDot.
 
-**Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
+**Fail-closed.** Only a CustomersDot `200` allows the query. A `402` denies it, and so does every other outcome: `401`, `403`, `422`, any other status, a timeout, or a connection failure. This matches the AI Gateway, which denies on any quota-check error so an outage or a rejected credential cannot become unmetered usage. Failed checks return the same `RESOURCE_EXHAUSTED` status and `GITLAB_CREDITS_EXHAUSTED` reason as a `402`, because Workhorse only maps that reason to a `402` response. They are recorded as `decision=fail_closed`.
 
 **Enforced builds.** A binary built with `ORBIT_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
 

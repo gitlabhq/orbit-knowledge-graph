@@ -14,7 +14,7 @@ use tracing::{info, warn};
 
 use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::{QuotaAuth, QuotaClient};
+use client::{DenyReason, QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
@@ -139,7 +139,7 @@ impl QuotaService {
                 );
                 Ok(())
             }
-            QuotaGateDecision::FailOpen(reason) => {
+            QuotaGateDecision::Failed(reason) => {
                 warn!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
@@ -151,9 +151,9 @@ impl QuotaService {
                     reason = ?reason,
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
-                    "quota gate decision: fail_open"
+                    "quota gate decision: fail_closed"
                 );
-                Ok(())
+                Err(credits_exhausted_status())
             }
             QuotaGateDecision::Deny(reason) => {
                 info!(
@@ -169,19 +169,25 @@ impl QuotaService {
                     correlation_id = %correlation_id,
                     "quota gate decision: denied"
                 );
-                let details = ErrorDetails::with_error_info(
-                    REASON_GITLAB_CREDITS_EXHAUSTED,
-                    ERROR_DOMAIN,
-                    std::collections::HashMap::new(),
-                );
-                Err(Status::with_error_details(
-                    Code::ResourceExhausted,
-                    reason.message(),
-                    details,
-                ))
+                Err(credits_exhausted_status())
             }
         }
     }
+}
+
+// A failed check reuses the credits-exhausted status so Workhorse, which only
+// recognizes GITLAB_CREDITS_EXHAUSTED, returns a 402 instead of a generic 502.
+fn credits_exhausted_status() -> Status {
+    let details = ErrorDetails::with_error_info(
+        REASON_GITLAB_CREDITS_EXHAUSTED,
+        ERROR_DOMAIN,
+        std::collections::HashMap::new(),
+    );
+    Status::with_error_details(
+        Code::ResourceExhausted,
+        DenyReason::QuotaExhausted.message(),
+        details,
+    )
 }
 
 fn record_skipped(source_type: &str) {
@@ -190,12 +196,12 @@ fn record_skipped(source_type: &str) {
 }
 
 fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
-    use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
+    use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_CLOSED, HIT, MISS};
 
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
-        QuotaGateDecision::FailOpen(_) => FAIL_OPEN,
+        QuotaGateDecision::Failed(_) => FAIL_CLOSED,
     };
     let cache_label = match cache {
         CacheOutcome::Hit => HIT,
@@ -463,16 +469,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_open_on_upstream_5xx() {
-        let (url, _counter) = counting_server(AxumStatus::INTERNAL_SERVER_ERROR).await;
-        let svc = service_for(url);
-        let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
-        assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
-        let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
-        assert!(
-            after > before,
-            "record_decision must fire on fail-open (before={before}, after={after})"
-        );
+    async fn fails_closed_uncached_on_unexpected_statuses() {
+        for status in [
+            AxumStatus::UNAUTHORIZED,
+            AxumStatus::FORBIDDEN,
+            AxumStatus::UNPROCESSABLE_ENTITY,
+            AxumStatus::INTERNAL_SERVER_ERROR,
+            AxumStatus::SERVICE_UNAVAILABLE,
+        ] {
+            let (url, counter) = counting_server(status).await;
+            let svc = service_for(url);
+            let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+
+            for _ in 0..2 {
+                let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
+                assert_eq!(err.code(), tonic::Code::ResourceExhausted, "{status}");
+                let error_info = err
+                    .get_error_details()
+                    .error_info()
+                    .cloned()
+                    .expect("fail-closed status must carry an ErrorInfo detail");
+                assert_eq!(error_info.reason, REASON_GITLAB_CREDITS_EXHAUSTED);
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 2, "{status}");
+            let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+            assert!(
+                after > before,
+                "record_decision must fire on fail-closed (before={before}, after={after})"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fails_closed_when_cdot_unreachable() {
+        install_crypto();
+        let svc = service_for("http://127.0.0.1:1".into());
+        let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
     }
 
     #[tokio::test]
@@ -498,12 +531,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn license_mode_401_fails_open_uncached() {
+    async fn license_mode_401_fails_closed_uncached() {
         let (url, counter) = counting_server(AxumStatus::UNAUTHORIZED).await;
         let svc = license_service_for(url);
 
-        assert!(svc.check(&license_inputs("mcp")).await.is_ok());
-        assert!(svc.check(&license_inputs("mcp")).await.is_ok());
+        for _ in 0..2 {
+            let err = svc.check(&license_inputs("mcp")).await.unwrap_err();
+            assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        }
         assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
