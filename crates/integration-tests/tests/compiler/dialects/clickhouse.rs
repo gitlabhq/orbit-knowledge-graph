@@ -1332,7 +1332,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH () RETURN *",
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
-        "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
         "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
@@ -1457,23 +1456,17 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    for query in [
-        "MATCH (u:User) WHERE u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN [] AND u.id >= 1 AND u.id <= 3 RETURN u",
-        "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u",
-    ] {
-        assert!(
-            compiler::compile(
-                query,
-                compiler::Frontend::Gql,
-                &test_ontology(),
-                &test_ctx()
-            )
-            .is_err(),
-            "{query}"
-        );
-    }
+    let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
+    assert!(
+        compiler::compile(
+            query,
+            compiler::Frontend::Gql,
+            &test_ontology(),
+            &test_ctx()
+        )
+        .is_err(),
+        "{query}"
+    );
 }
 
 #[test]

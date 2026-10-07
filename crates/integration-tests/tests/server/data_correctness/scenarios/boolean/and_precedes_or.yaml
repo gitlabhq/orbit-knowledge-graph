@@ -1,0 +1,16 @@
+description: AND binds before OR so the first branch can include a closed work item
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id = 4001 OR wi.id = 4000 AND NOT wi.state = 'closed'
+    RETURN wi.state ORDER BY wi.id LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      order: [4000, 4001]
+      rows:
+        - { id: 4000, state: opened }
+        - { id: 4001, state: closed }

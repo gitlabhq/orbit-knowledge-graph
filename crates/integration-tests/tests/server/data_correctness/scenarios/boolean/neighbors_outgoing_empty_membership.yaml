@@ -1,0 +1,16 @@
+description: Empty state membership removes the merge request center and its outgoing project neighbor
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(n)
+    WHERE mr.state IN []
+    RETURN n
+
+expect:
+  node_count: 0
+  nodes:
+    MergeRequest:
+      ids: []
+  skip_requirements: [filter:state]
+  edges:
+    IN_PROJECT: []

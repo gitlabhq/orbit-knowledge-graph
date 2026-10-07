@@ -1,0 +1,31 @@
+description: Boolean filters use the latest values and exclude tombstones before background merges
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      work_item: [9400, 9401, 9402, 9403]
+  extra_seed:
+    gl_work_item:
+      - { id: 9400, title: old match, state: opened, weight: 3, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 9400, title: now closed, state: closed, weight: 3, traversal_path: "1/100/", _version: "2024-06-01 00:00:00" }
+      - { id: 9401, title: old closed, state: closed, weight: 3, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 9401, title: now opened, state: opened, weight: 8, traversal_path: "1/100/", _version: "2024-06-01 00:00:00" }
+      - { id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 9402, title: deleted match, state: opened, weight: 13, traversal_path: "1/100/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 9403, title: closed exception, state: closed, weight: 13, traversal_path: "1/100/", _version: "2024-06-01 00:00:00" }
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id IN [9400, 9401, 9402, 9403] AND (NOT wi.state = 'closed' OR wi.weight = 13)
+    RETURN wi.title, wi.state, wi.weight LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      ids: [9401, 9403]
+      rows:
+        - { id: 9401, title: now opened, state: opened, weight: 8 }
+        - { id: 9403, title: closed exception, state: closed, weight: 13 }

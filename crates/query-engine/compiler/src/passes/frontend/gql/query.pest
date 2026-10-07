@@ -21,10 +21,13 @@ RangeLiteral = { "*" ~ SP? ~ RangeStart? ~ SP? ~ (RangeDots ~ SP? ~ RangeEnd?)? 
 RangeStart = { UnsignedInteger }
 RangeEnd = { UnsignedInteger }
 RangeDots = { ".." }
-Where = { ^"WHERE" ~ SP ~ AndExpression }
-AndExpression = { Predicate ~ (SP ~ ^"AND" ~ SP ~ Predicate)* }
+Where = { ^"WHERE" ~ SP ~ OrExpression }
+OrExpression = { AndExpression ~ (SP ~ ^"OR" ~ SP ~ AndExpression)* }
+AndExpression = { NotExpression ~ (SP ~ ^"AND" ~ SP ~ NotExpression)* }
+NotExpression = { Negation* ~ Predicate }
+Negation = { ^"NOT" ~ !IdentifierPart ~ SP? }
 Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression }
-ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
+ParenthesizedExpression = { "(" ~ SP? ~ OrExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ (SP? ~ ComparisonOperator ~ SP? ~ (Value | PropertyExpression) | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ ListLiteral | SP ~ NullOperator) }
 ComparisonOperator = @{ "<=" | ">=" | "<>" | "!=" | "=" | "<" | ">" }
 StringOperator = { ^"STARTS" ~ SP ~ ^"WITH" | ^"ENDS" ~ SP ~ ^"WITH" | ^"CONTAINS" }

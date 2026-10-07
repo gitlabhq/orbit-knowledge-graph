@@ -192,8 +192,24 @@ Shortest paths use the ISO GQL path search prefix, `p = ANY SHORTEST (a)-[*1..3]
 The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST k GROUP`) are rejected: the compiler returns one path per endpoint pair.
 `ANY` and `SHORTEST` are reserved.
 
-Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
+Predicates support `NOT`, `AND`, `OR`, comparisons, `IN`, string matching, null checks, and the compiler's three token predicates.
+Precedence is `NOT`, then `AND`, then `OR`. Parentheses override this order.
+Boolean groups can reference several nodes and single-hop relationship variables in traversal and aggregation queries.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
+
+```plaintext
+MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition)
+WHERE NOT callee.name IN ['debug', 'trace']
+  AND (callee.name STARTS WITH 'load' OR callee.name = 'execute')
+RETURN caller.name, callee.name
+```
+
+A null value does not pass `NOT property IN [...]` for a list with at least one value.
+Use `property IS NULL OR NOT property IN [...]` to include nulls.
+`property IN []` is false. Its negation is true, even when the property is null.
+Groups that reference one node can narrow its scan without splitting the expression into separate filters.
+`NOT` alone cannot bound a remote scan. Add an ID or a filter that narrows the scan.
+An OR across different aliases needs a separate selective anchor.
 
 ID forms preserve the compiler's distinct selector and filter representations:
 
@@ -203,15 +219,19 @@ ID forms preserve the compiler's distinct selector and filter representations:
 - An ID list and range can appear together, in any predicate order.
 - `WHERE node.id = 1` remains a property filter.
 - Other ID predicates remain filters; they do not replace the ID selector.
+- ID predicates inside `NOT` or `OR` remain grouped predicates. They never become independent ID selectors or ranges.
 
 ## Rejections and bounds
 
 The frontend rejects mutations, multiple statements, disconnected patterns, cycles between pattern variables, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
-It also rejects OR, general NOT, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
+It also rejects DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
+Boolean groups do not support neighbors queries, shortest paths, virtual properties, or variable-length relationship-list predicates.
+These groups can compare two node fields, but neither field can be a traversal path.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
+Boolean expressions also have a depth limit of 32 and a total limit of 256 predicate leaves.
 Existing compiler limits still apply after lowering.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 

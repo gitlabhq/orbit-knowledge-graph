@@ -90,10 +90,7 @@ fn enforce_traversal_path_filters(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
-        let (Some(entity), Some(tp_filters)) = (
-            node.entity.as_deref(),
-            node.filters.get(TRAVERSAL_PATH_COLUMN),
-        ) else {
+        let Some(entity) = node.entity.as_deref() else {
             continue;
         };
         let Some(_) = model.entity(entity) else {
@@ -105,7 +102,10 @@ fn enforce_traversal_path_filters(
             .entity_minimum_access_level(entity)
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
-        for tp_filter in tp_filters {
+        for (_, tp_filter) in input
+            .node_filters(node)
+            .filter(|(property, _)| *property == TRAVERSAL_PATH_COLUMN)
+        {
             validate_traversal_path_filter_scope(
                 &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
                 tp_filter,
@@ -114,12 +114,12 @@ fn enforce_traversal_path_filters(
         }
     }
 
-    for (i, rel) in input.relationships.iter().enumerate() {
-        let Some(tp_filters) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
-            continue;
-        };
+    for i in 0..input.relationships.len() {
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
-        for tp_filter in tp_filters {
+        for (_, tp_filter) in input
+            .relationship_filters(i)
+            .filter(|(property, _)| *property == TRAVERSAL_PATH_COLUMN)
+        {
             validate_traversal_path_filter_scope(
                 &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
                 tp_filter,
@@ -232,14 +232,6 @@ pub fn restrict(
             continue;
         };
 
-        for prop in node.filters.keys() {
-            if admin_only(model, entity, prop) {
-                return Err(QueryError::Restrict(format!(
-                    "filter on \"{prop}\" for {entity}: field requires administrator access"
-                )));
-            }
-        }
-
         if let Some(ColumnSelection::All) = &node.columns {
             return Err(QueryError::PipelineInvariant(
                 "RestrictPass requires expanded columns; normalization must run first".into(),
@@ -288,17 +280,18 @@ pub fn restrict(
     }
 
     for node in &input.nodes {
-        if node.entity.is_none() {
-            continue;
-        }
-        for filters in node.filters.values() {
-            for filter in filters {
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
-                    && let Some(rhs_entity) = entity_of(input, rhs_node)
-                    && admin_only(model, rhs_entity, rhs_prop)
+        for (property, filter) in input.node_filters(node) {
+            for (alias, property) in std::iter::once((node.id.as_str(), property)).chain(
+                filter
+                    .rhs_column
+                    .as_ref()
+                    .map(|(alias, property)| (alias.as_str(), property.as_str())),
+            ) {
+                if let Some(entity) = entity_of(input, alias)
+                    && admin_only(model, entity, property)
                 {
                     return Err(QueryError::Restrict(format!(
-                        "filter on \"{rhs_prop}\" for {rhs_entity}: field requires administrator access"
+                        "filter on \"{property}\" for {entity}: field requires administrator access"
                     )));
                 }
             }
