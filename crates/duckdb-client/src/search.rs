@@ -232,46 +232,50 @@ ORDER BY {file_path}, {id}",
 
     let mut current_path = String::new();
     let mut content = String::new();
-    let mut sources = StringBuilder::new();
-    for index in 0..ids.len() {
-        if current_path != paths[index] {
-            current_path.clone_from(&paths[index]);
-            let path = repository_root.join(&current_path);
-            content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                eprintln!(
-                    "warning: skipping body search for {}: {error}",
-                    path.display()
-                );
-                String::new()
-            });
-        }
-        let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
-            (Ok(start), Ok(end)) if start < content.len() => content
-                .get(start..end.min(content.len()))
-                .unwrap_or_default(),
-            _ => "",
-        };
-        sources.append_value(source);
-    }
-
-    let batch = RecordBatch::try_new(
-        Arc::new(Schema::new(vec![
-            Field::new("def_id", DataType::Int64, false),
-            Field::new("source", DataType::Utf8, false),
-        ])),
-        vec![Arc::new(Int64Array::from(ids)), Arc::new(sources.finish())],
-    )?;
     client.execute(
         &format!("CREATE OR REPLACE TEMP TABLE {DEF_SOURCE_TABLE} (def_id BIGINT, source VARCHAR)"),
         &[],
     )?;
-    client.insert_batch(DEF_SOURCE_TABLE, &batch)?;
+    for (chunk, ids) in ids.chunks(4096).enumerate() {
+        let mut sources = StringBuilder::new();
+        for index in chunk * 4096..chunk * 4096 + ids.len() {
+            if current_path != paths[index] {
+                current_path.clone_from(&paths[index]);
+                let path = repository_root.join(&current_path);
+                content = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                    eprintln!(
+                        "warning: skipping body search for {}: {error}",
+                        path.display()
+                    );
+                    String::new()
+                });
+            }
+            let source = match (usize::try_from(starts[index]), usize::try_from(ends[index])) {
+                (Ok(start), Ok(end)) if start < content.len() => content
+                    .get(start..end.min(content.len()))
+                    .unwrap_or_default(),
+                _ => "",
+            };
+            sources.append_value(source);
+        }
+
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("def_id", DataType::Int64, false),
+                Field::new("source", DataType::Utf8, false),
+            ])),
+            vec![
+                Arc::new(Int64Array::from(ids.to_vec())),
+                Arc::new(sources.finish()),
+            ],
+        )?;
+        client.insert_batch(DEF_SOURCE_TABLE, &batch)?;
+    }
     client.execute(
         &format!(
-            "UPDATE {doc_table} AS d
-SET source = s.source
-FROM {DEF_SOURCE_TABLE} AS s
-WHERE d.def_id = s.def_id"
+            "CREATE OR REPLACE TABLE {doc_table} AS
+SELECT d.* REPLACE (coalesce(s.source, d.source) AS source)
+FROM {doc_table} AS d LEFT JOIN {DEF_SOURCE_TABLE} AS s USING (def_id)"
         ),
         &[],
     )?;
