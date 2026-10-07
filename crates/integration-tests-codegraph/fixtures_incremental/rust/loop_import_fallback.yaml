@@ -1,0 +1,67 @@
+name: "Rust: loop calls retain lexical import fallback"
+fixtures:
+  - path: src/lib.rs
+    content: |
+      fn straight() {
+          use external::*;
+          missing();
+      }
+      fn in_loop() {
+          use external::*;
+          loop {
+              missing();
+          }
+      }
+      fn inner_import() {
+          loop {
+              use inner::*;
+              missing();
+          }
+      }
+      fn shadowed() {
+          use external::*;
+          let missing = || {};
+          loop {
+              missing();
+          }
+      }
+      fn builtin() {
+          use external::*;
+          loop {
+              drop(1);
+          }
+      }
+      fn target() {}
+      fn known() {
+          use external::*;
+          let callback = target;
+          loop {
+              callback();
+          }
+      }
+tests:
+  - name: "Undefined calls use the wildcard visible at their call site"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['straight', 'in_loop', 'inner_import']
+      RETURN caller.name AS caller, target.import_path AS path
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: straight, path: external } }
+      - { row: { caller: in_loop, path: external } }
+      - { row: { caller: inner_import, path: inner } }
+  - name: "Opaque locals and builtins block wildcard fallback in loops"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['shadowed', 'builtin', 'known']
+      RETURN caller.name
+    assert:
+      - { empty: true }
+  - name: "Known loop targets still resolve through their reaching values"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'known'
+      RETURN target.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: target } }

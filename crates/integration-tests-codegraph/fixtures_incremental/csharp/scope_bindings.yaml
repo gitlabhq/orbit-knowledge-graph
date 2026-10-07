@@ -1,0 +1,80 @@
+name: "C#: lexical binding ownership"
+fixtures:
+  - path: siblings/main.cs
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Second {
+          public void pong() {}
+      }
+
+      class Main {
+          void run() {
+              {
+                  var f = new First();
+                  f.ping();
+              }
+              {
+                  var f = new Second();
+                  f.pong();
+              }
+          }
+      }
+  - path: local_function/main.cs
+    content: |
+      class Main {
+          static void target() {}
+
+          void run() {
+              {
+                  void target() {}
+              }
+              target();
+          }
+      }
+  - path: control/main.cs
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              f.ping();
+          }
+      }
+  - path: shadow/main.cs
+    content: |
+      class First {
+          public void ping() {}
+      }
+
+      class Main {
+          First f;
+
+          void run() {
+              {
+                  string f = null;
+              }
+              f.ping();
+          }
+      }
+tests:
+  - name: "Sibling blocks and field shadows retain their own targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 7 }
+      - { row: { file: siblings/main.cs, target: First } }
+      - { row: { file: siblings/main.cs, target: Second } }
+      - { row: { file: siblings/main.cs, target: ping } }
+      - { row: { file: siblings/main.cs, target: pong } }
+      - { row: { file: local_function/main.cs, target: target } }
+      - { row: { file: control/main.cs, target: ping } }
+      - { row: { file: shadow/main.cs, target: ping } }

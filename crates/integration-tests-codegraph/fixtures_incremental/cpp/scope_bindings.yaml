@@ -1,0 +1,36 @@
+name: "C++: lexical binding ownership"
+fixtures:
+  - path: local/main.cpp
+    content: |
+      void first() {}
+      void second() {}
+
+      void run() {
+          auto f = first;
+          {
+              auto f = second;
+          }
+          f();
+      }
+  - path: assignment/main.cpp
+    content: |
+      void first() {}
+      void second() {}
+
+      void run() {
+          auto f = first;
+          {
+              f = second;
+          }
+          f();
+      }
+tests:
+  - name: "Declarations stay local while assignments update outer bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: local/main.cpp, target: first } }
+      - { row: { file: assignment/main.cpp, target: second } }
