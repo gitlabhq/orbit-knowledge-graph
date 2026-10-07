@@ -255,7 +255,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let tools = ToolRegistry::tools_with_catalog(
             frontend,
             inline_catalog,
-            schema.as_ref().map(|schema| schema.ontology.as_ref()),
+            schema
+                .as_ref()
+                .map(|schema| schema.relationship_patterns.as_str()),
         )
         .into_iter()
         .map(proto_tool_definition)

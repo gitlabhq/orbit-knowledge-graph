@@ -24,8 +24,9 @@ description: >-
   schema. Fetch node properties only for nodes you query whose property
   names you do not know. An unknown property error lists the valid ones.
   Anchor groups and projects by full_path, not name. Resolve a loosely named
-  group or project first with full_path CONTAINS 'x' (case-insensitive).
-  There is no NOT: query both sets and compare them.
+  group or project first with a contains filter on full_path, which ignores
+  case. To find nodes without a relationship, query both sets and compare
+  them.
 
 
   {{ relationships }}{% endif %}{% else %}Call this before invoke_command to get each command's

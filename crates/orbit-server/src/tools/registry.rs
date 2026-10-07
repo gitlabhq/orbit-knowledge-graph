@@ -1,5 +1,3 @@
-use ontology::Ontology;
-use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
 use query_engine::compiler::Frontend;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -79,19 +77,17 @@ impl From<&ToolDefinition> for CommandCatalogEntry {
 
 /// Description for callers that cannot afford a discovery turn: the full
 /// command catalog is inlined as compact JSON, followed by the graph
-/// relationship patterns when an ontology is available.
+/// relationship patterns when given.
 pub(super) fn inline_list_commands_description(
     frontend: Frontend,
-    ontology: Option<&Ontology>,
+    relationships: Option<&str>,
 ) -> String {
     let entries: Vec<CommandCatalogEntry> = CommandRegistry::commands_for(frontend)
         .iter()
         .map(CommandCatalogEntry::from)
         .collect();
     let catalog = serde_json::to_string(&entries).expect("command definitions serialize to JSON");
-    let relationships = ontology
-        .map(|ontology| build_relationship_patterns(ontology, IntrospectionScope::All).join("\n"))
-        .unwrap_or_default();
+    let relationships = relationships.unwrap_or_default();
 
     render_prompt(
         "list_commands",
@@ -187,15 +183,15 @@ impl ToolRegistry {
     }
 
     /// When `inline_catalog` is set, `list_commands` carries the full command
-    /// catalog, plus `ontology`'s relationship patterns when given, in its
+    /// catalog, plus the graph relationship patterns when given, in its
     /// description so the caller can skip the discovery and schema turns.
     pub fn tools_with_catalog(
         frontend: Frontend,
         inline_catalog: bool,
-        ontology: Option<&Ontology>,
+        relationships: Option<&str>,
     ) -> Vec<ToolDefinition> {
         vec![
-            Self::list_commands(frontend, inline_catalog, ontology),
+            Self::list_commands(frontend, inline_catalog, relationships),
             Self::invoke_command(),
         ]
     }
@@ -203,10 +199,10 @@ impl ToolRegistry {
     fn list_commands(
         frontend: Frontend,
         inline_catalog: bool,
-        ontology: Option<&Ontology>,
+        relationships: Option<&str>,
     ) -> ToolDefinition {
         let description = if inline_catalog {
-            inline_list_commands_description(frontend, ontology)
+            inline_list_commands_description(frontend, relationships)
         } else {
             list_commands_description(frontend)
         };
@@ -311,6 +307,9 @@ impl CommandRegistry {
 
 #[cfg(test)]
 mod tests {
+    use ontology::Ontology;
+    use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
+
     use super::*;
 
     fn all_tools() -> Vec<ToolDefinition> {
@@ -438,13 +437,17 @@ mod tests {
         }
     }
 
-    fn inline_description(frontend: Frontend) -> String {
+    fn relationship_patterns() -> String {
         let ontology = Ontology::load_embedded().expect("embedded ontology loads");
-        inline_description_with(frontend, Some(&ontology))
+        build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n")
     }
 
-    fn inline_description_with(frontend: Frontend, ontology: Option<&Ontology>) -> String {
-        ToolRegistry::tools_with_catalog(frontend, true, ontology)
+    fn inline_description(frontend: Frontend) -> String {
+        inline_description_with(frontend, Some(&relationship_patterns()))
+    }
+
+    fn inline_description_with(frontend: Frontend, relationships: Option<&str>) -> String {
+        ToolRegistry::tools_with_catalog(frontend, true, relationships)
             .into_iter()
             .find(|tool| tool.name == "list_commands")
             .expect("list_commands tool")
@@ -469,11 +472,10 @@ mod tests {
 
     #[test]
     fn inlined_description_carries_relationship_patterns() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
-        let patterns = build_relationship_patterns(&ontology, IntrospectionScope::All);
+        let patterns = relationship_patterns();
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             let description = inline_description(frontend);
-            assert!(description.contains(&patterns.join("\n")));
+            assert!(description.contains(&patterns));
             assert!(description.contains("(User)-[:AUTHORED]->("));
             assert!(!inline_description_with(frontend, None).contains("Graph relationships"));
         }
