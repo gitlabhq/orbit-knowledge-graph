@@ -25,7 +25,7 @@ const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.s
 
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
-const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+pub(crate) const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
 #[derive(Serialize)]
 pub(crate) struct IndexOutput {

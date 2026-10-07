@@ -142,6 +142,7 @@ pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
 pub struct IndexedRepo {
     pub git: GitInfo,
     pub client: DuckDbClient,
+    pub edited: usize,
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
@@ -162,8 +163,16 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
             );
         }
     }
+    let edited = crate::commands::refresh::refresh_worktree(&git, &db).unwrap_or_else(|error| {
+        tracing::warn!("working-tree refresh failed: {error:#}");
+        0
+    });
     let client = crate::sql::open_graph(Some(db))?;
-    Ok(IndexedRepo { git, client })
+    Ok(IndexedRepo {
+        git,
+        client,
+        edited,
+    })
 }
 
 fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
@@ -238,7 +247,7 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     Ok(())
 }
 
-fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
+pub(crate) fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
     if !table_exists(client, "_orbit_meta")? {
         return Ok(None);
     }
