@@ -78,8 +78,8 @@ glab skills install --global --force orbit
 
 The `orbit-wrapper` skill copies no guidance. It runs
 `glab orbit skills get orbit` and loads the skill your GitLab instance serves,
-composed with your installed Orbit CLI, so it can't drift from the binary. It
-needs `glab` and the Orbit CLI installed. Install it instead of the `orbit`
+composed with your installed GitLab Orbit CLI, so it can't drift from the binary.
+It needs `glab` and the GitLab Orbit CLI installed. Install it instead of the `orbit`
 skill, not alongside it. Install it with
 [`npx skills`](https://github.com/vercel-labs/skills):
 
