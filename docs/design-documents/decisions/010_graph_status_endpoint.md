@@ -17,8 +17,9 @@ Accepted
 
 Two RPCs expose the services directly, for the Rails status pages.
 
-- Both take 1 to 100 traversal paths: a top-level group, a subgroup or a project. The
-  caller must have access to each path, and an admin can ask for any path.
+- `GetIndexingStatus` takes 1 to 100 traversal paths and `GetItemCounts` takes one: a
+  top-level group, a subgroup or a project. The caller must have access to each path, and
+  an admin can ask for any path.
 - `GetIndexingStatus` returns one phase per path and per domain: unknown, not started,
   syncing, ready or error. A project path reports the SDLC phases of its root, and the source
   code domain carries the project coverage under the path.

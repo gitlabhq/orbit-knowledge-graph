@@ -1,13 +1,33 @@
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
+use query_engine::pipeline::PipelineError;
 
 use super::Claims;
 
 const ADMIN_ORG_ROOT_ACCESS_LEVEL: u32 = 50;
 
-pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String> {
+#[derive(Debug, thiserror::Error)]
+pub enum SecurityContextError {
+    #[error("missing organization_id in claims")]
+    MissingOrganization,
+    #[error("no enabled namespaces for this user")]
+    NoEnabledNamespaces,
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl From<SecurityContextError> for PipelineError {
+    fn from(error: SecurityContextError) -> Self {
+        match error {
+            SecurityContextError::NoEnabledNamespaces => Self::NoEnabledNamespaces,
+            other => Self::Security(other.to_string()),
+        }
+    }
+}
+
+pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, SecurityContextError> {
     let org_id = claims
         .organization_id
-        .ok_or("missing organization_id in claims")? as i64;
+        .ok_or(SecurityContextError::MissingOrganization)? as i64;
 
     let traversal_paths = if claims.admin {
         vec![AuthorizedPath::new(
@@ -16,7 +36,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
         )]
     } else {
         if claims.group_traversal_ids.is_empty() {
-            return Err("no enabled namespaces for this user".into());
+            return Err(SecurityContextError::NoEnabledNamespaces);
         }
         claims
             .group_traversal_ids
@@ -36,7 +56,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
                 .with_realm(realm)
                 .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| SecurityContextError::Invalid(e.to_string()))
 }
 
 #[cfg(test)]
@@ -74,6 +94,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            license_checksum: None,
         }
     }
 
@@ -94,14 +115,14 @@ mod tests {
     fn missing_org_id_returns_error() {
         let claims = make_claims(true, vec![], None);
         let err = build_security_context(&claims).unwrap_err();
-        assert!(err.contains("missing organization_id"));
+        assert!(matches!(err, SecurityContextError::MissingOrganization));
     }
 
     #[test]
     fn non_admin_empty_paths_returns_error() {
         let claims = make_claims(false, vec![], Some(1));
         let err = build_security_context(&claims).unwrap_err();
-        assert!(err.contains("no enabled namespaces"));
+        assert!(matches!(err, SecurityContextError::NoEnabledNamespaces));
     }
 
     #[test]

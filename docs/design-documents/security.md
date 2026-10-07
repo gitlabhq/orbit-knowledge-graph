@@ -449,6 +449,18 @@ Every `gkg` image digest that a manifest job publishes from the canonical projec
 
 Verification, mirroring, registry retention, and failure handling are in the [image signing runbook](../dev/runbooks/image_signing.md).
 
+### Image Hardening
+
+FedRAMP requires hardened container images (DISA Container Image Creation and Deployment Guide, NIST SP 800-53 AC-6 and CM-6).
+
+- **Image user**: the `gkg` image runs as UID 65532 with group 0. The chart sets the same UID, and group 0 lets an OpenShift arbitrary UID keep the same file access. The build removes the set-user-ID and set-group-ID bits from every file.
+
+CI scans the `gkg` image with Trivy at three points:
+
+- **Dockerfile**: the `dockerfile-scan` job runs on merge requests and `main`. It fails on any High or Critical misconfiguration, which includes an image that runs as root.
+- **Release gate**: the `release-image-scan` job scans each per-arch release digest before `release-manifest` moves the version tags. A root image user or a High or Critical CVE with a fix available fails the release.
+- **Vulnerability Report**: the `container_scanning` job scans every `main` image. A pipeline schedule with `SCHEDULE_ONLY=container_scanning` scans `latest` again each week, inside the FedRAMP 30-day window. These results do not block.
+
 ## Handling Aggregations
 
 Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor). This left an oracle. A Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts. This held even though they did not hold `read_vulnerability` on the target entity.

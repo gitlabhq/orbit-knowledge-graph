@@ -97,6 +97,11 @@ tls:
   internal:
     enabled: false
 
+# --mode clickhouse-setup applies config/clickhouse-setup.sql to graph.url as admin_username.
+# Passwords are secret files: /etc/secrets/clickhouse_setup/{admin,writer,reader,siphon_reader}_password.
+clickhouse_setup:
+  admin_username: default
+
 engine:
   # max_concurrent_workers: 16     # unset = derived from container CPU count and memory limit
   concurrency_groups: {}           # empty = derived from `modules` and the worker cap
@@ -213,6 +218,7 @@ billing:
   quota:
     enabled: false
     customers_dot_url: "http://localhost:5000"
+    auth_mode: admin_token                 # admin_token (.com) | license_checksum (self-managed, Dedicated)
     request_timeout_ms: 1000
     fallback_cache_ttl_secs: 3600
     # api_user: ""

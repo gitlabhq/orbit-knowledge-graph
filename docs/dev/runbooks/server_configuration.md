@@ -1,6 +1,6 @@
 # Server configuration runbook
 
-Reference for all configurable knobs in the GKG server. All four modes (Webserver, Indexer, DispatchIndexing, HealthCheck) share the same `AppConfig` struct and loading mechanism.
+Reference for all configurable knobs in the GKG server. All five modes (Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup) share the same `AppConfig` struct and loading mechanism.
 
 ## Configuration loading
 
@@ -55,7 +55,7 @@ engine:
 
 ## Server modes
 
-The binary (`gkg-server`) runs in one of four modes via `--mode`:
+The binary (`gkg-server`) runs in one of five modes via `--mode`:
 
 | Mode | Purpose | Key config sections |
 |------|---------|---------------------|
@@ -63,6 +63,7 @@ The binary (`gkg-server`) runs in one of four modes via `--mode`:
 | `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
 | `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
 | `HealthCheck` | Aggregate Kubernetes workload and ClickHouse health, plus NATS queue depth | `health_check`, `graph`, `datalake`, `nats` |
+| `ClickhouseSetup` | Apply `config/clickhouse-setup.sql` as a ClickHouse administrator, then exit | `clickhouse_setup`, `graph`, `datalake` |
 
 All modes share the same configuration structure.
 
@@ -536,10 +537,27 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `billing.quota.enabled` | `false` | Enable the CDot quota gate |
-| `billing.quota.customers_dot_url` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.customers_dot_url` | `http://localhost:5000` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.auth_mode` | `admin_token` | How the gate authenticates to CDot: `admin_token` (GitLab.com) or `license_checksum` (self-managed and Dedicated) |
 | `billing.quota.request_timeout_ms` | `1000` | CDot request timeout in milliseconds |
-| `billing.quota.api_user` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
-| `billing.quota.api_token` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+| `billing.quota.api_user` | None | CDot admin email, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_user`. |
+| `billing.quota.api_token` | None | CDot admin token, required in `admin_token` mode. Mounted from `/etc/secrets/billing/quota/api_token`. |
+
+In `license_checksum` mode the gate sends the instance's license checksum as `X-License-Token`. GitLab adds it to the Orbit JWT as the `license_checksum` claim when the instance has an online cloud license. No CDot credentials are deployed. Requests without the claim skip the check and are allowed with a warning (`decision=skipped` on `gkg.billing.quota.decisions`). A CDot `401` (expired or unknown license) fails open with a warning and is not cached. Cached decisions are not keyed on the license, so a renewal can take up to one cache TTL to take effect. Orbit pods need egress to `customers_dot_url`. The claim travels inside the JWT, so use TLS between GitLab and Orbit when that traffic leaves a trusted network.
+
+Quota checks carry a `gkg-server/<version>` User-Agent and a `correlation_id` query parameter, so CDot logs can be traced back to Orbit requests.
+
+### Enforced builds
+
+Images built with the `ORBIT_BILLING_ENFORCED=true` build argument validate the billing settings at startup and refuse to start unless all of the following hold:
+
+- `billing.enabled` and `billing.quota.enabled` are both `true`.
+- `billing.quota.customers_dot_url` and `billing.collector_url` exactly match one environment pair. A trailing slash is allowed; any other difference, such as a path, a port or different capitalisation, is rejected:
+  - production: `https://customers.gitlab.com` with `https://billing.prdsub.gitlab.net`
+  - staging: `https://customers.staging.gitlab.com` with `https://billing.stgsub.gitlab.net`
+- The auth modes belong to one family: `admin_token` with `oidc`, or `license_checksum` with `cloud_connector`.
+
+The switch is compiled into the binary, so the config map cannot change it. The build argument defaults to `false`, which skips these checks. The startup log reports `billing_enforced`.
 
 ## Object storage
 
@@ -600,6 +618,20 @@ Round-trip a config file against the bucket it names with the throwaway example:
 ```shell
 cargo run -p orbit-object-storage --example roundtrip -- config.yaml [secrets-dir]
 ```
+
+## ClickHouse setup
+
+Read only by `--mode clickhouse-setup`. The mode connects to `graph.url` as the administrator and applies `config/clickhouse-setup.sql`. It creates the graph database, the three Orbit users, their roles, and their grants. The grants include read access to `datalake.database`. Every statement is idempotent, and a rerun sets the passwords again, so changing a password and rerunning rotates it.
+
+When `graph.replicated` is `true`, the mode first runs two checks. ClickHouse must store users in a replicated user directory. The graph database must already exist with the `Replicated` engine. If either check fails, the mode stops before it changes anything.
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `clickhouse_setup.admin_username` | `default` | ClickHouse user that runs the statements |
+| `clickhouse_setup.admin_password` | unset | Mount at `/etc/secrets/clickhouse_setup/admin_password` |
+| `clickhouse_setup.writer_password` | unset | Password for `gkg_writer`; mount at `/etc/secrets/clickhouse_setup/writer_password` |
+| `clickhouse_setup.reader_password` | unset | Password for `gkg_reader`; mount at `/etc/secrets/clickhouse_setup/reader_password` |
+| `clickhouse_setup.siphon_reader_password` | unset | Password for `gkg_siphon_reader`; mount at `/etc/secrets/clickhouse_setup/siphon_reader_password` |
 
 ## Health check
 

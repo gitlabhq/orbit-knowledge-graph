@@ -1,15 +1,14 @@
-use std::collections::HashMap;
-
+use super::context::PlanningContext;
+use super::{EdgeTableConfig, PathFinding, Plan, find_node};
 use crate::error::Result;
-use crate::input::*;
-
-use super::{EdgeTableConfig, NodePlan, PathFindingBody, Plan, PlanBody, Strategy, find_node};
 use query_data_model::QueryDataModel;
 
-pub fn plan_pathfinding<M>(input: &Input, model: &M) -> Result<Plan>
+pub(super) fn plan_pathfinding<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<PathFinding>>
 where
     M: QueryDataModel + ?Sized,
 {
+    let input = context.input;
+    let model = context.model;
     let path = input
         .path
         .as_ref()
@@ -20,8 +19,8 @@ where
     let start_alias = start_node.id.clone();
     let end_alias = end_node.id.clone();
 
-    let start_np = node_plan_from(start_node, model)?;
-    let end_np = node_plan_from(end_node, model)?;
+    let start_np = context.resolve_node(start_node)?;
+    let end_np = context.resolve_node(end_node)?;
 
     let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
     let edge = EdgeTableConfig::from_model(model, &path.rel_types);
@@ -35,7 +34,7 @@ where
         } else {
             model.graph().relationship_names(None, Some(entity))
         };
-        crate::passes::shared::rel_kind_filter_values(&relationships)
+        super::helpers::rel_kind_filter_values(&relationships)
     };
     let forward_first_hop_filter = start_node
         .entity
@@ -50,37 +49,17 @@ where
     let forward_depth = max_depth / 2 + max_depth % 2;
     let backward_depth = if max_depth >= 2 { max_depth / 2 } else { 0 };
 
-    let mut nodes = HashMap::new();
-    nodes.insert(start_alias.clone(), start_np);
-    nodes.insert(end_alias.clone(), end_np);
-
-    Ok(Plan {
-        scope_requirements: Vec::new(),
-        nodes,
-        hops: vec![],
-        strategy: Strategy::SingleNode,
-        node_edge_mappings: HashMap::new(),
-        denormalized: HashMap::new(),
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
-        body: PlanBody::PathFinding(PathFindingBody {
-            start: start_alias,
-            end: end_alias,
-            max_depth,
-            forward_depth,
-            backward_depth,
-            edge,
-            forward_first_hop_filter,
-            backward_first_hop_filter,
-            scoped_by_tp,
-        }),
-    })
-}
-
-fn node_plan_from<M>(node: &InputNode, model: &M) -> Result<NodePlan>
-where
-    M: QueryDataModel + ?Sized,
-{
-    NodePlan::from_input(node, model, false)
-        .ok_or_else(|| crate::error::QueryError::Lowering("path node entity is unknown".into()))
+    context.nodes.insert(start_alias.clone(), start_np);
+    context.nodes.insert(end_alias.clone(), end_np);
+    Ok(context.finish(PathFinding {
+        start: start_alias,
+        end: end_alias,
+        max_depth,
+        forward_depth,
+        backward_depth,
+        edge,
+        forward_first_hop_filter,
+        backward_first_hop_filter,
+        scoped_by_tp,
+    }))
 }

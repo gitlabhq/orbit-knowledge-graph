@@ -15,7 +15,7 @@ extraResources:
         name: e2e-ca
         kind: ClusterIssuer
       dnsNames:
-        - gkg-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
+        - orbit-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
 
 image:
   repository: {{ $gkgImage }}
@@ -57,7 +57,6 @@ webserver:
       memory: 1Gi
   service:
     type: ClusterIP
-    httpPort: 8080
     grpcPort: 50054
 
 indexer:
@@ -101,9 +100,9 @@ healthCheck:
     enabled: true
   targets:
     - deployments:
-        - gkg-indexer-default
-        - gkg-webserver
-        - gkg-dispatcher
+        - orbit-indexer-default
+        - orbit-webserver
+        - orbit-dispatcher
     - namespace: e2e-{{ $sha }}-siphon
       deployments:
         - postgres-producer

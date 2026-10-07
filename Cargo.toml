@@ -49,9 +49,9 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "58826ceb0e7c7519b65e0e18a73b1db080897ad5" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "58826ceb0e7c7519b65e0e18a73b1db080897ad5", default-features = false }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c", default-features = false }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -170,6 +170,7 @@ tabled = "0.21"
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
+regress = "0.11.1"
 ra_ap_hir = "0.0.345"
 ra_ap_cfg = "0.0.345"
 ra_ap_ide = "0.0.345"
@@ -202,6 +203,7 @@ axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
+secrecy = "0.10.3"
 
 # Formatter test dependencies
 insta = { version = "1.40", features = ["yaml"] }

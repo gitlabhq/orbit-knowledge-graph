@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
-use super::registry::ToolDefinition;
+use super::registry::{CommandCatalogEntry, ToolDefinition};
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
 use super::{CommandRegistry, ToolRegistry};
 
@@ -193,25 +193,11 @@ impl ToolService {
     ) -> Result<String, ExecutorError> {
         #[derive(Serialize)]
         struct CommandCatalogToon {
-            commands: Vec<CommandToon>,
-        }
-
-        #[derive(Serialize)]
-        struct CommandToon {
-            name: String,
-            description: String,
-            input_schema: Value,
+            commands: Vec<CommandCatalogEntry>,
         }
 
         let catalog = CommandCatalogToon {
-            commands: commands
-                .iter()
-                .map(|command| CommandToon {
-                    name: command.name.clone(),
-                    description: command.description.clone(),
-                    input_schema: command.parameters.clone(),
-                })
-                .collect(),
+            commands: commands.iter().map(CommandCatalogEntry::from).collect(),
         };
 
         encode(&catalog, &EncodeOptions::default()).map_err(|e| {

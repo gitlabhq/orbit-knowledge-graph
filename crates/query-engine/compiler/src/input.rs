@@ -254,6 +254,12 @@ pub struct InputFilter {
     pub rhs_column: Option<(String, String)>,
 }
 
+impl InputFilter {
+    pub fn value_str(&self) -> Option<&str> {
+        self.value.as_ref().and_then(Value::as_str)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
@@ -741,18 +747,6 @@ pub enum TruncateUnit {
 }
 
 impl TruncateUnit {
-    pub fn ch_function(self) -> &'static str {
-        match self {
-            Self::Minute => "toStartOfMinute",
-            Self::Hour => "toStartOfHour",
-            Self::Day => "toStartOfDay",
-            Self::Week => "toStartOfWeek",
-            Self::Month => "toStartOfMonth",
-            Self::Quarter => "toStartOfQuarter",
-            Self::Year => "toStartOfYear",
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Minute => "minute",
@@ -833,31 +827,6 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
     match group {
         InputGroupByKey::Node { .. } => "node",
         InputGroupByKey::Property { .. } => "property",
-    }
-}
-
-impl AggFunction {
-    pub fn as_sql(&self) -> &'static str {
-        match self {
-            Self::Count => "COUNT",
-            Self::Sum => "SUM",
-            Self::Avg => "AVG",
-            Self::Min => "MIN",
-            Self::Max => "MAX",
-            Self::Collect => "groupArray",
-        }
-    }
-
-    /// ClickHouse `-If` combinator name (e.g. `countIf`, `sumIf`).
-    pub fn as_sql_if(&self) -> &'static str {
-        match self {
-            Self::Count => "countIf",
-            Self::Sum => "sumIf",
-            Self::Avg => "avgIf",
-            Self::Min => "minIf",
-            Self::Max => "maxIf",
-            Self::Collect => "groupArrayIf",
-        }
     }
 }
 

@@ -48,7 +48,7 @@ In CI the `e2e` job runs automatically on `main` and manually on MRs.
 
 | Suite | What it tests |
 |---|---|
-| `01_setup_and_smoke.robot` | Bootstrap e2e-bot, enable KG flags, provision the shared namespace, smoke-test the pipeline |
+| `01_setup_and_smoke.robot` | Bootstrap e2e-bot, enable `orbit_gql_queries`, provision the shared namespace, smoke-test the pipeline |
 | `02_indexing.robot` | Create projects, issues, notes, epics; assert SDLC nodes and edges land in Orbit |
 | `03_code_indexing.robot` | Push fixture repos; assert File/Definition/IMPORTS/DEFINES via Orbit |
 | `04_code_backfill.robot` | Enable KG on a populated namespace and verify backfill dispatches code indexing |
@@ -56,11 +56,18 @@ In CI the `e2e` job runs automatically on `main` and manually on MRs.
 | `06_incremental_update.robot` | Rails-side note delete propagates; Orbit stops returning the tombstoned node |
 | `07_namespace_lifecycle.robot` | Disable retains indexed data (30-day grace); re-enable resumes indexing |
 | `08_private_redaction.robot` | Private project/issue redacted from a non-member, visible to admin |
-| `09_api_surface.robot` | Read-only Orbit endpoints: schema, schema/dsl, schema/format, graph_status, tools, commands |
+| `09_api_surface.robot` | Read-only Orbit endpoints: schema, `CALL db.schema()`, schema/format, graph_status, tools, commands |
 | `10_query_shapes.robot` | neighbors, path_finding, and llm (GOON) response format |
 | `11_security_graph.robot` | Vulnerability node plus IN_PROJECT/AUTHORED/OCCURRENCE_OF edges |
 | `12_membership_graph.robot` | MEMBER_OF (User→Group) and CREATOR (User→Project) edges |
 | `13_cross_namespace_traversal.robot` | Scoped-query traversal-path pruning must not drop cross-namespace related entities |
+
+## Query language
+
+Every suite sends GQL text to `POST /api/v4/orbit/query`. Suite 01 turns on the
+`orbit_gql_queries` feature flag for the instance, so Rails selects the GQL
+frontend for every user. With the flag on, Orbit rejects JSON DSL queries. See
+[Orbit query frontend](../design-documents/querying/orbit_query_frontend.md).
 
 ## Parallel execution
 
@@ -88,7 +95,7 @@ other suite runs in a parallel worker pool.
 - In CI the runner pod uses the prebaked `e2e-robot` image. The
   `e2e-robot-image` job builds it from `e2e/Dockerfile.robot` whenever that file
   changes, tagged by its content hash. Local runs default to
-  `python:3.12-slim` and install Robot Framework at pod startup.
+  `python:3.14-slim` and install Robot Framework at pod startup.
 
 ## Setup phases
 

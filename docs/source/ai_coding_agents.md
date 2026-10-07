@@ -17,14 +17,14 @@ title: Set up AI coding agents with the GitLab Orbit skill
 The GitLab Orbit skill gives AI coding agents structured guidance for querying the
 GitLab Orbit graph. It includes:
 
-- **Query recipes** - paste-ready JSON bodies for common questions (blast
-  radius, pipeline history, contributor patterns).
-- **DSL reference** - the full query language so agents compose valid queries
-  on the first attempt.
+- **Query recipes** - paste-ready queries for common questions, such as
+  class inheritance, pipeline history, and grouped counts.
+- **Query language reference** - syntax guidance for the enabled query mode:
+  JSON Query DSL or read-only openCypher 9-based syntax.
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
-- **Repository map helpers** - scripts that summarize codebase structure from
-  a local checkout or from GitLab Orbit Remote.
+- **Repository maps** - the local `repo-map` command for a checkout.
+  JSON mode also includes a helper script for GitLab Orbit Remote.
 
 The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 [GitLab Orbit Local](local/_index.md).
@@ -73,3 +73,31 @@ To update to the latest version, re-run the install command with `--force`:
 ```shell
 glab skills install --global --force orbit
 ```
+
+## Use the wrapper skill
+
+The `orbit-wrapper` skill copies no guidance. It runs
+`glab orbit skills get orbit` and loads the skill your GitLab instance serves,
+composed with your installed GitLab Orbit CLI, so it can't drift from the binary.
+It needs `glab` and the GitLab Orbit CLI installed. Install it instead of the `orbit`
+skill, not alongside it. Install it with
+[`npx skills`](https://github.com/vercel-labs/skills):
+
+```shell
+npx skills add https://gitlab.com/gitlab-org/orbit/knowledge-graph --skill orbit-wrapper
+```
+
+In Claude Code's default permission mode, the skill can't run its `!` command
+and fails to load. Allow the command in `~/.claude/settings.json`, or in the
+project's `.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(glab orbit skills get orbit)"]
+  }
+}
+```
+
+With that rule the skill loads without a prompt. Running Claude Code with
+`--dangerously-skip-permissions` also works.

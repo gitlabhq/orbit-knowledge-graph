@@ -1,15 +1,28 @@
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, execute_query_message,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, ExecuteQueryResult,
+    execute_query_message,
 };
 
-use query_engine::pipeline::PipelineError;
+use query_engine::pipeline::{ClickHouseLimit, PipelineError};
 
 use crate::pipeline::metrics::failure_reason;
+
+pub(super) async fn send_query_result(
+    tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    result: ExecuteQueryResult,
+) -> Result<(), PipelineError> {
+    info!("Sending final query result");
+    tx.send(Ok(ExecuteQueryMessage {
+        content: Some(execute_query_message::Content::Result(result)),
+    }))
+    .await
+    .map_err(|_| PipelineError::client_closed())
+}
 
 pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
@@ -105,9 +118,12 @@ fn sanitize_error_message(error: &PipelineError) -> String {
         PipelineError::Compile {
             message,
             client_safe: true,
+            ..
         } => message.clone(),
         PipelineError::Compile { .. } => "Query compilation failed.".to_string(),
-        PipelineError::Security(_) => "Security context error.".to_string(),
+        PipelineError::Security(_) | PipelineError::NoEnabledNamespaces => {
+            "Security context error.".to_string()
+        }
         PipelineError::Execution(msg) => classify_execution_error(msg),
         PipelineError::Authorization(_) => "Authorization failed.".to_string(),
         PipelineError::ContentResolution(_) => {
@@ -122,79 +138,48 @@ fn sanitize_error_message(error: &PipelineError) -> String {
 /// No internal details (table names, SQL, infrastructure) are exposed — only
 /// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
-    let code = extract_ch_error_code(msg);
-    match code {
-        Some(241) => {
-            // MEMORY_LIMIT_EXCEEDED
+    match ClickHouseLimit::from_message(msg) {
+        Some(ClickHouseLimit::MemoryLimit) => {
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
              node_ids to pin specific entities, or reduce hops/max_depth."
-                .to_string()
         }
-        Some(159) | Some(160) => {
-            // TIMEOUT_EXCEEDED / TOO_SLOW
+        Some(ClickHouseLimit::TooSlow) => {
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
              reduce hops/max_depth, specify rel_types, or use node_ids \
              to pin high-cardinality entities like Definition or File."
-                .to_string()
         }
-        Some(307) => {
-            // TOO_MANY_BYTES
+        Some(ClickHouseLimit::TooManyBytes) => {
             "Query read too much data. Try: add a project_id filter to \
              scope the scan, use node_ids for selective endpoints, or \
              narrow filters on high-cardinality entities."
-                .to_string()
         }
-        Some(158) => {
-            // TOO_MANY_ROWS
+        Some(ClickHouseLimit::TooManyRows) => {
             "Query scanned too many rows. Filters like name or path on \
              entities like Definition or File may not be selective enough \
              without project_id scoping. Try: add project_id, use node_ids, \
              or pre-resolve broad filters with a separate lookup query."
-                .to_string()
         }
-        Some(191) => {
-            // SET_SIZE_LIMIT_EXCEEDED
+        Some(ClickHouseLimit::SetSizeLimit) => {
             "Query matched too many IDs in a filter subquery. The filter \
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
-                .to_string()
         }
-        Some(53) => {
-            // TYPE_MISMATCH
+        Some(ClickHouseLimit::TypeMismatch) => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \
              date columns)."
-                .to_string()
         }
-        _ => "Query execution failed.".to_string(),
+        _ => "Query execution failed.",
     }
-}
-
-/// Matches patterns like "Code: 241." or "Code: 241,".
-fn extract_ch_error_code(error: &str) -> Option<u32> {
-    let start = error.find("Code: ")?;
-    let after = &error[start + 6..];
-    let end = after.find(|c: char| !c.is_ascii_digit())?;
-    after[..end].parse().ok()
+    .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_ch_error_code_parses_standard_format() {
-        let msg = "query error: bad response: Code: 241. DB::Exception: Memory limit exceeded";
-        assert_eq!(extract_ch_error_code(msg), Some(241));
-    }
-
-    #[test]
-    fn extract_ch_error_code_returns_none_for_unknown() {
-        assert_eq!(extract_ch_error_code("some other error"), None);
-    }
 
     #[test]
     fn classify_memory() {

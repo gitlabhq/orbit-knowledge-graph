@@ -4588,8 +4588,8 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 
 [[package]]
 name = "labkit"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.6.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f28afb0ddf507e859923f56bb5a35a3d6325663c#f28afb0ddf507e859923f56bb5a35a3d6325663c"
 dependencies = [
  "axum",
  "axum-server",
@@ -4606,6 +4606,8 @@ dependencies = [
  "pin-project-lite",
  "prometheus",
  "rustls",
+ "serde",
+ "serde_json",
  "tokio",
  "tonic",
  "tower",
@@ -4613,6 +4615,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "tracing-appender",
  "tracing-core",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -4621,8 +4624,8 @@ dependencies = [
 
 [[package]]
 name = "labkit-events"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.6.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f28afb0ddf507e859923f56bb5a35a3d6325663c#f28afb0ddf507e859923f56bb5a35a3d6325663c"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4639,8 +4642,8 @@ dependencies = [
 
 [[package]]
 name = "labkit-fields"
-version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=58826ceb0e7c7519b65e0e18a73b1db080897ad5#58826ceb0e7c7519b65e0e18a73b1db080897ad5"
+version = "0.6.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f28afb0ddf507e859923f56bb5a35a3d6325663c#f28afb0ddf507e859923f56bb5a35a3d6325663c"
 
 [[package]]
 name = "language-tags"
@@ -5481,9 +5484,11 @@ dependencies = [
  "orbit-versions",
  "parking_lot",
  "prettyplease",
+ "regress",
  "serde",
  "serde_json",
  "syn 2.0.118",
+ "tokio",
  "tracing",
  "typify",
 ]
@@ -5500,12 +5505,15 @@ dependencies = [
  "opentelemetry",
  "orbit-observability",
  "orbit-server-config",
+ "orbit-utils",
  "query-engine",
  "rand 0.10.2",
  "reqwest 0.13.4",
  "rustls",
+ "secrecy",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tonic",
  "tonic-types",
@@ -5669,11 +5677,13 @@ dependencies = [
  "reqwest 0.13.4",
  "rust-embed",
  "rustls",
+ "secrecy",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "strum 0.28.0",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -6621,6 +6631,7 @@ dependencies = [
  "compiler",
  "ontology",
  "orbit-utils",
+ "strum 0.28.0",
  "thiserror 2.0.18",
 ]
 
@@ -8783,7 +8794,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser 0.0.7",
@@ -8801,7 +8812,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ec1f5cac0eb96063c64b28705255a7ed6e7d77f95c1d25e9f8b8c928006ce1"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "granit-parser 1.1.0",
  "nohash-hasher",
@@ -9347,6 +9358,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9467,7 +9484,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -10000,6 +10017,19 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.18",
+ "time",
+ "tracing-subscriber",
 ]
 
 [[package]]

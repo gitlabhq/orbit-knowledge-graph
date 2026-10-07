@@ -165,7 +165,7 @@ tests:
           - { empty: true }
 
   - name: "chained return types: engine.session().cursor().fetch_all() via annotations"
-    skip: true
+    skip: false
     queries:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -180,7 +180,8 @@ tests:
       - query: |
           MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
           WHERE caller.name = 'run_query'
-            AND NOT callee.name IN ['session', 'cursor', 'fetch_all', 'Engine']
+            AND callee.name <> 'session' AND callee.name <> 'cursor'
+            AND callee.name <> 'fetch_all' AND callee.name <> 'Engine'
           RETURN callee.name
         assert:
           - { empty: true }

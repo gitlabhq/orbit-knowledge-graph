@@ -31,10 +31,6 @@ const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;
 
-/// Safety margin subtracted from the token's `exp` claim so it doesn't lapse
-/// in flight to the collector.
-pub(crate) const CC_TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
-
 fn into_byte_stream(response: reqwest::Response) -> ByteStream {
     let stream = futures::stream::unfold(Some(response), |state| async {
         let mut resp = state?;
@@ -159,12 +155,10 @@ impl GitlabClient {
 
         let raw: CloudConnectorTokenResponse = response.json().await?;
         let exp = decode_token_exp(&raw.token)?;
-        let token = CloudConnectorToken {
+        Ok(CloudConnectorToken {
             token: raw.token,
             exp,
-        };
-        validate_not_already_expired(&token)?;
-        Ok(token)
+        })
     }
 
     pub async fn download_archive(
@@ -431,21 +425,6 @@ pub(crate) fn decode_token_exp(token: &str) -> Result<i64, GitlabClientError> {
     Ok(data.claims.exp)
 }
 
-pub(crate) fn validate_not_already_expired(
-    token: &CloudConnectorToken,
-) -> Result<(), GitlabClientError> {
-    let now = chrono::Utc::now().timestamp();
-    let expires_at = token.expires_at();
-    if expires_at <= now {
-        return Err(GitlabClientError::JwtDecoding(format!(
-            "token already within its expiry buffer: exp={}, buffered expires_at={expires_at}, now={now}",
-            token.exp
-        )));
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,18 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn cloud_connector_token_expires_at_subtracts_buffer() {
-        let token = CloudConnectorToken {
-            token: "t".into(),
-            exp: 1_700_000_000,
-        };
-        assert_eq!(
-            token.expires_at(),
-            1_700_000_000 - CC_TOKEN_EXPIRY_BUFFER_SECS
-        );
-    }
-
-    #[test]
     fn decode_token_exp_ignores_signature() {
         let key = EncodingKey::from_secret(b"some-other-key-entirely");
         let now = chrono::Utc::now().timestamp();
@@ -517,33 +484,6 @@ mod tests {
         let token = encode(&Header::new(Algorithm::HS256), &serde_json::json!({}), &key).unwrap();
 
         let err = decode_token_exp(&token).unwrap_err();
-        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
-    }
-
-    #[test]
-    fn validate_not_already_expired_rejects_a_token_already_within_its_buffer() {
-        let now = chrono::Utc::now().timestamp();
-
-        // exp is in the future, but not far enough to survive the buffer subtraction.
-        let token = CloudConnectorToken {
-            token: "t".into(),
-            exp: now + 10,
-        };
-
-        let err = validate_not_already_expired(&token).unwrap_err();
-        assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
-    }
-
-    #[test]
-    fn validate_not_already_expired_rejects_an_already_expired_token() {
-        let now = chrono::Utc::now().timestamp();
-
-        let token = CloudConnectorToken {
-            token: "t".into(),
-            exp: now - 3600,
-        };
-
-        let err = validate_not_already_expired(&token).unwrap_err();
         assert!(matches!(err, GitlabClientError::JwtDecoding(_)));
     }
 
@@ -631,44 +571,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cloud_connector_token_derives_expiry_from_the_response_token() {
+    async fn cloud_connector_token_returns_the_served_token_with_its_exp_even_if_expired() {
         use axum::Router;
         use axum::routing::get;
 
         let now = chrono::Utc::now().timestamp();
-        let key = EncodingKey::from_secret(b"any-secret");
-        let mut header = Header::new(Algorithm::HS256);
-        header.kid = Some("cloud-connector-2026".to_string());
-        let cc_token = encode(
-            &header,
-            &serde_json::json!({
-                "iss": "gitlab-cloud-connector",
-                "aud": "gitlab-orbit",
-                "sub": "cloud_connector_token",
-                "exp": now + 3600,
-            }),
-            &key,
-        )
-        .unwrap();
+        for exp in [now + 3600, now - 3600] {
+            let key = EncodingKey::from_secret(b"any-secret");
+            let mut header = Header::new(Algorithm::HS256);
+            header.kid = Some("cloud-connector-2026".to_string());
+            let cc_token = encode(
+                &header,
+                &serde_json::json!({
+                    "iss": "gitlab-cloud-connector",
+                    "aud": "gitlab-orbit",
+                    "sub": "cloud_connector_token",
+                    "exp": exp,
+                }),
+                &key,
+            )
+            .unwrap();
+            let expected_token = cc_token.clone();
 
-        let app = Router::new().route(
-            "/api/v4/internal/orbit/cloud_connector_token",
-            get(move || {
-                let cc_token = cc_token.clone();
-                async move { axum::Json(serde_json::json!({ "token": cc_token })) }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let app = Router::new().route(
+                "/api/v4/internal/orbit/cloud_connector_token",
+                get(move || {
+                    let cc_token = cc_token.clone();
+                    async move { axum::Json(serde_json::json!({ "token": cc_token })) }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let client =
-            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
-        let result = client.cloud_connector_token().await.unwrap();
+            let client =
+                GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+            let result = client.cloud_connector_token().await.unwrap();
 
-        assert_eq!(
-            result.expires_at(),
-            now + 3600 - CC_TOKEN_EXPIRY_BUFFER_SECS
-        );
+            assert_eq!(result.token, expected_token);
+            assert_eq!(result.exp, exp);
+        }
     }
 }

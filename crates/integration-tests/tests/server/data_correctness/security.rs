@@ -1273,9 +1273,9 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
 
     let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
         matches!(
-            (&p.ch_type, &p.value),
+            (&p.data_type, &p.value),
             (
-                orbit_utils::clickhouse::ChType::Bool,
+                orbit_utils::query_types::SqlType::Bool,
                 serde_json::Value::Bool(false)
             )
         )
@@ -1383,9 +1383,9 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
     // alias has zero eligible paths.
     let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
         matches!(
-            (&p.ch_type, &p.value),
+            (&p.data_type, &p.value),
             (
-                orbit_utils::clickhouse::ChType::Bool,
+                orbit_utils::query_types::SqlType::Bool,
                 serde_json::Value::Bool(false)
             )
         )
@@ -1592,7 +1592,7 @@ pub(super) async fn aggregation_over_shortest_path_rejects_at_compile(ctx: &Test
             {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             {"id": "p", "entity": "Project"}
         ],
-        "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+        "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3, "rel_types": ["*"]},
         "group_by": ["p"],
         "aggregations": [{"count": "u", "as": "hit"}],
         "limit": 10

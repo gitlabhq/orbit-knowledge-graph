@@ -8,6 +8,7 @@
 
 mod cc_token_source;
 pub mod constants;
+pub mod enforcement;
 pub mod inputs;
 mod metrics;
 mod observer;
@@ -20,3 +21,6 @@ pub use observer::BillingObserver;
 pub use quota::register_metrics as register_quota_metrics;
 pub use quota::{QuotaCheckInputs, QuotaService};
 pub use tracker::{BillingTracker, SnowplowBillingTracker};
+
+#[cfg(feature = "testkit")]
+pub use tracker::InMemoryBillingTracker;

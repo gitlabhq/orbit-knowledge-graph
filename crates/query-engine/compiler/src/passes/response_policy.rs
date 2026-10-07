@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Expr, Node, Op, SelectExpr};
+use crate::ast::{Expr, Function, Node, Op, SelectExpr};
 use crate::input::{ColumnSelection, Input};
 use ontology::DataType;
 
@@ -75,20 +75,20 @@ fn rewrite_select(
 fn excerpt(alias: &str, column: &str, max_chars: u32) -> Expr {
     let value = Expr::col(alias, column);
     let excerpt = Expr::func(
-        "substringUTF8",
+        Function::Substring,
         vec![value.clone(), Expr::lit(1), Expr::lit(max_chars)],
     );
     let shortened = Expr::binary(
         Op::Gt,
-        Expr::func("length", vec![value]),
-        Expr::func("length", vec![excerpt.clone()]),
+        Expr::func(Function::ByteLength, vec![value]),
+        Expr::func(Function::ByteLength, vec![excerpt.clone()]),
     );
     Expr::func(
-        "concat",
+        Function::Concat,
         vec![
             excerpt,
             Expr::func(
-                "if",
+                Function::If,
                 vec![
                     shortened,
                     Expr::string(TEXT_TRUNCATION_SUFFIX),

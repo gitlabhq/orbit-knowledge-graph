@@ -1,0 +1,17 @@
+name: Projecting a multi-ID FK target prevents hop elision
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["id"]},{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"p","entity":"Project","node_ids":[1000,1001],"columns":["name"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1001] RETURN u.id, mr.id, p.name
+logical:
+  expect: ["(Filter p.id IN [1000, 1001] (_))"]
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON p.id = mr.project_id (_) (_))
+        - (Filter p.id IN [1000, 1001], ... (_))
+        - (Project p.name AS p_name, ... (_))
+    emitted:
+      expect: ["(Project p.name AS p_name, ... (_))", "(Scan Table(gl_project) AS p)"]

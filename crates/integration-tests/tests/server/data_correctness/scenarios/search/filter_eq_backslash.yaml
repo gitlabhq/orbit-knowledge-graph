@@ -1,0 +1,29 @@
+description: eq keeps a backslash in the bound value byte for byte
+
+config:
+  redaction: { allow: { merge_request: [2103] } }
+  extra_seed:
+    gl_merge_request:
+      - { id: 2103, iid: 9, title: "Path C:\\temp", state: opened, source_branch: path-a, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"eq": "Path C:\\temp"}}}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title = 'Path C:\\temp'
+    RETURN mr.title LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    MergeRequest:
+      filters:
+        title: { eq: "Path C:\\temp" }
+      rows:
+        - { id: 2103, title: "Path C:\\temp" }

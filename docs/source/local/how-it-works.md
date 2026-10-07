@@ -75,7 +75,7 @@ index them from separate checkout or worktree paths.
 
 ## Supported languages
 
-See [index data with GitLab Orbit](../indexed-data.md#supported-languages) for the
+See [index data with GitLab Orbit](../compare-local-remote.md#supported-languages) for the
 shared language-support table.
 
 ## Billing

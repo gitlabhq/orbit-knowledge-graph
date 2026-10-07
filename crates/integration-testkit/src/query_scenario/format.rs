@@ -23,6 +23,8 @@ pub struct ScenarioConfig {
     #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
+    pub unmerged_seed: bool,
+    #[serde(default)]
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
@@ -67,6 +69,13 @@ pub struct RedactionConfig {
     pub allow: BTreeMap<String, Vec<i64>>,
     #[serde(default)]
     pub deny: BTreeMap<String, Vec<i64>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedIndex {
+    pub table: String,
+    pub index: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -118,6 +127,8 @@ pub struct QueryExpect {
     pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
+    #[serde(default)]
+    pub indexes_used: Vec<ExpectedIndex>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,

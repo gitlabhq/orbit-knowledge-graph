@@ -8,6 +8,7 @@ license = "MIT"
 orbit-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
 compiler = { path = "../compiler" }
+strum = { workspace = true }
 thiserror = { workspace = true }
 
 [lints]

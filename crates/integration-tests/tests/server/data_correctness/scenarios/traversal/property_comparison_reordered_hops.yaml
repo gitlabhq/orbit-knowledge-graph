@@ -1,0 +1,24 @@
+description: Cross-node comparisons use the correct endpoints after a filtered target reverses the join order
+
+query:
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    WHERE p.name IN ['Public Project', 'Internal Project'] AND u.id < g.id AND g.id < p.id
+      AND g.visibility_level = p.visibility_level
+    RETURN u, g, p.name LIMIT 20
+
+expect:
+  node_count: 5
+  nodes:
+    User: { ids: [1, 2, 6] }
+    Group: { ids: [100] }
+    Project:
+      ids: [1000]
+      absent: [1002]
+      rows:
+        - { id: 1000, name: Public Project }
+  edges:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]
+    CONTAINS: [[100, 1000]]
+  referential_integrity: true
+  skip_requirements: ["filter:name"]

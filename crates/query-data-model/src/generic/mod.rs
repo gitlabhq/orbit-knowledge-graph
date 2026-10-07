@@ -11,14 +11,21 @@ use crate::DataModelError;
 
 #[derive(Debug, Clone)]
 pub enum PropertyRealization {
-    Stored,
+    Stored { column: String },
     Virtual(ontology::VirtualSource),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endpoint {
+    Source,
+    Target,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForeignKey {
-    pub holder: EntityId,
+    pub holder: Endpoint,
     pub property: PropertyId,
+    pub referenced_key: PropertyId,
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +111,12 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
-    fn property_column(&self, property: PropertyId) -> Option<&str>;
+    fn property_column(&self, property: PropertyId) -> Option<&str> {
+        match self.property_realization(property)? {
+            PropertyRealization::Stored { column } => Some(column),
+            PropertyRealization::Virtual(_) => None,
+        }
+    }
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization>;
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
@@ -246,6 +258,11 @@ pub trait QueryDataModel {
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         self.query_backend().table_sort_key(table)
+    }
+
+    fn in_sort_key(&self, table: &str, column: &str) -> bool {
+        self.table_sort_key(table)
+            .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
     }
 
     fn has_text_index(&self, property: PropertyId) -> bool {

@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::pin::Pin;
+use std::slice;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
@@ -18,7 +20,7 @@ use tracing::{Instrument, info, instrument};
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
 use crate::analytics::AnalyticsTracker;
-use crate::auth::{Claims, JwtValidator, build_security_context};
+use crate::auth::{Claims, JwtValidator, SourceType, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
@@ -39,14 +41,15 @@ use crate::proto::{
     ListToolsRequest, ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata,
     QueryType, ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
     SchemaNode, SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary,
-    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, get_graph_schema_response,
+    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
-use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
+use query_engine::formatters::{
+    FormatName, GoonFormatter, GqlFormatter, GraphFormatter, ResultFormatter,
+};
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
     match QueryLanguage::try_from(language) {
@@ -84,11 +87,11 @@ fn named_language(frontend: Frontend) -> named_queries::Language {
 
 fn schema_query_result(
     response: &SchemaResponse,
-    use_llm_format: bool,
+    text_format: bool,
 ) -> Result<ExecuteQueryResult, PipelineError> {
     use crate::proto::execute_query_result::Content;
 
-    let content = if use_llm_format {
+    let content = if text_format {
         ToolService::encode_schema_toon(response)
             .map(Content::FormattedText)
             .map_err(|error| PipelineError::custom(error.to_string()))?
@@ -107,6 +110,28 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
         FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Gql => ProtoFormatName::Gql,
+    }
+}
+
+fn query_formatter(format: i32) -> Result<&'static dyn ResultFormatter, Status> {
+    match ResponseFormat::try_from(format) {
+        Ok(ResponseFormat::Llm) => Ok(&GoonFormatter),
+        Ok(ResponseFormat::Gql) => Ok(&GqlFormatter),
+        Ok(ResponseFormat::Raw) => Ok(&GraphFormatter),
+        Err(_) => Err(Status::invalid_argument(format!(
+            "Unknown response format: {format}"
+        ))),
+    }
+}
+
+fn query_result_content(
+    formatted: serde_json::Value,
+) -> crate::proto::execute_query_result::Content {
+    use crate::proto::execute_query_result::Content;
+    match formatted {
+        serde_json::Value::String(text) => Content::FormattedText(text),
+        json => Content::ResultJson(json.to_string()),
     }
 }
 
@@ -135,7 +160,6 @@ pub struct OrbitServiceImpl {
     graph_status: GraphStatusService,
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
-    stream_timeout_secs: u64,
     quota: Arc<QuotaService>,
 }
 
@@ -150,7 +174,11 @@ impl OrbitServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::default();
-        let pipeline = QueryPipelineService::new(Arc::clone(&client), analytics_config);
+        let pipeline = QueryPipelineService::new(
+            Arc::clone(&client),
+            analytics_config,
+            Duration::from_secs(stream_timeout_secs),
+        );
         let graph_status = GraphStatusService::new(Arc::clone(&client));
         let indexing_status = IndexingStatusService::new(Arc::clone(&client));
         let item_counts = ItemCountService::new(client);
@@ -163,7 +191,6 @@ impl OrbitServiceImpl {
             graph_status,
             indexing_status,
             item_counts,
-            stream_timeout_secs,
             quota: Arc::new(QuotaService::disabled()),
         }
     }
@@ -212,8 +239,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
-        let tools = ToolRegistry::tools_for(
+        let inline_catalog = ctx.claims.source_type == SourceType::Dws;
+        let tools = ToolRegistry::tools_with_catalog(
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+            inline_catalog,
         )
         .into_iter()
         .map(proto_tool_definition)
@@ -368,7 +397,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let pipeline = self.pipeline.clone();
         let schema = self.active_schema.snapshot()?;
-        let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
         tokio::spawn(
@@ -377,6 +405,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     Some(r) => r,
                     None => return,
                 };
+
+                let formatter = match query_formatter(req.format) {
+                    Ok(formatter) => formatter,
+                    Err(error) => {
+                        let _ = tx.send(Err(error)).await;
+                        return;
+                    }
+                };
+                let text_format = formatter.format_name() != FormatName::Raw;
 
                 let resolved = resolve_raw_query(
                     req.query_type,
@@ -397,41 +434,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 info!(query_len = query.text.len(), "Executing query");
 
-                let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
-                let timeout = std::time::Duration::from_secs(stream_timeout);
-                let result = pipeline
-                    .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
-                    .await;
-
-                let result = result.and_then(|output| match output {
+                let render = |output| match output {
                     QueryServiceOutput::Schema(response) => {
-                        schema_query_result(&response, use_llm_format)
+                        schema_query_result(&response, text_format)
                     }
                     QueryServiceOutput::Graph(output) => {
-                        use crate::proto::execute_query_result::Content;
-
-                        let (formatted, format_version, format_name) = if use_llm_format {
-                            GoonFormatter.format_stamped(&output)
-                        } else {
-                            GraphFormatter.format_stamped(&output)
-                        };
-
-                        let content = if use_llm_format {
-                            // GoonFormatter::format returns Value::String(raw_goon_bytes).
-                            // `to_string()` on a Value JSON-encodes it (adds quotes + \n
-                            // escapes). Workhorse then JSON-encodes again when wrapping
-                            // into the {result, ...} envelope, producing literal `\n` in
-                            // the UI. Extract the inner string so the gRPC field carries
-                            // raw goon text.
-                            let text = match formatted {
-                                serde_json::Value::String(s) => s,
-                                other => other.to_string(),
-                            };
-                            Some(Content::FormattedText(text))
-                        } else {
-                            Some(Content::ResultJson(formatted.to_string()))
-                        };
+                        let (formatted, format_version, format_name) =
+                            formatter.format_stamped(&output);
+                        let content = Some(query_result_content(formatted));
 
                         let metadata = Some(QueryMetadata {
                             query_type: output.query_type,
@@ -443,21 +453,17 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                         Ok(ExecuteQueryResult { content, metadata })
                     }
-                });
+                };
+                let result = pipeline
+                    .run_query(&schema, ctx, query, &tx, stream, render)
+                    .await;
 
                 match result {
-                    Ok(result) => {
-                        info!("Sending final query result");
-                        let _ = tx
-                            .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(result)),
-                            }))
-                            .await;
+                    Ok(()) => {}
+                    Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
+                        info!(error = %e, "Client left before the query result");
                     }
                     Err(e @ PipelineError::Timeout) => {
-                        // run_query already logged via send_query_error and
-                        // recorded the metric through the observer chain.
-                        // Translate to deadline_exceeded for the gRPC client.
                         send_query_error(&tx, e).await;
                         let _ = tx
                             .send(Err(Status::deadline_exceeded("Query stream timed out")))
@@ -590,8 +596,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<ListSkillsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
 
-        let skills: Vec<SkillSummary> = list_skills()
+        let skills: Vec<SkillSummary> = list_skills(frontend)
             .into_iter()
             .map(|skill| SkillSummary {
                 name: skill.name,
@@ -620,9 +628,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         ctx.record_in_current_span();
 
         let req = request.get_ref();
-        info!(skill_name = %req.name, metadata_only = req.metadata_only, "Fetching embedded skill");
+        let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
+        info!(skill_name = %req.name, metadata_only = req.metadata_only, ?frontend, "Fetching embedded skill");
 
-        let skill = get_skill(&req.name, req.metadata_only)
+        let skill = get_skill(&req.name, frontend, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
         let files = skill
             .files
@@ -749,15 +758,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
-        let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
+        let path = parse_authorized_path(&ctx.claims, &request.get_ref().traversal_path)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(path_count = paths.len(), "Fetching item counts for user");
+        info!(traversal_path = %path, "Fetching item counts for user");
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.ontology, &security_context, &paths)
+            .count_items(&schema.ontology, &security_context, slice::from_ref(&path))
             .await;
         Ok(Response::new(build_item_counts_response(
             &schema.ontology,
@@ -939,13 +948,15 @@ fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<Trave
 
     paths
         .iter()
-        .map(|path| {
-            let path = TraversalPath::new_unchecked(path.clone());
-            path.validate().map_err(Status::invalid_argument)?;
-            authorize_traversal_path(claims, &path)?;
-            Ok(path)
-        })
+        .map(|path| parse_authorized_path(claims, path))
         .collect()
+}
+
+fn parse_authorized_path(claims: &Claims, path: &str) -> Result<TraversalPath, Status> {
+    let path = TraversalPath::new_unchecked(path);
+    path.validate().map_err(Status::invalid_argument)?;
+    authorize_traversal_path(claims, &path)?;
+    Ok(path)
 }
 
 fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> Result<(), Status> {
@@ -972,13 +983,17 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 
 #[cfg(test)]
 mod tests {
+    mod billing;
     mod commands;
+    mod quota;
     mod skills;
     mod status;
 
     use super::*;
-    use crate::proto::orbit_service_server::OrbitService;
+    use crate::proto::orbit_service_client::OrbitServiceClient;
+    use crate::proto::orbit_service_server::{OrbitService, OrbitServiceServer};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
 
     fn mock_validator() -> JwtValidator {
@@ -994,10 +1009,14 @@ mod tests {
     }
 
     fn test_service() -> OrbitServiceImpl {
+        test_service_on(&test_config())
+    }
+
+    fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            clickhouse,
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1008,13 +1027,104 @@ mod tests {
         authed_request_for_user(message, 1)
     }
 
+    async fn serve(service: OrbitServiceImpl) -> OrbitServiceClient<tonic::transport::Channel> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(OrbitServiceServer::new(service))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        OrbitServiceClient::connect(format!("http://{addr}"))
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn query_formatter_dispatches_on_response_format() {
+        let cases = [
+            (
+                ResponseFormat::Raw as i32,
+                FormatName::Raw,
+                ProtoFormatName::Raw,
+            ),
+            (
+                ResponseFormat::Llm as i32,
+                FormatName::Goon,
+                ProtoFormatName::Goon,
+            ),
+            (
+                ResponseFormat::Gql as i32,
+                FormatName::Gql,
+                ProtoFormatName::Gql,
+            ),
+        ];
+        for (format, expected, proto) in cases {
+            let name = query_formatter(format).unwrap().format_name();
+            assert_eq!(name, expected, "format {format}");
+            assert_eq!(proto_format_name(name), proto, "format {format}");
+        }
+    }
+
+    #[test]
+    fn query_format_rejects_unknown_values_and_preserves_text() {
+        use crate::proto::execute_query_result::Content;
+        for format in [-1, 99] {
+            assert_eq!(
+                query_formatter(format).err().unwrap().code(),
+                tonic::Code::InvalidArgument
+            );
+        }
+        let text = "| path |\n| (:User {id: 1}) |\n";
+        assert_eq!(
+            query_result_content(text.into()),
+            Content::FormattedText(text.into())
+        );
+        let raw = serde_json::json!({"nodes": []});
+        assert_eq!(
+            query_result_content(raw.clone()),
+            Content::ResultJson(raw.to_string())
+        );
+
+        let schema = ontology::introspection::build_schema_response(
+            &test_ontology(),
+            Default::default(),
+            &[],
+        );
+        let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
+        let result =
+            schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();
+        assert_eq!(
+            result.content,
+            Some(Content::FormattedText(
+                ToolService::encode_schema_toon(&schema).unwrap()
+            ))
+        );
+    }
+
     fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
+        authed_request_from(message, user_id, SourceType::Rest)
+    }
+
+    fn authed_request_from<T>(message: T, user_id: u64, source_type: SourceType) -> Request<T> {
+        signed_request(
+            message,
+            Claims {
+                user_id,
+                source_type,
+                ..test_claims()
+            },
+        )
+    }
+
+    fn signed_request<T>(message: T, claims: Claims) -> Request<T> {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             iat: now,
             exp: now + 3600,
-            user_id,
-            ..test_claims()
+            ..claims
         };
         let token = encode(
             &Header::new(Algorithm::HS256),
@@ -1325,6 +1435,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            license_checksum: None,
         }
     }
 

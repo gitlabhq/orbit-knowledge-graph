@@ -51,13 +51,14 @@ tests:
           - { empty: true }
 
   - name: "no duplicate edges"
-    skip: true
+    skip: false
     queries:
       - query: |
           MATCH (src:Definition)-[e:CALLS|DEFINES|EXTENDS]->(tgt:Definition)
           WHERE src.fqn STARTS WITH 'com.example.App'
-          WITH src.name AS caller, tgt.name AS callee, count(src) AS cnt
-          WHERE cnt > 2
-          RETURN caller, callee, cnt
+          RETURN src.name AS caller, tgt.name AS callee, count(src) AS cnt
+          ORDER BY cnt DESC
+          LIMIT 1
         assert:
-          - { empty: true }
+          - { empty: false }
+          - { not: true, count_gte: { field: cnt, value: 3 } }

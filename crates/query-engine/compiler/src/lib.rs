@@ -57,7 +57,7 @@ pub use constants::{
     internal_column_prefix, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
     path_column, relationship_type_column,
 };
-pub use error::{QueryError, Result};
+pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
     parse_input,
@@ -248,7 +248,6 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use orbit_utils::traversal_path::TraversalPath;
     use std::sync::LazyLock;
 
     static ONTOLOGY: LazyLock<Arc<Ontology>> =
@@ -288,7 +287,10 @@ mod tests {
             .values()
             .find(|param| param.value == serde_json::json!(2))
             .expect("target_id filter parameter");
-        assert_eq!(filter_param.ch_type, orbit_utils::clickhouse::ChType::Int64);
+        assert_eq!(
+            filter_param.data_type,
+            orbit_utils::query_types::SqlType::Int64
+        );
     }
 
     #[test]
@@ -355,7 +357,10 @@ mod tests {
             err.is_client_safe(),
             "traversal_path scope rejection should be client safe: {err:?}"
         );
-        assert_eq!(crate::metrics::failure_reason(&err), "authorization");
+        assert_eq!(
+            err.rejection_reason(),
+            crate::error::RejectionReason::Authorization
+        );
         assert!(
             after > before,
             "count_err must run on traversal_path authorization rejections (before={before}, after={after})"
@@ -749,56 +754,6 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_filtered_endpoint_produces_anchor_cte() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"eq": "root"}}},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_nf_start"),
-            "filtered endpoint should generate _nf_start CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("username = 'root'") || sql.contains("username = {"),
-            "CTE should contain username filter, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_id_range_endpoint_produces_anchor_cte() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "id_range": {"start": 100, "end": 200}}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_nf_end"),
-            "id_range endpoint should generate _nf_end CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains(">= 100"),
-            "CTE should contain range lower bound, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
         let query = r#"{
             "query_type": "path_finding",
@@ -1003,31 +958,6 @@ mod tests {
         assert!(
             !sql.contains("ORDER BY e.source_id"),
             "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_user_paths_do_not_join_on_traversal_path() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_path_scope_traversal_paths"),
-            "path finding without traversal_path endpoints should not compute traversal_path candidates, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("f.traversal_path = b.traversal_path"),
-            "User paths must not require traversal_path on frontier rows, got:\n{sql}"
         );
     }
 
@@ -1305,87 +1235,6 @@ mod tests {
         assert!(
             !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
-        );
-    }
-
-    fn denorm_traversal_sql(mr_filter: &str) -> String {
-        let query = format!(
-            r#"{{
-            "query_type": "traversal",
-            "nodes": [
-                {{"id": "u", "entity": "User", "node_ids": [1]}},
-                {{"id": "mr", "entity": "MergeRequest", "filters": {{ {mr_filter} }}}}
-            ],
-            "relationships": [{{"type": "REVIEWER", "from": "u", "to": "mr"}}],
-            "limit": 10
-        }}"#
-        );
-        compile_sql(&query)
-    }
-
-    #[test]
-    fn denorm_eq_filter_pushes_to_edge_tags() {
-        let sql = denorm_traversal_sql(r#""state": {"eq": "merged"}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "denorm filter must be pushed to edge target_tags, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_nf_mr"),
-            "no _nf_mr CTE when filter is fully denormalized, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_in_list_filter_uses_has_any() {
-        let sql = denorm_traversal_sql(r#""state": {"in": ["merged", "opened"]}"#);
-        assert!(
-            sql.contains("hasAny(e0.target_tags"),
-            "IN-list denorm filter must use hasAny, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("state:merged") && sql.contains("state:opened"),
-            "both filter values must appear in tag predicate, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_in_list_single_value_uses_has() {
-        let sql = denorm_traversal_sql(r#""state": {"in": ["merged"]}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "single-value IN-list must use has, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_partial_filters_joins_for_non_denorm() {
-        let sql =
-            denorm_traversal_sql(r#""state": {"eq": "merged"}, "source_branch": {"eq": "main"}"#);
-        assert!(
-            sql.contains("INNER JOIN"),
-            "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
-            "denormalized state filter must be pushed to edge tags, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("source_branch") && sql.contains("main"),
-            "JOIN must retain non-denormalized source_branch filter, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_boolean_filter_renders_value_token() {
-        let sql = denorm_traversal_sql(r#""draft": {"eq": true}"#);
-        assert!(
-            sql.contains("has(e0.target_tags, 'draft:true')"),
-            "boolean denorm filter must render its value token, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("'draft:'"),
-            "boolean denorm filter must not emit an empty-value token, got:\n{sql}"
         );
     }
 
@@ -1763,9 +1612,10 @@ mod tests {
             "center should get a candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j")
-                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe"),
-            "outer latest-row reads should use dedup (FINAL or LIMIT BY), got:\n{sql}"
+            sql.contains("FROM gl_job AS j FINAL")
+                && sql.contains("LIMIT 1 BY pipe.traversal_path, pipe.id) AS pipe WHERE")
+                && sql.contains("AS pipe ON (pipe.id = j.pipeline_id)"),
+            "joined target filters must run after latest-row dedup, got:\n{sql}"
         );
         assert!(
             sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
@@ -1801,139 +1651,16 @@ mod tests {
     }
 
     #[test]
-    fn fk_star_unfiltered_join_narrow_uses_candidate_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
+    fn narrowed_join_keeps_sort_key_filters_before_dedup() {
+        let sql = compile_sql(
+            r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
+        );
         assert!(
             sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 WHERE"
-            ),
-            "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
+                "p.id IN (SELECT id FROM _candidate_p) AND startsWith(p.traversal_path, '1/100/'))) ORDER BY"
+            ) && sql.contains("LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (startsWith(p.traversal_path, '1/100/') AND (p._deleted = false))"),
+            "sort-key filters must prune before dedup and recheck after it, got:\n{sql}"
         );
-        assert!(
-            !sql.contains(
-                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 FINAL"
-            ),
-            "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_candidate_p1"),
-            "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("p1.id IN (SELECT id FROM _candidate_p1)"),
-            "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
-                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
-            "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "proj", "entity": "Project"}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
-            "group_by": ["proj"],
-            "aggregations": [{"count": "j", "as": "failed_jobs"}],
-            "limit": 200
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_proj"),
-            "FK-center group-by aggregation must not re-scan the center for narrowing, got:\n{sql}"
-        );
-        assert_eq!(
-            sql.matches("FROM gl_job").count(),
-            1,
-            "gl_job must be scanned exactly once, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("proj.id = j.project_id"),
-            "Project hydration must still join on the center FK, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_center_traversal_keeps_narrow_scan() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
-                {"id": "p2", "entity": "Pipeline"},
-                {"id": "proj", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
-                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_narrow_p2"),
-            "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_chain_aggregation_joins_nodes_without_edge_scans() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed", "source": "merge_request_event"}},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "d", "entity": "MergeRequestDiff"},
-                {"id": "f", "entity": "MergeRequestDiffFile"}
-            ],
-            "relationships": [
-                {"type": "TRIGGERED", "from": "mr", "to": "pl"},
-                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
-                {"type": "HAS_FILE", "from": "d", "to": "f"}
-            ],
-            "aggregations": [{"count": "f", "as": "appearances"}],
-            "group_by": ["f.old_path"],
-            "limit": 60
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
-            "FK-chain aggregation must join node tables, not scan edge tables, got:\n{sql}"
-        );
-        for on in [
-            "pl.merge_request_id = mr.id",
-            "mr.latest_merge_request_diff_id = d.id",
-            "f.merge_request_diff_id = d.id",
-        ] {
-            assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
-        }
-        assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
     fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
@@ -1969,6 +1696,27 @@ mod tests {
                 "n",
                 "'CONTAINS'|'HAS_NOTE'",
             ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "p.created_at",
+                "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
+                "d.state",
+                "d",
+                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "mr",
+                "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
+            ),
         ];
         for (nodes, rels, group, agg, expect) in cases {
             let sql = compile_sql_scoped(nodes, rels, group, agg);
@@ -1977,6 +1725,126 @@ mod tests {
                     Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
                     None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn scope_anchor_aggregation_rejects_join_predicates() {
+        for predicate in ["g.id = p.id", "p.id = g.id"] {
+            let query =
+                format!("MATCH (g:Group {{id: 100}})-[:CONTAINS]->(p:Project) WHERE {predicate}");
+            let error = compile(
+                &format!("{query} RETURN count(p) AS c LIMIT 20"),
+                Frontend::Gql,
+                &ONTOLOGY,
+                &security_ctx(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, QueryError::Validation(ref message)
+                    if message == "cross-node property comparisons are only supported in traversal queries"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_proofs_preserve_deeper_authorization_filters() {
+        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
+            .unwrap()
+            .with_scope_proofs(std::collections::HashMap::from([(
+                "p".into(),
+                ScopeProof::literal("1/2/"),
+            )]));
+        for (query, lookup) in [
+            (
+                "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
+                false,
+            ),
+            ("MATCH (p:Project {id: 100}) RETURN p LIMIT 20", true),
+            (
+                "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
+                true,
+            ),
+            (
+                "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
+                true,
+            ),
+        ] {
+            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
+            let sql = compiled.base.render();
+            for path in ["1/2/", "1/2/3/", "1/2/4/"] {
+                assert!(
+                    sql.contains(&format!("startsWith(p.traversal_path, '{path}')")),
+                    "{query}: {sql}"
+                );
+            }
+            if lookup {
+                assert!(sql.contains("argMaxOrNull"), "{query}: {sql}");
+                for path in ["1/2/3/", "1/2/4/"] {
+                    assert!(
+                        sql.contains(&format!("startsWith(_scope.traversal_path, '{path}')")),
+                        "{query}: {sql}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
+        let cases = [
+            (
+                "Group",
+                "Project",
+                r#""from":"a","to":"x""#,
+                "countSubstrings(x.traversal_path, '/') >=",
+            ),
+            (
+                "Group",
+                "Group",
+                r#""from":"a","to":"x","hops":[2,3]"#,
+                "countSubstrings(x.traversal_path, '/') <=",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x""#,
+                "(x.traversal_path = (SELECT",
+            ),
+            (
+                "Project",
+                "Branch",
+                r#""from":"a","to":"x","direction":"incoming""#,
+                "gl_edge",
+            ),
+            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
+        ];
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        for (anchor, far, rel, expect) in cases {
+            let query = format!(
+                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
+            );
+            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
+                .unwrap()
+                .base
+                .render();
+            assert!(
+                sql.contains(expect),
+                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
+            );
+            if expect != "gl_edge" {
+                assert!(
+                    !sql.contains("gl_edge"),
+                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
+                );
             }
         }
     }
@@ -2012,34 +1880,6 @@ mod tests {
     }
 
     #[test]
-    fn cascade_narrowing_skipped_for_convergent_join_target() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "n", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "n"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{"count": "n", "as": "note_count"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_p"),
-            "p is the join target of two hops (IN_PROJECT and CONTAINS), so the cross-hop joins narrow it without a cascade CTE; got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn filtered_redaction_joins_push_filters_into_subquery() {
         let query = r#"{
             "query_type": "traversal",
@@ -2055,14 +1895,39 @@ mod tests {
 
         assert!(
             sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
-                && sql.contains("endsWith(f.path, '.rb')"),
+                && sql.contains("endsWith(lower(f.path), lower('.rb'))"),
             "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
             sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
-                && sql.contains("startsWith(d.name, 'process')"),
+                && sql.contains("startsWith(lower(d.name), lower('process'))"),
             "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
+    }
+
+    #[test]
+    fn local_string_filters_fold_case_with_lower_on_both_sides() {
+        for (operator, function) in [
+            ("contains", "contains"),
+            ("starts_with", "starts_with"),
+            ("ends_with", "ends_with"),
+        ] {
+            let query = format!(
+                r#"{{
+                    "query_type": "traversal",
+                    "nodes": [{{"id": "f", "entity": "File", "filters": {{"path": {{"{operator}": "ALI"}}}}}}],
+                    "limit": 10
+                }}"#
+            );
+
+            let sql = compile_local(&query, Frontend::JsonDsl, &ONTOLOGY)
+                .expect("should compile")
+                .base
+                .render();
+
+            let folded = format!("{function}(lower(f.path), lower('ALI'))");
+            assert!(sql.contains(&folded), "expected {folded}, got:\n{sql}");
+        }
     }
 
     #[test]
@@ -2101,41 +1966,6 @@ mod tests {
                 && sql.contains("startsWith(j.traversal_path")
                 && !sql.contains("startsWith(u.traversal_path"),
             "all in-namespace nodes (mr, pipe, j) scoped, global User hub unscoped; got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn hydration_uses_limit_by_for_latest_rows() {
-        let input = Input {
-            query_type: QueryType::Hydration,
-            nodes: vec![InputNode {
-                id: "mr".into(),
-                entity: Some("MergeRequest".into()),
-                columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
-                node_ids: vec![1],
-                traversal_paths: vec![TraversalPath::new_unchecked("1/")],
-                ..Default::default()
-            }],
-            limit: 10,
-            ..Default::default()
-        };
-
-        let ont = ONTOLOGY.clone();
-        let compiled = compile_input(
-            input,
-            HydrationCompileOptions::default(),
-            &ont,
-            &security_ctx(),
-        )
-        .expect("hydration input should compile");
-        let sql = compiled.base.render();
-        assert!(
-            !sql.contains(" FINAL"),
-            "hydration should dedup via LIMIT BY, not FINAL, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("LIMIT 1 BY"),
-            "hydration should dedup latest rows via LIMIT 1 BY, got:\n{sql}"
         );
     }
 

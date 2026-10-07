@@ -1,5 +1,11 @@
 # source: crates/integration-tests/tests/server/data_correctness/search.rs::search_filter_starts_with_returns_matching_rows
-description: starts_with filter returns rows with matching prefix
+description: starts_with filter returns rows with matching prefix regardless of case and prunes granules with the ngram skip index
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_user:
+      - { id: 50, username: zed, name: Zed Zero, state: active, user_type: human, email: zed@example.com }
 
 query:
   json: |
@@ -7,13 +13,15 @@ query:
       "query_type": "traversal",
       "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
                  "columns": ["username"],
-                 "filters": {"username": {"starts_with": "ali"}}}],
+                 "filters": {"username": {"starts_with": "ALI"}}}],
       "limit": 10
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ali' RETURN u.username LIMIT 10
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
 
 expect:
+  sql_contains: ["startsWith(lower(u.username), lower('ALI'))"]
+  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:

@@ -1,0 +1,27 @@
+name: Incoming FK self-relationship retains the physical holder
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "canceling", "entity": "Pipeline", "columns": ["id"], "filters": {"status": "success"}},
+        {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
+      ],
+      "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}]
+    }
+  gql: |
+    MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline)
+    RETURN canceling.id, canceled.id
+logical:
+  expect:
+    - (EdgeScan AUTO_CANCELED_BY canceled->canceling AS e0)
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON canceling.id = canceled.auto_canceled_by_id (_) (_))
+        - (Deduplicate Final (Scan Table(gl_pipeline) AS canceled))
+        - (Project canceled.id AS e0_src, canceled.auto_canceled_by_id AS e0_dst, ... (_))
+      reject:
+        - (Join ON canceled.id = canceling.auto_canceled_by_id (_) (_))
+        - (Scan Table(gl_ci_edge) ...)

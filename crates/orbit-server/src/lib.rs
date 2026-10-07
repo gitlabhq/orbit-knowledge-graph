@@ -3,6 +3,7 @@ pub mod analytics;
 pub mod auth;
 mod billing_adapter;
 pub mod cli;
+pub mod clickhouse_setup;
 pub mod cluster_health;
 pub mod content;
 pub mod fips;

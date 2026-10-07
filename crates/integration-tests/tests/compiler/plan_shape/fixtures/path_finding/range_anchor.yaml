@@ -1,0 +1,16 @@
+name: Path endpoint ranges create bounded anchor keys
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"User","node_ids":[1]},{"id":"b","entity":"Project","id_range":{"start":100,"end":200}}],"path":{"type":"shortest","from":"a","to":"b","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(b:Project) WHERE b.id >= 100 AND b.id <= 200 RETURN p
+logical:
+  expect: ["(Input path_finding (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter b.id >= 100, b.id <= 200, ... (_))"]
+    emitted:
+      ctes:
+        exact_order: [_nf_b, forward, backward]
+      expect: ["(CTE _nf_b (Limit 500 (_)))", "(Filter b.id >= 100, b.id <= 200 (_))"]

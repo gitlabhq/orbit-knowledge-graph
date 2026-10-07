@@ -1,0 +1,17 @@
+description: FK traversal joins target properties used only by a cross-node predicate
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {project_id: 1000})-[:IN_PROJECT]->(p:Project)
+    WHERE mr.id > p.id AND mr.title <> p.name
+    RETURN mr, p LIMIT 20
+
+expect:
+  node_count: 5
+  nodes:
+    Project: { ids: [1000] }
+    MergeRequest: { ids: [2000, 2001, 2004, 2005] }
+  edges:
+    IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
+  skip_requirements: ["filter:project_id"]
+  referential_integrity: true

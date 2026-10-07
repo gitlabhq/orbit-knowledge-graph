@@ -143,6 +143,7 @@ Consecutive MATCH clauses combine into one pattern, and their WHERE predicates c
 Declare each node's label and inline properties on its first occurrence. Later parts can refer to that variable without declaring another node. A repeated label must match; repeated inline properties are rejected. Add further predicates with WHERE.
 The first relationship establishes the tree. Each later relationship must attach one new node to it. Disconnected hops and cycles between pattern variables are rejected. Nodes can be declared before their relationships, but every declared node must belong to the final connected pattern.
 The far endpoint of a neighbors query is the exception to the label requirement: it has a variable but no label or predicate. It can be written on either side of the labeled center, so `(n)-->(c:WorkItem {id: 1})` and `(c:WorkItem {id: 1})<--(n)` are the same query.
+The response lists the center node alongside its neighbors, so leave the center out when counting neighbors.
 ORDER BY accepts one sort key. A second key is rejected with a message that names the limit.
 
 The frontend infers the query type:

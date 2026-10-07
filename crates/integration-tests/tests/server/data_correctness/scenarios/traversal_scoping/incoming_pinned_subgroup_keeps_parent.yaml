@@ -1,0 +1,16 @@
+description: Incoming containment from a pinned subgroup keeps its ancestor's scope
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"child","entity":"Group","node_ids":[200]},{"id":"parent","entity":"Group","columns":["name"]}],
+     "relationships":[{"type":"CONTAINS","from":"child","to":"parent","direction":"incoming"}],"group_by":["parent"],"aggregations":[{"count":"parent","as":"n"}],"limit":10}
+  gql: |
+    MATCH (child:Group {id: 200})<-[:CONTAINS]-(parent:Group) RETURN parent{.id, .name}, count(parent) AS n LIMIT 10
+expect:
+  sql_contains: ["gl_edge"]
+  skip_requirements: ["node_ids"]
+  groups:
+    parent:
+      ids: [100]
+      entity: Group
+      rows:
+        - { entity: Group, id: 100, values: { n: 1 }, properties: { name: Public Group } }

@@ -1,0 +1,17 @@
+name: Filtered neighbors plan separate directional arms
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"d","entity":"Definition","node_ids":[1],"filters":{"name":"caller"}}],"neighbors":{"direction":"both","rel_types":["CALLS"]}}
+  gql: |
+    MATCH (d:Definition {id: 1, name: 'caller'})-[:CALLS]-(neighbor) RETURN d, neighbor
+logical:
+  expect:
+    - (Input neighbors (...))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Neighbors center=d direction=both directional outgoing=[gl_code_edge] incoming=[gl_code_edge] center_filter=true ... (_))
+    emitted:
+      expect:
+        - (Union ALL (_) (_))

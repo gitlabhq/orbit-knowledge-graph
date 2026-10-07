@@ -1,0 +1,18 @@
+name: Dynamic hydration prunes an ancestor to one prefix
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}]}
+  gql: |
+    MATCH (f:File {id: 1}) RETURN f.path
+hydration:
+  dynamic: true
+  paths:
+    f: ["1/", "1/100/"]
+logical:
+  expect: ["(Input hydration (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter f.traversal_path PREFIX UNION ['1/100/'], f.id IN [1] (_))"]
+    emitted:
+      expect: ["(Filter StartsWith(f.traversal_path, '1/100/'), f.id = 1 (Scan Table(gl_file) AS f))"]

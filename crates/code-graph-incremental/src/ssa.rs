@@ -22,32 +22,10 @@ pub enum Value {
     ImportRef(u32),
     Type(u32),
     Call(u32),
-    Alias(u32),
     Opaque,
+    Undefined,
     Marker,
     Phi(PhiId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ParseValue {
-    LocalDef(u32),
-    ImportRef(u32),
-    Type(u32),
-    Call(u32),
-    Opaque,
-}
-
-impl Value {
-    pub fn to_parse_value(&self) -> Option<ParseValue> {
-        match self {
-            Value::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
-            Value::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
-            Value::Type(t) => Some(ParseValue::Type(*t)),
-            Value::Call(c) => Some(ParseValue::Call(*c)),
-            Value::Opaque => Some(ParseValue::Opaque),
-            Value::Alias(_) | Value::Marker | Value::Phi(_) => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,8 +48,6 @@ pub struct SsaEngine {
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     read_depth: usize,
-    /// Variables that have ever been written. A read of any other name in a
-    /// fully sealed graph is Opaque without walking the block chain.
     written: FxHashSet<u32>,
     unsealed: usize,
 }
@@ -176,41 +152,19 @@ impl SsaEngine {
     }
 
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
-        let resolved = if let Value::Alias(alias_name) = value {
-            let alias_val = self.read_variable_internal(alias_name, block);
-            if alias_val != Value::Opaque {
-                alias_val
-            } else {
-                Value::Alias(alias_name)
-            }
-        } else {
-            value
-        };
         self.written.insert(variable);
         self.current_def
             .entry(variable)
             .or_default()
-            .insert(block, resolved);
+            .insert(block, value);
     }
 
-    pub fn read_variable(&mut self, variable: u32, block: BlockId) -> Vec<ParseValue> {
-        let mut value = self.read_variable_internal(variable, block);
-        let mut depth = 0;
-        while let Value::Alias(target) = &value {
-            depth += 1;
-            if depth > 8 {
-                break;
-            }
-            let target_value = self.read_variable_internal(*target, block);
-            if matches!(target_value, Value::Opaque | Value::Marker) {
-                break;
-            }
-            value = target_value;
-        }
+    pub fn read_variable(&mut self, variable: u32, block: BlockId) -> Vec<Value> {
+        let value = self.read_variable_internal(variable, block);
         self.resolve_value(&value)
     }
 
-    fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
+    pub(crate) fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
@@ -218,7 +172,7 @@ impl SsaEngine {
         }
         // No unsealed block means no phi to create.
         if self.unsealed == 0 && !self.written.contains(&variable) {
-            return Value::Opaque;
+            return Value::Undefined;
         }
         if self.read_depth >= MAX_READ_DEPTH {
             return Value::Opaque;
@@ -243,7 +197,7 @@ impl SsaEngine {
                 .insert(variable, phi_id);
             Value::Phi(phi_id)
         } else if num_preds == 0 {
-            Value::Opaque
+            Value::Undefined
         } else if num_preds == 1 {
             let pred = self.blocks[block.0].predecessors[0];
             self.read_variable_internal(variable, pred)
@@ -482,48 +436,27 @@ impl SsaEngine {
         }
     }
 
-    fn resolve_value(&self, value: &Value) -> Vec<ParseValue> {
-        match value {
-            Value::LocalDef(_)
-            | Value::ImportRef(_)
-            | Value::Type(_)
-            | Value::Call(_)
-            | Value::Alias(_) => value.to_parse_value().into_iter().collect(),
-            Value::Opaque | Value::Marker => vec![],
-            Value::Phi(_) => {
-                let mut values = SmallVec::<[Value; 2]>::new();
-                let mut visited = FxHashSet::default();
-                self.resolve_value_recursive(value, &mut values, &mut visited);
-                let mut seen = FxHashSet::default();
-                values.retain(|v| seen.insert(v.clone()));
-                values
-                    .into_iter()
-                    .filter_map(|v| v.to_parse_value())
-                    .collect()
+    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<Value> {
+        if !matches!(value, Value::Phi(_)) {
+            return match value {
+                Value::Undefined | Value::Marker => vec![],
+                _ => vec![value.clone()],
+            };
+        }
+        let mut pending = SmallVec::<[&Value; 8]>::from_slice(&[value]);
+        let mut visited = FxHashSet::default();
+        let mut values = Vec::new();
+        while let Some(value) = pending.pop() {
+            if !visited.insert(value) {
+                continue;
+            }
+            match value {
+                Value::Phi(phi) => pending.extend(self.phis[phi.0].operands.iter().rev()),
+                Value::Undefined | Value::Marker => {}
+                _ => values.push(value.clone()),
             }
         }
-    }
-
-    fn resolve_value_recursive(
-        &self,
-        value: &Value,
-        out: &mut SmallVec<[Value; 2]>,
-        visited: &mut FxHashSet<PhiId>,
-    ) {
-        match value {
-            Value::Phi(phi_id) => {
-                if !visited.insert(*phi_id) {
-                    return;
-                }
-                for op in &self.phis[phi_id.0].operands {
-                    stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-                        self.resolve_value_recursive(op, out, visited)
-                    });
-                }
-            }
-            Value::Opaque | Value::Marker => {}
-            other => out.push(other.clone()),
-        }
+        values
     }
 }
 
@@ -620,7 +553,7 @@ mod tests {
         ssa.seal_block(b);
         ssa.write_variable(1, b, Value::LocalDef(0));
         let result = ssa.read_variable(1, b);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -631,7 +564,7 @@ mod tests {
         let b1 = ssa.add_sealed_successor(b0);
         ssa.write_variable(1, b0, Value::LocalDef(0));
         let result = ssa.read_variable(1, b1);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -648,8 +581,8 @@ mod tests {
 
         let result = ssa.read_variable(1, join);
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&ParseValue::LocalDef(0)));
-        assert!(result.contains(&ParseValue::LocalDef(1)));
+        assert!(result.contains(&Value::LocalDef(0)));
+        assert!(result.contains(&Value::LocalDef(1)));
     }
 
     #[test]
@@ -663,7 +596,7 @@ mod tests {
 
         ssa.write_variable(1, entry, Value::LocalDef(0));
         let result = ssa.read_variable(1, join);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -679,8 +612,8 @@ mod tests {
         let exit = ssa.finish_loop(header, body);
         let result = ssa.read_variable(1, exit);
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&ParseValue::LocalDef(0)));
-        assert!(result.contains(&ParseValue::LocalDef(1)));
+        assert!(result.contains(&Value::LocalDef(0)));
+        assert!(result.contains(&Value::LocalDef(1)));
     }
 
     #[test]
@@ -694,7 +627,7 @@ mod tests {
 
         let exit = ssa.finish_loop(header, body);
         let result = ssa.read_variable(1, exit);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -705,7 +638,7 @@ mod tests {
         ssa.write_variable(1, b, Value::LocalDef(0));
         ssa.write_variable(1, b, Value::LocalDef(1));
         let result = ssa.read_variable(1, b);
-        assert_eq!(result, vec![ParseValue::LocalDef(1)]);
+        assert_eq!(result, vec![Value::LocalDef(1)]);
     }
 
     #[test]
@@ -760,7 +693,7 @@ mod tests {
 
         ssa.remove_redundant_phi_sccs();
         let result = ssa.read_variable(1, exit);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -771,7 +704,7 @@ mod tests {
         ssa.write_variable(1, b, Value::ImportRef(0));
         ssa.write_variable(2, b, Value::LocalDef(0));
 
-        assert_eq!(ssa.read_variable(1, b), vec![ParseValue::ImportRef(0)]);
-        assert_eq!(ssa.read_variable(2, b), vec![ParseValue::LocalDef(0)]);
+        assert_eq!(ssa.read_variable(1, b), vec![Value::ImportRef(0)]);
+        assert_eq!(ssa.read_variable(2, b), vec![Value::LocalDef(0)]);
     }
 }

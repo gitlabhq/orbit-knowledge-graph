@@ -35,6 +35,13 @@ fixtures:
       def builtin_len_call():
           len([1, 2])
 
+      def local_print(value):
+          pass
+
+      def shadowed_builtin_call():
+          print = local_print
+          print("debug")
+
   - path: local_models.py
     content: |
       class LocalClient:
@@ -106,12 +113,19 @@ tests:
       - { row: { caller: "main.wildcard_import_call", path: "wildcard_sdk", name: "*", import_type: "WildcardImport" } }
 
   - name: "built-ins do not target wildcard imports"
-    # Known gap: python.yaml declares no `link.builtins`, so an unresolved
-    # `print`/`len` falls back to the wildcard import. Tracked on !2629.
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
       RETURN sym.import_path AS path
     assert:
       - { empty: true }
+
+  - name: "Local bindings still override builtin names"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadowed_builtin_call'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: local_print } }

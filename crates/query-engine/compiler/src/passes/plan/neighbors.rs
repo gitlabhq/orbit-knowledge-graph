@@ -1,18 +1,19 @@
-use std::collections::HashMap;
-
 use ontology::constants::*;
 
 use crate::error::Result;
 use crate::input::*;
 
-use super::{EdgeTableConfig, NodePlan, Plan, PlanBody, Strategy};
-use crate::passes::shared::has_non_denorm_filters;
+use super::context::PlanningContext;
+use super::helpers::has_non_denorm_filters;
+use super::{EdgeTableConfig, Neighbors, Plan};
 use query_data_model::QueryDataModel;
 
-pub fn plan_neighbors<M>(input: &Input, model: &M) -> Result<Plan>
+pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<Neighbors>>
 where
     M: QueryDataModel + ?Sized,
 {
+    let input = context.input;
+    let model = context.model;
     let config = input
         .neighbors
         .as_ref()
@@ -34,13 +35,11 @@ where
             crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
         })?;
 
-    let center_np = NodePlan::from_input(center_node, model, false).ok_or_else(|| {
-        crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
-    })?;
+    let center_np = context.resolve_node(center_node)?;
 
-    let denormalized = super::denormalized_facts(input, model);
-    let has_non_denorm =
-        has_non_denorm_filters(&center_np.filters, &denormalized) || center_np.id_range.is_some();
+    context.denormalized = super::denormalized_facts(input, model);
+    let has_non_denorm = has_non_denorm_filters(&center_np.filters, &context.denormalized)
+        || center_np.id_range.is_some();
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
     {
@@ -77,35 +76,30 @@ where
         }
     }
 
-    let node_edge_mappings = HashMap::from([(
+    context.node_edge_mappings.insert(
         center_alias.clone(),
         ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
-    )]);
-
-    let mut nodes = HashMap::new();
-    nodes.insert(center_alias.clone(), center_np);
-
-    Ok(Plan {
-        scope_requirements: Vec::new(),
-        nodes,
-        hops: vec![],
-        strategy: Strategy::SingleNode,
-        node_edge_mappings,
-        denormalized,
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
-        body: PlanBody::Neighbors {
-            center: center_alias,
-            direction: config.direction,
-            edge,
-            has_non_denorm,
-            center_tp_lookup: center_node
-                .entity
-                .as_deref()
-                .and_then(|entity| {
-                    model.traversal_path_lookup(entity, ontology::TraversalPathKind::Id)
-                })
-                .map(|(table, column)| (table.to_string(), column.to_string())),
-        },
-    })
+    );
+    let mut tables = edge.outgoing_tables.clone();
+    tables.extend(edge.incoming_tables.iter().cloned());
+    tables.sort();
+    tables.dedup();
+    let fused_table = (config.direction == Direction::Both
+        && !has_non_denorm
+        && center_np.uses_default_pk()
+        && tables.len() == 1)
+        .then(|| tables.remove(0));
+    context.nodes.insert(center_alias.clone(), center_np);
+    Ok(context.finish(Neighbors {
+        center: center_alias,
+        direction: config.direction,
+        edge,
+        has_non_denorm,
+        fused_table,
+        center_tp_lookup: center_node
+            .entity
+            .as_deref()
+            .and_then(|entity| model.traversal_path_lookup(entity, ontology::TraversalPathKind::Id))
+            .map(|(table, column)| (table.to_string(), column.to_string())),
+    }))
 }

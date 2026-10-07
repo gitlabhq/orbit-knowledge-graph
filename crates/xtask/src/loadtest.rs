@@ -27,6 +27,7 @@ use orbit_server::proto::{
     RedactionExchange, RedactionResponse, ResourceAuthorization, redaction_exchange,
 };
 use serde::Deserialize;
+use tabled::settings::Style;
 use tabled::{Table, Tabled};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -87,7 +88,7 @@ pub async fn run(opts: Options) -> Result<()> {
     }
 
     let total = opts.concurrency * opts.rounds;
-    println!(
+    eprintln!(
         "Load test: endpoint={} concurrency={} rounds={} => {} requests/query, {} queries",
         opts.endpoint,
         opts.concurrency,
@@ -95,7 +96,7 @@ pub async fn run(opts: Options) -> Result<()> {
         total,
         queries.len()
     );
-    println!(
+    eprintln!(
         "JWT: user={USERNAME} org={ORG_ID} admin={} ttl={TOKEN_TTL}s",
         opts.admin
     );
@@ -122,7 +123,7 @@ pub async fn run(opts: Options) -> Result<()> {
             opts.per_call_timeout,
         )
         .await;
-        println!(
+        eprintln!(
             "done: {} ({} reqs, {})",
             q.label,
             stats.samples.len() + stats.errors.values().sum::<usize>(),
@@ -138,19 +139,30 @@ pub async fn run(opts: Options) -> Result<()> {
         rows.push(stats.into_row(q.label.clone()));
     }
 
-    println!("\n{}", Table::new(rows));
-
-    if !error_detail.is_empty() {
-        println!("\nErrors:");
-        for (label, errors) in error_detail {
-            println!("  {label}:");
-            for (msg, count) in errors {
-                println!("    [{count}x] {msg}");
-            }
-        }
-    }
+    print!("{}", render_report(rows, &error_detail));
 
     Ok(())
+}
+
+/// Markdown report: latency table, then errors in a text fence so `|` and
+/// backticks in messages cannot break rendering.
+fn render_report(rows: Vec<ReportRow>, errors: &[(String, BTreeMap<String, usize>)]) -> String {
+    let mut out = format!(
+        "{} queries, latencies in ms (successful requests only).\n\n{}\n",
+        rows.len(),
+        Table::new(rows).with(Style::markdown())
+    );
+    if !errors.is_empty() {
+        out.push_str("\n### Errors\n\n```text\n");
+        for (label, msgs) in errors {
+            out.push_str(&format!("{label}:\n"));
+            for (msg, count) in msgs {
+                out.push_str(&format!("  [{count}x] {msg}\n"));
+            }
+        }
+        out.push_str("```\n");
+    }
+    out
 }
 
 /// Fan out `total` requests for one query with a bounded `concurrency` of
@@ -363,6 +375,7 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         deployment_type: None,
         realm: None,
         is_gitlab_team_member: None,
+        license_checksum: None,
     };
     // Rails base64-decodes the secret before signing; mirror that so the
     // server's JwtValidator accepts the token. Fall back to raw bytes if the
@@ -423,6 +436,34 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<LoadQuery>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_is_a_markdown_table_with_fenced_errors() {
+        let row = QueryStats {
+            samples: vec![10.0, 20.0],
+            errors: BTreeMap::new(),
+        }
+        .into_row("q".into());
+        let errs = vec![(
+            "q".to_string(),
+            BTreeMap::from([("boom | `x`".to_string(), 2)]),
+        )];
+        let out = render_report(vec![row], &errs);
+        assert!(out.starts_with("1 queries"));
+        assert!(out.contains("| Query |"));
+        assert!(out.contains("|---"));
+        assert!(out.contains("```text\nq:\n  [2x] boom | `x`\n```"));
+    }
+
+    #[test]
+    fn report_without_errors_has_no_errors_section() {
+        let row = QueryStats {
+            samples: vec![5.0],
+            errors: BTreeMap::new(),
+        }
+        .into_row("q".into());
+        assert!(!render_report(vec![row], &[]).contains("### Errors"));
+    }
 
     #[test]
     fn percentile_uses_nearest_rank_index() {

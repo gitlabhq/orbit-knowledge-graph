@@ -12,6 +12,7 @@ pub mod values {
     pub const ALLOW: &str = "allow";
     pub const DENY: &str = "deny";
     pub const FAIL_OPEN: &str = "fail_open";
+    pub const SKIPPED: &str = "skipped";
     pub const HIT: &str = "hit";
     pub const MISS: &str = "miss";
 }
@@ -27,7 +28,7 @@ const DOMAIN: &str = "billing.quota";
 // fewer. Use `cdot_duration_seconds_count{outcome="fail_open"}` for the call rate.
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
-    "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result \
+    "Quota gate decisions, labelled by outcome (allow/deny/fail_open/skipped), cache result \
      (hit/miss), and source_type (mcp/rest). \
      cache=miss on fail_open does not imply a 1:1 CDot call ratio — see \
      gkg.billing.quota.cdot.duration for actual upstream call counts.",

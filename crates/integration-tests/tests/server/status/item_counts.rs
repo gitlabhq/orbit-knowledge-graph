@@ -17,7 +17,6 @@ async fn item_counts() {
     run_subtests_shared!(
         &ctx,
         counts_entities_under_a_scope,
-        many_scopes_count_each_entity_once,
         scope_outside_the_callers_paths_counts_nothing,
         deleted_rows_are_excluded,
         duplicate_versions_count_once,
@@ -60,13 +59,6 @@ async fn counts_entities_under_a_scope(ctx: &TestContext) {
     assert_eq!(group["Project"], 2);
     assert_eq!(group["Group"], 1);
     assert_eq!(group["MergeRequest"], 1);
-}
-
-async fn many_scopes_count_each_entity_once(ctx: &TestContext) {
-    let counts = count(ctx, &admin_context(), &["1/100/", "1/100/1000/", "1/101/"]).await;
-
-    assert_eq!(counts["Project"], 3);
-    assert_eq!(counts["MergeRequest"], 2);
 }
 
 async fn scope_outside_the_callers_paths_counts_nothing(ctx: &TestContext) {

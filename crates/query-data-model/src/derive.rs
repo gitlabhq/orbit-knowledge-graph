@@ -75,7 +75,7 @@ mod tests {
         );
         assert!(matches!(
             model.backend().property_realization(property),
-            Some(PropertyRealization::Stored)
+            Some(PropertyRealization::Stored { column }) if column == "project_id"
         ));
         assert_eq!(
             model.backend().property_column(property),
@@ -97,5 +97,85 @@ mod tests {
         assert_eq!(model.backend().property_column(property), Some("when"));
         assert!(table.columns.contains("when"));
         assert!(!table.columns.contains("`when`"));
+    }
+
+    #[test]
+    fn foreign_keys_identify_the_endpoint_and_referenced_key() {
+        use crate::Endpoint;
+
+        let model =
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap();
+        for (relationship, source, target, holder, property) in [
+            (
+                "AUTHORED",
+                "User",
+                "MergeRequest",
+                Endpoint::Target,
+                "author_id",
+            ),
+            (
+                "IN_PROJECT",
+                "MergeRequest",
+                "Project",
+                Endpoint::Source,
+                "project_id",
+            ),
+            (
+                "AUTO_CANCELED_BY",
+                "Pipeline",
+                "Pipeline",
+                Endpoint::Source,
+                "auto_canceled_by_id",
+            ),
+        ] {
+            let key = model
+                .foreign_key(&[relationship.into()], source, target)
+                .unwrap();
+            assert_eq!(key.holder, holder, "{relationship}");
+            assert_eq!(model.graph().property(key.property).name, property);
+            let referenced_entity = match holder {
+                Endpoint::Source => target,
+                Endpoint::Target => source,
+            };
+            let referenced = model.graph().property(key.referenced_key);
+            assert_eq!(referenced.name, "id");
+            assert_eq!(
+                referenced.entity,
+                model.graph().entity_id(referenced_entity).unwrap()
+            );
+        }
+        assert!(
+            model
+                .foreign_key(
+                    &["AUTHORED".into(), "APPROVED".into()],
+                    "User",
+                    "MergeRequest",
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn property_realization_reports_backend_availability() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        let local = DuckDbDataModel::derive(ontology).unwrap();
+        let remote_entity = remote.graph().entity_id("MergeRequest").unwrap();
+        let local_entity = local.graph().entity_id("MergeRequest").unwrap();
+        let remote_property = remote.graph().property_id(remote_entity, "title").unwrap();
+        let local_property = local.graph().property_id(local_entity, "title").unwrap();
+        assert!(matches!(remote.property_realization(remote_property),
+            Some(PropertyRealization::Stored { column }) if column == "title"));
+        assert!(local.property_realization(local_property).is_none());
+        assert!(local.property_column(local_property).is_none());
+
+        let file = remote.graph().entity_id("File").unwrap();
+        let content = remote.graph().property_id(file, "content").unwrap();
+        assert!(matches!(
+            remote.property_realization(content),
+            Some(PropertyRealization::Virtual(_))
+        ));
+        assert!(remote.property_column(content).is_none());
     }
 }

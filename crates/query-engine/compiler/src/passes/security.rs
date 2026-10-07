@@ -26,7 +26,8 @@ use regex::Regex;
 
 use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::visit::{visit_queries_mut, visit_relations};
+use crate::ast::{Expr, Function, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -60,12 +61,7 @@ pub fn apply_security_context(
         ));
     }
     match node {
-        Node::Query(q) => {
-            for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx, model)?;
-            }
-            apply_to_query(q, ctx, model)
-        }
+        Node::Query(q) => visit_queries_mut(q, &mut |query| apply_to_query(query, ctx, model)),
         Node::Insert(_) => Ok(()),
     }
 }
@@ -95,45 +91,7 @@ fn apply_to_query(
         );
     }
 
-    apply_security_to_from(&mut q.from, ctx, model)?;
-
-    if let Some(where_clause) = &mut q.where_clause {
-        apply_security_to_expr(where_clause, ctx, model)?;
-    }
-
-    for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, model)?;
-    }
-
     Ok(())
-}
-
-fn apply_security_to_expr(
-    expr: &mut Expr,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match expr {
-        Expr::InSelect { query, .. } | Expr::Scalar(query) => apply_to_query(query, ctx, model),
-        Expr::BinaryOp { left, right, .. } => {
-            apply_security_to_expr(left, ctx, model)?;
-            apply_security_to_expr(right, ctx, model)
-        }
-        Expr::UnaryOp { expr, .. }
-        | Expr::Lambda { body: expr, .. }
-        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, model),
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                apply_security_to_expr(arg, ctx, model)?;
-            }
-            Ok(())
-        }
-        Expr::Column { .. }
-        | Expr::Identifier(_)
-        | Expr::Literal(_)
-        | Expr::Param { .. }
-        | Expr::Star => Ok(()),
-    }
 }
 
 fn build_path_filter(alias: &str, paths: &[&TraversalPath]) -> Expr {
@@ -156,7 +114,7 @@ fn starts_with_expr(alias: &str, path: &str) -> Expr {
 
 fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
     Expr::func(
-        "startsWith",
+        Function::StartsWith,
         vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
     )
 }
@@ -190,43 +148,15 @@ pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
     model: &(impl query_data_model::QueryDataModel + ?Sized),
 ) -> Vec<(String, String)> {
-    match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, model) => {
-            vec![(alias.clone(), table.clone())]
+    let mut aliases = Vec::new();
+    visit_relations(table_ref, &mut |relation| {
+        if let TableRef::Scan { table, alias, .. } = relation
+            && should_apply_security_filter(table, model)
+        {
+            aliases.push((alias.clone(), table.clone()));
         }
-        TableRef::Scan { .. } => vec![],
-        TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left, model);
-            aliases.extend(collect_aliased_tables(right, model));
-            aliases
-        }
-        // Derived tables don't have traversal_path columns themselves.
-        // Their arms get security filters via apply_security_to_from.
-        TableRef::Union { .. } | TableRef::Subquery { .. } => vec![],
-    }
-}
-
-fn apply_security_to_from(
-    table_ref: &mut TableRef,
-    ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> Result<()> {
-    match table_ref {
-        TableRef::Union { queries, .. } => {
-            for arm in queries {
-                apply_to_query(arm, ctx, model)?;
-            }
-        }
-        TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx, model)?;
-        }
-        TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx, model)?;
-            apply_security_to_from(right, ctx, model)?;
-        }
-        TableRef::Scan { .. } => {}
-    }
-    Ok(())
+    });
+    aliases
 }
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed
@@ -250,6 +180,7 @@ fn should_apply_security_filter(
 mod tests {
     use super::*;
     use crate::AuthorizedPath;
+    use crate::ast::visit::{visit_expressions, visit_queries};
     use crate::ast::{JoinType, Op, SelectExpr};
     use crate::scope::ScopeProof;
     use ontology::constants::EDGE_TABLE;
@@ -305,7 +236,13 @@ mod tests {
     #[test]
     fn single_path_uses_starts_with() {
         let expr = build_path_filter("u", &[&TraversalPath::from("42/43/")]);
-        assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
+        assert!(matches!(
+            expr,
+            Expr::FuncCall {
+                name: Function::StartsWith,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -336,7 +273,7 @@ mod tests {
             "large path sets should use OR chain, not arrayExists: {dbg}"
         );
         assert!(
-            dbg.contains("startsWith"),
+            dbg.contains("StartsWith"),
             "should produce startsWith predicates: {dbg}"
         );
     }
@@ -385,61 +322,25 @@ mod tests {
 
     fn starts_with_paths_for_alias(expr: &Expr, alias: &str) -> Vec<String> {
         let mut paths = Vec::new();
-        collect_starts_with_paths(expr, alias, &mut paths);
-        paths
-    }
-
-    fn collect_starts_with_paths(expr: &Expr, alias: &str, paths: &mut Vec<String>) {
-        match expr {
-            Expr::FuncCall { name, args } if name == "startsWith" && args.len() == 2 => {
-                if let (
+        visit_expressions(expr, &mut |expr| {
+            if let Expr::FuncCall { name, args } = expr
+                && *name == Function::StartsWith
+                && let [
                     Expr::Column { table, column },
                     Expr::Param {
                         value: Value::String(path),
                         ..
                     },
-                ) = (&args[0], &args[1])
-                    && table == alias
-                    && column == TRAVERSAL_PATH_COLUMN
-                {
-                    paths.push(path.clone());
-                }
-
-                for arg in args {
-                    collect_starts_with_paths(arg, alias, paths);
-                }
+                ] = args.as_slice()
+                && table == alias
+                && column == TRAVERSAL_PATH_COLUMN
+            {
+                paths.push(path.clone());
             }
-            Expr::FuncCall { args, .. } => {
-                for arg in args {
-                    collect_starts_with_paths(arg, alias, paths);
-                }
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                collect_starts_with_paths(left, alias, paths);
-                collect_starts_with_paths(right, alias, paths);
-            }
-            Expr::UnaryOp { expr, .. } => collect_starts_with_paths(expr, alias, paths),
-            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
-                collect_starts_with_paths(expr, alias, paths)
-            }
-            Expr::Lambda { body, .. } => collect_starts_with_paths(body, alias, paths),
-            Expr::Identifier(_)
-            | Expr::Column { .. }
-            | Expr::Literal(_)
-            | Expr::Param { .. }
-            | Expr::Scalar(_)
-            | Expr::Star => {}
-        }
-    }
-
-    fn find_in_select_query(expr: &Expr) -> Option<&Query> {
-        match expr {
-            Expr::InSelect { query, .. } => Some(query),
-            Expr::BinaryOp { left, right, .. } => {
-                find_in_select_query(left).or_else(|| find_in_select_query(right))
-            }
-            _ => None,
-        }
+            Ok(())
+        })
+        .unwrap();
+        paths
     }
 
     #[test]
@@ -472,9 +373,14 @@ mod tests {
         let Node::Query(q) = &node else {
             unreachable!()
         };
-        let anchor = find_in_select_query(q.where_clause.as_ref().unwrap())
-            .expect("InSelect subquery should survive the security pass");
-        let paths = starts_with_paths_for_alias(anchor.where_clause.as_ref().unwrap(), "e0p");
+        let mut paths = Vec::new();
+        visit_queries(q, &mut |query| {
+            if let Some(predicate) = &query.where_clause {
+                paths.extend(starts_with_paths_for_alias(predicate, "e0p"));
+            }
+            Ok(())
+        })
+        .unwrap();
         assert!(
             paths.contains(&"1/100/".to_string()) && paths.contains(&"1/200/".to_string()),
             "anchor subquery must carry the caller's full path set, got {paths:?}"
@@ -593,7 +499,7 @@ mod tests {
         let filter = build_path_filter("t", &eligible);
         let sql = format!("{filter:?}");
         assert!(
-            sql.contains("startsWith"),
+            sql.contains("StartsWith"),
             "should produce startsWith predicates: {sql}"
         );
     }

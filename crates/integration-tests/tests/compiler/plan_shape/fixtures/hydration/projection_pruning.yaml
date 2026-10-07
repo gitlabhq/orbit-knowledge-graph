@@ -1,0 +1,16 @@
+name: Hydration reads only requested properties and current-row columns
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1],"columns":["path"]}]}
+  gql: |
+    MATCH (f:File {id: 1}) RETURN f.path
+hydration: {}
+logical:
+  expect: ["(Input hydration (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Hydration (Project f.path (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.project_id, f.branch, f.id (_)))))"]
+    emitted:
+      expect: ["(Project f.id AS id, f._deleted AS _deleted, f.path AS path (_))"]
+      reject: ["(Project * (_))", "(Deduplicate Final (_))", "(Filter StartsWith(f.traversal_path, ?), ... (_))"]

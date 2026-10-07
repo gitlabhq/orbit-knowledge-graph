@@ -17,7 +17,7 @@ Vulnerability And Its Core Edges Are Indexed
     [Tags]    security
     ${suffix}=    Random Suffix
     Start Indexing Budget    300
-    ${project}=    Create Project    e2e-sec-prj-${suffix}    ${SHARED_NAMESPACE_ID}
+    ${project}=    Create Project    e2e-sec-prj-${suffix}    ${SHARED_NAMESPACE_ID}    readme=${True}
     ${title}=    Set Variable    e2e-sec vuln ${suffix}
     ${vuln}=    Create Vulnerability    ${project["id"]}    ${title}    severity=high
 

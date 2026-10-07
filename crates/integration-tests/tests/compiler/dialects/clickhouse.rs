@@ -23,6 +23,29 @@ fn compile_to_ast_works() {
 }
 
 #[test]
+fn incoming_self_relationship_keeps_the_foreign_key_on_its_source() {
+    let ontology = crate::compiler::setup::embedded_ontology();
+    let compiled = compile_pair(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
+                {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
+            ],
+            "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}],
+            "limit": 10
+        }"#,
+        "MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10",
+        &ontology,
+        &test_ctx(),
+    ).unwrap();
+    let sql = compiled.base.render();
+    assert!(sql.contains("canceled.auto_canceled_by_id"), "{sql}");
+    assert!(!sql.contains("canceling.auto_canceled_by_id"), "{sql}");
+    assert!(!sql.contains("FROM gl_edge"), "{sql}");
+}
+
+#[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
     let json = r#"{
@@ -396,7 +419,7 @@ fn filter_operators() {
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
-    assert!(rendered.contains("positionCaseInsensitive"));
+    assert!(rendered.contains("multiSearchAny(lower("));
 }
 
 #[test]
@@ -1023,11 +1046,11 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
 fn orbit_query_rejects_aggregation_over_shortest_paths() {
     let cases = [
         (
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3,"rel_types":["*"]},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
             "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10",
         ),
         (
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3,"rel_types":["*"]},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
             "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project {id: 2}) WHERE u.id >= 2 AND u.id <= 2 RETURN p{.id}, count(u) AS hit LIMIT 1",
         ),
     ];

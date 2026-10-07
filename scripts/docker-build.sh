@@ -23,6 +23,9 @@ BUILD_ARGS=""
 if [ -n "$GKG_VERSION" ]; then
   BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
 fi
+if [ -n "$ORBIT_BILLING_ENFORCED" ]; then
+  BUILD_ARGS="$BUILD_ARGS --build-arg ORBIT_BILLING_ENFORCED=$ORBIT_BILLING_ENFORCED"
+fi
 
 SECRET_ARGS=""
 if [ -n "$SCCACHE_GCS_KEY" ] && [ -f "$SCCACHE_GCS_KEY" ]; then

@@ -15,6 +15,7 @@ mod tui;
 mod workspace;
 
 use anyhow::{Context, Result};
+use clap::builder::TypedValueParser;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -486,8 +487,15 @@ enum Commands {
         #[arg(long)]
         project_id: Option<i64>,
 
-        /// Server response format. Defaults to `raw` (structured JSON).
-        #[arg(long, value_enum)]
+        #[arg(
+            long,
+            help = "Server response format. Defaults to raw (structured JSON).",
+            value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
+                .map(|value| match value.as_str() {
+                    "raw" => remote::ResponseFormat::Raw,
+                    _ => remote::ResponseFormat::Llm,
+                })
+        )]
         response_format: Option<remote::ResponseFormat>,
     },
     /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
@@ -717,12 +725,30 @@ async fn dispatch(
             let components = commands::setup::Component::from_flags(mcp, &skip);
             let options = flags.to_options(agents, all, !no_index, graph_first, components);
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::install(options, flags.target()?, &machine)
+            let run = commands::setup::install(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_CONFIGURED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(agents, false, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::uninstall(options, flags.target()?, &machine)
+            let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_REMOVED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::HookGuard {
             kind,
@@ -1028,6 +1054,41 @@ mod tests {
                 "{argv:?} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn gql_response_format_is_query_only() {
+        assert!(matches!(
+            Cli::parse_from([
+                "orbit",
+                "query",
+                "--response-format",
+                "gql",
+                "CALL db.schema()"
+            ])
+            .command,
+            Commands::Query {
+                response_format: Some(super::remote::ResponseFormat::Gql),
+                ..
+            }
+        ));
+        for format in ["raw", "llm", "gql"] {
+            let result = Cli::try_parse_from([
+                "orbit",
+                "graph-status",
+                "--full-path",
+                "a/b",
+                "--response-format",
+                format,
+            ]);
+            assert_eq!(result.is_ok(), format != "gql");
+        }
+        let help = Cli::command()
+            .find_subcommand_mut("graph-status")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("gql"));
     }
 
     #[test]

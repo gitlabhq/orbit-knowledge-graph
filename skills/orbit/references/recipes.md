@@ -416,8 +416,8 @@ Count detected vulnerabilities by severity:
 ## `path_finding`: shortest path between nodes
 
 Shortest path from a group to a project (`max_depth` ≤ 3, server-enforced).
-`rel_types` is required when either endpoint uses `filters`. Omitting it
-causes a server-side validation error.
+`rel_types` is required on every path query, including when both endpoints use
+`node_ids`. Omitting it causes a server-side validation error.
 
 > **Pitfall:** `path_finding` follows `rel_types` only in their **defined
 > (schema) direction**, unlike `traversal` where `from`/`to` merely name
@@ -461,9 +461,11 @@ To repeat an operator on one property, use an array of operator objects:
 ### Text-token search
 
 Use `all_tokens` to find entities whose text-indexed property contains every
-specified token. Tokens are matched against the pre-built text index, so
-only properties listed in the text-indexed properties table in
-[`query_language.md`](query_language.md) support these operators.
+specified word, in any order and in any case. Words are matched against the
+pre-built text index, so only properties listed in the text-indexed properties
+table in [`query_language.md`](query_language.md) support these operators.
+For a word prefix or a phrase with its words in order, use `contains`; on the same properties
+it is indexed too.
 
 ```json orbit-query
 {
@@ -506,6 +508,48 @@ Pass `pagination.next_cursor` from each response as `cursor.after` on the next
 request until `next_cursor` is absent. The token is bound to the exact query
 that issued it. Every response carries `pagination.truncated`; when true, the
 result window is incomplete and any aggregate computed over it is too.
+
+## Troubleshooting
+
+### Empty result body
+
+Usually the query matched no rows. Confirm with a known-good probe in `/tmp/q-min.json`:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [{
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": {"starts_with": "gitlab-org/"}
+      }
+    }],
+    "limit": 1
+  }
+}
+```
+
+```shell
+glab orbit query --response-format raw --file /tmp/q-min.json
+```
+
+If this returns a row, the connection works and your other query has no matches.
+
+### Validation errors (HTTP 400, exit 1)
+
+The query did not match the DSL JSON Schema. Common causes:
+
+- `node` (singular) instead of the `nodes` array. Wrap the selector: `"nodes": [{...}]`.
+- `neighbors` or single-node `traversal` with more than one entry in `nodes`.
+- Multi-node `traversal` without at least two nodes and one relationship.
+- `aggregation` without any `aggregations` entries.
+- `hops` upper bound or `max_depth` above 3, the server-enforced ceiling.
+- `cursor.after` reused after the query changed. The token is bound to the exact query that issued it.
+- `allowlist rejected` or `not valid under 'oneOf'` on a `columns` entry. The column is not in the entity's allowlist. Run `glab orbit ontology <Entity>` for the valid list.
+
+Fix: validate against the live schema from `glab orbit dsl`. Full field reference in [`query_language.md`](query_language.md).
 
 ## More examples
 

@@ -775,7 +775,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
     fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
         match filter.op.unwrap_or(FilterOp::Eq) {
             FilterOp::Eq | FilterOp::StartsWith => {
-                let Some(path) = filter.value.as_ref().and_then(|v| v.as_str()) else {
+                let Some(path) = filter.value_str() else {
                     return Err(QueryError::Validation(format!(
                         "{label}: value must be a traversal_path string"
                     )));
@@ -839,12 +839,12 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+                 string operators (contains/starts_with/ends_with) are not allowed on this field"
             )));
         }
 
-        // ClickHouse rejects positionCaseInsensitive/startsWith on non-string
-        // columns at execution, which would surface as an opaque 500.
+        // ClickHouse rejects lower()/startsWith on non-string columns at
+        // execution, which would surface as an opaque 500.
         if is_like_op
             && !matches!(
                 data_type,
@@ -853,7 +853,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) require a text field, got {data_type}"
+                 string operators (contains/starts_with/ends_with) require a text field, got {data_type}"
             )));
         }
 
@@ -882,6 +882,18 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     Self::MIN_LIKE_PATTERN_LEN
                 )));
             }
+        }
+
+        if op == FilterOp::TokenMatch
+            && value.as_str().is_some_and(|s| {
+                s.chars()
+                    .any(|c| c.is_ascii() && !c.is_ascii_alphanumeric())
+            })
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 token_match value must be one word of letters and digits; use all_tokens for several words"
+            )));
         }
 
         match op {
@@ -1066,7 +1078,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     if !matches!(data_type, DataType::Int | DataType::Float) {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
-                            function.as_sql(),
+                            function.to_string().to_uppercase(),
                             entity,
                             prop
                         )));
@@ -2791,7 +2803,7 @@ mod tests {
 
         let err = validator.check_references(&input).unwrap_err();
         assert!(
-            err.to_string().contains("LIKE operators"),
+            err.to_string().contains("string operators"),
             "expected like_allowed rejection, got: {err}"
         );
     }

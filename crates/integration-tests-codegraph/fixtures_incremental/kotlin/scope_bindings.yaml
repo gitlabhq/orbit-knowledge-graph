@@ -1,0 +1,64 @@
+name: "Kotlin: lexical binding ownership"
+fixtures:
+  - path: local/main.kt
+    content: |
+      fun first() {}
+      fun second() {}
+
+      fun run(flag: Boolean) {
+          val f = ::first
+          if (flag) {
+              val f = ::second
+          }
+          f()
+      }
+  - path: callable/main.kt
+    content: |
+      fun first() {}
+
+      fun run() {
+          val f = ::first
+          f()
+      }
+  - path: shadow/main.kt
+    content: |
+      class First {
+          fun ping() {}
+      }
+
+      class Second {
+          fun pong() {}
+      }
+
+      fun run(flag: Boolean) {
+          val f = First()
+          if (flag) {
+              val f = Second()
+          }
+          f.ping()
+      }
+  - path: control/main.kt
+    content: |
+      class First {
+          fun ping() {}
+      }
+
+      fun run() {
+          val f = First()
+          f.ping()
+      }
+tests:
+  - name: "Callable aliases and receiver types survive inner declarations"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 7 }
+      - { row: { file: local/main.kt, target: first } }
+      - { row: { file: callable/main.kt, target: first } }
+      - { row: { file: shadow/main.kt, target: First } }
+      - { row: { file: shadow/main.kt, target: Second } }
+      - { row: { file: shadow/main.kt, target: ping } }
+      - { row: { file: control/main.kt, target: First } }
+      - { row: { file: control/main.kt, target: ping } }

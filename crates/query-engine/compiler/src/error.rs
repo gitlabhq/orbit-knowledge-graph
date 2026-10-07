@@ -72,6 +72,46 @@ impl QueryError {
                 | Self::LimitExceeded(_)
         )
     }
+
+    pub fn rejection_reason(&self) -> RejectionReason {
+        match self {
+            Self::Parse(_) => RejectionReason::Parse,
+            Self::Validation(_) => RejectionReason::Schema,
+            Self::ReferenceError(_) => RejectionReason::Reference,
+            Self::PaginationError(_) => RejectionReason::Pagination,
+            Self::AllowlistRejected(_) => RejectionReason::Ontology,
+            Self::Authorization(_) => RejectionReason::Authorization,
+            Self::Restrict(_) => RejectionReason::Restrict,
+            Self::Ontology(_) => RejectionReason::OntologyInternal,
+            Self::DepthExceeded(_) => RejectionReason::Depth,
+            Self::LimitExceeded(_) => RejectionReason::Limit,
+            Self::Security(_) => RejectionReason::Security,
+            Self::Lowering(_) => RejectionReason::Lowering,
+            Self::Enforcement(_) => RejectionReason::Enforcement,
+            Self::Codegen(_) => RejectionReason::Codegen,
+            Self::PipelineInvariant(_) => RejectionReason::Pipeline,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr, strum::EnumIter)]
+#[strum(serialize_all = "snake_case")]
+pub enum RejectionReason {
+    Parse,
+    Schema,
+    Reference,
+    Pagination,
+    Ontology,
+    Authorization,
+    Restrict,
+    OntologyInternal,
+    Depth,
+    Limit,
+    Security,
+    Lowering,
+    Enforcement,
+    Codegen,
+    Pipeline,
 }
 
 pub type Result<T> = std::result::Result<T, QueryError>;

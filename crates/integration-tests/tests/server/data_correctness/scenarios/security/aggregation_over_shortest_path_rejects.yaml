@@ -9,7 +9,7 @@ query:
         {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         {"id": "p", "entity": "Project"}
       ],
-      "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+      "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3, "rel_types": ["*"]},
       "group_by": ["p"],
       "aggregations": [{"count": "u", "as": "hit"}],
       "limit": 10

@@ -17,6 +17,7 @@ async fn item_counts_response() {
     run_subtests_shared!(
         &ctx,
         entities_are_grouped_under_their_domains,
+        project_path_counts_its_own_entities,
         reporter_gets_no_security_domain,
     );
 }
@@ -50,12 +51,20 @@ fn count_of(domains: &[DomainItemCount], domain: &str, entity: &str) -> i64 {
 }
 
 async fn entities_are_grouped_under_their_domains(ctx: &TestContext) {
-    let domains = respond(ctx, &admin_context(), &["1/100/", "1/101/"]).await;
+    let domains = respond(ctx, &admin_context(), &["1/101/"]).await;
 
-    assert_eq!(count_of(&domains, "core", "Group"), 2);
-    assert_eq!(count_of(&domains, "core", "Project"), 3);
-    assert_eq!(count_of(&domains, "code_review", "MergeRequest"), 2);
+    assert_eq!(count_of(&domains, "core", "Group"), 1);
+    assert_eq!(count_of(&domains, "core", "Project"), 1);
+    assert_eq!(count_of(&domains, "code_review", "MergeRequest"), 1);
     assert_eq!(count_of(&domains, "security", "Vulnerability"), 1);
+}
+
+async fn project_path_counts_its_own_entities(ctx: &TestContext) {
+    let domains = respond(ctx, &admin_context(), &["1/100/1000/"]).await;
+
+    assert_eq!(count_of(&domains, "core", "Group"), 0);
+    assert_eq!(count_of(&domains, "core", "Project"), 1);
+    assert_eq!(count_of(&domains, "code_review", "MergeRequest"), 1);
 }
 
 async fn reporter_gets_no_security_domain(ctx: &TestContext) {

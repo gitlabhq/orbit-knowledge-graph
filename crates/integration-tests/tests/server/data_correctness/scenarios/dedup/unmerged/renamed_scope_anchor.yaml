@@ -1,0 +1,23 @@
+description: A renamed group does not resolve through its obsolete full path
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_group:
+      - { id: 970, name: renamed, full_path: old, traversal_path: "1/970/", _version: "2024-01-01 00:00:00" }
+      - { id: 970, name: renamed, full_path: new, traversal_path: "1/970/", _version: "2024-06-01 00:00:00" }
+    gl_project:
+      - { id: 9700, name: project, full_path: "new/project", traversal_path: "1/970/9700/" }
+    gl_edge:
+      - { source_id: 970, source_kind: Group, relationship_kind: CONTAINS, target_id: 9700, target_kind: Project, traversal_path: "1/970/" }
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"full_path":"old"}}],
+     "relationships":[{"type":"CONTAINS","from":"p","to":"g","direction":"incoming"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+  gql: |
+    MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: 'old'}) RETURN count(p) AS c LIMIT 10
+expect:
+  sql_contains: ["gl_group AS _scope FINAL"]
+  sql_not_contains: ["gl_edge", "gl_group AS g"]
+  skip_requirements: ["filter:full_path"]
+  row_count: 1
+  row_values: [{c: 0}]

@@ -7,6 +7,7 @@ mod format;
 use std::path::Path;
 use std::sync::Arc;
 
+use format::ExpectedIndex;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
@@ -127,15 +128,34 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         let db_name = scenario::database_name(name);
         let forked = ctx.fork(&db_name).await;
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
-        crate::scenario::seed::apply_seed(
-            &forked,
-            &cfg.extra_seed,
-            &Default::default(),
-            &columns,
-            name,
-        )
-        .await;
-        forked.optimize_all().await;
+        let mut settings = Default::default();
+        if cfg.unmerged_seed {
+            for table in cfg.extra_seed.keys() {
+                let table = crate::scenario::seed::prefix_graph_table(table);
+                assert!(
+                    columns.contains_key(&table),
+                    "{name}: unknown table '{table}'"
+                );
+                forked.execute(&format!("SYSTEM STOP MERGES {table}")).await;
+            }
+            settings = std::collections::BTreeMap::from([(
+                "optimize_on_insert".to_string(),
+                serde_json::json!(0),
+            )]);
+        }
+        if cfg.unmerged_seed {
+            for (table, rows) in &cfg.extra_seed {
+                for row in rows {
+                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
+                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
+                        .await;
+                }
+            }
+        } else {
+            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+                .await;
+            forked.optimize_all().await;
+        }
         forked
     } else {
         ctx.clone()
@@ -243,6 +263,11 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.indexes_used.is_empty() {
+        let plan = ctx.explain_plan(&compiled.base).await;
+        assert_indexes_used(&plan, &expect.indexes_used, label);
+    }
+
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
@@ -286,6 +311,73 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
+    for ExpectedIndex { table, index } in expected {
+        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
+            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
+        });
+        let entry = skip_index(scan, index).unwrap_or_else(|| {
+            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
+        });
+        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        assert!(
+            selected < initial,
+            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
+        );
+    }
+}
+
+fn unversioned_table(description: &str) -> &str {
+    let table = description.rsplit('.').next().unwrap_or(description);
+    match table
+        .strip_prefix('v')
+        .and_then(|rest| rest.split_once('_'))
+    {
+        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
+        _ => table,
+    }
+}
+
+fn read_from_merge_tree<'a>(
+    value: &'a serde_json::Value,
+    table: &str,
+) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
+                == Some("ReadFromMergeTree");
+            let scans_table = map
+                .get("Description")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|description| unversioned_table(description) == table);
+            if is_scan && scans_table {
+                return Some(value);
+            }
+            map.values().find_map(|v| read_from_merge_tree(v, table))
+        }
+        serde_json::Value::Array(items) => {
+            items.iter().find_map(|v| read_from_merge_tree(v, table))
+        }
+        _ => None,
+    }
+}
+
+fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
+                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
+            {
+                return Some(value);
+            }
+            map.values().find_map(|v| skip_index(v, name))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
+        _ => None,
+    }
 }
 
 fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {

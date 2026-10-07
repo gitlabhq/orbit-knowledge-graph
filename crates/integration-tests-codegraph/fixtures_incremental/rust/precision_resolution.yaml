@@ -202,8 +202,6 @@ tests:
       - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
 
   - name: "local callable shadowing does not target imported symbols"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'local_callable_shadows_external_import'

@@ -25,6 +25,7 @@ mcp:
     project: opencode.json
     global: "~/.config/opencode/opencode.json"
   format: opencode
+  coding_agent: opencode
 skills:
   dir:
     project: .agents/skills

@@ -1,0 +1,18 @@
+description: Project scope does not exclude ancestor groups or their membership edges
+
+query:
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    WHERE p.id IN [1000, 1002]
+    RETURN u, g, p LIMIT 20
+
+expect:
+  node_count: 6
+  nodes:
+    User: { ids: [1, 2, 6] }
+    Group: { ids: [100] }
+    Project: { ids: [1000, 1002] }
+  edges:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]
+    CONTAINS: [[100, 1000], [100, 1002]]
+  referential_integrity: true

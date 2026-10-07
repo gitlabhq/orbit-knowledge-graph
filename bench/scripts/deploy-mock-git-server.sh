@@ -48,11 +48,11 @@ log "Upgrading GKG release: gitlab.baseUrl=${MOCK_URL}"
 
 # Pin to the installed chart version to avoid schema mismatches.
 INSTALLED_VERSION=$(helm list --namespace "${GKG_NS}" --kube-context "${KCTX}" \
-  -f gkg -o json 2>/dev/null \
+  -f orbit -o json 2>/dev/null \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'].rsplit('-',1)[-1]) if d else print('')" 2>/dev/null || echo "")
 
-HELM_ARGS=(upgrade gkg
-  oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+HELM_ARGS=(upgrade orbit
+  oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit
   --namespace "${GKG_NS}"
   --reuse-values
   --set "gitlab.baseUrl=${MOCK_URL}"
@@ -75,6 +75,6 @@ if [[ -n "${CKPT_TABLE}" ]]; then
 fi
 
 # --- 6. Restart indexer ---
-$KC rollout restart -n "${GKG_NS}" deploy/gkg-indexer-default
-$KC rollout status -n "${GKG_NS}" deploy/gkg-indexer-default --timeout=120s
+$KC rollout restart -n "${GKG_NS}" deploy/orbit-indexer-default
+$KC rollout status -n "${GKG_NS}" deploy/orbit-indexer-default --timeout=120s
 log "Indexer restarted with mock git server"

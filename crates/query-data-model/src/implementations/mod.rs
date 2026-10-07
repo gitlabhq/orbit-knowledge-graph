@@ -10,8 +10,7 @@ pub use duckdb::DuckDbCatalog;
 
 #[derive(Debug, Clone)]
 pub(super) struct PropertyBackendFacts {
-    column: Option<String>,
-    realization: PropertyRealization,
+    realization: Option<PropertyRealization>,
     selectivity: ontology::FieldSelectivity,
     has_text_index: bool,
 }
@@ -22,9 +21,8 @@ fn derive_property_backend_facts(
 ) -> Result<Vec<PropertyBackendFacts>, DataModelError> {
     let mut facts = vec![
         PropertyBackendFacts {
-            realization: PropertyRealization::Stored,
+            realization: None,
             selectivity: ontology::FieldSelectivity::High,
-            column: None,
             has_text_index: false,
         };
         graph.properties().count()
@@ -44,15 +42,8 @@ fn derive_property_backend_facts(
                     name: format!("{}.{}", node.name, field.name),
                 }
             })?;
-            let realization = match &field.source {
-                ontology::FieldSource::DatabaseColumn(_) => PropertyRealization::Stored,
-                ontology::FieldSource::Virtual(source) => {
-                    PropertyRealization::Virtual(source.clone())
-                }
-            };
             facts[property.index()] = PropertyBackendFacts {
-                column: None,
-                realization,
+                realization: None,
                 selectivity: field.selectivity,
                 has_text_index: false,
             };

@@ -62,21 +62,104 @@ Each active schema snapshot derives one immutable query data model from its load
 The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
 Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
 Its authorization catalog resolves GitLab redaction and scope metadata.
+Each stored property realization contains its physical query column. An absent realization means that the backend cannot supply that property.
+Foreign-key facts identify the source or target endpoint that holds the key, its property, and the referenced ID property.
+The endpoint remains unambiguous for self-relationships and incoming traversals.
+Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
-Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
-All later passes continue to use that AST.
+Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
+All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
+Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
+The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
+Built-in calls use a closed `Function` vocabulary rather than SQL names. Each renderer owns function spelling, argument placement, and dialect syntax.
+The emitted explain view prints exact `Function` variant names, such as `StartsWith`. ClickHouse codegen renders `startsWith`; DuckDB renders `starts_with`.
+Security checks recognize the prefix operation directly. String byte length is distinct from character substring operations.
+Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
+ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.
+Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
+Week buckets start on Sunday. Day and larger buckets return dates; minute and hour buckets retain timestamp output.
+Collection aggregates omit null inputs and return an empty array for empty input. Other aggregates retain their backend result conventions, including empty sums and averages.
+Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
+CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
+UNION arms also retain their local CTE definitions. Empty path arrays carry field types instead of relying on dummy values in lowering.
+
+`mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
+The shared runner and structural matcher live in `integration-testkit::plan_shape`.
+Logical assertions inspect parsed, normalized Input before scope preparation.
+They include node and relationship filters, groups, measures, ordering, and limits.
+Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
+The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
+Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(...)` matches zero or more children.
+`...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
+These assertions check plan structure; data-correctness scenarios check execution results.
+
+### Plan fixture assertions
+
+Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `ctes`, and `exact`.
+Use multiline patterns for nested operations. Expressions use readable column references and preserve explicit grouping and quoted literals.
+
+```yaml
+physical:
+  clickhouse:
+    planned:
+      bind:
+        - (CTE $projects (Project p.id AS id (_)))
+      expect:
+        - (Filter p.id IN $projects.id, ... (_))
+      occurrences:
+        - pattern: (CTE $projects (_))
+          count: 1
+      ctes:
+        exact_order: [$projects]
+    emitted:
+      expect:
+        - (Scan Table(gl_project) AS p)
+```
+
+`bind` must match exactly one subtree and introduce a named capture. Later assertions may reference it but cannot introduce new captures.
+Captures are local to one assertion block and one frontend/backend run. They capture syntax, not scoped SQL relation identities.
+`?` matches one expression token or parenthesized group; `$name` captures that same unit and requires later uses to agree.
+Quoted `'?'`, `'$name'`, and `'...'` are literal strings. Failed matches do not change capture bindings.
+
+Item lists match without order, preserve duplicate counts, and require `...` to admit extra items.
+Child order remains significant. Expressions retain token order and grouping; the matcher does not infer algebraic equivalence.
+`exact` compares the whole ordered tree, including projection order, and rejects wildcards and captures.
+`ctes.exact_order` checks the complete top-level CTE sequence, including captured names.
+Use `ctes.absent: true` to assert that no top-level CTEs exist. Omit `ctes` to leave definitions unchecked.
+The two forms are exclusive. Empty lists, empty blocks, and `absent: false` are rejected.
+Failures report the fixture path, frontend, backend, phase, and assertion index. Missing-pattern errors include the first subtree with the requested operator.
+
+The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.
+Scope-aware relation captures remain deferred to the query-local SQL identity work.
+Family explain views include neighbor access and routes, path frontier depths and endpoints, and hydration projections, paths, and dedup keys.
+Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
+The harness applies that setup after normalization; hydration remains unavailable as a user query type.
+
+Each edge-chain emitter builds node bindings as it emits scans and joins.
+Each binding contains the graph identity, visible table alias, and hydration path expression when available.
+Lowering resolves elided endpoints through their emitted holders or pinned literals.
+Filtering CTEs do not make a node table visible in the result query block.
+Result enforcement consumes these bindings instead of searching the SQL tree for aliases.
+It still adds required authorization scans and projects redaction columns.
+Neighbors emits direction-specific redaction columns in its own query arms.
+Its projected binding carries only an identity needed for an additional role scan, when required.
+Property comparisons and cursor identities reuse the resolved node bindings.
+Lowering rejects identities that have neither a visible source nor an elided pinned value.
+FK hop elision retains elevated-role targets for authorization scans.
+It also retains multi-ID targets when projection, grouping, property aggregation, or ordering needs their values.
+Ungrouped aggregations can still elide targets used only as filters.
 
 | # | Pass | Responsibility |
 |---|---|---|
 | 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope, including scope-only container removal ([Security](../security.md)) |
 | 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
 | 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
-| 7 | `scope_requirements` | Adds semantic guards required by scope-anchor elision |
-| 8 | `response_policy` | Applies transport-size policy to result projections |
-| 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
+| 7 | `response_policy` | Applies transport-size policy to result projections |
+| 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
+| 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
 | 12 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
@@ -95,6 +178,7 @@ The planner emits ClickHouse SQL similar to these patterns:
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. This applies when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
 - Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
+- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison. FK hop removal keeps relationships needed by these comparisons.
 - FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`. They then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates. The compiler does not build a same-table center candidate that only repeats the center node's own filters.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
@@ -102,17 +186,18 @@ These choices preserve factorization. Each hop operates on a compact frontier an
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms and narrowed node joins instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
 | Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
 | Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
-| FK candidate CTEs | Non-`FINAL` `SELECT DISTINCT id` or FK values plus outer `FINAL` recheck | Lets ClickHouse use selective filters before the expensive latest-row scan while preserving correctness through the outer recheck |
-| Edge narrowing CTEs | Non-`FINAL` `SELECT DISTINCT edge_id` frontier | Narrows joined node `FINAL` scans while avoiding duplicate-heavy `IN` sets from fan-out edges |
+| FK candidate CTEs | Non-`FINAL` ID or FK prefilter plus a latest-row recheck | Candidates can include stale matches. The target scan selects the latest version before rechecking filters. |
+| Edge narrowing CTEs | Non-`FINAL` edge-endpoint ID frontier | Narrows joined node scans to IDs the edges reach |
 | Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and single-node lookup semantics consistent |
+| Main query node scans and broad node joins | Node table scan with `FINAL` | Keeps traversal, FK center, aggregation, and single-node lookup semantics consistent |
+| Narrowed node joins | Candidate-ID and sort-key filters before `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`; other node filters and `_deleted = false` outside | Sort-key values are the same for every version of a row, so those filters keep primary-key pruning. Mutable filters and deleted checks run after deduplication. |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
 
 Filter placement rules for node `FINAL` scans:
@@ -120,7 +205,7 @@ Filter placement rules for node `FINAL` scans:
 - **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the `FINAL` scan so ClickHouse can still use primary-key pruning where supported.
 - **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
-- **Candidate CTEs** are allowed to over-select because they are only a performance prefilter. The outer `FINAL` scan always re-applies the filters and `_deleted = false` before rows can affect traversal or aggregation results.
+- **Candidate CTEs** may over-select because they are only a performance prefilter. The target scan resolves the latest row before re-applying node filters and `_deleted = false`.
 - **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
@@ -137,7 +222,17 @@ denormalized_joins:
       - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
 ```
 
-That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`. Adjacent tables join on the id or edge id that links them. Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join. Every other column of every table is copied under a `t{i}_` prefix. The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key. The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning). It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`. The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor. So a hop may cross namespaces just as it may in an edge chain. A row is returned only when the caller is authorized for every namespace it touches. The loader only requires that at least one table in the chain is scoped.
+That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`.
+Adjacent tables join on the ID or edge ID that links them.
+Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join.
+Every other column of every table is copied under a `t{i}_` prefix.
+The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key.
+The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning).
+It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`.
+The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor.
+So a hop may cross namespaces just as it may in an edge chain.
+A row is returned only when the caller is authorized for every namespace it touches.
+The loader only requires that at least one table in the chain is scoped.
 
 Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/`. That directory mirrors `config/ontology/` and is merged over it. Run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed. It checks the table holds exactly the rows the live source join produces. It runs the YAML query scenarios against the overlaid ontology.
 
@@ -155,22 +250,26 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
-- The lookup is a bloom-filter point read on the anchor table, a few milliseconds.
+- ID lookups use an aggregate over all matching versions. Full-path lookups use `FINAL` before filtering the mutable path, so an old name cannot resolve a renamed anchor.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When the plan elides a scope anchor (aggregation containers), it adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- When scope preparation removes a container anchor, scope application adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
+- Containment elision preserves the requested direction and constrains the target's traversal-path depth. The compiler retains the target's table scan even when the query does not return its properties.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
 **Where it lands**
 
-- The `restrict` pass derives the per-alias prefixes, stores them on `Input.compiler.scope_prefixes`, and stamps each edge whose endpoints share a prefix (`InputRelationship.scope_prefix`).
-- The security pass keeps the caller's authorization `startsWith` set on every scan and ANDs the scope predicate beside it. The `check` pass is unchanged and the prefix can only narrow. ClickHouse intersects both ranges (273 granules with both, 1 367 with the broad set alone).
-- The lowerer emits the same predicate on stamped edge scans.
+- Scope preparation runs after restriction. It removes a scope-only container only when the target's scope and hop depth exactly replace the relationship. It stores the bounded target proof in scope state and gives planning only the target alias that needs a table scan.
+- Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
+- Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
+- Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
+- Scope application, security injection, and final checks share callback-based query walkers. The walkers cover queries nested in expressions as well as derived tables and CTEs.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
 - Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
-- An edge row's `traversal_path` is its source entity's, so a prefix floods across scope-preserving edges to every reachable node and edge. A two-pass taint walk resolves the exact variant (`is_scope_preserving_triple`) and refuses aliases reachable through a cross-namespace edge.
+- Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. This follows the stored edge direction, including incoming query selectors. A project's path cannot constrain its ancestor group or that group's membership edges.
+- Other scope-preserving variants propagate prefixes in both directions. A two-pass taint walk resolves the exact variant and refuses aliases reachable through a cross-namespace edge.
 - Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).
 
 ## Request Flow (Deployed)

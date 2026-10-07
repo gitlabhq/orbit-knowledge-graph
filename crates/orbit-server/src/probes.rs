@@ -38,7 +38,7 @@ pub fn readiness_checks(
             let serving = serving.clone();
             vec![("schema_gate", Box::new(move || gate_cleared(&serving)))]
         }
-        Mode::HealthCheck => Vec::new(),
+        Mode::HealthCheck | Mode::ClickhouseSetup => Vec::new(),
     }
 }
 

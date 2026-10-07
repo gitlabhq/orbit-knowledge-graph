@@ -51,6 +51,7 @@ jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 labkit-events = { workspace = true }
 serde = { workspace = true }
+secrecy = { workspace = true }
 semver = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }
@@ -79,7 +80,11 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
+orbit-billing = { path = "../orbit-billing", features = ["testkit"] }
+orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
+tempfile = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
 tracing-subscriber = { workspace = true }
 
 [lints]
