@@ -31,7 +31,8 @@ impl RecallFilter {
 pub fn query_alternatives(query: &str) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
     let mut alternatives = Vec::new();
-    for alternative in query.split('|').map(str::trim) {
+    for alternative in split_unescaped(query) {
+        let alternative = alternative.trim();
         if !alternative.chars().any(char::is_alphanumeric) {
             return Err(format!("no usable search terms in query: {query:?}"));
         }
@@ -42,9 +43,31 @@ pub fn query_alternatives(query: &str) -> Result<Vec<String>, String> {
     Ok(alternatives)
 }
 
+fn split_unescaped(query: &str) -> Vec<String> {
+    let (mut parts, mut current) = (Vec::new(), String::new());
+    let mut chars = query.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => current.extend(chars.next()),
+            '|' => parts.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    parts.push(current);
+    parts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backslashes_escape_literally() {
+        assert_eq!(
+            query_alternatives(r"Router::new|route\(|^\[dependencies\]|a\|b").unwrap(),
+            ["Router::new", "route(", "^[dependencies]", "a|b"]
+        );
+    }
 
     #[test]
     fn alternatives_preserve_full_queries_and_first_spelling() {

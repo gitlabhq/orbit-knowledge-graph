@@ -51,6 +51,10 @@ pub(crate) fn run(
         &paths,
         &filter.kinds,
     )?;
+    let alternatives: Vec<String> = alternatives
+        .iter()
+        .map(|a| text::anchored(a).0.to_string())
+        .collect();
     write!(out, "{}", text::render(&hits, &alternatives))?;
     write!(
         out,

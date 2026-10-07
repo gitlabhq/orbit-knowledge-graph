@@ -4,6 +4,7 @@
 //! `read` is accepted for installs that still register it, and never nudges.
 
 use std::io::Read;
+use std::path::Path;
 
 use clap::ValueEnum;
 use serde_json::{Value, json};
@@ -58,34 +59,54 @@ fn local_graph_exists() -> bool {
 
 fn should_nudge(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
-    let command = tool_input
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let is_grep_tool = command.is_empty()
-        && call.get("tool_name").and_then(Value::as_str) != Some("Glob")
-        && tool_input
-            .get("pattern")
-            .and_then(Value::as_str)
-            .is_some_and(|p| !p.is_empty());
-    is_grep_tool
-        || command
-            .split(['|', ';', '&', '\n', '(', ')', '`'])
-            .any(segment_invokes_search)
+    let cwd = Path::new(call.get("cwd").and_then(Value::as_str).unwrap_or("."));
+    let field = |name: &str| tool_input.get(name).and_then(Value::as_str).unwrap_or("");
+    let command = field("command");
+    if command.is_empty() {
+        return call.get("tool_name").and_then(Value::as_str) != Some("Glob")
+            && !field("pattern").is_empty()
+            && !cwd.join(field("path")).is_file();
+    }
+    command
+        .split([';', '&', '\n', '(', ')', '`'])
+        .flat_map(|pipeline| pipeline.split('|').enumerate())
+        .any(|(position, segment)| searches_tree(segment, position > 0, cwd))
 }
 
-fn segment_invokes_search(segment: &str) -> bool {
-    for token in segment.split_whitespace() {
-        if token.starts_with('-') || token.contains('=') {
-            continue;
+fn searches_tree(segment: &str, piped: bool, cwd: &Path) -> bool {
+    let mut tokens = segment
+        .split_whitespace()
+        .map(|t| t.trim_matches(['"', '\'']));
+    let mut via_git = false;
+    let name = loop {
+        match tokens.next() {
+            None => return false,
+            Some(t) if t.starts_with('-') || t.contains('=') => continue,
+            Some(t) => {
+                let name = t.rsplit('/').next().unwrap_or(t);
+                if !COMMAND_WRAPPERS.contains(&name) {
+                    break name;
+                }
+                via_git |= matches!(name, "git" | "xargs");
+            }
         }
-        let name = token.rsplit('/').next().unwrap_or(token);
-        if COMMAND_WRAPPERS.contains(&name) {
-            continue;
-        }
-        return SEARCH_COMMANDS.contains(&name);
+    };
+    if !SEARCH_COMMANDS.contains(&name) {
+        return false;
     }
-    false
+    let rest: Vec<&str> = tokens.collect();
+    let recursive = rest.iter().any(|t| {
+        *t == "--recursive"
+            || (t.starts_with('-') && !t.starts_with("--") && t.contains(['r', 'R']))
+    });
+    let paths: Vec<&str> = rest
+        .iter()
+        .filter(|t| !t.starts_with('-'))
+        .skip(1)
+        .copied()
+        .collect();
+    let greps_tree = matches!(name, "rg" | "ripgrep" | "ag" | "ack") && paths.is_empty() && !piped;
+    via_git || recursive || greps_tree || paths.iter().any(|p| cwd.join(p).is_dir())
 }
 
 #[cfg(test)]
@@ -97,18 +118,22 @@ mod tests {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
+            "grep -n foo src",
             "sudo rg foo",
             "xargs -n1 grep foo",
             "/usr/bin/rg foo",
             "git grep foo",
-            "cat x.txt | grep foo",
+            "rg foo src",
             "RUST_LOG=debug rg foo",
         ] {
-            let call = json!({"tool_input": {"command": command}});
+            let call =
+                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
             assert!(respond(Kind::Search, &call).is_some(), "{command}");
         }
         let tool = json!({"tool_name": "Grep", "tool_input": {"pattern": "fn main"}});
         assert!(respond(Kind::Search, &tool).is_some());
+        let file = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "rand", "path": "Cargo.toml"}});
+        assert!(respond(Kind::Search, &file).is_none());
     }
 
     #[test]
@@ -120,8 +145,12 @@ mod tests {
             "ls -la",
             "cargo build",
             "git log --grep=foo",
+            "cat x.txt | grep foo",
+            "grep -n rand Cargo.toml crates/x/Cargo.toml",
+            "rg -n rand Cargo.toml",
         ] {
-            let call = json!({"tool_input": {"command": command}});
+            let call =
+                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
             assert!(respond(Kind::Search, &call).is_none(), "{command}");
         }
         let glob = json!({"tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});

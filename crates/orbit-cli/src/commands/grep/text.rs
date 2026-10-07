@@ -29,6 +29,17 @@ fn normalized(expr: &str) -> String {
     format!("lower(regexp_replace({expr}, '[_\\-\\s]', '', 'g'))")
 }
 
+pub(super) fn anchored(term: &str) -> (&str, bool, bool) {
+    let start = term.starts_with('^');
+    let core = term.strip_prefix('^').unwrap_or(term);
+    let end = core.len() > 1 && core.ends_with('$');
+    (
+        core.strip_suffix('$').filter(|_| end).unwrap_or(core),
+        start,
+        end,
+    )
+}
+
 fn compact(text: &str) -> String {
     text.chars()
         .filter(|c| !(c.is_whitespace() || *c == '_' || *c == '-'))
@@ -52,13 +63,17 @@ pub(super) fn hits(
         return Ok(Vec::new());
     }
     let def = NodeHydrator::embedded("Definition")?;
-    let filter = (0..alternatives.len())
-        .map(|i| {
-            format!(
-                "contains({}, {})",
-                normalized("h.text"),
-                normalized(&format!("?{}", i + 2))
-            )
+    let filter = alternatives
+        .iter()
+        .enumerate()
+        .map(|(i, term)| {
+            let (text, param) = (normalized("h.text"), normalized(&format!("?{}", i + 2)));
+            match anchored(term) {
+                (_, true, true) => format!("{text} = {param}"),
+                (_, true, false) => format!("starts_with({text}, {param})"),
+                (_, false, true) => format!("ends_with({text}, {param})"),
+                _ => format!("contains({text}, {param})"),
+            }
         })
         .collect::<Vec<_>>()
         .join(" OR ");
@@ -75,7 +90,7 @@ pub(super) fn hits(
         ),
     };
     let mut params: Vec<serde_json::Value> = std::iter::once(git.commit_sha.clone().into())
-        .chain(alternatives.iter().map(|a| a.clone().into()))
+        .chain(alternatives.iter().map(|a| anchored(a).0.into()))
         .collect();
     params.push(git.project_id.into());
     let batches = client.query_arrow_json(
