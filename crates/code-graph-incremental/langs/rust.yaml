@@ -54,9 +54,9 @@ stages:
   - name: retag-refs
     rules:
       - match: '(field_initializer field: $N value: $V)'
-        replace: '(__field @$N (__rhs @$ROOT|tree_node_id|prepend("$value:")) (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$V $V)))'
+        replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$V $V)))'
       - match: '(shorthand_field_initializer $N)'
-        replace: '(__field @$N (__rhs @$ROOT|tree_node_id|prepend("$value:")) (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
+        replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
       - match: '(field_initializer_list $$$F:__field)'
         replace: '(__obj $$$F)'
       - match: '(field_expression value: $O:__ivar field: $F)'
@@ -376,11 +376,11 @@ stages:
   - name: positional-fields
     rules:
       - match: '(tuple_value $F:__field $$$REST:__field)'
-        replace: '(__field @$ROOT|sibling_index (__rhs @$ROOT|tree_node_id|prepend("$value:")) (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__obj $F $$$REST))))'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__obj $F $$$REST))))'
       - match: '(tuple_value $C:__callee $$$REST)'
-        replace: '(__field @$ROOT|sibling_index (__rhs @$ROOT|tree_node_id|prepend("$value:")) (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__call $C $$$REST))))'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__call $C $$$REST))))'
       - match: '(tuple_value)'
-        replace: '(__field @$ROOT|sibling_index (__rhs @$ROOT|tree_node_id|prepend("$value:")) (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
       - match: '(__ssa_arm $V:identifier)'

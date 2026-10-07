@@ -500,8 +500,8 @@ impl<'t> Fold<'t> {
                 self.bind_fields(lhs, tail);
             }
         }
-        if declaration {
-            self.declare_binding(c, c.sym());
+        if declaration && let Some((_, scope)) = self.scopes.last_mut() {
+            scope.insert(c.sym(), lhs);
         }
         true
     }
@@ -612,7 +612,12 @@ impl<'t> Fold<'t> {
                 .map(|field| {
                     (
                         field.sym(),
-                        self.binding(field.child_sym(C::Rhs).unwrap_or(0)),
+                        self.binding(
+                            field
+                                .child_sym(C::Binding)
+                                .or_else(|| field.child_sym(C::Rhs))
+                                .unwrap_or(0),
+                        ),
                     )
                 })
                 .collect()
@@ -623,8 +628,8 @@ impl<'t> Fold<'t> {
             self.fields.get(&source).cloned().unwrap_or_default()
         };
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
-        let mut field_updates = Vec::new();
-        let mut value_updates = Vec::new();
+        let mut field_updates = smallvec::SmallVec::<[_; 4]>::new();
+        let mut value_updates = smallvec::SmallVec::<[_; 8]>::new();
         while let Some((target, sources)) = copies.pop() {
             if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
                 self.killed = Some(killed);
@@ -646,8 +651,10 @@ impl<'t> Fold<'t> {
                 }
                 let value = self.read_value(source);
                 value_updates.push((target, value));
-                let sources = self.fields.get(&source).cloned().unwrap_or_default();
-                copies.push((target, sources));
+                if self.fields.contains_key(&source) || self.fields.contains_key(&target) {
+                    let sources = self.fields.get(&source).cloned().unwrap_or_default();
+                    copies.push((target, sources));
+                }
             }
             field_updates.push((target, fields));
         }
