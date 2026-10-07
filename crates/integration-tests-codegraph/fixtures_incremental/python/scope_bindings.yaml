@@ -1,0 +1,38 @@
+name: "Python: lexical binding ownership"
+fixtures:
+  - path: global_read/main.py
+    content: "def first(): pass\ndef second(): pass\nf = first\ndef run():\n global f\n f()\n f = second\n"
+  - path: nonlocal/main.py
+    content: "def first(): pass\ndef second(): pass\ndef outer():\n f = first\n def run():\n  nonlocal f\n  f()\n  f = second\n"
+  - path: class_local/main.py
+    content: "def first(): pass\ndef second(): pass\ndef run():\n class Local:\n  first = second\n first()\n"
+  - path: before_assignment/main.py
+    content: "def first(): pass\ndef second(): pass\ndef run():\n    first()\n    first = second\n"
+  - path: branch/main.py
+    content: "def first(): pass\ndef second(): pass\ndef run(flag):\n    f = first\n    if flag:\n        f = second\n    f()\n"
+  - path: global_write/main.py
+    content: "def first(): pass\ndef second(): pass\nf = first\ndef run():\n global f\n f = second\n f()\n"
+  - path: global_nested/main.py
+    content: "def first(): pass\ndef second(): pass\nf = first\ndef outer():\n f = second\n def run():\n  global f\n  f()\n"
+tests:
+  - name: "Function locals block global fallback before assignment"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND caller.file_path = 'before_assignment/main.py'
+      RETURN callee.name AS target
+    assert:
+      - { empty: true }
+  - name: "Explicit ownership and branch assignments select exact targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 7 }
+      - { row: { file: global_read/main.py, target: first } }
+      - { row: { file: nonlocal/main.py, target: first } }
+      - { row: { file: class_local/main.py, target: first } }
+      - { row: { file: branch/main.py, target: first } }
+      - { row: { file: branch/main.py, target: second } }
+      - { row: { file: global_write/main.py, target: second } }
+      - { row: { file: global_nested/main.py, target: first } }

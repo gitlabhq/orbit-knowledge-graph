@@ -1,0 +1,16 @@
+name: "Bash: command and variable namespaces"
+fixtures:
+  - path: braces/main.sh
+    content: "first() { :; }\nrun() { { first; }; }"
+  - path: variable/main.sh
+    content: "first() { :; }\nsecond() { :; }\nrun() { local first=second; first; }"
+tests:
+  - name: "Literal commands resolve independently of variable bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: braces/main.sh, target: first } }
+      - { row: { file: variable/main.sh, target: first } }

@@ -1,0 +1,16 @@
+name: "Lua: lexical binding ownership"
+fixtures:
+  - path: local/main.lua
+    content: "function first() end\nfunction second() end\nfunction run() local f = first; do local f = second end; f() end"
+  - path: assignment/main.lua
+    content: "function first() end\nfunction second() end\nfunction run() local f = first; do f = second end; f() end"
+tests:
+  - name: "Local declarations stay inside blocks while assignments survive"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: local/main.lua, target: first } }
+      - { row: { file: assignment/main.lua, target: second } }

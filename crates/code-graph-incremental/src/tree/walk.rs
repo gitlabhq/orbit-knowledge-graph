@@ -302,8 +302,13 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn tail_expr(self) -> Self {
-        let stop =
-            |c: &Self| c.is(C::Call) || c.is(C::SsaBranch) || c.is(C::SsaReturn) || c.is(C::Member);
+        let stop = |c: &Self| {
+            c.is(C::Call)
+                || c.is(C::SsaBranch)
+                || c.is(C::SsaReturn)
+                || c.is(C::Member)
+                || c.is(C::Obj)
+        };
         let next = |c: &Self| (!stop(c)).then(|| c.last_named()).flatten();
         std::iter::successors(Some(self), next)
             .last()

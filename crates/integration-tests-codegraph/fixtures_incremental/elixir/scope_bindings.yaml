@@ -1,0 +1,16 @@
+name: "Elixir: lexical alias ownership"
+fixtures:
+  - path: shadow/main.ex
+    content: "defmodule First do\n def ping(), do: :ok\nend\ndefmodule Second do\n def ping(), do: :ok\nend\ndefmodule Main do\n alias First, as: Target\n def run(flag) do\n  if flag do\n   alias Second, as: Target\n  end\n  Target.ping()\n end\nend"
+  - path: control/main.ex
+    content: "defmodule First do\n def ping(), do: :ok\nend\ndefmodule Main do\n alias First, as: Target\n def run() do\n  Target.ping()\n end\nend"
+tests:
+  - name: "Inner aliases do not replace outer module aliases"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: shadow/main.ex, target: First.ping } }
+      - { row: { file: control/main.ex, target: First.ping } }

@@ -232,6 +232,12 @@ The incremental engine distinguishes an undefined name from a local value whose
 target is unknown. Unknown locals block fallback to same-named imports or functions.
 Direct Rust tuple destructuring reads the source bindings before assigning the
 destination bindings, including positions discarded with `_`.
+Rust pattern rules lower tuple and record components to ordinary declarations
+with field reads. Nested patterns repeat the same rewrite. A temporary binding
+holds the source before destination names become visible. Field initializers
+also use temporaries so later expressions cannot change earlier captured values.
+The `tree_node_id` transform supplies unique names within the rewritten file; these
+temporary names are internal and do not become graph definitions.
 Record fields and tuple-struct positions use separate SSA bindings within each
 function. Copies retain the current field values; whole-value replacement clears
 old fields. Calls through fields or loop joins retain their reaching values until
@@ -249,6 +255,19 @@ names. TypeScript rules use block labels for `let` and `const`, and function lab
 for `var`. Python assignment rules use function labels. Rust declarations take
 effect in source order. Scope labels are YAML symbols; the engine does not branch
 on language names.
+
+C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
+local declarations introduce bindings independently of assignments to outer names.
+JavaScript-family iteration rules retain the source expression and bind the loop
+variable in its block or function scope. Rust blocks use the existing hoisting
+tag to register local items before walking statements.
+
+An `__alias` on a named declaration selects an enclosing scope with that label.
+The linker registers these aliases before local declarations. Python `global`
+and PHP `global` select the module; Python `nonlocal` selects an outer function.
+PHP rules register variable reads in their function scope so undeclared locals
+cannot inherit file-level values. Bash variable bindings use their `$` prefix
+to keep them separate from literal command names.
 
 ##### Inventory-driven indexing pipeline
 

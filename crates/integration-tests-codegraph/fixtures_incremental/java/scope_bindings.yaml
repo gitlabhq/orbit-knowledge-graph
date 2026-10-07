@@ -1,0 +1,27 @@
+name: "Java: lexical binding ownership"
+fixtures:
+  - path: shadow/Main.java
+    content: "class First { void ping() {} } class Main { First f; void run() { { String f = null; } f.ping(); } }"
+  - path: control/Main.java
+    content: "class First { void ping() {} } class Main { First f; void run() { f.ping(); } }"
+  - path: siblings/Main.java
+    content: "class First { void ping() {} } class Second { void pong() {} } class Main { void run() { { First f = new First(); f.ping(); } { Second f = new Second(); f.pong(); } } }"
+  - path: local_class/Main.java
+    content: "class First { void ping() {} } class Main { void run() { { class Local { void ping() {} } Local f = new Local(); } First f = new First(); f.ping(); } }"
+tests:
+  - name: "Local classes and variables do not escape their blocks"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 9 }
+      - { row: { file: shadow/Main.java, target: ping } }
+      - { row: { file: control/Main.java, target: ping } }
+      - { row: { file: siblings/Main.java, target: First } }
+      - { row: { file: siblings/Main.java, target: Second } }
+      - { row: { file: siblings/Main.java, target: ping } }
+      - { row: { file: siblings/Main.java, target: pong } }
+      - { row: { file: local_class/Main.java, target: First } }
+      - { row: { file: local_class/Main.java, target: Local } }
+      - { row: { file: local_class/Main.java, target: ping } }

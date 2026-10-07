@@ -199,6 +199,12 @@ stages:
         replace: '(__ssa_branch (__ssa_arm $B) $$$ALTS->__ssa_arm)'
 
       # Loops
+      - match: '(for_in_statement (let) left: $N:identifier right: $V body: $B)'
+        replace: '(__scope "block" (__ssa_loop $V (__binding @$N (__declaration "block")) $B))'
+      - match: '(for_in_statement (const) left: $N:identifier right: $V body: $B)'
+        replace: '(__scope "block" (__ssa_loop $V (__binding @$N (__declaration "block")) $B))'
+      - match: '(for_in_statement (var) left: $N:identifier right: $V body: $B)'
+        replace: '(__ssa_loop $V (__binding @$N (__declaration "function") (__rhs)) $B)'
       - match: '(for_statement body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(for_in_statement body: $B)'

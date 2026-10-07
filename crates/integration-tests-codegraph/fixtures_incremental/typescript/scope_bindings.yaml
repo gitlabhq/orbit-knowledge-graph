@@ -1,0 +1,43 @@
+name: "TypeScript: lexical binding ownership"
+fixtures:
+  - path: optional_parameter/main.ts
+    content: "function first() {} function run(first?: () => void) { first!(); }"
+  - path: for_initializer/main.ts
+    content: "function first() {} function run() { for (let first = () => {}; false;) {} first(); }"
+  - path: for_binding/main.ts
+    content: "function first() {} function run() { for (let first of [() => {}]) { first(); } }"
+  - path: let/main.ts
+    content: "function first() {} function second() {} function run() { let f = first; { let f = second; } f(); }"
+  - path: var/main.ts
+    content: "function first() {} function second() {} function run() { var f = first; { var f = second; } f(); }"
+  - path: parameter/main.ts
+    content: "function first() {} function run(first: () => void) { first(); }"
+  - path: temporal_dead_zone/main.ts
+    content: "function first() {} function run() { { first(); let first = () => {}; } }"
+  - path: var_redeclaration/main.ts
+    content: "function first() {} function second() {} function run() { var f = first; { var f; } f(); }"
+  - path: loop_source/main.ts
+    content: "function first() {} function source() { return [() => {}]; } function run() { for (const first of source()) { first(); } first(); }"
+  - path: loop_var/main.ts
+    content: "function first() {} function run() { var f = first; for (var f of [() => {}]) { f(); } }"
+tests:
+  - name: "Unknown locals and loop values do not fall back to outer functions"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND caller.file_path IN ['optional_parameter/main.ts', 'parameter/main.ts', 'temporal_dead_zone/main.ts', 'for_binding/main.ts', 'loop_var/main.ts']
+      RETURN callee.name AS target
+    assert:
+      - { empty: true }
+  - name: "Block and function ownership preserve the exact call targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 6 }
+      - { row: { file: for_initializer/main.ts, target: first } }
+      - { row: { file: let/main.ts, target: first } }
+      - { row: { file: var/main.ts, target: second } }
+      - { row: { file: var_redeclaration/main.ts, target: first } }
+      - { row: { file: loop_source/main.ts, target: first } }
+      - { row: { file: loop_source/main.ts, target: source } }

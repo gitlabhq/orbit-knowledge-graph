@@ -1,0 +1,19 @@
+name: "Go: lexical binding ownership"
+fixtures:
+  - path: shadow/main.go
+    content: "package main\ntype First struct{}\nfunc (f First) ping() {}\ntype Second struct{}\nfunc (f Second) pong() {}\nfunc run() { f := First{}; { f := Second{}; _ = f }; f.ping() }"
+  - path: control/main.go
+    content: "package main\ntype First struct{}\nfunc (f First) ping() {}\nfunc run() { f := First{}; f.ping() }"
+  - path: short_declaration/main.go
+    content: "package main\nfunc first() {}\nfunc second() {}\nfunc run() { f := first; { f := second; _ = f }; f() }"
+tests:
+  - name: "Short declarations preserve outer callable and receiver bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { file: shadow/main.go, target: ping } }
+      - { row: { file: control/main.go, target: ping } }
+      - { row: { file: short_declaration/main.go, target: first } }

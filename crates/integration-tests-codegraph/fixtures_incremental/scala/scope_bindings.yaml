@@ -1,0 +1,25 @@
+name: "Scala: lexical binding ownership"
+fixtures:
+  - path: local/main.scala
+    content: "object Main { def first(): Unit = {} ; def second(): Unit = {}; def run(): Unit = { val f = first _; { val f = second _; () }; f() } }"
+  - path: callable/main.scala
+    content: "object Main { def first(): Unit = {}; def run(): Unit = { val f = first _; f() } }"
+  - path: shadow/main.scala
+    content: "class First { def ping(): Unit = {} }\nclass Second { def pong(): Unit = {} }\nobject Main { def run(): Unit = { val f = new First(); { val f = new Second(); () }; f.ping() } }"
+  - path: control/main.scala
+    content: "class First { def ping(): Unit = {} }\nobject Main { def run(): Unit = { val f = new First(); f.ping() } }"
+tests:
+  - name: "Callable aliases and receiver types survive inner declarations"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 7 }
+      - { row: { file: local/main.scala, target: first } }
+      - { row: { file: callable/main.scala, target: first } }
+      - { row: { file: shadow/main.scala, target: First } }
+      - { row: { file: shadow/main.scala, target: Second } }
+      - { row: { file: shadow/main.scala, target: ping } }
+      - { row: { file: control/main.scala, target: First } }
+      - { row: { file: control/main.scala, target: ping } }

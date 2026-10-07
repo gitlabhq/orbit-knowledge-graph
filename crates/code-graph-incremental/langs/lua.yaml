@@ -28,6 +28,8 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V)))'
+        replace: '(local_assignment (__name @$N) $V)'
       - match: '(chunk $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_statement $$$V)'
@@ -46,14 +48,14 @@ stages:
 
   - name: classify
     rules:
-      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor)))'
+      - match: '(local_assignment $N:__name $V:table_constructor)'
         replace: '(__def (__defname @$N) (__class) $V)'
+      - match: '(local_assignment $N:__name $V:__call)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
+      - match: '(local_assignment $N:__name $V)'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor))'
         replace: '(__def (__defname @$N) (__class) $V)'
-      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V:__call)))'
-        replace: '(__binding @$N (__rhs $V))'
-      - match: '(variable_declaration (assignment_statement (variable_list $N:identifier) (expression_list $V)))'
-        replace: '(__binding @$N (__rhs @$V))'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:__call))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V))'
@@ -77,6 +79,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return (expression_list $V:identifier))'
         replace: '(__ssa_return (__rhs @$V))'
 

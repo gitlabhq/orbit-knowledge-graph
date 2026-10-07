@@ -1,0 +1,16 @@
+name: "C: lexical binding ownership"
+fixtures:
+  - path: local/main.c
+    content: "void first() {} void second() {} typedef void (*Fn)(); void run() { Fn f = first; { Fn f = second; } f(); }"
+  - path: assignment/main.c
+    content: "void first() {} void second() {} typedef void (*Fn)(); void run() { Fn f = first; { f = second; } f(); }"
+tests:
+  - name: "Declarations stay local while assignments update outer bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: local/main.c, target: first } }
+      - { row: { file: assignment/main.c, target: second } }

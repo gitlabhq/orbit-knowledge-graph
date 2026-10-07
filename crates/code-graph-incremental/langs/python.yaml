@@ -94,6 +94,10 @@ stages:
 
   - name: classify
     rules:
+      - match: '(global_statement $$$N:identifier)'
+        replace: '(global_names $$$N=>global_name)'
+      - match: '(nonlocal_statement $$$N:identifier)'
+        replace: '(nonlocal_names $$$N=>nonlocal_name)'
       # Defs
       - match: '(assignment left: $N right: $R:lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
@@ -173,11 +177,17 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(global_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "module"))'
+      - match: '(nonlocal_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "function"))'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 
   - name: tag-defs
     rules:
+      - match: '(__source_file)'
+        tag: { scoped: "module" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
