@@ -53,8 +53,7 @@ impl QuotaService {
                 let (Some(user), Some(token)) = (cfg.api_user.clone(), cfg.api_token.clone())
                 else {
                     warn!(
-                        "quota.enabled=true but api_user or api_token is not set; \
-                         disabling quota gate to avoid silent fail-open on 401"
+                        "quota.enabled=true but api_user or api_token is not set; quota gate disabled"
                     );
                     return Ok(Self { inner: None });
                 };
@@ -474,6 +473,8 @@ mod tests {
     #[tokio::test]
     async fn fails_closed_uncached_on_unexpected_statuses() {
         for status in [
+            AxumStatus::NO_CONTENT,
+            AxumStatus::TEMPORARY_REDIRECT,
             AxumStatus::UNAUTHORIZED,
             AxumStatus::FORBIDDEN,
             AxumStatus::UNPROCESSABLE_ENTITY,

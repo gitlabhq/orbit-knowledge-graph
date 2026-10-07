@@ -52,13 +52,24 @@ impl QuotaConfig {
         if self.customers_dot_url.trim().is_empty() {
             return Err(QuotaConfigError::MissingCustomersDotUrl);
         }
-        if self.auth_mode == QuotaAuthMode::AdminToken
-            && (self.api_user.is_none() || self.api_token.is_none())
-        {
-            return Err(QuotaConfigError::MissingAdminCredentials);
+        if self.auth_mode == QuotaAuthMode::AdminToken {
+            let (Some(user), Some(token)) = (&self.api_user, &self.api_token) else {
+                return Err(QuotaConfigError::MissingAdminCredentials);
+            };
+            // An unusable credential would be dropped from the request, turning every
+            // quota check into a 401 that denies all metered queries.
+            if !is_header_value(user) || !is_header_value(token) {
+                return Err(QuotaConfigError::InvalidAdminCredentials);
+            }
         }
         Ok(())
     }
+}
+
+fn is_header_value(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b == b'\t' || (b' '..=b'~').contains(&b))
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -71,6 +82,12 @@ pub enum QuotaConfigError {
          (mount them at /etc/secrets/billing/quota/)"
     )]
     MissingAdminCredentials,
+
+    #[error(
+        "billing.quota.api_user or api_token contains characters that are not valid in an HTTP \
+         header"
+    )]
+    InvalidAdminCredentials,
 }
 
 #[cfg(test)]
@@ -105,6 +122,21 @@ mod tests {
             ..enabled(QuotaAuthMode::AdminToken)
         };
         assert_eq!(with_creds.validate(), Ok(()));
+    }
+
+    #[test]
+    fn admin_token_mode_rejects_credentials_unusable_as_headers() {
+        for (user, token) in [("u", "t\u{7}"), ("u\r\nx: y", "t"), ("u", "tök")] {
+            let cfg = QuotaConfig {
+                api_user: Some(user.into()),
+                api_token: Some(token.into()),
+                ..enabled(QuotaAuthMode::AdminToken)
+            };
+            assert_eq!(
+                cfg.validate(),
+                Err(QuotaConfigError::InvalidAdminCredentials)
+            );
+        }
     }
 
     #[test]

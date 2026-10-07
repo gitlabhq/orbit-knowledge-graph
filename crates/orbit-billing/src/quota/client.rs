@@ -13,13 +13,13 @@ const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
 
+// CustomersDot's block body is a small JSON object; a larger body is not one.
+const MAX_BLOCK_BODY_BYTES: usize = 1024;
+
 pub(crate) enum QuotaAuth {
     AdminToken { user: String, token: String },
     LicenseChecksum,
 }
-
-// CustomersDot's block body is a small JSON object; a larger body is not one.
-const MAX_BLOCK_BODY_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaDecision {
@@ -504,6 +504,67 @@ mod tests {
             failed(FailureReason::UnexpectedResponse)
         );
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn timeout_fails_closed_as_unreachable() {
+        install_crypto();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                AxumStatus::OK
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = QuotaClient::new(
+            format!("http://{addr}"),
+            admin_auth(),
+            Duration::from_millis(200),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        assert_eq!(
+            client.check(&sample_request()).await,
+            failed(FailureReason::Unreachable)
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_402_body_still_denies() {
+        use tokio::io::AsyncWriteExt;
+
+        install_crypto();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut request).await;
+            socket
+                .write_all(b"HTTP/1.1 402 Payment Required\r\ncontent-length: 100\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let client = QuotaClient::new(
+            format!("http://{addr}"),
+            admin_auth(),
+            Duration::from_millis(300),
+            Duration::from_secs(42),
+        )
+        .unwrap();
+        assert_eq!(
+            client.check(&sample_request()).await,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(None),
+                ttl: Duration::from_secs(42),
+            }
+        );
     }
 
     #[tokio::test]

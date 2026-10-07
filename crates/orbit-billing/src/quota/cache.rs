@@ -315,6 +315,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cached_deny_keeps_block_reason() {
+        install_crypto();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let c = counter.clone();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(move || {
+                let c = c.clone();
+                async move {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    (
+                        AxumStatus::PAYMENT_REQUIRED,
+                        r#"{"block_reason":"license_revoked"}"#,
+                    )
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = Arc::new(
+            QuotaClient::new(
+                format!("http://{addr}"),
+                QuotaAuth::AdminToken {
+                    user: "test@example.com".into(),
+                    token: "test-token".into(),
+                },
+                Duration::from_secs(5),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
+        );
+        let cache = QuotaCache::new(client, 1024);
+
+        let expected = QuotaGateDecision::Deny(Some("license_revoked".into()));
+        assert_eq!(
+            cache.check(request_with("revoked")).await,
+            (expected.clone(), CacheOutcome::Miss)
+        );
+        assert_eq!(
+            cache.check(request_with("revoked")).await,
+            (expected, CacheOutcome::Hit)
+        );
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn coalesces_concurrent_misses_for_same_key() {
         let (url, counter) = counting_status_server(AxumStatus::OK).await;
         let client = Arc::new(
