@@ -56,8 +56,6 @@ impl QuotaConfig {
             let (Some(user), Some(token)) = (&self.api_user, &self.api_token) else {
                 return Err(QuotaConfigError::MissingAdminCredentials);
             };
-            // An unusable credential would be dropped from the request, turning every
-            // quota check into a 401 that denies all metered queries.
             if !is_header_value(user) || !is_header_value(token) {
                 return Err(QuotaConfigError::InvalidAdminCredentials);
             }

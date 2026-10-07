@@ -106,9 +106,8 @@ impl QuotaService {
             return Ok(());
         }
 
-        // Rails sends no governing namespace when a SaaS user has zero or several eligible
-        // paid groups. CustomersDot can't resolve such a request, so it is neither checked
-        // nor billed until Rails denies it upstream.
+        // Temporary until Rails rejects SaaS requests without a governing namespace.
+        // CustomersDot can't resolve them, so they are neither checked nor billed.
         if inputs.root_namespace_id.is_none()
             && inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS)
         {
@@ -197,9 +196,7 @@ impl QuotaService {
     }
 }
 
-// A failed check reuses the credits-exhausted reason so Workhorse, which only
-// recognizes GITLAB_CREDITS_EXHAUSTED, returns a 402 instead of a generic 502.
-// Workhorse passes the message through, so that is where the two differ.
+// Workhorse only maps GITLAB_CREDITS_EXHAUSTED to a 402, so failed checks reuse it.
 fn credits_exhausted_status(message: &str) -> Status {
     let details = ErrorDetails::with_error_info(
         REASON_GITLAB_CREDITS_EXHAUSTED,

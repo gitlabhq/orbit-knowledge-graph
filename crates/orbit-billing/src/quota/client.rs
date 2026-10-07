@@ -13,7 +13,6 @@ const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
 
-// CustomersDot's block body is a small JSON object; a larger body is not one.
 const MAX_BLOCK_BODY_BYTES: usize = 1024;
 
 pub(crate) enum QuotaAuth {
@@ -78,8 +77,6 @@ impl QuotaClient {
         let http = reqwest::Client::builder()
             .user_agent(format!("{APP_ID}/{}", orbit_utils::version::get()))
             .timeout(request_timeout)
-            // Following a redirect would resend the credential headers to another host
-            // and could cache that host's 200 as an Allow.
             .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers)
             .build()?;
@@ -183,8 +180,6 @@ impl QuotaClient {
     }
 }
 
-// The decision comes from the status alone, so a body that fails to arrive or
-// exceeds the cap only loses the reason.
 async fn read_block_reason(mut response: reqwest::Response) -> Option<String> {
     let mut body = Vec::new();
     while let Ok(Some(chunk)) = response.chunk().await {

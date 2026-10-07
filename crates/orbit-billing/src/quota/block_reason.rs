@@ -2,11 +2,8 @@ use serde::Deserialize;
 
 const MAX_BLOCK_REASON_LEN: usize = 64;
 
-/// Reads CustomersDot's `block_reason` from a block response body, for logging only.
-///
-/// `None` when the body carries no `block_reason`, such as a bodiless 401 or an HTML
-/// error page from a proxy. Values that are not short snake_case identifiers are also
-/// dropped, since on self-managed the body may come from a customer-controlled proxy.
+/// Only short snake_case values are kept: on self-managed the body may come from a
+/// customer-controlled proxy.
 pub(crate) fn parse(body: &[u8]) -> Option<String> {
     #[derive(Deserialize)]
     struct BlockBody {

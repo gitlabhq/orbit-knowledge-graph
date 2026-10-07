@@ -104,8 +104,6 @@ impl BillingObserver {
             record_dropped(REASON_REALM_UNRECOGNIZED);
             return None;
         };
-        // CustomersDot attributes SaaS usage to the root namespace, so an event without
-        // one can't be billed. The quota gate skips these requests for the same reason.
         if realm == REALM_SAAS && self.inputs.root_namespace_id.is_none() {
             tracing::warn!(
                 user_id = self.inputs.user_id,
