@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHasher};
 use sha2::{Digest, Sha256};
 
-use super::limits::add_capped;
+use super::limits::{LimitKind, add_capped};
 use super::path::key;
 use super::scratch::Scratch;
 use super::{Decision, File, Limits, Options, Pass, SourceError, Tag, Usage, Vfs};
@@ -100,8 +100,18 @@ impl<T: Tag> Loading<T> {
             Put::ReadAndStore { size, .. } | Put::ReadOnDemand { size, .. } => *size,
             Put::Symlink(_) => 0,
         };
-        add_capped(&self.files, "files", 1, self.limits.files.map(|n| n as u64))?;
-        add_capped(&self.bytes, "total_bytes", size, self.limits.total_bytes)?;
+        add_capped(
+            &self.files,
+            LimitKind::Files,
+            1,
+            self.limits.files.map(|n| n as u64),
+        )?;
+        add_capped(
+            &self.bytes,
+            LimitKind::TotalBytes,
+            size,
+            self.limits.total_bytes,
+        )?;
 
         if let Put::Symlink(target) = what {
             let file = File::new(key, size, Decision::List("symlink"));
@@ -183,7 +193,7 @@ impl<T: Tag> Loading<T> {
             Entry::Vacant(vacant) => {
                 let blob = match add_capped(
                     &self.resident,
-                    "resident_bytes",
+                    LimitKind::ResidentBytes,
                     len,
                     self.limits.resident_bytes,
                 ) {

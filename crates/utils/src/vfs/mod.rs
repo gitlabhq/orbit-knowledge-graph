@@ -33,13 +33,24 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use limits::{CapExceeded, Limits};
+pub use limits::{CapExceeded, LimitKind, Limits};
 pub use loading::{ContentReader, Loading, Put};
 pub use policy::{Decision, File, Pass, Tag, Then};
 pub use store::{Kind, Stat, Vfs};
 
 pub trait Source {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError>;
+}
+
+impl<'a, I, P> Source for I
+where
+    I: IntoIterator<Item = (P, Put<'a>)>,
+    P: AsRef<str>,
+{
+    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
+        self.into_iter()
+            .try_for_each(|(path, input)| into.put(path.as_ref(), input))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

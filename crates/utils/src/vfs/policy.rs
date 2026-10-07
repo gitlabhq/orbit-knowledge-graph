@@ -70,12 +70,7 @@ impl<'a, T: Tag> File<'a, T> {
             path: Cow::Borrowed(&self.path),
             size: self.size,
             metadata_decision: self.metadata_decision,
-            content_decision: self
-                .content_decision
-                .get()
-                .copied()
-                .map(OnceLock::from)
-                .unwrap_or_default(),
+            content_decision: self.content_decision.clone(),
             bytes: self.bytes,
         }
     }

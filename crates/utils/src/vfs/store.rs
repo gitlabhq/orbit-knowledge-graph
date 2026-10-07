@@ -49,8 +49,8 @@ impl<T: Tag> Vfs<T> {
         Ok(loading.finish())
     }
 
-    pub fn read(&self, path: &Path) -> io::Result<Bytes> {
-        let (key, _) = self.resolve(path)?;
+    pub fn read(&self, path: impl AsRef<Path>) -> io::Result<Bytes> {
+        let (key, _) = self.resolve(path.as_ref())?;
         let Some(entry) = self.entry(&key) else {
             return Err(match self.is_dir(&key) {
                 true => {
@@ -95,8 +95,8 @@ impl<T: Tag> Vfs<T> {
         }
     }
 
-    pub fn read_dir(&self, path: &Path) -> io::Result<Vec<String>> {
-        let (key, _) = self.resolve(path)?;
+    pub fn read_dir(&self, path: impl AsRef<Path>) -> io::Result<Vec<String>> {
+        let (key, _) = self.resolve(path.as_ref())?;
         if self.entry(&key).is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::NotADirectory,
@@ -119,8 +119,8 @@ impl<T: Tag> Vfs<T> {
         Ok(names)
     }
 
-    pub fn stat(&self, path: &Path) -> io::Result<Stat<T>> {
-        let (key, link) = self.resolve(path)?;
+    pub fn stat(&self, path: impl AsRef<Path>) -> io::Result<Stat<T>> {
+        let (key, link) = self.resolve(path.as_ref())?;
         let (kind, len, decision) = match self.entry(&key) {
             Some(entry) => (Kind::File, entry.file.size, Some(entry.file.decision())),
             None if self.is_dir(&key) => (Kind::Dir, 0, None),
@@ -139,8 +139,11 @@ impl<T: Tag> Vfs<T> {
         self.entries.iter().map(|entry| &entry.file)
     }
 
-    pub fn subtree(&self, dir: &Path) -> impl Iterator<Item = &File<'static, T>> + use<'_, T> {
-        let key = self.resolve(dir).ok().map(|(key, _)| key);
+    pub fn subtree<P: AsRef<Path>>(
+        &self,
+        dir: P,
+    ) -> impl Iterator<Item = &File<'static, T>> + use<'_, T, P> {
+        let key = self.resolve(dir.as_ref()).ok().map(|(key, _)| key);
         key.into_iter().flat_map(|key| self.subtree_of(&key))
     }
 

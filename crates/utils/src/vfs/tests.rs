@@ -6,20 +6,12 @@ use std::sync::{
 };
 
 use super::{
-    Decision, File, Kind, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag, Vfs,
+    Decision, File, Kind, LimitKind, Limits, Loading, Options, Pass, Put, Source, SourceError, Tag,
+    Vfs,
 };
 
-struct Inputs<'a>(Vec<(&'a str, Put<'a>)>);
-impl Source for Inputs<'_> {
-    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        self.0
-            .into_iter()
-            .try_for_each(|(path, input)| into.put(path, input))
-    }
-}
-
-fn load<T: Tag>(inputs: Vec<(&str, Put<'_>)>, pass: impl Pass<Tag = T> + 'static) -> Vfs<T> {
-    Vfs::load(Inputs(inputs), pass, Limits::default(), Options::default()).unwrap()
+fn load<T: Tag>(source: impl Source, pass: impl Pass<Tag = T> + 'static) -> Vfs<T> {
+    Vfs::load(source, pass, Limits::default(), Options::default()).unwrap()
 }
 
 fn rejected(size: u64) -> Put<'static> {
@@ -67,7 +59,7 @@ impl Pass for Filter {
 #[test]
 fn catalog_preserves_empty_rejected_and_replaced_files() {
     let vfs = load(
-        vec![
+        [
             ("src/file", Put::Bytes(b"old".to_vec())),
             ("src/empty", Put::Bytes(vec![])),
             ("src/file", Put::Bytes(b"new".to_vec())),
@@ -82,15 +74,15 @@ fn catalog_preserves_empty_rejected_and_replaced_files() {
             .collect::<Vec<_>>(),
         ["binary", "ignored.skip", "src/empty", "src/file"]
     );
-    assert_eq!(&*vfs.read(Path::new("/src/../src/file")).unwrap(), b"new");
-    assert!(vfs.read(Path::new("src/empty")).unwrap().is_empty());
+    assert_eq!(&*vfs.read("/src/../src/file").unwrap(), b"new");
+    assert!(vfs.read("src/empty").unwrap().is_empty());
     assert_eq!(
-        vfs.read_dir(Path::new("/")).unwrap(),
+        vfs.read_dir("/").unwrap(),
         ["binary", "ignored.skip", "src"]
     );
-    assert_eq!(vfs.subtree(Path::new("src")).count(), 2);
-    assert_eq!(vfs.subtree(Path::new("../")).count(), 0);
-    assert_eq!(vfs.stat(Path::new("src")).unwrap().kind, Kind::Dir);
+    assert_eq!(vfs.subtree("src").count(), 2);
+    assert_eq!(vfs.subtree("../").count(), 0);
+    assert_eq!(vfs.stat("src").unwrap().kind, Kind::Dir);
     for (path, expected) in [
         ("binary", ErrorKind::Unsupported),
         ("ignored.skip", ErrorKind::Unsupported),
@@ -98,14 +90,14 @@ fn catalog_preserves_empty_rejected_and_replaced_files() {
         ("../escape", ErrorKind::NotFound),
         ("src", ErrorKind::IsADirectory),
     ] {
-        assert_eq!(vfs.read(Path::new(path)).unwrap_err().kind(), expected);
+        assert_eq!(vfs.read(path).unwrap_err().kind(), expected);
     }
     assert_eq!(
-        vfs.read_dir(Path::new("binary")).unwrap_err().kind(),
+        vfs.read_dir("binary").unwrap_err().kind(),
         ErrorKind::NotADirectory
     );
     assert_eq!(
-        vfs.stat(Path::new("binary")).unwrap().decision,
+        vfs.stat("binary").unwrap().decision,
         Some(Decision::List("binary"))
     );
     let usage = vfs.usage();
@@ -129,47 +121,35 @@ fn virtual_links_resolve_only_inside_the_catalog() {
         .map(|(path, target)| (path, Put::Symlink(target.into()))),
     );
     let vfs = load(inputs, ());
-    assert_eq!(&*vfs.read(Path::new("chain/link")).unwrap(), b"data");
-    assert_eq!(vfs.read_dir(Path::new("alias")).unwrap(), ["file", "link"]);
-    assert_eq!(vfs.subtree(Path::new("chain")).count(), 2);
-    let stat = vfs.stat(Path::new("chain/link")).unwrap();
+    assert_eq!(&*vfs.read("chain/link").unwrap(), b"data");
+    assert_eq!(vfs.read_dir("alias").unwrap(), ["file", "link"]);
+    assert_eq!(vfs.subtree("chain").count(), 2);
+    let stat = vfs.stat("chain/link").unwrap();
     assert_eq!(stat.path, Path::new("/dir/file"));
     assert_eq!(stat.link.as_deref(), Some(Path::new("file")));
-    assert!(vfs.stat(Path::new("alias/file")).unwrap().link.is_none());
+    assert!(vfs.stat("alias/file").unwrap().link.is_none());
     for path in ["escape", "escape/file", "host", "dangling"] {
-        assert_eq!(
-            vfs.stat(Path::new(path)).unwrap_err().kind(),
-            ErrorKind::NotFound
-        );
+        assert_eq!(vfs.stat(path).unwrap_err().kind(), ErrorKind::NotFound);
     }
-    assert_eq!(
-        vfs.read(Path::new("ping")).unwrap_err().kind(),
-        ErrorKind::Other
-    );
+    assert_eq!(vfs.read("ping").unwrap_err().kind(), ErrorKind::Other);
 }
 
 #[test]
 fn large_unsorted_catalog_keeps_the_last_version_of_each_path() {
-    struct Replacements;
-    impl Source for Replacements {
-        fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-            for version in [b"old", b"new"] {
-                for index in (0..10_000).rev() {
-                    into.put(&format!("dir/{index:05}"), Put::Bytes(version.to_vec()))?;
-                }
-            }
-            Ok(())
-        }
-    }
-    let vfs = Vfs::load(Replacements, (), Limits::default(), Options::default()).unwrap();
+    let source = [b"old", b"new"].into_iter().flat_map(|version| {
+        (0..10_000)
+            .rev()
+            .map(move |index| (format!("dir/{index:05}"), Put::Bytes(version.to_vec())))
+    });
+    let vfs = load(source, ());
     assert_eq!(vfs.usage().files, 10_000);
     assert_eq!(vfs.usage().duplicate_paths, 10_000);
     for (index, file) in vfs.files().enumerate() {
         assert_eq!(file.path, format!("dir/{index:05}"));
-        assert_eq!(&*vfs.read(Path::new(file.path.as_ref())).unwrap(), b"new");
+        assert_eq!(&*vfs.read(file.path.as_ref()).unwrap(), b"new");
     }
-    assert_eq!(vfs.subtree(Path::new("dir")).count(), 10_000);
-    assert_eq!(vfs.read_dir(Path::new("dir")).unwrap().len(), 10_000);
+    assert_eq!(vfs.subtree("dir").count(), 10_000);
+    assert_eq!(vfs.read_dir("dir").unwrap().len(), 10_000);
 }
 
 #[test]
@@ -177,11 +157,11 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
     let body = vec![b'x'; 4096];
     for (resident, compress) in [(4096, false), (0, false), (0, true)] {
         let vfs = Vfs::load(
-            Inputs(vec![
+            [
                 ("a", Put::Bytes(body.clone())),
                 ("b", Put::Bytes(body.clone())),
                 ("empty", Put::Bytes(vec![])),
-            ]),
+            ],
             (),
             Limits {
                 resident_bytes: Some(resident),
@@ -194,8 +174,8 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
             },
         )
         .unwrap();
-        let a = vfs.read(Path::new("a")).unwrap();
-        let b = vfs.read(Path::new("b")).unwrap();
+        let a = vfs.read("a").unwrap();
+        let b = vfs.read("b").unwrap();
         assert_eq!(&*a, body);
         assert_eq!(&*b, body);
         assert_eq!(vfs.usage().deduped_bytes, 4096);
@@ -210,31 +190,33 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
         drop(vfs);
         assert_eq!(&*a, body);
     }
-    for metric in ["files", "total_bytes", "spilled_bytes"] {
+    for metric in [
+        LimitKind::Files,
+        LimitKind::TotalBytes,
+        LimitKind::SpilledBytes,
+    ] {
         let mut limits = Limits::default();
         match metric {
-            "files" => limits.files = Some(0),
-            "total_bytes" => limits.total_bytes = Some(0),
-            _ => {
+            LimitKind::Files => limits.files = Some(0),
+            LimitKind::TotalBytes => limits.total_bytes = Some(0),
+            LimitKind::SpilledBytes => {
                 limits.resident_bytes = Some(0);
                 limits.spilled_bytes = Some(0);
             }
+            LimitKind::ResidentBytes => {
+                unreachable!("resident overflow spills instead of failing loading")
+            }
         }
-        let result = Vfs::load(
-            Inputs(vec![("a", Put::Bytes(vec![1]))]),
-            (),
-            limits,
-            Options::default(),
-        );
+        let result = Vfs::load([("a", Put::Bytes(vec![1]))], (), limits, Options::default());
         assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == metric));
     }
     for size in [2, u64::MAX] {
         let result = Vfs::load(
-            Inputs(vec![
+            [
                 ("big", rejected(size)),
                 ("empty", Put::Bytes(vec![])),
                 ("extra", Put::Bytes(vec![1])),
-            ]),
+            ],
             (),
             Limits {
                 file_bytes: Some(0),
@@ -245,14 +227,21 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
             Options::default(),
         );
         if size == u64::MAX {
-            assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == "total_bytes"));
+            let Err(SourceError::Cap(cap)) = result else {
+                panic!("expected total byte cap");
+            };
+            assert_eq!(cap.metric, LimitKind::TotalBytes);
+            assert_eq!(
+                cap.to_string(),
+                format!("total_bytes cap exceeded ({} > {})", u64::MAX, u64::MAX)
+            );
         } else {
             let vfs = result.unwrap();
             assert_eq!(
-                vfs.stat(Path::new("big")).unwrap().decision,
+                vfs.stat("big").unwrap().decision,
                 Some(Decision::List("oversize"))
             );
-            assert!(vfs.read(Path::new("empty")).unwrap().is_empty());
+            assert!(vfs.read("empty").unwrap().is_empty());
         }
     }
 }
@@ -296,7 +285,7 @@ fn policy_composition_preserves_laziness_and_borrowed_content() {
             })
         };
         let vfs = Vfs::load(
-            Inputs(vec![("empty", input)]),
+            [("empty", input)],
             Stage(calls.clone()).then(Stage(calls.clone()).then(Stage(calls.clone()))),
             Limits {
                 file_bytes: Some(0),
@@ -307,7 +296,7 @@ fn policy_composition_preserves_laziness_and_borrowed_content() {
         .unwrap();
         assert_eq!(reads.load(SeqCst), usize::from(!deferred));
         for _ in 0..2 {
-            assert!(vfs.read(Path::new("empty")).unwrap().is_empty());
+            assert!(vfs.read("empty").unwrap().is_empty());
         }
         assert_eq!(reads.load(SeqCst), if deferred { 2 } else { 1 });
         assert_eq!(calls.load(SeqCst), 3);
@@ -323,7 +312,7 @@ fn reader_failures_remain_cataloged_and_later_failures_are_retryable() {
     let reads = attempts.clone();
     let calls = Arc::new(AtomicUsize::new(0));
     let vfs = Vfs::load(
-        Inputs(vec![
+        [
             (
                 "failed",
                 read_and_store(4, || {
@@ -339,7 +328,7 @@ fn reader_failures_remain_cataloged_and_later_failures_are_retryable() {
                     _ => Ok(b"large".to_vec()),
                 }),
             ),
-        ]),
+        ],
         Filter(calls.clone()),
         Limits {
             file_bytes: Some(4),
@@ -354,24 +343,21 @@ fn reader_failures_remain_cataloged_and_later_failures_are_retryable() {
         ("mismatch", ErrorKind::InvalidData),
         ("retry", ErrorKind::NotFound),
     ] {
-        assert_eq!(vfs.read(Path::new(path)).unwrap_err().kind(), kind);
+        assert_eq!(vfs.read(path).unwrap_err().kind(), kind);
     }
-    assert_eq!(
-        vfs.read(Path::new("failed")).unwrap_err().to_string(),
-        "denied"
-    );
+    assert_eq!(vfs.read("failed").unwrap_err().to_string(), "denied");
     assert_eq!(calls.load(SeqCst), 0);
     for _ in 0..2 {
-        assert_eq!(&*vfs.read(Path::new("retry")).unwrap(), b"data");
+        assert_eq!(&*vfs.read("retry").unwrap(), b"data");
     }
     assert_eq!(calls.load(SeqCst), 1);
     assert_eq!(
-        vfs.read(Path::new("retry")).unwrap_err().kind(),
+        vfs.read("retry").unwrap_err().kind(),
         ErrorKind::FileTooLarge
     );
     assert_eq!(vfs.usage().kept, 4);
     let result = Vfs::load(
-        Inputs(vec![("file", Put::Bytes(vec![]))]),
+        [("file", Put::Bytes(vec![]))],
         (),
         Limits::default(),
         Options {
@@ -421,20 +407,14 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
             let (vfs, start) = (&vfs, &start);
             scope.spawn(move || {
                 start.wait();
-                assert_eq!(
-                    vfs.read(Path::new("lazy")).unwrap_err().kind(),
-                    ErrorKind::Unsupported
-                );
-                assert_eq!(
-                    &*vfs.read(Path::new(&format!("{worker}"))).unwrap(),
-                    vec![b'x'; 128]
-                );
+                assert_eq!(vfs.read("lazy").unwrap_err().kind(), ErrorKind::Unsupported);
+                assert_eq!(&*vfs.read(format!("{worker}")).unwrap(), vec![b'x'; 128]);
             });
         }
     });
     assert_eq!(calls.load(SeqCst), 9);
     assert_eq!(
-        vfs.stat(Path::new("lazy")).unwrap().decision,
+        vfs.stat("lazy").unwrap().decision,
         Some(Decision::List("binary"))
     );
 }
