@@ -281,6 +281,7 @@ fn defining_rank(hit: &Hit, alternatives: &[Term]) -> u8 {
     }
 }
 
+const SEP: &str = " │ ";
 const FULL_LINES: usize = 3;
 const LINE_CHARS: usize = 160;
 
@@ -301,7 +302,7 @@ fn located(lines: &[&Hit]) -> String {
     if !rest.is_empty() {
         parts.push(runs(&rest));
     }
-    parts.join("  ")
+    parts.join(SEP)
 }
 
 fn runs(lines: &[usize]) -> String {
@@ -339,7 +340,7 @@ fn code_row(hits: &[&Hit]) -> String {
             format!("{}{}", label.unwrap_or_default(), located(list))
         })
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(SEP)
 }
 
 fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>)>, usize, usize) {
@@ -434,11 +435,15 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term]) -> String {
                 .min()
                 .unwrap_or(2);
             let class = if is_test(file) { 3 } else { best };
-            (class, list.len(), format!("  {file}   {}", code_row(list)))
+            (
+                class,
+                list.len(),
+                format!("  {file}{SEP}{}", code_row(list)),
+            )
         })
         .chain(text.iter().map(|(file, list)| {
             let class = if is_test(file) { 5 } else { 4 };
-            (class, list.len(), format!("  {file}   {}", located(list)))
+            (class, list.len(), format!("  {file}{SEP}{}", located(list)))
         }))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
@@ -557,7 +562,7 @@ mod tests {
         assert_eq!(lines[0], "No matches: nosuchxyz");
         assert_eq!(lines[1], "16 lines in 4 files");
         assert!(
-            lines[2].starts_with("  src/middleware/maintenance.js   default:9-41 :10 "),
+            lines[2].starts_with("  src/middleware/maintenance.js │ default:9-41 :10 "),
             "{out}"
         );
         assert!(
@@ -565,13 +570,13 @@ mod tests {
             "{out}"
         );
         assert!(
-            lines[3].starts_with("  src/routes/feeds.js   default:25-38 :26 "),
+            lines[3].starts_with("  src/routes/feeds.js │ default:25-38 :26 "),
             "{out}"
         );
         assert!(lines[3].ends_with(":29-37"), "{out}");
         assert!(lines[4].starts_with("  test/controllers.js"), "{out}");
         assert!(
-            lines[5].starts_with("  install/data/defaults.json   :130 "),
+            lines[5].starts_with("  install/data/defaults.json │ :130 "),
             "{out}"
         );
     }
