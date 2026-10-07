@@ -24,7 +24,7 @@ pub struct Changeset<'a> {
 
 impl Source for Directory<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        let root = self.0.canonicalize()?;
+        let root = dunce::canonicalize(self.0)?;
         let failed: Mutex<Option<SourceError>> = Mutex::new(None);
         let fail = |error: SourceError| {
             failed
@@ -81,7 +81,7 @@ impl Source for Directory<'_> {
 
 impl Source for Changeset<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        let root = self.root.canonicalize()?;
+        let root = dunce::canonicalize(self.root)?;
         self.paths.into_par_iter().try_for_each(|path| {
             if !is_safe_relative_path(Path::new(&path)) || path.is_empty() {
                 return Err(
