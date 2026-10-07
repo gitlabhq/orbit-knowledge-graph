@@ -623,26 +623,37 @@ impl<'t> Fold<'t> {
             self.fields.get(&source).cloned().unwrap_or_default()
         };
         let mut copies: smallvec::SmallVec<[_; 4]> = smallvec![(lhs, sources)];
+        let mut field_updates = Vec::new();
+        let mut value_updates = Vec::new();
         while let Some((target, sources)) = copies.pop() {
+            if let Err(killed) = self.run.check().and_then(|()| self.file.check()) {
+                self.killed = Some(killed);
+                return;
+            }
             if sources.is_empty() && !self.fields.contains_key(&target) {
                 continue;
             }
-            let fields = self.fields.entry(target).or_default();
+            let mut fields = self.fields.get(&target).cloned().unwrap_or_default();
             for field in sources.keys() {
                 fields
                     .entry(*field)
                     .or_insert_with(|| self.syms.intern(&format!("{target}\0{field}")));
             }
-            for (field, target) in fields.clone() {
+            for (&field, &target) in &fields {
                 let source = sources.get(&field).copied().unwrap_or(0);
                 if target == source {
                     continue;
                 }
                 let value = self.read_value(source);
-                self.ssa.write_variable(target, self.cur, value);
+                value_updates.push((target, value));
                 let sources = self.fields.get(&source).cloned().unwrap_or_default();
                 copies.push((target, sources));
             }
+            field_updates.push((target, fields));
+        }
+        self.fields.extend(field_updates);
+        for (target, value) in value_updates {
+            self.ssa.write_variable(target, self.cur, value);
         }
     }
 

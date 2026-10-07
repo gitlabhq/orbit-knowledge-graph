@@ -1,0 +1,56 @@
+name: "Rust: overlapping field copies terminate"
+fixtures:
+  - path: main.rs
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn self_reference() {
+          let mut x;
+          x.f = x;
+          first();
+      }
+
+      fn mutual_reference() {
+          let mut x;
+          let mut y;
+          x.f = y;
+          y.f = x;
+          x.f = y;
+          second();
+      }
+
+      fn copy_into_child() {
+          let mut x;
+          x.callback = first;
+          x.f = x;
+          let saved = x.f;
+          (saved.callback)();
+      }
+
+      fn copy_from_child() {
+          let x = ((first, second), second);
+          let x = x.0;
+          (x.0)();
+          (x.1)();
+      }
+tests:
+  - name: "Incomplete self-referential assignments do not prevent later calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['self_reference', 'mutual_reference', 'copy_into_child']
+      RETURN caller.name AS caller, callee.name AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: self_reference, target: first } }
+      - { row: { caller: mutual_reference, target: second } }
+      - { row: { caller: copy_into_child, target: first } }
+  - name: "Copying a nested tuple preserves both sibling values"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'copy_from_child'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { target: first } }
+      - { row: { target: second } }
