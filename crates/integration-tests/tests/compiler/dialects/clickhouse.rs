@@ -1694,20 +1694,63 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
 fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
+    let base = "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1})";
+    for (plain, aliased) in [
+        (
+            "RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+            "RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+            "RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid, p{.full_path} ORDER BY mr.iid DESC LIMIT 5",
+            "RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid ORDER BY mr.iid PAGE 5",
+            "RETURN mr.iid AS number ORDER BY number PAGE 5",
+        ),
+    ] {
+        let plain = compile(&format!("{base} {plain}"), Frontend::Gql, &ontology, &ctx).unwrap();
+        let query = format!("{base} {aliased}");
+        let aliased = compile(&query, Frontend::Gql, &ontology, &ctx).unwrap();
+        assert_eq!(plain.base.render(), aliased.base.render(), "{query}");
+        assert_eq!(plain.hydration, aliased.hydration, "{query}");
+    }
+
     let plain = compile(
-        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+        "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n",
         Frontend::Gql,
         &ontology,
         &ctx,
     )
     .unwrap();
-    for query in [
-        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5",
-        "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5",
+    let aliased = compile(
+        "MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n",
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(plain.base.render(), aliased.base.render());
+
+    for (query, expected) in [
+        (
+            "RETURN mr.iid, p AS project ORDER BY project",
+            "not a node alias",
+        ),
+        ("RETURN mr.iid AS x, p AS x", "duplicate alias"),
+        ("RETURN mr.iid AS x, p.full_path AS x", "duplicate alias"),
+        ("RETURN mr.iid ORDER BY missing", "or a property alias"),
     ] {
-        let aliased = compile(query, Frontend::Gql, &ontology, &ctx).unwrap();
-        assert_eq!(plain.base.render(), aliased.base.render(), "{query}");
-        assert_eq!(plain.hydration, aliased.hydration, "{query}");
+        let query = format!("{base} {query}");
+        let error = compile(&query, Frontend::Gql, &ontology, &ctx).expect_err(&query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
+            "{query}: {error}"
+        );
     }
 }
 

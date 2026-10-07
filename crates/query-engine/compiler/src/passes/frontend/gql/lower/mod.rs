@@ -65,7 +65,7 @@ struct Lowering {
     edges: HashMap<String, usize>,
     path: Option<String>,
     neighbor: Option<String>,
-    aliases: HashMap<String, PropertyRef>,
+    aliases: HashMap<String, Option<PropertyRef>>,
 }
 
 impl Lowering {

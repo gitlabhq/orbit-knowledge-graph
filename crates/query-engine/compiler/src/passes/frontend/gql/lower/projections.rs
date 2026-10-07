@@ -106,6 +106,9 @@ impl Lowering {
                     if property_set.len() != columns.len() {
                         return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
+                    if !aggregate {
+                        self.alias(span, alias.clone(), None)?;
+                    }
                     let node = self
                         .input
                         .nodes
@@ -148,6 +151,11 @@ impl Lowering {
                                 "property projections require traversal or neighbors",
                             ));
                         }
+                        let target = PropertyRef {
+                            node: node.clone(),
+                            property: property.clone(),
+                        };
+                        self.alias(span, alias, Some(target))?;
                         let input_node = self
                             .input
                             .nodes
@@ -156,15 +164,6 @@ impl Lowering {
                             .ok_or_else(|| {
                                 invalid(span, "property projection references an undefined node")
                             })?;
-                        if let Some(alias) = alias {
-                            let target = PropertyRef {
-                                node: node.clone(),
-                                property: property.clone(),
-                            };
-                            if self.aliases.insert(alias, target).is_some() {
-                                return Err(invalid(span, "duplicate alias"));
-                            }
-                        }
                         if selected.insert(node.clone()) {
                             property_nodes.insert(node.clone());
                             input_node.columns = Some(ColumnSelection::List(Vec::new()));
@@ -271,6 +270,22 @@ impl Lowering {
                 node: variable,
                 alias,
             });
+        } else {
+            self.alias(span, alias, None)?;
+        }
+        Ok(())
+    }
+
+    fn alias(
+        &mut self,
+        span: pest::Span<'_>,
+        alias: Option<String>,
+        target: Option<PropertyRef>,
+    ) -> Result<()> {
+        if let Some(alias) = alias
+            && self.aliases.insert(alias, target).is_some()
+        {
+            return Err(invalid(span, "duplicate alias"));
         }
         Ok(())
     }
@@ -309,14 +324,21 @@ impl Lowering {
             QueryType::Traversal => {
                 let PropertyRef { node, property } = match sort.key {
                     Target::Property(key) => key.into(),
-                    Target::Variable(name) => {
-                        self.aliases.get(&name.value).cloned().ok_or_else(|| {
-                            invalid(
+                    Target::Variable(name) => match self.aliases.get(&name.value) {
+                        Some(Some(target)) => target.clone(),
+                        Some(None) => {
+                            return Err(invalid(
                                 name.span,
-                                "traversal ORDER BY requires node.property or a returned alias",
-                            )
-                        })?
-                    }
+                                "ORDER BY a property alias, not a node alias",
+                            ));
+                        }
+                        None => {
+                            return Err(invalid(
+                                name.span,
+                                "traversal ORDER BY requires node.property or a property alias",
+                            ));
+                        }
+                    },
                 };
                 self.input.order_by = Some(InputOrderBy {
                     node,
