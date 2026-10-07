@@ -97,6 +97,137 @@ impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
         }
         Ok(())
     }
+
+    pub fn rewrite_operations<Error: From<GraphError>>(
+        mut self,
+        root: BlockId,
+        mut rewrite: impl FnMut(
+            &mut Self,
+            Relational<'a, L>,
+        ) -> std::result::Result<Relational<'a, L>, Error>,
+    ) -> std::result::Result<Self, Error> {
+        for block in self.reachable_blocks(root)? {
+            let query = self
+                .block_mut(block)?
+                .operation
+                .take()
+                .ok_or(GraphError::EmptyProjection)?;
+            let dependencies = self.block(block)?.required.clone();
+            let kind = match query.kind {
+                QueryKind::Project(input) => {
+                    QueryKind::Project(self.rewrite_operation(input, &mut rewrite)?)
+                }
+                QueryKind::UnionAll(arms) => QueryKind::UnionAll(arms),
+            };
+            if !self.block(block)?.required.is_subset(&dependencies) {
+                return Err(GraphError::DefinitionVisibility.into());
+            }
+            if self.block(block)?.operation.is_some() {
+                return Err(GraphError::FinishedQuery.into());
+            }
+            self.block_mut(block)?.operation = Some(QueryOperation { kind, ..query });
+        }
+        Ok(self)
+    }
+
+    fn rewrite_operation<Error: From<GraphError>>(
+        &mut self,
+        operation: Relational<'a, L>,
+        rewrite: &mut impl FnMut(
+            &mut Self,
+            Relational<'a, L>,
+        ) -> std::result::Result<Relational<'a, L>, Error>,
+    ) -> std::result::Result<Relational<'a, L>, Error> {
+        use OperationKind::*;
+        let Relational {
+            block,
+            kind,
+            columns,
+            occurrences,
+            expanded,
+        } = operation;
+        let mut child =
+            |input: Box<Relational<'a, L>>| self.rewrite_operation(*input, rewrite).map(Box::new);
+        let kind = match kind {
+            One => One,
+            Source { relation, read } => Source { relation, read },
+            Filter { input, predicate } => Filter {
+                input: child(input)?,
+                predicate,
+            },
+            Join {
+                left,
+                right,
+                kind,
+                condition,
+            } => Join {
+                left: child(left)?,
+                right: child(right)?,
+                kind,
+                condition,
+            },
+            Aggregate { input, groups } => Aggregate {
+                input: child(input)?,
+                groups,
+            },
+            Expand { input, column } => Expand {
+                input: child(input)?,
+                column,
+            },
+            Materialize { input, relation } => Materialize {
+                input: child(input)?,
+                relation,
+            },
+            Latest { input, requirement } => Latest {
+                input: child(input)?,
+                requirement,
+            },
+            Sort { input, keys } => Sort {
+                input: child(input)?,
+                keys,
+            },
+            FirstBy { input, keys } => FirstBy {
+                input: child(input)?,
+                keys,
+            },
+            Limit { input, count } => Limit {
+                input: child(input)?,
+                count,
+            },
+        };
+        let operation = Relational {
+            block,
+            kind,
+            columns,
+            occurrences,
+            expanded,
+        };
+        let columns = operation.columns.clone();
+        let occurrences = operation.occurrences.clone();
+        let expanded = operation.expanded.clone();
+        let groups = operation.groups().to_vec();
+        let aggregate = operation
+            .aggregate_input()
+            .map(|input| (input.columns.clone(), input.expanded.clone()));
+        let replacement = rewrite(self, operation)?;
+        let same_aggregate = match (aggregate, replacement.aggregate_input()) {
+            (None, None) => true,
+            (Some((columns, expanded)), Some(input)) => {
+                columns == input.columns && expanded == input.expanded
+            }
+            _ => false,
+        };
+        if replacement.block != block
+            || replacement.columns != columns
+            || replacement.occurrences != occurrences
+            || replacement.expanded != expanded
+            || replacement.groups() != groups
+            || !same_aggregate
+        {
+            return Err(GraphError::OutputContract.into());
+        }
+        Ok(replacement)
+    }
 }
 
 impl<'a, L> Relational<'a, L> {

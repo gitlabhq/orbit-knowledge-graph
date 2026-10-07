@@ -106,34 +106,6 @@ impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
         Ok(())
     }
 
-    pub fn restrict_scan(&mut self, relation: RelationId, predicate: Expression<'a>) -> Result<()> {
-        let mut read = None;
-        self.operation(relation.block)?
-            .walk(None, &mut |operation, _| {
-                if let OperationKind::Source {
-                    relation: source,
-                    read: mode,
-                } = operation.kind()
-                    && *source == relation
-                {
-                    read = Some(*mode);
-                }
-                Ok::<_, GraphError>(())
-            })?;
-        let source = self.read_relation(relation, read.ok_or(GraphError::OperationVisibility)?)?;
-        let filtered = self.filter_relation(source, predicate)?;
-        let query = self
-            .block_mut(relation.block)?
-            .operation
-            .as_mut()
-            .ok_or(GraphError::EmptyProjection)?;
-        let QueryKind::Project(operation) = &mut query.kind else {
-            return Err(GraphError::ExpectedSelect);
-        };
-        install_scan_filter(operation, relation, &mut Some(filtered));
-        Ok(())
-    }
-
     pub fn scalar_query(
         &mut self,
         parent: BlockId,
@@ -169,22 +141,5 @@ impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
             relation,
             port: Port::Output(output),
         }))
-    }
-}
-
-fn install_scan_filter<'a, L>(
-    operation: &mut Relational<'a, L>,
-    relation: RelationId,
-    replacement: &mut Option<Relational<'a, L>>,
-) {
-    if matches!(operation.kind(), OperationKind::Source { relation: source, .. } if *source == relation)
-    {
-        *operation = replacement
-            .take()
-            .expect("one operation per relation occurrence");
-        return;
-    }
-    for input in operation.inputs_mut() {
-        install_scan_filter(input, relation, replacement);
     }
 }

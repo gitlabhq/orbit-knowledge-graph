@@ -134,7 +134,7 @@ fn query_graph_relationship_scope_contract() {
         )
         .unwrap();
     graph.finish_query(projection).unwrap();
-    scope::apply_graph(&mut graph, &scope, &input).unwrap();
+    let graph = scope::apply_graph(graph, root, &scope, &input).unwrap();
     let sql = graph.render(root).unwrap();
     assert!(sql.contains("startsWith") && sql.contains("1/42/"), "{sql}");
 }

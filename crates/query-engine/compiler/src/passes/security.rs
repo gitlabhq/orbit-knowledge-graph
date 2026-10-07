@@ -1,6 +1,6 @@
 use crate::error::{QueryError, Result};
 use crate::query_graph::{
-    BlockId, BlockView, Expression, OperationKind, QueryGraph, RelationId, Source,
+    BlockId, BlockView, ColumnRef, Expression, OperationKind, QueryGraph, RelationId, Source,
 };
 pub use crate::types::SecurityContext;
 use orbit_utils::traversal_path::TraversalPathTrie;
@@ -16,6 +16,25 @@ pub(crate) fn require_authorized_paths(context: &SecurityContext) -> Result<()> 
     Ok(())
 }
 
+fn path_predicate<'a>(
+    column: ColumnRef<'a>,
+    minimum_access: u32,
+    context: &SecurityContext,
+) -> Expression<'a> {
+    let paths = context.paths_at_least(minimum_access);
+    TraversalPathTrie::from_paths(&paths)
+        .to_minimal_prefixes()
+        .iter()
+        .map(|path| {
+            Expression::StartsWith(
+                Box::new(Expression::Column(column)),
+                Box::new(Expression::Text(path.as_str().into())),
+            )
+        })
+        .reduce(|left, right| Expression::Or(Box::new(left), Box::new(right)))
+        .unwrap_or(Expression::Boolean(false))
+}
+
 pub(crate) fn scan_predicate<'a, M: QueryDataModel + ?Sized>(
     block: &BlockView<'_, 'a, M>,
     relation: RelationId,
@@ -27,40 +46,34 @@ pub(crate) fn scan_predicate<'a, M: QueryDataModel + ?Sized>(
     if !block.catalog.table_has_path_columns(table.name()) {
         return Ok(None);
     }
-    let paths = context.paths_at_least(block.catalog.table_minimum_access_level(table.name()));
-    let paths = TraversalPathTrie::from_paths(&paths).to_minimal_prefixes();
-    let column = block.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?;
-    Ok(Some(
-        paths
-            .iter()
-            .map(|path| {
-                Expression::StartsWith(
-                    Box::new(Expression::Column(column)),
-                    Box::new(Expression::Text(path.as_str().into())),
-                )
-            })
-            .reduce(|left, right| Expression::Or(Box::new(left), Box::new(right)))
-            .unwrap_or(Expression::Boolean(false)),
-    ))
+    Ok(Some(path_predicate(
+        block.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?,
+        block.catalog.table_minimum_access_level(table.name()),
+        context,
+    )))
 }
 
 pub fn apply_graph_security<'a, M: QueryDataModel + ?Sized>(
-    graph: &mut QueryGraph<'a, M, Infallible>,
+    graph: QueryGraph<'a, M, Infallible>,
     root: BlockId,
     context: &SecurityContext,
-) -> Result<()> {
+) -> Result<QueryGraph<'a, M, Infallible>> {
     require_authorized_paths(context)?;
-    let mut restrictions = Vec::new();
-    graph.walk_operations(root, |block, operation, _| {
-        if let OperationKind::Source { relation, .. } = operation.kind()
-            && let Some(predicate) = scan_predicate(block, *relation, context)?
-        {
-            restrictions.push((*relation, predicate));
+    graph.rewrite_operations(root, |graph, operation| {
+        let OperationKind::Source { relation, .. } = operation.kind() else {
+            return Ok(operation);
+        };
+        let Source::Stored(table) = graph.relation(*relation)?.source else {
+            return Ok(operation);
+        };
+        if !graph.catalog().table_has_path_columns(table.name()) {
+            return Ok(operation);
         }
-        Ok::<_, QueryError>(())
-    })?;
-    for (relation, predicate) in restrictions {
-        graph.restrict_scan(relation, predicate)?;
-    }
-    Ok(())
+        let predicate = path_predicate(
+            graph.stored_column(*relation, ontology::TRAVERSAL_PATH_COLUMN)?,
+            graph.catalog().table_minimum_access_level(table.name()),
+            context,
+        );
+        Ok(graph.filter_relation(operation, predicate)?)
+    })
 }

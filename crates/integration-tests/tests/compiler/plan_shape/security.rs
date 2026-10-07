@@ -149,19 +149,21 @@ fn authorization_covers_every_nested_scan_occurrence() {
             .unwrap();
         graph.finish_query(projection).unwrap();
         assert!(check_graph(&graph, root, &context).is_err(), "{position}");
-        apply_graph_security(&mut graph, root, &context).unwrap();
+        let graph = apply_graph_security(graph, root, &context).unwrap();
         check_graph(&graph, root, &context).unwrap();
         graph.render(root).unwrap();
-        let source = graph.read_relation(scan, ReadMode::Current).unwrap();
-        let (source, value) = if scalar {
-            (graph.aggregate_relation(source, vec![]).unwrap(), E::Count)
-        } else {
-            (source, E::Column(id))
-        };
-        let replacement = graph
-            .project_values(source, [("id".into(), value)])
+        let graph = graph
+            .rewrite_operations(root, |_, operation| {
+                if matches!(operation.kind(), OperationKind::Filter { .. }) {
+                    let OperationKind::Filter { input, .. } = operation.into_kind() else {
+                        unreachable!()
+                    };
+                    Ok::<_, compiler::query_graph::GraphError>(*input)
+                } else {
+                    Ok(operation)
+                }
+            })
             .unwrap();
-        graph.substitute_query(replacement).unwrap();
         assert!(check_graph(&graph, root, &context).is_err(), "{position}");
     }
 }
@@ -222,7 +224,7 @@ fn authorization_walk_visits_shared_bodies_once_and_ignores_unreachable_blocks()
         )
         .unwrap();
     graph.finish_query(projection).unwrap();
-    apply_graph_security(&mut graph, root, &context).unwrap();
+    let graph = apply_graph_security(graph, root, &context).unwrap();
     check_graph(&graph, root, &context).unwrap();
     assert!(matches!(
         graph.operation(unused).unwrap().kind(),
@@ -323,7 +325,7 @@ fn denied_roles_require_a_false_filter_on_the_scan() {
         )
         .unwrap();
     graph.finish_query(projection).unwrap();
-    apply_graph_security(&mut graph, root, &context).unwrap();
+    let mut graph = apply_graph_security(graph, root, &context).unwrap();
     check_graph(&graph, root, &context).unwrap();
     assert!(graph.render(root).unwrap().contains("WHERE false"));
     for predicate in [
@@ -343,8 +345,8 @@ fn denied_roles_require_a_false_filter_on_the_scan() {
         assert!(check_graph(&graph, root, &context).is_err());
     }
     let empty = SecurityContext::new(1, vec![]).unwrap();
-    assert!(apply_graph_security(&mut graph, root, &empty).is_err());
     assert!(check_graph(&graph, root, &empty).is_err());
+    assert!(apply_graph_security(graph, root, &empty).is_err());
 }
 
 #[test]
@@ -384,7 +386,7 @@ fn role_filtering_precedes_prefix_collapse() {
             )
             .unwrap();
         graph.finish_query(projection).unwrap();
-        apply_graph_security(&mut graph, root, &context).unwrap();
+        let graph = apply_graph_security(graph, root, &context).unwrap();
         check_graph(&graph, root, &context).unwrap();
         let (_, params) = graph.render_parameterized(root).unwrap();
         let mut paths = params

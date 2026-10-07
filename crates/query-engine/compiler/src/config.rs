@@ -102,13 +102,13 @@ fn compile_graph_context(
     let mut graph = graph.lower_operations();
     observe(GraphStage::Emitted(&graph, root))?;
     response_policy::apply_graph_excerpts(&mut graph, root, &input)?;
-    let (mut graph, result_context) = enforce::enforce_graph_return(graph, root, &input)?;
-    crate::scope::apply_graph(&mut graph, &scope, &input)?;
+    let (graph, result_context) = enforce::enforce_graph_return(graph, root, &input)?;
+    let mut graph = crate::scope::apply_graph(graph, root, &scope, &input)?;
     if !security_context.scope_proofs.is_empty() {
         let scope = crate::scope::QueryScope::nodes(security_context.scope_proofs.clone());
-        crate::scope::apply_graph(&mut graph, &scope, &input)?;
+        graph = crate::scope::apply_graph(graph, root, &scope, &input)?;
     }
-    security::apply_graph_security(&mut graph, root, &security_context)?;
+    let graph = security::apply_graph_security(graph, root, &security_context)?;
     let (graph, root, key_count) = cursor::apply_graph(graph, root, &input, pagination.query_hash)?;
     pagination.key_count = key_count;
     check::check_graph(&graph, root, &security_context)?;
