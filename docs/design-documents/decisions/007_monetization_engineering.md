@@ -367,6 +367,8 @@ GKG queries have no per-request namespace context. Every query scopes across all
 
 **Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting. This applies when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
 
+**Orbit behavior without a namespace.** A SaaS request whose JWT has no `root_namespace_id` skips the quota check, and its billing event is dropped (`reason=root_namespace_missing`). CustomersDot attributes SaaS usage to the root namespace, so neither can be resolved. Rails is expected to block these requests before they reach Orbit.
+
 **UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
 
 **JWT wiring.** Rails resolves `knowledge_graph_governing_namespace_id` server-side per request and sets `claims.root_namespace_id` before calling GKG. GKG continues to consume only the signed JWT claim, with no untrusted body field.

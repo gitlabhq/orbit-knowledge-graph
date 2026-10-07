@@ -6,6 +6,7 @@ use orbit_observability::billing::events as spec;
 
 pub(crate) const REASON_REALM_MISSING: &str = "realm_missing";
 pub(crate) const REASON_REALM_UNRECOGNIZED: &str = "realm_unrecognized";
+pub(crate) const REASON_ROOT_NAMESPACE_MISSING: &str = "root_namespace_missing";
 pub(crate) const REASON_EVENT_BUILD_FAILED: &str = "event_build_failed";
 
 pub(crate) const REASON_NON_RETRIABLE_STATUS: &str = "non_retriable_status";
@@ -52,6 +53,7 @@ pub fn register() {
     for reason in [
         REASON_REALM_MISSING,
         REASON_REALM_UNRECOGNIZED,
+        REASON_ROOT_NAMESPACE_MISSING,
         REASON_EVENT_BUILD_FAILED,
     ] {
         METRICS

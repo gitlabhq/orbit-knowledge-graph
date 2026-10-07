@@ -13,7 +13,7 @@ use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
-use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
+use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, REALM_SAAS, normalize_realm};
 use block_reason::label as block_reason_label;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::{QuotaAuth, QuotaClient};
@@ -101,6 +101,24 @@ impl QuotaService {
                 source_type = %inputs.source_type,
                 correlation_id = %correlation_id,
                 "quota gate decision: skipped (no license_checksum claim)"
+            );
+            record_skipped(&inputs.source_type);
+            return Ok(());
+        }
+
+        // Rails sends no governing namespace when a SaaS user has zero or several eligible
+        // paid groups. CustomersDot can't resolve such a request, so it is neither checked
+        // nor billed until Rails denies it upstream.
+        if inputs.root_namespace_id.is_none()
+            && inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS)
+        {
+            warn!(
+                user_id = inputs.user_id,
+                realm = inputs.realm.as_deref().unwrap_or(""),
+                global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
+                source_type = %inputs.source_type,
+                correlation_id = %correlation_id,
+                "quota gate decision: skipped (no root_namespace_id claim on SaaS)"
             );
             record_skipped(&inputs.source_type);
             return Ok(());
@@ -459,14 +477,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn errors_when_saas_root_namespace_id_missing() {
+    async fn skips_when_saas_root_namespace_id_missing() {
         let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let svc = service_for(url);
-        let mut inputs = inputs_with_source("mcp");
-        inputs.root_namespace_id = None;
-
-        let err = svc.check(&inputs).await.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Internal);
+        for realm in ["SaaS", "saas"] {
+            let inputs = QuotaCheckInputs {
+                realm: Some(realm.into()),
+                root_namespace_id: None,
+                ..inputs_with_source("mcp")
+            };
+            assert!(svc.check(&inputs).await.is_ok(), "{realm}");
+        }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
