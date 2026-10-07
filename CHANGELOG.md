@@ -1,3 +1,21 @@
+## [0.138.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.137.1...v0.138.0) (2026-10-07)
+
+### Features
+
+* **cli:** report setup choices in telemetry ([7f67baf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f67bafb80bd4e33676ac0bfc42a78a6921c6e9c)) by Jean-Gabriel Doyon
+* **cli:** tag the coding agent in MCP entries that setup writes ([8f47428](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f474287129d0007a9f185bfa8de7e72e136d4e9)) by Jean-Gabriel Doyon
+* **server:** clickhouse-setup mode applies the setup contract with verified TLS ([497235a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/497235a31a474e0eeda6a2b5f5619b39f28784ac)) by Bohdan Parkhomchuk
+* **skills:** add orbit-wrapper skill ([1262ffd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1262ffd1b960e0e151d1dffad40d27e4e41385a7)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** guide users when setup or index runs outside a git repository ([04da714](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/04da714c265ab43d3e4582f2484d16642e9e418a)) by Jean-Gabriel Doyon
+
+### Other
+
+* **e2e:** send GQL from every suite and bump e2e images ([6a1eecc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a1eecc784cfdb363c2071b5fd0f5b74778052f4)) by Michael Angelo Rivera
+* **query:** pin non-ASCII case folding and match indexes_used by table ([1f6e583](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1f6e583e5ed1803665d17676678d0712120bcfcd)) by Dmitry Gruzd
+
 ## [0.137.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.137.0...v0.137.1) (2026-10-06)
 
 ### Fixes
