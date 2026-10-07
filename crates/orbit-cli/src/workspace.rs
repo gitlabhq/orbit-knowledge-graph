@@ -72,7 +72,7 @@ impl Workspace {
         // Climbing after repos were found but filtered out would index an
         // enclosing repository the user did not point at.
         if found_any {
-            return Ok(discovered);
+            return Ok(Vec::new());
         }
         Ok(git_toplevel(&canonical).into_iter().collect())
     }
@@ -468,27 +468,6 @@ mod tests {
             .unwrap();
     }
 
-    fn commit_all(repo: &Path) {
-        for args in [
-            &["add", "-A"][..],
-            &[
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@e.co",
-                "commit",
-                "-qm",
-                "x",
-            ],
-        ] {
-            Command::new("git")
-                .args(args)
-                .current_dir(repo)
-                .output()
-                .unwrap();
-        }
-    }
-
     fn workspace_in(root: &Path) -> Workspace {
         Workspace::open(root.join("orbit-home")).unwrap()
     }
@@ -514,7 +493,6 @@ mod tests {
         init_repo(&dotfiles);
         std::fs::write(dotfiles.join(".gitignore"), "*\n").unwrap();
         init_repo(&dotfiles.join("workspace/a"));
-        commit_all(&dotfiles);
 
         let resolved = workspace_in(scratch.path())
             .resolve_repos(&dotfiles.join("workspace"))
