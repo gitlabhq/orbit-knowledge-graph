@@ -1,9 +1,14 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
-# Pi reads AGENTS.md natively (project root, or ~/.pi/agent/AGENTS.md for user scope), so the
-# instruction file is the whole integration.
+# Pi reads AGENTS.md natively (project root, or ~/.pi/agent/AGENTS.md for user scope). The
+# extension routes tool calls through `orbit hook-guard` for nudges.
 name: pi
 title: Pi
 detect: ["~/.pi/agent"]
 instruction_file:
   project: AGENTS.md
   global: "~/.pi/agent/AGENTS.md"
+template_files:
+  - path:
+      project: .pi/extensions/orbit.ts
+      global: "~/.pi/agent/extensions/orbit.ts"
+    template: pi_extension.ts

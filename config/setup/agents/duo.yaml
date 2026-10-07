@@ -1,7 +1,22 @@
 # yaml-language-server: $schema=../../schemas/setup_agent.schema.json
+# GitLab Duo CLI hooks only run at session start, so Duo gets a session reminder instead of
+# per-call nudges. Project hooks run only with --enable-project-hooks.
 name: duo
 title: GitLab Duo
 detect: ["~/.gitlab/duo"]
 instruction_file:
   project: AGENTS.md
   global: "~/.gitlab/duo/AGENTS.md"
+json_merges:
+  - file:
+      project: .gitlab/duo/hooks.json
+      global: "~/.gitlab/duo/hooks.json"
+    path: [hooks, SessionStart]
+    marker: hook-guard
+    entries:
+      - hooks:
+          - type: command
+            command: "{{orbit}} hook-guard session"
+            timeout: 10
+    note:
+      project: "start it with --enable-project-hooks"

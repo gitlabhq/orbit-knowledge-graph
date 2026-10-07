@@ -1,10 +1,9 @@
 //! Declarative agent specs embedded from `config/setup/agents/`. Each YAML file describes
 //! one agent as generic operations (detection paths, instruction file, marker-owned JSON
 //! merges, templated files, string registrations, MCP entry, skill directories), so adding an
-//! agent means adding a YAML file, not Rust. The instruction block, hook nudges, MCP server,
-//! and template values live in `config/setup/setup.yaml`.
+//! agent means adding a YAML file, not Rust. The instruction block, hook guard texts, and MCP
+//! server live in `config/setup/setup.yaml`.
 
-use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use ontology::migrations::sha256_hex;
@@ -22,8 +21,7 @@ struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
     nudge_search: String,
-    #[serde(default)]
-    template_vars: BTreeMap<String, String>,
+    session_start: String,
 }
 
 static TEXTS: LazyLock<SetupTexts> = LazyLock::new(|| {
@@ -64,6 +62,9 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instruc
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
+
+static RENDERED_SESSION_START: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.session_start.trim_end(), launcher()));
 
 fn describe_graph_contents() -> String {
     use strum::IntoEnumIterator;
@@ -110,6 +111,10 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+pub(crate) fn session_start_text() -> &'static str {
+    &RENDERED_SESSION_START
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,6 +194,14 @@ pub(super) struct JsonMerge {
     pub(super) path: Vec<String>,
     pub(super) marker: String,
     pub(super) entries: Vec<Value>,
+    pub(super) note: Option<ScopedNote>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ScopedNote {
+    pub(super) project: Option<String>,
+    pub(super) global: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -252,10 +265,8 @@ const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
 
 impl TemplateFile {
     pub(super) fn render(&self) -> String {
-        let mut body = read_embedded_text(&self.template);
-        for (name, value) in &TEXTS.template_vars {
-            body = body.replace(&format!("{{{{{name}}}}}"), value);
-        }
+        let body = read_embedded_text(&self.template)
+            .replace("{{hook_client}}", &read_embedded_text("hook_client.js"));
         let body = substitute_launcher(&body, launcher());
         format!("{TEMPLATE_CHECKSUM_PREFIX}{}\n{body}", sha256_hex(&body))
     }
@@ -329,17 +340,16 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plugin_uses_default_graph_without_shell_interpolation() {
-        let contents = agent_named("opencode").unwrap().template_files[0].render();
-        assert!(contents.contains(r#"join(homedir(), ".gitlab", "orbit")"#));
-        assert!(!contents.contains('`'));
-        assert!(!contents.contains("$("));
-
-        for (name, text) in &TEXTS.template_vars {
+    fn templates_use_default_graph_without_shell_interpolation() {
+        for name in ["opencode", "pi"] {
+            let contents = agent_named(name).unwrap().template_files[0].render();
+            assert!(contents.contains(r#"join(homedir(), ".gitlab", "orbit")"#));
+            assert!(contents.contains(r#"const LAUNCHER = "orbit".split(" ");"#));
             assert!(
-                !text.contains(['"', '`']) && !text.contains("$("),
-                "{name} is not shell-safe"
+                !contents.contains('`') && !contents.contains("$("),
+                "{name}"
             );
+            assert!(!contents.contains("{{"), "{name}: unresolved token");
         }
     }
 
