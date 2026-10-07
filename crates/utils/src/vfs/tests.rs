@@ -124,8 +124,8 @@ fn virtual_links_resolve_only_inside_the_catalog() {
     assert_eq!(vfs.read_dir("alias").unwrap(), ["file", "link"]);
     assert_eq!(vfs.subtree("chain").count(), 2);
     let stat = vfs.stat("chain/link").unwrap();
-    assert_eq!(stat.path.as_str(), "/dir/file");
-    assert_eq!(stat.link.as_ref().map(|path| path.as_str()), Some("file"));
+    assert_eq!(stat.path, "/dir/file");
+    assert_eq!(stat.link.as_deref(), Some("file"));
     assert!(vfs.stat("alias/file").unwrap().link.is_none());
     for path in ["escape", "escape/file", "host", "dangling"] {
         assert_eq!(vfs.stat(path).unwrap_err().kind(), ErrorKind::NotFound);
@@ -154,7 +154,7 @@ fn virtual_paths_have_the_same_syntax_on_every_platform() {
         "dir/rooted",
     ] {
         assert_eq!(&*vfs.read(path).unwrap(), b"backslash");
-        assert_eq!(vfs.stat(path).unwrap().path.as_str(), r"/dir\name/file");
+        assert_eq!(vfs.stat(path).unwrap().path, r"/dir\name/file");
     }
     assert_eq!(&*vfs.read("dir/name/file").unwrap(), b"slash");
     assert_eq!(&*vfs.read(r"C:\repo\file").unwrap(), b"drive");
