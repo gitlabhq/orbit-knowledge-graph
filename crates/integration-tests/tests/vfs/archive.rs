@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::path::Path;
 
 use orbit_utils::vfs::{Decision, File, Limits, Pass, SourceError, Vfs, sources::Archive};
 
@@ -65,10 +64,10 @@ fn archive_hardlinks_stay_within_the_selected_root() {
     )
     .unwrap();
     for path in ["src/file", "alias", "chain"] {
-        assert_eq!(&*vfs.read(Path::new(path)).unwrap(), b"content");
+        assert_eq!(&*vfs.read(path).unwrap(), b"content");
     }
     assert_eq!(
-        vfs.read(Path::new("file")).unwrap_err().kind(),
+        vfs.read("file").unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
     assert_eq!(vfs.usage().files, 3);
@@ -117,8 +116,8 @@ fn pax_headers_do_not_become_files() {
         Default::default(),
     )
     .unwrap();
-    assert_eq!(vfs.read_dir(Path::new("/")).unwrap(), ["file"]);
-    assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"content");
+    assert_eq!(vfs.read_dir("/").unwrap(), ["file"]);
+    assert_eq!(&*vfs.read("file").unwrap(), b"content");
 }
 
 #[test]
@@ -141,12 +140,12 @@ fn pax_size_enforces_the_file_limit() {
         Default::default(),
     )
     .unwrap();
-    let stat = vfs.stat(Path::new("big.txt")).unwrap();
+    let stat = vfs.stat("big.txt").unwrap();
     assert_eq!(stat.len, 4096);
     assert_eq!(stat.decision, Some(Decision::List("oversize")));
     assert_eq!(vfs.usage().resident, 0);
     assert_eq!(
-        vfs.read(Path::new("big.txt")).unwrap_err().kind(),
+        vfs.read("big.txt").unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
 }
@@ -203,17 +202,14 @@ fn archive_policy_receives_the_complete_body() {
         Default::default(),
     )
     .unwrap();
-    assert_eq!(&*vfs.read(Path::new("big.txt")).unwrap(), body);
+    assert_eq!(&*vfs.read("big.txt").unwrap(), body);
+    assert_eq!(vfs.read_dir("/").unwrap(), ["big.txt", "logo.png"]);
     assert_eq!(
-        vfs.read_dir(Path::new("/")).unwrap(),
-        ["big.txt", "logo.png"]
-    );
-    assert_eq!(
-        vfs.stat(Path::new("logo.png")).unwrap().decision,
+        vfs.stat("logo.png").unwrap().decision,
         Some(Decision::List("image"))
     );
     assert_eq!(
-        vfs.read(Path::new("logo.png")).unwrap_err().kind(),
+        vfs.read("logo.png").unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
 }

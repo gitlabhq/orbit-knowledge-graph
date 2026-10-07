@@ -2,7 +2,6 @@ mod schema;
 mod sources;
 
 use std::io;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use orbit_utils::vfs::{Decision, File, Pass, Vfs};
@@ -218,27 +217,26 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
             match step {
                 Step::Read { path, expect } => match expect {
                     Outcome::Ok(value) => check(
-                        vfs.read(Path::new(&path)).map(|b| b.to_vec()),
+                        vfs.read(&path).map(|b| b.to_vec()),
                         Outcome::Ok(Success {
                             ok: value.ok.into_bytes(),
                         }),
                     ),
-                    Outcome::Err(error) => check(
-                        vfs.read(Path::new(&path)).map(|b| b.to_vec()),
-                        Outcome::Err(error),
-                    ),
+                    Outcome::Err(error) => {
+                        check(vfs.read(&path).map(|b| b.to_vec()), Outcome::Err(error))
+                    }
                 },
-                Step::ReadDir { path, expect } => check(vfs.read_dir(Path::new(&path)), expect),
+                Step::ReadDir { path, expect } => check(vfs.read_dir(&path), expect),
                 Step::Stat { path, expect } => check(
-                    vfs.stat(Path::new(&path)).map(|stat| Stat {
-                        path: stat.path.to_string_lossy().into_owned(),
+                    vfs.stat(&path).map(|stat| Stat {
+                        path: stat.path,
                         kind: match stat.kind {
                             orbit_utils::vfs::Kind::File => Kind::File,
                             orbit_utils::vfs::Kind::Dir => Kind::Dir,
                         },
                         len: stat.len,
                         decision: stat.decision.map(verdict),
-                        link: stat.link.map(|p| p.to_string_lossy().into_owned()),
+                        link: stat.link,
                     }),
                     expect,
                 ),
@@ -253,7 +251,7 @@ fn run_source(scenario: &Scenario, kind: SourceKind) {
                     expect
                 ),
                 Step::Subtree { path, expect } => assert_eq!(
-                    vfs.subtree(Path::new(&path))
+                    vfs.subtree(&path)
                         .map(|file| file.path.to_string())
                         .collect::<Vec<_>>(),
                     expect

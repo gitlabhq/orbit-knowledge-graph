@@ -1,11 +1,10 @@
 //! Tests requiring native filenames, permissions, or concurrent scheduling.
 
 use orbit_utils::vfs::{
-    Decision, File, Limits, Loading, Pass, Put, Source, SourceError, Tag, Vfs,
+    Decision, File, LimitKind, Limits, Loading, Pass, Put, Source, SourceError, Tag, Vfs,
     sources::{Changeset, Directory},
 };
 use std::io;
-use std::path::Path;
 use std::sync::{
     Arc, Barrier,
     atomic::{AtomicUsize, Ordering::SeqCst},
@@ -67,7 +66,7 @@ fn concurrent_puts_deduplicate_and_spill_without_losing_files() {
     for worker in 0..8 {
         for file in 0..200 {
             assert_eq!(
-                &*vfs.read(Path::new(&format!("{worker}/{file}"))).unwrap(),
+                &*vfs.read(format!("{worker}/{file}")).unwrap(),
                 format!("{worker}:{file}").as_bytes()
             );
         }
@@ -92,7 +91,7 @@ fn concurrent_first_reads_run_content_once() {
             scope.spawn(|| {
                 start.wait();
                 assert_eq!(
-                    vfs.read(Path::new("blob")).unwrap_err().kind(),
+                    vfs.read("blob").unwrap_err().kind(),
                     io::ErrorKind::Unsupported
                 );
             });
@@ -142,13 +141,10 @@ fn loading_decisions_are_not_repeated_by_reads() {
             .unwrap();
             assert_eq!(count.load(SeqCst), 1);
             for _ in 0..3 {
-                assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"content");
+                assert_eq!(&*vfs.read("file").unwrap(), b"content");
             }
             assert_eq!(count.load(SeqCst), 1);
-            assert_eq!(
-                vfs.stat(Path::new("file")).unwrap().decision,
-                Some(Decision::Keep(()))
-            );
+            assert_eq!(vfs.stat("file").unwrap().decision, Some(Decision::Keep(())));
         }
     }
 }
@@ -167,10 +163,10 @@ fn resident_duplicates_share_content_after_loading() {
         Default::default(),
     )
     .unwrap();
-    let b = vfs.read(Path::new("b")).unwrap();
-    let c = vfs.read(Path::new("c")).unwrap();
+    let b = vfs.read("b").unwrap();
+    let c = vfs.read("c").unwrap();
     assert!(Arc::ptr_eq(&b, &c));
-    assert_eq!(&*vfs.read(Path::new("a")).unwrap(), b"replacement");
+    assert_eq!(&*vfs.read("a").unwrap(), b"replacement");
     drop(vfs);
     assert_eq!(&*b, b"shared");
 }
@@ -228,14 +224,14 @@ fn on_demand_readers_remain_lazy_repeatable_and_size_checked() {
     )
     .unwrap();
     assert_eq!(calls.load(SeqCst), 0);
-    assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"data");
+    assert_eq!(&*vfs.read("file").unwrap(), b"data");
     assert_eq!(
-        vfs.read(Path::new("file")).unwrap_err().kind(),
+        vfs.read("file").unwrap_err().kind(),
         io::ErrorKind::InvalidData
     );
     assert_eq!(calls.load(SeqCst), 2);
     assert_eq!(
-        vfs.read(Path::new("listed")).unwrap_err().kind(),
+        vfs.read("listed").unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
     assert_eq!(vfs.usage().files, 2);
@@ -262,12 +258,9 @@ fn a_file_removed_after_metadata_classification_remains_cataloged() {
     )
     .unwrap();
     assert_eq!(vfs.files().next().unwrap().path, "file");
+    assert_eq!(vfs.stat("file").unwrap().decision, Some(Decision::Pending));
     assert_eq!(
-        vfs.stat(Path::new("file")).unwrap().decision,
-        Some(Decision::Pending)
-    );
-    assert_eq!(
-        vfs.read(Path::new("file")).unwrap_err().kind(),
+        vfs.read("file").unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
     assert_eq!(vfs.usage().files, 1);
@@ -310,7 +303,7 @@ fn reader_errors_preserve_their_cause_and_do_not_run_content_policy() {
     }
     let vfs = Vfs::load(Inputs, Filter, Limits::default(), Default::default()).unwrap();
     for file in vfs.files().filter(|file| file.path != "healthy") {
-        let original = vfs.read(Path::new(file.path.as_ref())).unwrap_err();
+        let original = vfs.read(file.path.as_ref()).unwrap_err();
         let original_cause = original
             .get_ref()
             .unwrap()
@@ -319,7 +312,7 @@ fn reader_errors_preserve_their_cause_and_do_not_run_content_policy() {
         assert!(original_cause.get_ref().unwrap().is::<Disconnected>());
         assert_eq!(file.decision(), Decision::Pending);
         for _ in 0..2 {
-            let error = vfs.read(Path::new(file.path.as_ref())).unwrap_err();
+            let error = vfs.read(file.path.as_ref()).unwrap_err();
             assert_eq!(error.kind(), original.kind());
             assert_eq!(error.to_string(), "reader disconnected");
             let shared = error
@@ -332,7 +325,7 @@ fn reader_errors_preserve_their_cause_and_do_not_run_content_policy() {
     }
     assert_eq!(vfs.usage().files, 5);
     assert_eq!(vfs.usage().kept, 4);
-    assert_eq!(&*vfs.read(Path::new("healthy")).unwrap(), b"data");
+    assert_eq!(&*vfs.read("healthy").unwrap(), b"data");
 }
 
 #[test]
@@ -366,12 +359,12 @@ fn an_on_demand_failure_after_loading_can_be_retried() {
     .unwrap();
     assert_eq!(reads.load(SeqCst), 0);
     assert_eq!(
-        vfs.read(Path::new("file")).unwrap_err().kind(),
+        vfs.read("file").unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
     assert_eq!(classifications.load(SeqCst), 0);
     for _ in 0..2 {
-        assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"data");
+        assert_eq!(&*vfs.read("file").unwrap(), b"data");
     }
     assert_eq!(classifications.load(SeqCst), 1);
     assert_eq!(reads.load(SeqCst), 3);
@@ -415,11 +408,11 @@ fn oversized_on_demand_files_remain_cataloged_during_loading_and_later_reads() {
         assert_eq!(vfs.usage().files, 1);
         assert_eq!(vfs.usage().resident, 0);
         assert_eq!(
-            vfs.read(Path::new("file")).unwrap_err().kind(),
+            vfs.read("file").unwrap_err().kind(),
             io::ErrorKind::FileTooLarge
         );
         assert_eq!(
-            vfs.stat(Path::new("file")).unwrap().decision,
+            vfs.stat("file").unwrap().decision,
             Some(if defer {
                 Decision::Keep(())
             } else {
@@ -487,11 +480,8 @@ fn composed_passes_observe_previous_decisions_without_changing_file_metadata() {
             Decision::Keep(if linked { 3 } else { 13 })
         );
         for _ in 0..2 {
-            assert_eq!(&*vfs.read(Path::new("file")).unwrap(), b"content");
-            assert_eq!(
-                vfs.stat(Path::new("file")).unwrap().decision,
-                Some(Decision::Keep(13))
-            );
+            assert_eq!(&*vfs.read("file").unwrap(), b"content");
+            assert_eq!(vfs.stat("file").unwrap().decision, Some(Decision::Keep(13)));
         }
     }
 }
@@ -526,8 +516,8 @@ fn file_bytes_are_borrowed_only_while_classifying_including_empty_files() {
     assert_eq!(calls.load(SeqCst), 0);
     assert!(vfs.files().all(|file| file.bytes().is_none()));
     for _ in 0..2 {
-        assert_eq!(&*vfs.read(Path::new("empty")).unwrap(), b"");
-        assert_eq!(&*vfs.read(Path::new("full")).unwrap(), b"content");
+        assert_eq!(&*vfs.read("empty").unwrap(), b"");
+        assert_eq!(&*vfs.read("full").unwrap(), b"content");
     }
     assert_eq!(calls.load(SeqCst), 4);
     assert!(vfs.files().all(|file| file.bytes().is_none()));
@@ -572,7 +562,7 @@ fn sources_keep_host_link_targets_outside_the_virtual_namespace() {
     .unwrap();
     for path in ["escape/file", "chain/new/file", "dangling"] {
         assert_eq!(
-            archive.read(Path::new(path)).unwrap_err().kind(),
+            archive.read(path).unwrap_err().kind(),
             io::ErrorKind::NotFound
         );
     }
@@ -607,7 +597,7 @@ fn sources_keep_host_link_targets_outside_the_virtual_namespace() {
     )
     .unwrap();
     assert_eq!(
-        vfs.read(Path::new("host-file")).unwrap_err().kind(),
+        vfs.read("host-file").unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
 }
@@ -656,15 +646,15 @@ fn lazy_readers_run_once_and_only_for_readable_files() {
     .unwrap();
     assert_eq!(reads.load(SeqCst), 1);
     for _ in 0..2 {
-        assert_eq!(&*vfs.read(Path::new("kept")).unwrap(), b"data");
+        assert_eq!(&*vfs.read("kept").unwrap(), b"data");
     }
     assert_eq!(reads.load(SeqCst), 1);
     assert_eq!(
-        vfs.read(Path::new("listed")).unwrap_err().kind(),
+        vfs.read("listed").unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
     assert_eq!(
-        vfs.read(Path::new("oversize")).unwrap_err().kind(),
+        vfs.read("oversize").unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
     assert_eq!(
@@ -702,11 +692,11 @@ fn reader_failures_are_cataloged_but_global_limits_abort_loading() {
         (1, false, io::ErrorKind::InvalidData),
     ] {
         let vfs = Vfs::load(Input(size, fail), (), Limits::default(), Default::default()).unwrap();
-        assert_eq!(vfs.read(Path::new("file")).unwrap_err().kind(), expected);
+        assert_eq!(vfs.read("file").unwrap_err().kind(), expected);
         let file = vfs.files().find(|file| file.path == "file").unwrap();
         assert_eq!(file.decision(), Decision::Pending);
         assert_eq!(file.size, size);
-        assert_eq!(&*vfs.read(Path::new("extra")).unwrap(), b"x");
+        assert_eq!(&*vfs.read("extra").unwrap(), b"x");
         assert_eq!(vfs.usage().files, 2);
         assert_eq!(vfs.usage().kept, 1);
     }
@@ -721,11 +711,11 @@ fn reader_failures_are_cataloged_but_global_limits_abort_loading() {
         Default::default(),
     )
     .unwrap_err();
-    assert!(matches!(error, SourceError::Cap(cap) if cap.metric == "total_bytes"));
+    assert!(matches!(error, SourceError::Cap(cap) if cap.metric == LimitKind::TotalBytes));
 }
 
 #[test]
-fn non_utf8_names_retain_real_disk_paths() {
+fn non_utf8_names_fail_instead_of_colliding_in_the_catalog() {
     use std::os::unix::ffi::OsStrExt;
     let root = tempfile::tempdir().unwrap();
     for name in [b"caf\xff.rs", b"caf\xfe.rs"] {
@@ -739,15 +729,14 @@ fn non_utf8_names_retain_real_disk_paths() {
             panic!("create non-UTF8 name: {error}");
         }
     }
-    let vfs = Vfs::load(
+    let error = Vfs::load(
         Directory(root.path()),
         (),
         Default::default(),
         Default::default(),
     )
-    .unwrap();
-    assert_eq!(vfs.usage().duplicate_paths, 1);
-    assert_eq!(&*vfs.read(Path::new("caf\u{fffd}.rs")).unwrap(), b"data");
+    .unwrap_err();
+    assert!(matches!(error, SourceError::Io(error) if error.kind() == io::ErrorKind::InvalidData));
 }
 
 #[test]
