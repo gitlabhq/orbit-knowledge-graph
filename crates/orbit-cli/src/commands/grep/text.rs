@@ -33,6 +33,7 @@ pub(super) struct Hit {
 pub(super) struct Term {
     pub(super) raw: String,
     regex: Option<(regex::Regex, regex::Regex)>,
+    assign: Option<regex::Regex>,
 }
 
 impl Term {
@@ -47,9 +48,11 @@ impl Term {
                 Some((line, whole))
             })
             .flatten();
+        let assign = regex.is_none().then(|| assignment(raw)).flatten();
         Self {
             raw: raw.to_string(),
             regex,
+            assign,
         }
     }
 
@@ -57,6 +60,7 @@ impl Term {
         Self {
             raw: self.raw.clone(),
             regex: None,
+            assign: assignment(&self.raw),
         }
     }
 
@@ -291,17 +295,19 @@ fn names(hit: &Hit, alternatives: &[Term]) -> bool {
         .is_some_and(|def| def.start == hit.line && alternatives.iter().any(|a| a.names(&def.name)))
 }
 
+fn assignment(raw: &str) -> Option<regex::Regex> {
+    regex::Regex::new(&format!(
+        r"(?i)^\s*(?:(?:const|let|var)\s+)?(?:[\w$]+\.)*{}\s*=[^=]",
+        regex::escape(raw.trim())
+    ))
+    .ok()
+}
+
 fn assigns(hit: &Hit, alternatives: &[Term]) -> bool {
     alternatives
         .iter()
-        .filter(|t| t.regex.is_none())
-        .any(|term| {
-            regex::Regex::new(&format!(
-                r"(?i)^\s*(?:(?:const|let|var)\s+)?(?:[\w$]+\.)*{}\s*=[^=]",
-                regex::escape(term.raw.trim())
-            ))
-            .is_ok_and(|re| re.is_match(&hit.text))
-        })
+        .filter_map(|t| t.assign.as_ref())
+        .any(|re| re.is_match(&hit.text))
 }
 
 fn defining_rank(hit: &Hit, alternatives: &[Term]) -> u8 {

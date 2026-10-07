@@ -105,27 +105,23 @@ fn edited_files(repo: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
-/// The files among `files` that exist but git does not track. Asks git about these paths only,
-/// so it never walks the tree.
+/// The files among `files` that exist but git does not track. Reads the index listing once and
+/// never walks the tree.
 pub(crate) fn untracked(repo: &Path, files: &[&str]) -> Vec<String> {
-    let mut known = std::collections::HashSet::new();
-    for chunk in files.chunks(500) {
-        let Ok(output) = std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(["ls-files", "-z", "--"])
-            .args(chunk)
-            .stderr(std::process::Stdio::null())
-            .output()
-        else {
-            return Vec::new();
-        };
-        known.extend(
-            String::from_utf8_lossy(&output.stdout)
-                .split('\0')
-                .map(str::to_string),
-        );
+    if files.is_empty() {
+        return Vec::new();
     }
+    let Ok(output) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["ls-files", "-z"])
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let known: std::collections::HashSet<&str> = listing.split('\0').collect();
     files
         .iter()
         .filter(|file| !known.contains(**file) && repo.join(file).is_file())
