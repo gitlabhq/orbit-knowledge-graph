@@ -44,7 +44,6 @@ pub(crate) fn run(
     if !filter.kinds.is_empty() {
         writeln!(out, "kind: {}", filter.kinds.join(" "))?;
     }
-    writeln!(out, "grep {:?} @ {}", query, backend.header())?;
     let mut alternatives: Vec<text::Term> =
         alternatives.iter().map(|a| text::Term::parse(a)).collect();
     let search = |terms: &[text::Term]| {
@@ -63,6 +62,7 @@ pub(crate) fn run(
             search(&alternatives)?
         }
     };
+    writeln!(out, "grep {:?} @ {}", query, backend.header())?;
     write!(out, "{}", text::render(&hits, &alternatives))?;
     write!(
         out,

@@ -376,6 +376,16 @@ pub fn populate_text_lines(
         ),
         &[],
     )?;
+    append_text_lines(client, table, repository_root, commit_sha, files)
+}
+
+pub fn append_text_lines(
+    client: &DuckDbClient,
+    table: &str,
+    repository_root: &Path,
+    commit_sha: &str,
+    files: &[String],
+) -> Result<usize> {
     let mut shas = StringBuilder::new();
     let mut paths = StringBuilder::new();
     let mut texts = StringBuilder::new();

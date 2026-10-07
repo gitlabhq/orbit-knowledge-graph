@@ -36,7 +36,11 @@ impl LocalBackend {
         db: Option<PathBuf>,
         paths: &[String],
     ) -> Result<Self> {
-        let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
+        let workspace::IndexedRepo {
+            git,
+            client,
+            edited,
+        } = workspace::open_indexed(repo, db)?;
         let paths: Vec<String> = paths
             .iter()
             .flat_map(|p| p.split(','))
@@ -44,7 +48,10 @@ impl LocalBackend {
             .collect();
         Ok(Self {
             search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, &paths)?,
-            header: git.short_sha().to_string(),
+            header: match edited {
+                0 => git.short_sha().to_string(),
+                n => format!("{} + {n} edited files", git.short_sha()),
+            },
             paths,
             git,
         })
