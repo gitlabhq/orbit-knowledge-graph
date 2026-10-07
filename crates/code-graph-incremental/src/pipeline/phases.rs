@@ -13,7 +13,7 @@ use ontology::Ontology;
 
 use super::{
     Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
-    Lazy, LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile,
+    LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths,
     Sources, State, Workset,
 };
 use crate::env::Env;
@@ -29,7 +29,7 @@ use crate::treesitter::{self, SupportLang};
 pub struct Prepare;
 
 impl Phase<Sources> for Prepare {
-    type Output = Workset<Lazy<SourceFile>>;
+    type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "prepare".into()
@@ -56,7 +56,7 @@ fn workset(
     root: PathBuf,
     entries: Vec<FileInventoryEntry>,
     dirty: FxHashSet<usize>,
-) -> Workset<Lazy<SourceFile>> {
+) -> Workset<SourcePaths> {
     let manifest_names = &env.resolve.config.parse_files;
     let is_manifest = |path: &str| {
         let name = path.rsplit('/').next().unwrap_or(path);
@@ -94,13 +94,12 @@ fn workset(
         }
         listed.files.push((path, size, reason));
     }
-    let items = candidates.into_iter().filter_map(move |path| {
-        let content = std::fs::read_to_string(root.join(&path)).ok()?;
-        Some(SourceFile { path, content })
-    });
     Workset {
         state,
-        items: Box::new(items),
+        items: SourcePaths {
+            root,
+            paths: candidates,
+        },
         dirty,
         listed,
     }
@@ -112,7 +111,7 @@ fn workset(
 pub struct Remap;
 
 impl Phase<ReindexInput> for Remap {
-    type Output = Workset<Lazy<SourceFile>>;
+    type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "remap".into()
@@ -264,10 +263,13 @@ impl<T: Send> IntoParallel for Vec<T> {
     }
 }
 
-impl<T: Send> IntoParallel for Lazy<T> {
-    type Item = T;
-    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
-        self.par_bridge()
+impl IntoParallel for SourcePaths {
+    type Item = SourceFile;
+    fn into_parallel(self) -> impl ParallelIterator<Item = SourceFile> {
+        self.paths.into_par_iter().filter_map(move |path| {
+            let content = std::fs::read_to_string(self.root.join(&path)).ok()?;
+            Some(SourceFile { path, content })
+        })
     }
 }
 

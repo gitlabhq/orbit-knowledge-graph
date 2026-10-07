@@ -2,11 +2,11 @@
 //! running a `Phase`. The artifact's type decides which phases apply:
 //!
 //! ```text
-//! Sources ─Prepare─> Workset<Lazy<SourceFile>>
+//! Sources ─Prepare─> Workset<SourcePaths>
 //!   ─Each(Parse+Rewrite+Canonicalize+Link)─> Workset<Vec<LinkedFile>>
 //!   ─Insert─> DirtyGraph ─Resolve─> Resolved ─Display─> Displayed
 //!   ─Export─> Exported ─Emit─> Exported
-//! ReindexInput ─Remap─> Workset<Lazy<SourceFile>> ─(as above)
+//! ReindexInput ─Remap─> Workset<SourcePaths> ─(as above)
 //! ```
 
 mod artifacts;

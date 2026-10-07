@@ -39,7 +39,10 @@ pub struct Workset<C> {
     pub listed: Listed,
 }
 
-pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
+pub struct SourcePaths {
+    pub root: PathBuf,
+    pub paths: Vec<String>,
+}
 
 /// What the inventory held besides parseable code: manifests for the
 /// resolver, every other file with the reason it was not parsed, and each

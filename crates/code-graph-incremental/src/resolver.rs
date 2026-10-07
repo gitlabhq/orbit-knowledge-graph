@@ -1457,13 +1457,19 @@ fn is_external(source_str: &str, external: &[String]) -> bool {
 }
 
 fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<Loc> {
-    let prefixed = prefixes.iter().map(|p| match p.is_empty() {
-        true => target.to_string(),
-        false => format!("{p}{PATH_SEP}{target}"),
-    });
-    std::iter::once(target.to_string())
-        .chain(prefixed)
-        .find_map(|key| file_index.get(&key))
+    file_index.get(target).or_else(|| {
+        let mut key = String::new();
+        prefixes
+            .iter()
+            .filter(|prefix| !prefix.is_empty())
+            .find_map(|prefix| {
+                key.clear();
+                key.push_str(prefix);
+                key.push_str(PATH_SEP);
+                key.push_str(target);
+                file_index.get(&key)
+            })
+    })
 }
 
 fn resolve_submodule(

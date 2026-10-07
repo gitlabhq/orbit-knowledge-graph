@@ -151,7 +151,11 @@ impl Project<'_> {
         let inventory = inventory::walk(&self.git.repo_path)
             .context("failed to walk repository files")?
             .into_inner();
-        info!("walk {:.2}s, {} files", started.elapsed().as_secs_f64(), inventory.len());
+        info!(
+            "walk {:.2}s, {} files",
+            started.elapsed().as_secs_f64(),
+            inventory.len()
+        );
         let by_family = split_by_family(inventory, None);
         let owner = by_family.values().next().map(|(lang, _)| *lang);
         let work = by_family
