@@ -71,7 +71,7 @@ To create the database and the identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.137.1 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -199,7 +199,7 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
 
    ```yaml
    image:
-     tag: "0.134.0"
+     tag: "0.137.1"
 
    secrets:
      perKey:
@@ -245,14 +245,24 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    tls:
      enabled: true
      existingSecret: gkg-webserver-tls
+
+   # Usage billing. Requires GitLab 19.5 or later.
+   billing:
+     enabled: true
+     collector_url: "https://billing.prdsub.gitlab.net"
+     auth_mode: cloud_connector
+     quota:
+       enabled: true
+       customers_dot_url: "https://customers.gitlab.com"
+       auth_mode: license_checksum
    ```
 
 1. Install the chart:
 
    ```shell
-   helm upgrade --install gkg \
-     oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
-     --version 3.0.0 \
+   helm upgrade --install orbit \
+     oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit \
+     --version 4.2.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
@@ -261,6 +271,10 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    This command is a reference for a direct Helm install. Adjust the namespace names and the deployment
    method to match your own tooling.
 
+   If you installed the `gkg` chart 3.x, chart 4.0 and later is published as `orbit` and renames the
+   resources it creates. Before you upgrade, see
+   [Upgrading to 4.0](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/blob/main/README.md#upgrading-to-40).
+
 1. Confirm that all three components are running:
 
    ```shell
@@ -268,15 +282,14 @@ You must also provide a TLS certificate for the gRPC endpoint. For more informat
    ```
 
 The output lists the webserver, indexer, and dispatcher pods in the `Running` state. The chart turns
-everything else off by default, including metrics, autoscaling, analytics, and billing. Leave them off on
-GitLab Self-Managed.
+metrics and autoscaling off by default.
 
 ### TLS and network requirements
 
 GitLab connects to the gRPC endpoint over TLS on port 50054. Both Rails and Workhorse open their own
 connections, so both require a route to the endpoint.
 
-TLS can terminate in one of two places: a load balancer in front of the `gkg-webserver` service, or the
+TLS can terminate in one of two places: a load balancer in front of the `orbit-webserver` service, or the
 webserver itself with `tls.enabled` and `tls.existingSecret`. Only the webserver case needs the certificate
 inside the cluster.
 
@@ -286,9 +299,22 @@ information, see
 [Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
 
 If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
-`tls://gkg-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
+`tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
 GitLab connects to. Otherwise, expose the service with a method your cluster supports, and keep the address
 on a private network.
+
+### Billing requirements
+
+The billing settings in the values file report GitLab Orbit usage to GitLab and check it against your
+subscription. They require:
+
+- GitLab 19.5 or later.
+- An online cloud license on the GitLab instance.
+- Outbound HTTPS on port 443 from the webserver pods to `customers.gitlab.com` and
+  `billing.prdsub.gitlab.net`.
+
+GitLab Orbit authenticates with your instance license, so the billing settings need no extra Secret.
+Keep the URLs and authentication modes exactly as shown.
 
 ### Resource requirements
 
