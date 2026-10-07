@@ -44,7 +44,8 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 }
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
+    let workspace::IndexedRepo { git, client, .. } =
+        workspace::open_indexed(target.repo, target.db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
     let targets = resolve_targets(&client, &git, &hydrator, &target.target)?;
     let mut out = String::new();
