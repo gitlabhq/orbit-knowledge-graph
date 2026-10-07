@@ -43,7 +43,7 @@ pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
 // N concurrent waiters on the same key produce N miss increments but 1 CDot call.
 pub const QUOTA_CDOT_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.billing.quota.cdot.duration",
-    "Latency of upstream CustomersDot HEAD requests for quota resolution. \
+    "Latency of upstream CustomersDot GET requests for quota resolution. \
      Recorded once per actual HTTP call; concurrent cache-miss coalescing means \
      this count is lower than the decisions{cache=miss} counter under load.",
     Some("s"),

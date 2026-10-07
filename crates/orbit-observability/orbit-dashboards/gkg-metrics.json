@@ -73,7 +73,7 @@
     {
       "otel_name": "gkg.billing.quota.cdot.duration",
       "prom_name": "gkg_billing_quota_cdot_duration_seconds",
-      "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+      "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
       "kind": "histogram_f64",
       "unit": "s",
       "labels": [

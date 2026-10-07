@@ -1,3 +1,4 @@
+mod block_reason;
 mod cache;
 mod client;
 pub mod inputs;
@@ -13,13 +14,16 @@ use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
 use crate::constants::QUOTA_MAX_CACHE_ENTRIES;
+use block_reason::label as block_reason_label;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
-use client::{DenyReason, QuotaAuth, QuotaClient};
+use client::{QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
 
 const ERROR_DOMAIN: &str = "BILLING";
 const REASON_GITLAB_CREDITS_EXHAUSTED: &str = "GITLAB_CREDITS_EXHAUSTED";
+const CREDITS_EXHAUSTED_MESSAGE: &str = "GitLab credits exhausted";
+const CHECK_FAILED_MESSAGE: &str = "Unable to verify GitLab credits";
 
 pub use metrics::register as register_metrics;
 
@@ -139,7 +143,7 @@ impl QuotaService {
                 );
                 Ok(())
             }
-            QuotaGateDecision::Failed(reason) => {
+            QuotaGateDecision::Failed(reason, block_reason) => {
                 warn!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
@@ -149,13 +153,14 @@ impl QuotaService {
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
                     reason = ?reason,
+                    block_reason = block_reason_label(block_reason.as_deref()),
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: fail_closed"
                 );
-                Err(credits_exhausted_status())
+                Err(credits_exhausted_status(CHECK_FAILED_MESSAGE))
             }
-            QuotaGateDecision::Deny(reason) => {
+            QuotaGateDecision::Deny(block_reason) => {
                 info!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
@@ -164,30 +169,27 @@ impl QuotaService {
                     instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
-                    reason = ?reason,
+                    block_reason = block_reason_label(block_reason.as_deref()),
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: denied"
                 );
-                Err(credits_exhausted_status())
+                Err(credits_exhausted_status(CREDITS_EXHAUSTED_MESSAGE))
             }
         }
     }
 }
 
-// A failed check reuses the credits-exhausted status so Workhorse, which only
+// A failed check reuses the credits-exhausted reason so Workhorse, which only
 // recognizes GITLAB_CREDITS_EXHAUSTED, returns a 402 instead of a generic 502.
-fn credits_exhausted_status() -> Status {
+// Workhorse passes the message through, so that is where the two differ.
+fn credits_exhausted_status(message: &str) -> Status {
     let details = ErrorDetails::with_error_info(
         REASON_GITLAB_CREDITS_EXHAUSTED,
         ERROR_DOMAIN,
         std::collections::HashMap::new(),
     );
-    Status::with_error_details(
-        Code::ResourceExhausted,
-        DenyReason::QuotaExhausted.message(),
-        details,
-    )
+    Status::with_error_details(Code::ResourceExhausted, message, details)
 }
 
 fn record_skipped(source_type: &str) {
@@ -201,7 +203,7 @@ fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &
     let decision_label = match gate {
         QuotaGateDecision::Allow => ALLOW,
         QuotaGateDecision::Deny(_) => DENY,
-        QuotaGateDecision::Failed(_) => FAIL_CLOSED,
+        QuotaGateDecision::Failed(..) => FAIL_CLOSED,
     };
     let cache_label = match cache {
         CacheOutcome::Hit => HIT,
@@ -244,7 +246,7 @@ mod tests {
     use super::*;
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
-    use axum::routing::head;
+    use axum::routing::get;
     use orbit_server_config::{AppConfig, QuotaConfig};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
@@ -293,7 +295,7 @@ mod tests {
         let c = counter.clone();
         let app = Router::new().route(
             crate::constants::CDOT_QUOTA_PATH,
-            head(move || {
+            get(move || {
                 let c = c.clone();
                 async move {
                     c.fetch_add(1, Ordering::SeqCst);
@@ -410,6 +412,7 @@ mod tests {
             .expect("deny status must carry an ErrorInfo detail");
         assert_eq!(error_info.reason, REASON_GITLAB_CREDITS_EXHAUSTED);
         assert_eq!(error_info.domain, ERROR_DOMAIN);
+        assert_eq!(err.message(), CREDITS_EXHAUSTED_MESSAGE);
         let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         assert!(
             after > before,
@@ -490,6 +493,7 @@ mod tests {
                     .cloned()
                     .expect("fail-closed status must carry an ErrorInfo detail");
                 assert_eq!(error_info.reason, REASON_GITLAB_CREDITS_EXHAUSTED);
+                assert_eq!(err.message(), CHECK_FAILED_MESSAGE);
             }
             assert_eq!(counter.load(Ordering::SeqCst), 2, "{status}");
             let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);

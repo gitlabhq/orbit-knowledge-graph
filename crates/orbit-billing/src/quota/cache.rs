@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use moka::future::Cache;
 use opentelemetry::metrics::ObservableGauge;
 
-use super::client::{DenyReason, FailureReason, QuotaClient, QuotaDecision, QuotaOutcome};
+use super::client::{FailureReason, QuotaClient, QuotaDecision, QuotaOutcome};
 use super::key::{CacheKey, CdotRequest};
 
 // Cached decision plus the instant at which it should be treated as expired.
@@ -31,8 +31,8 @@ fn jittered(ttl: Duration) -> Duration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaGateDecision {
     Allow,
-    Deny(DenyReason),
-    Failed(FailureReason),
+    Deny(Option<String>),
+    Failed(FailureReason, Option<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,12 +104,15 @@ impl QuotaCache {
                             expires_at: Instant::now() + jittered(ttl),
                         })
                     }
-                    QuotaOutcome::Failed(reason) => {
+                    QuotaOutcome::Failed {
+                        reason,
+                        block_reason,
+                    } => {
                         record_cdot_duration(
                             start.elapsed().as_secs_f64(),
                             orbit_observability::billing::quota::values::FAIL_CLOSED,
                         );
-                        Err(CheckFailed(reason))
+                        Err(CheckFailed(reason, block_reason))
                     }
                 }
             })
@@ -117,7 +120,7 @@ impl QuotaCache {
 
         let gate = match entry {
             Ok(cached) => gate_from_decision(cached.decision),
-            Err(e) => QuotaGateDecision::Failed(e.0),
+            Err(e) => QuotaGateDecision::Failed(e.0, e.1.clone()),
         };
         (gate, CacheOutcome::Miss)
     }
@@ -126,7 +129,7 @@ impl QuotaCache {
 fn gate_from_decision(decision: QuotaDecision) -> QuotaGateDecision {
     match decision {
         QuotaDecision::Allow => QuotaGateDecision::Allow,
-        QuotaDecision::Deny(reason) => QuotaGateDecision::Deny(reason),
+        QuotaDecision::Deny(block_reason) => QuotaGateDecision::Deny(block_reason),
     }
 }
 
@@ -146,7 +149,7 @@ fn record_cdot_duration(secs: f64, outcome: &'static str) {
 }
 
 #[derive(Debug)]
-struct CheckFailed(FailureReason);
+struct CheckFailed(FailureReason, Option<String>);
 
 impl std::fmt::Display for CheckFailed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -186,7 +189,7 @@ mod tests {
     use crate::quota::client::QuotaAuth;
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
-    use axum::routing::head;
+    use axum::routing::get;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
 
@@ -218,7 +221,7 @@ mod tests {
         let c = counter.clone();
         let app = Router::new().route(
             crate::constants::CDOT_QUOTA_PATH,
-            head(move || {
+            get(move || {
                 let c = c.clone();
                 async move {
                     c.fetch_add(1, Ordering::SeqCst);
@@ -304,7 +307,7 @@ mod tests {
         for _ in 0..3 {
             assert_eq!(
                 cache.check(request_with("denied")).await.0,
-                QuotaGateDecision::Deny(DenyReason::QuotaExhausted)
+                QuotaGateDecision::Deny(None)
             );
         }
 
