@@ -93,6 +93,13 @@ fixtures:
 
       pub struct ImportedTuple(pub i32);
 tests:
+  - name: "Unit declarations do not execute their own initializer"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.definition_type = 'Struct'
+      RETURN caller.name, target.name
+    assert:
+      - { empty: true }
   - name: "Unit struct method targets do not depend on capitalization"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

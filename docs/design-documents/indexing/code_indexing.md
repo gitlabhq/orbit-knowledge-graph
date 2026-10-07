@@ -249,6 +249,8 @@ the linker seals the loop back-edges.
 
 Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
 to declaration identities, which also identify SSA variables and field slots.
+The linker allocates these keys per file; they do not enter the shared symbol
+interner or snapshots. Class values retain declaration node IDs through joins.
 Leaving a block removes its name mappings without restoring values. Assignments
 to outer bindings therefore survive block exit.
 

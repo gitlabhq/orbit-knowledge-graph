@@ -1,0 +1,61 @@
+name: "Rust: field copies require an actual source value"
+fixtures:
+  - path: main.rs
+    content: |
+      #[derive(Clone, Copy)]
+      struct R {
+          cb: fn(),
+      }
+
+      fn helper() {}
+      fn other() {}
+
+      fn wrap(value: R) -> R {
+          R { cb: other }
+      }
+
+      fn call_result() {
+          let r = R { cb: helper };
+          let x = wrap(r);
+          (x.cb)();
+      }
+
+      struct Outer {
+          cb: fn(),
+          inner: R,
+      }
+
+      fn untracked_member(mut o: Outer) {
+          o.cb = helper;
+          let x = o.inner;
+          (x.cb)();
+      }
+
+      fn replaced() {
+          let r = R { cb: helper };
+          let mut x = r;
+          x = wrap(r);
+          (x.cb)();
+      }
+
+      fn copied() {
+          let r = R { cb: helper };
+          let x = r;
+          (x.cb)();
+      }
+tests:
+  - name: "Calls and untracked members do not inherit argument or receiver fields"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name IN ['call_result', 'untracked_member', 'replaced']
+        AND target.name = 'helper'
+      RETURN caller.name
+    assert:
+      - { empty: true }
+  - name: "Plain bindings still copy callable fields"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'copied' AND target.name = 'helper'
+      RETURN target.name
+    assert:
+      - { row_count: 1 }
