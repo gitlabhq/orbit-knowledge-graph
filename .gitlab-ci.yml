@@ -101,10 +101,13 @@ stages:
 # Cargo downloads (crates.io index, crate archives, git dependencies) cached by
 # Cargo.lock. Most jobs only restore it; unit-test uploads it so that dozens of
 # jobs don't each push ~550 MB. A miss means a cold fetch, which is today's
-# behavior.
+# behavior. Trust model: MR pipelines share this non-protected cache (like the
+# sccache bucket), so scripts/ci-cargo-home-cache.sh drops any crate archive
+# that doesn't match the Cargo.lock checksum; git/checkouts is never cached.
+# Keep the paths in sync with that script.
 .cargo-home-cache:
   paths: &cargo-home-paths
-    - .cargo-cache/git
+    - .cargo-cache/git/db
     - .cargo-cache/registry/cache
     - .cargo-cache/registry/index
   pull:
@@ -351,6 +354,7 @@ rust-toolchain-sync-check:
     - .sccache-template
     - .mr-and-main-rules
   needs: []
+  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - mise run toolchain:check
 
@@ -516,6 +520,7 @@ fmt-check:
   extends:
     - .job-template
     - .mr-only-rules
+  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - cargo fmt --all -- --check
 
@@ -524,6 +529,7 @@ newline-check:
   extends:
     - .job-template
     - .mr-only-rules
+  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - mise run lint:newlines
 
@@ -560,6 +566,7 @@ cargo-audit:
     - .job-template
     - .mr-and-main-rules
   needs: []
+  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - cargo audit
 
