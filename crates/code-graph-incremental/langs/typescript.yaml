@@ -368,8 +368,14 @@ resolve:
 
     - name: packages
       rules:
+        - match: '(__dir (__file "package.json" (__obj (__field "main" $M:__str))))'
+          append: ['(__source_path @$M)']
         - match: '(__dir (__file "package.json"))'
           append: ['(__package_root)']
+    - name: package-entrypoints
+      rules:
+        - match: '(__source_path)'
+          replace: '(__source_path @$ROOT|tree_path("/")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
     - name: index_dirs
       rules:
         - match: '(__dir (__file "index.ts"))'

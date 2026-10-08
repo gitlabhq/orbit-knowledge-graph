@@ -132,8 +132,6 @@ tests:
       - { row: { caller: "runProc", path: "procAlias", name: "default" } }
 
   - name: Node package metadata resolves only through contained repo files
-    # Known gap: Alias-escape hardening from the old pipeline is not ported.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'src/package_consumer.js'

@@ -216,18 +216,51 @@ impl Resolver {
     pub fn resolve(
         &mut self,
         trees: &[Tree],
-        edges: &mut [Edge],
+        edges: &mut Vec<Edge>,
         lang: &Lang,
         dirty_fis: &FxHashSet<u32>,
         support_lang: SupportLang,
         lookup_prefixes: &[String],
         config: &ResolveConfig,
         aliases: &[(String, String)],
+        entrypoints: &[(String, String)],
         env: &Env,
         run: &Sentinel,
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
         self.file_index = build_file_index(trees, lang, support_lang, index_names);
+        for (directory, path) in entrypoints {
+            if let Some(target) = self.file_index.get(path) {
+                self.file_index.keys.insert(directory.clone(), target);
+            }
+        }
+
+        let mut redirected: FxHashSet<u32> = self
+            .reqs
+            .iter()
+            .filter(|req| {
+                !resolve_glob(&req.target_path, &self.file_index, lookup_prefixes)
+                    .contains(&Loc::new(req.target_fi as usize, req.anchor))
+            })
+            .map(|req| req.fi)
+            .collect();
+        if !redirected.is_empty() {
+            let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+            for req in &self.reqs {
+                dependents.entry(req.target_fi).or_default().push(req.fi);
+            }
+            redirected = redirected
+                .into_iter()
+                .flat_map(|fi| {
+                    reachable(fi, |target| {
+                        dependents.get(&target).into_iter().flatten().copied()
+                    })
+                })
+                .collect();
+        }
+        edges
+            .retain(|edge| edge.from_tree == edge.to_tree || !redirected.contains(&edge.from_tree));
+        let dirty_fis: &FxHashSet<u32> = &dirty_fis.union(&redirected).copied().collect();
 
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {

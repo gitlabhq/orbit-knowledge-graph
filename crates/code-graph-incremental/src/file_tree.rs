@@ -9,6 +9,7 @@ use crate::rules::{ParseFormat, ResolveConfig, ResolveStage};
 use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {
+    pub entrypoints: Vec<(String, String)>,
     pub prefixes: Vec<String>,
     pub aliases: Vec<(String, String)>,
     /// Per file: the tags rules put on it and on its ancestor directories,
@@ -78,6 +79,7 @@ impl<'a> ProjectTree<'a> {
         let tag_keys = pt.tag_keys();
         if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
+                entrypoints: vec![],
                 prefixes: vec![],
                 aliases: vec![],
                 file_tags: vec![],
@@ -89,7 +91,18 @@ impl<'a> ProjectTree<'a> {
         pt.collect_aliases();
         pt.collect_prefixes();
         let file_tags = pt.collect_file_tags();
+        let entrypoints = pt
+            .tree
+            .root()
+            .descendants()
+            .filter(|node| node.is(C::Dir))
+            .filter_map(|directory| {
+                let path = directory.child_sym(C::SourcePath)?;
+                Some((pt.node_path(directory), lang.syms.resolve(path).to_string()))
+            })
+            .collect();
         WalkResult {
+            entrypoints,
             prefixes: pt.prefixes,
             aliases: pt.aliases,
             file_tags,
