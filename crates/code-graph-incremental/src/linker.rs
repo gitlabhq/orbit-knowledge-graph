@@ -396,7 +396,10 @@ impl<'t> Fold<'t> {
         let from = self.enclosing();
         let first = self.edges.len();
         if let Some(member) = callee.child(C::Member) {
-            if member.child_sym(C::Dispatch).is_some() {
+            if member
+                .child(C::Dispatch)
+                .is_some_and(|dispatch| !dispatch.has(C::Object))
+            {
                 return;
             }
             if let Some(receiver) = member

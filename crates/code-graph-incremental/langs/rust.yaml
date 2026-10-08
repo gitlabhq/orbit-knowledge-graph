@@ -109,7 +109,7 @@ stages:
         replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
-        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch (__object @$R)))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch @$P (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
