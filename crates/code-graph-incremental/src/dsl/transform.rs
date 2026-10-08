@@ -279,8 +279,8 @@ impl Tf {
             Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
                 let raw = Tree::to_raw(id);
-                let found = edge_ctx
-                    .is_some_and(|ctx| ctx.endpoints.contains(&(ctx.tree_index, raw, *kind, *dir)));
+                let found =
+                    edge_ctx.is_some_and(|ctx| ctx.edges.has(*kind, *dir, ctx.tree_index, raw));
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {

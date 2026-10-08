@@ -3,7 +3,7 @@ use std::ops::ControlFlow;
 use crate::canonical::Canonical as C;
 use crate::resolver::CLASS_LIKE;
 
-use super::types::{Edge, EdgeKind, Node, Tree};
+use super::types::{Edge, EdgeKind, Tree};
 
 pub enum Step<R> {
     Into,
@@ -13,7 +13,7 @@ pub enum Step<R> {
 
 pub struct Walk<'a> {
     cur: Cursor<'a>,
-    iter: std::iter::Skip<indextree::Traverse<'a, Node>>,
+    next: Option<indextree::NodeEdge>,
     last: Option<indextree::NodeId>,
 }
 
@@ -21,7 +21,13 @@ impl<'a> Iterator for Walk<'a> {
     type Item = Cursor<'a>;
     fn next(&mut self) -> Option<Cursor<'a>> {
         loop {
-            if let indextree::NodeEdge::Start(id) = self.iter.next()? {
+            let edge = self.next?;
+            if edge == indextree::NodeEdge::End(self.cur.nid()) {
+                self.next = None;
+                return None;
+            }
+            self.next = edge.next_traverse(&self.cur.tree().arena);
+            if let indextree::NodeEdge::Start(id) = edge {
                 self.last = Some(id);
                 return Some(self.cur.at(id));
             }
@@ -32,9 +38,7 @@ impl<'a> Iterator for Walk<'a> {
 impl<'a> Walk<'a> {
     pub fn skip_subtree(&mut self) {
         if let Some(id) = self.last.take() {
-            self.iter
-                .by_ref()
-                .find(|e| *e == indextree::NodeEdge::End(id));
+            self.next = indextree::NodeEdge::End(id).next_traverse(&self.cur.tree().arena);
         }
     }
 
@@ -289,7 +293,7 @@ impl<'a> Cursor<'a> {
     pub fn walk(self) -> Walk<'a> {
         Walk {
             cur: self,
-            iter: self.nid().traverse(&self.tree().arena).skip(1),
+            next: indextree::NodeEdge::Start(self.nid()).next_traverse(&self.tree().arena),
             last: None,
         }
     }
@@ -305,7 +309,8 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn is_class(self) -> bool {
-        CLASS_LIKE.iter().any(|&k| self.has(k))
+        self.children()
+            .any(|child| CLASS_LIKE.iter().any(|&kind| child.kind() == kind))
     }
 
     pub fn reference(self) -> Self {
