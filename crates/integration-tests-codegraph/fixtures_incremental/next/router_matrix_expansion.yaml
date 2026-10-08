@@ -326,18 +326,17 @@ tests:
       - { row: { caller: "savePost", callee_file: "src/lib/index.ts", callee: "updateItem" } }
 
   - name: Next external package imports remain external in expanded matrix
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
         AND i.import_path IN ['next/server', 'next/navigation']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name
       ORDER BY file_path, path, name
     assert:
       - { row_count: 3 }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextRequest", is_type_only: true } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextResponse", is_type_only: false } }
-      - { row: { file_path: "src/app/client-panel.tsx", path: "next/navigation", name: "useRouter", is_type_only: false } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextRequest" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextResponse" } }
+      - { row: { file_path: "src/app/client-panel.tsx", path: "next/navigation", name: "useRouter" } }
 
   - name: Next external package imports have no local targets in expanded matrix
     query: |

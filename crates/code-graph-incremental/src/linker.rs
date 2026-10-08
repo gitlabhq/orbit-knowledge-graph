@@ -221,6 +221,11 @@ impl<'t> Fold<'t> {
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
+            if c.is(C::ImportType) || n.has_tag(self.tags.type_only) {
+                let binding = self.declare_binding(n, local);
+                self.ssa.write_variable(binding, self.cur, Value::Opaque);
+                continue;
+            }
             if let Some(module) = module
                 && self.bind_from_def(module, n, local)
             {

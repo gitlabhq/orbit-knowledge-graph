@@ -689,8 +689,6 @@ tests:
       - { empty: true }
 
   - name: Type-only side-effect shadowed and global calls avoid imported-symbol fallbacks
-    # Known gap: Imported-symbol fallback and type-only exclusions differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN [
