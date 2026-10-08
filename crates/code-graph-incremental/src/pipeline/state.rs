@@ -49,7 +49,7 @@ impl State {
         eligible: impl Fn(&str) -> bool,
     ) -> Result<SymbolCompaction, crate::LoadError> {
         let before = (env.lang.syms.len(), env.lang.syms.text_bytes());
-        let fresh = Env::with_lang(
+        let mut fresh = Env::with_lang(
             env.lang_id,
             Lang {
                 kinds: env.lang.kinds.clone(),
@@ -58,6 +58,7 @@ impl State {
             },
             env.limits,
         )?;
+        fresh.tree_store = env.tree_store.clone();
         let mut mapping = vec![0; before.0 as usize + 1];
         for (symbol, text) in env.lang.syms.rodeo.iter() {
             if !eligible(text) {
@@ -75,6 +76,7 @@ impl State {
             *symbol = *mapped;
         };
         for tree in &mut self.trees {
+            tree.materialize();
             for node in tree.arena.iter_mut().filter(|node| !node.is_removed()) {
                 remap(&mut node.get_mut().sym);
             }
@@ -189,6 +191,8 @@ pub struct TreeSnapshot {
 
 impl From<&Tree> for TreeSnapshot {
     fn from(tree: &Tree) -> Self {
+        let acquired = tree.acquire();
+        let tree = &*acquired;
         let ids: Vec<indextree::NodeId> = tree.root.descendants(&tree.arena).collect();
         let id_to_pos: rustc_hash::FxHashMap<indextree::NodeId, u32> = ids
             .iter()

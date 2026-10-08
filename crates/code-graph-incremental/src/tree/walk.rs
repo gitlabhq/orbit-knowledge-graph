@@ -112,18 +112,39 @@ where
 #[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     trees: &'a [Tree],
+    session: Option<&'a super::TreeSession<'a>>,
+    tree: &'a Tree,
+    metadata: &'a Tree,
     fi: u32,
     id: u32,
 }
 
 impl<'a> Cursor<'a> {
     pub fn new(trees: &'a [Tree], fi: u32, id: u32) -> Self {
-        Self { trees, fi, id }
+        Self {
+            trees,
+            session: None,
+            tree: &trees[fi as usize],
+            metadata: &trees[fi as usize],
+            fi,
+            id,
+        }
+    }
+
+    pub(crate) fn in_session(session: &'a super::TreeSession<'a>, fi: u32, id: u32) -> Self {
+        Self {
+            trees: &[],
+            session: Some(session),
+            tree: session.get(fi),
+            metadata: session.metadata(fi),
+            fi,
+            id,
+        }
     }
 
     #[inline]
     fn tree(self) -> &'a Tree {
-        &self.trees[self.fi as usize]
+        self.tree
     }
 
     fn nid(self) -> indextree::NodeId {
@@ -149,12 +170,12 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     pub fn tag(self, key: u32) -> Option<u32> {
-        self.tree().get_tag(self.id, key)
+        self.metadata.get_tag(self.id, key)
     }
 
     #[inline]
     pub fn has_tag(self, key: u32) -> bool {
-        self.tree().get_tag(self.id, key).is_some()
+        self.metadata.get_tag(self.id, key).is_some()
     }
 
     #[inline]
@@ -164,7 +185,11 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     pub fn sym(self) -> u32 {
-        self.tree().node(self.nid()).sym
+        self.metadata
+            .symbol_updates
+            .get(&self.id)
+            .copied()
+            .unwrap_or_else(|| self.tree().node(self.nid()).sym)
     }
 
     #[inline]
@@ -344,8 +369,17 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn jump(self, fi: u32, id: u32) -> Self {
+        if fi == self.fi {
+            return Self { id, ..self };
+        }
+        if let Some(session) = self.session {
+            return Self::in_session(session, fi, id);
+        }
         Self {
             trees: self.trees,
+            session: None,
+            tree: &self.trees[fi as usize],
+            metadata: &self.trees[fi as usize],
             fi,
             id,
         }

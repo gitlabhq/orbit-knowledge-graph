@@ -98,7 +98,8 @@ impl ImportReq {
             return Cow::Borrowed(&visible[self.target_fi as usize]);
         }
         let mut names = visible[self.target_fi as usize].clone();
-        let module = trees[self.target_fi as usize].cursor(self.anchor);
+        let acquired = trees[self.target_fi as usize].acquire();
+        let module = acquired.cursor(self.anchor);
         for d in module
             .children()
             .filter(|d| d.is(C::Def) && !d.has(C::ImplBlock))
@@ -232,7 +233,7 @@ impl Resolver {
         for &fi in dirty_fis {
             let fi = fi as usize;
             if fi < trees.len() {
-                self.visible[fi] = gather_visible_one(&trees[fi], fi, self.tags.exports);
+                self.visible[fi] = gather_visible_one(&trees[fi].acquire(), fi, self.tags.exports);
             }
         }
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
@@ -260,10 +261,8 @@ impl Resolver {
             .filter(|req| dirty_fis.contains(&req.fi))
             .filter_map(|req| {
                 let sym = lang.syms.intern(&req.target_path);
-                let node = trees[req.fi as usize]
-                    .cursor(req.node)
-                    .child(C::SourcePath)?
-                    .index();
+                let tree = trees[req.fi as usize].acquire();
+                let node = tree.cursor(req.node).child(C::SourcePath)?.index();
                 Some(ResolvedSourcePath {
                     fi: req.fi,
                     node,
@@ -309,6 +308,7 @@ impl Resolver {
         let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
             .par_iter()
             .map(|tree| {
+                let tree = tree.acquire();
                 let mut members = FxHashMap::default();
                 for member in tree.root().descendants().filter(|node| node.is(C::Def)) {
                     let Some(name) = member.child_sym(C::DefName) else {
@@ -336,6 +336,7 @@ impl Resolver {
         let imports: Vec<FxHashMap<u32, (u32, u32)>> = trees
             .iter()
             .map(|t| {
+                let t = t.acquire();
                 let imports = t.root().descendants().filter(|c| c.is(C::Import));
                 imports
                     .flat_map(|i| i.names())
@@ -351,12 +352,12 @@ impl Resolver {
             run,
             file_resolve_ms: env.limits.file_resolve_ms,
             env,
-            extends_of,
-            imports_to,
-            call_at_site,
+            extends_of: &extends_of,
+            imports_to: &imports_to,
+            call_at_site: &call_at_site,
             corpus: Cursor::new(trees, 0, 0),
-            type_uses,
-            producers,
+            type_uses: &type_uses,
+            producers: &producers,
             lang,
             visible: &self.visible,
             ambiguous: &ambiguous,
@@ -377,7 +378,10 @@ impl Resolver {
             .par_iter()
             .map(|&fi| {
                 let started = Instant::now();
-                (resolve_file(&ctx, fi as usize), (fi, started.elapsed()))
+                (
+                    ctx.with_trees(|ctx| resolve_file(ctx, fi as usize)),
+                    (fi, started.elapsed()),
+                )
             })
             .unzip();
         run.check()?;
@@ -390,18 +394,20 @@ impl Resolver {
             .reqs
             .par_iter()
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
-            .flat_map(|req| resolve_one_import(&ctx, req))
+            .flat_map(|req| ctx.with_trees(|ctx| resolve_one_import(ctx, req)))
             .chain(per_file.into_par_iter().flatten())
             .filter(|e| {
                 !(e.kind == EdgeKind::Calls
                     && e.site
-                        .is_some_and(|s| ctx.corpus.jump(e.from_tree, s).has(C::Property))
-                    && ctx.corpus.follow(e).is_class())
+                        .is_some_and(|s| trees[e.from_fi()].acquire().cursor(s).has(C::Property))
+                    && trees[e.to_fi()].acquire().cursor(e.to_node).is_class())
             })
             .collect();
+        let mut resolved_extends = extends_of.clone();
         for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
-            ctx.extends_of.entry(e.from()).or_default().push(e.to());
+            resolved_extends.entry(e.from()).or_default().push(e.to());
         }
+        ctx.extends_of = &resolved_extends;
         cross_edges.extend(&wave1);
         run.check()?;
 
@@ -413,7 +419,8 @@ impl Resolver {
             .chain(&wave1)
             .filter(|e| e.kind == EdgeKind::Imports)
         {
-            let target = ctx.corpus.jump(e.to_tree, e.to_node);
+            let tree = trees[e.to_fi()].acquire();
+            let target = tree.cursor(e.to_node);
             if e.from_tree == e.to_tree && wildcard_or_name(&ctx, target) == ctx.wildcard_sym {
                 referrers.entry(e.to()).or_default().insert(e.from_node);
             }
@@ -423,13 +430,15 @@ impl Resolver {
             .par_iter()
             .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
             .flat_map_iter(|req| {
-                let import = ctx.corpus.jump(req.fi, req.node);
-                import
-                    .names()
-                    .filter(|n| wildcard_or_name(&ctx, *n) == ctx.wildcard_sym)
-                    .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
-                    .flat_map(|(n, r)| wildcard_uses(&ctx, req, n, r))
-                    .collect::<Vec<_>>()
+                ctx.with_trees(|ctx| {
+                    let import = ctx.corpus.jump(req.fi, req.node);
+                    import
+                        .names()
+                        .filter(|n| wildcard_or_name(ctx, *n) == ctx.wildcard_sym)
+                        .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
+                        .flat_map(|(n, r)| wildcard_uses(ctx, req, n, r))
+                        .collect::<Vec<_>>()
+                })
             })
             .collect();
         cross_edges.extend(&wildcard_edges);
@@ -438,12 +447,15 @@ impl Resolver {
         let wave2: Vec<Edge> = ctx
             .type_uses
             .par_iter()
-            .map(|(&(tree, node), uses)| (ctx.corpus.jump(tree, node), uses))
-            .filter(|(producer, _)| {
-                producer.is(C::Binding) || external_of(&ctx, *producer).is_some()
-            })
-            .flat_map(|(producer, uses)| {
-                dispatch(&ctx, producer, producer_class(&ctx, producer), uses)
+            .flat_map(|(&(tree, node), uses)| {
+                ctx.with_trees(|ctx| {
+                    let producer = ctx.corpus.jump(tree, node);
+                    if producer.is(C::Binding) || external_of(ctx, producer).is_some() {
+                        dispatch(ctx, producer, producer_class(ctx, producer), uses)
+                    } else {
+                        Vec::new()
+                    }
+                })
             })
             .collect();
         cross_edges.extend(&wave2);
@@ -463,7 +475,7 @@ impl Resolver {
             run.check()?;
             wave = wave
                 .par_iter()
-                .flat_map(|ce| resolve_type_edges(&ctx, ce))
+                .flat_map(|ce| ctx.with_trees(|ctx| resolve_type_edges(ctx, ce)))
                 .collect::<Vec<_>>()
                 .into_iter()
                 .filter(|e| seen.insert(key(e)))
@@ -481,17 +493,18 @@ impl Resolver {
     }
 }
 
+#[derive(Clone)]
 struct ResolveCtx<'a> {
     trees: &'a [Tree],
     run: &'a Sentinel,
     file_resolve_ms: u64,
     env: &'a Env,
-    extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
-    imports_to: FxHashMap<(u32, u32), Vec<&'a Edge>>,
-    call_at_site: FxHashMap<(u32, u32), &'a Edge>,
+    extends_of: &'a FxHashMap<(u32, u32), Vec<(u32, u32)>>,
+    imports_to: &'a FxHashMap<(u32, u32), Vec<&'a Edge>>,
+    call_at_site: &'a FxHashMap<(u32, u32), &'a Edge>,
     corpus: Cursor<'a>,
-    type_uses: FxHashMap<(u32, u32), Vec<&'a Edge>>,
-    producers: FxHashMap<(u32, u32), Vec<&'a Edge>>,
+    type_uses: &'a FxHashMap<(u32, u32), Vec<&'a Edge>>,
+    producers: &'a FxHashMap<(u32, u32), Vec<&'a Edge>>,
     lang: &'a Lang,
     visible: &'a VisibleMap,
     ambiguous: &'a FxHashSet<(u32, u32)>,
@@ -510,6 +523,12 @@ struct ResolveCtx<'a> {
 }
 
 impl ResolveCtx<'_> {
+    fn with_trees<T>(&self, operation: impl FnOnce(&ResolveCtx<'_>) -> T) -> T {
+        let session = crate::tree::TreeSession::new(self.trees);
+        let mut context = self.clone();
+        context.corpus = Cursor::in_session(&session, 0, 0);
+        operation(&context)
+    }
     /// Import edges into `target`, its name children, or its parent import.
     fn imports_to(&self, fi: usize, target: u32) -> impl Iterator<Item = &Edge> {
         let node = self.corpus.jump(fi as u32, target);
@@ -561,7 +580,7 @@ fn gather_imports_for(
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
         .map(|&fi| {
-            let tree = &trees[fi as usize];
+            let tree = trees[fi as usize].acquire();
             tree.root()
                 .fold_tree((Vec::new(), Vec::new()), |(reqs, edges), cur, _w| {
                     if cur.kind() != C::Import && cur.kind() != C::ImportType {
@@ -633,6 +652,7 @@ fn propagate_reexports(
     let mut visible_from_directives = Vec::new();
     let mut declared = vec![Vec::new(); trees.len()];
     for (fi, tree) in trees.iter().enumerate() {
+        let tree = tree.acquire();
         for c in tree.root().descendants() {
             if let Some(source_sym) = c.tag(tags.visible_from) {
                 visible_from_directives.push((fi, source_sym));
@@ -651,7 +671,8 @@ fn propagate_reexports(
         };
         for req in reqs {
             let exports = req.exports(trees, visible);
-            for c in trees[req.fi as usize].cursor(req.node).names() {
+            let tree = trees[req.fi as usize].acquire();
+            for c in tree.cursor(req.node).names() {
                 let hint = c.child_sym(C::SsaHint).filter(|&h| h == wildcard_sym);
                 let ns = hint.unwrap_or(c.sym());
                 if ns == wildcard_sym {
@@ -691,7 +712,9 @@ fn propagate_reexports(
         }
         for (fi, ns, loc) in new_exports {
             if let Some(&existing) = visible[fi].get(&ns) {
-                let key = |l: Loc| partial_key(trees[l.fi as usize].cursor(l.node), merge_types);
+                let key = |l: Loc| {
+                    partial_key(trees[l.fi as usize].acquire().cursor(l.node), merge_types)
+                };
                 if existing != loc && (key(existing).is_none() || key(existing) != key(loc)) {
                     ambiguous.insert((u32::try_from(fi).expect("file index exceeds u32"), ns));
                 }
@@ -1105,6 +1128,7 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
     let (mut parts, mut extensions, mut defs_by_name) = Members::default();
     defs_by_name.resize_with(trees.len(), Default::default);
     for (fi, tree) in trees.iter().enumerate() {
+        let tree = tree.acquire();
         for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
             let Some(name) = d.child_sym(C::DefName) else {
                 continue;
@@ -1439,6 +1463,7 @@ fn build_file_index(
     let mut idx = FileIndex::default();
     let sep = support_lang.fqn_separator();
     for (fi, (tree, path)) in trees.iter().map(|t| (t, t.label.as_str())).enumerate() {
+        let tree = tree.acquire();
         let file_lang = SupportLang::from_path(path).unwrap_or(support_lang);
         let stem = file_lang.strip_extension(path);
         let file = Loc::new(fi, 0);
