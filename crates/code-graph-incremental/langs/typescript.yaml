@@ -13,7 +13,7 @@ config:
         format: json
       - name: "webpack.config.js"
         format: raw
-        extract: "['\"]([^'\"]+)['\"]\\s*:\\s*path\\.\\w+\\([^,]+,\\s*['\"]([^'\"]+)['\"]"
+        extract: "['\"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/-]*)['\"]?\\s*:\\s*path\\.(?:join|resolve)\\(__dirname,\\s*['\"]([^'\"]+)['\"]"
     lookup_from:
       - __source_root
 
@@ -361,6 +361,8 @@ resolve:
 
     - name: aliases
       rules:
+        - match: '(__alias $V:__str)'
+          replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("^/", "")))'
         - match: '(path_alias (__arr $V:__str $$$REST))'
           replace: '(__alias @$ROOT (__str @$V|strip_prefix("./")))'
 

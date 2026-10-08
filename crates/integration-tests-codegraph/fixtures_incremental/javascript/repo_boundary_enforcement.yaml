@@ -103,10 +103,6 @@ tests:
       - { empty: true }
 
   - name: process.env does not unlock escaping aliases
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/env_consumer.js'
@@ -116,10 +112,6 @@ tests:
       - { row: { caller: "runEnv", callee_file: "safe/env.js", callee: "safeEnv" } }
 
   - name: fs existsSync does not unlock escaping aliases
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'app/assets/javascripts/fs_consumer.js'

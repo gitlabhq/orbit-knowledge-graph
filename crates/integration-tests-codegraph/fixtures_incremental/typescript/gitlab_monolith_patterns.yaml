@@ -171,8 +171,6 @@ fixtures:
 
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
@@ -309,10 +307,6 @@ tests:
       - { empty: true }
 
   - name: ee alias helper imports target enterprise utility definitions
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
