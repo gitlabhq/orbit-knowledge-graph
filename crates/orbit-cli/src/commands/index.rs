@@ -706,6 +706,7 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
+    refresh_git_index(&git.repo_path);
     workspace::set_status(
         &client,
         &key,
@@ -885,4 +886,17 @@ mod tests {
         assert!(reason.contains("DuckDB write failed"), "{reason}");
         assert!(reason.contains("2 fatal"), "{reason}");
     }
+}
+
+/// `orbit grep` asks `git status` which matched files changed since the index. After a fresh
+/// checkout every file's cached stat data is stale and each status re-hashes the whole tree, so
+/// refresh the cache once here.
+fn refresh_git_index(repo: &Path) {
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["update-index", "-q", "--refresh"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
