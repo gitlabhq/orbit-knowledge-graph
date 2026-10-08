@@ -144,6 +144,8 @@ stages:
       # module.exports = function main() {} → the default export
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (function_expression name: $N body: $B)))'
         replace: '(__def (__defname @$N) (__default_export "default") (__function) $B)'
+      - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: $N:identifier))'
+        replace: '(__module_export @$N (__default_export "default"))'
 
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'

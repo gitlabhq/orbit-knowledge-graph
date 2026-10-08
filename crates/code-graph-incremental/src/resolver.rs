@@ -524,7 +524,7 @@ impl ResolveCtx<'_> {
 }
 
 fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
-    tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
+    let mut names = tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
         if !c.is(C::Def) || c.has(C::ImplBlock) {
             return;
         }
@@ -544,7 +544,22 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
                 names.insert(name, loc);
             }
         }
-    })
+    });
+    for export in tree
+        .root()
+        .children()
+        .filter(|node| node.is(C::ModuleExport))
+    {
+        if let Some(alias) = export.child_sym(C::DefaultExport)
+            && let Some(target) = tree
+                .root()
+                .children()
+                .find(|node| node.is(C::Def) && node.child_sym(C::DefName) == export.sym_opt())
+        {
+            names.insert(alias, Loc::new(fi, target.index()));
+        }
+    }
+    names
 }
 
 fn gather_imports_for(

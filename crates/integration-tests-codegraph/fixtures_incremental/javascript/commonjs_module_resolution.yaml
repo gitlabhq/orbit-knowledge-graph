@@ -43,6 +43,10 @@ fixtures:
       }
 
       module.exports = main;
+
+      function unrelated() {
+        function main() {}
+      }
   - path: default/main.js
     content: |
       const runMain = require('./util');
@@ -75,11 +79,11 @@ fixtures:
 
   - path: alias_chain/util.js
     content: |
+      module.exports = main;
+
       function main() {
         return "ok";
       }
-
-      module.exports = main;
   - path: alias_chain/main.js
     content: |
       const runMain = require('./util');
@@ -268,9 +272,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "resolve" } }
 
-  - name: Default module.exports require targets the primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Default module.exports require targets the exported definition
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'default/main.js'
@@ -280,10 +282,6 @@ tests:
       - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
 
   - name: Default module.exports require call resolves to the exported function
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'default/main.js'
@@ -304,10 +302,6 @@ tests:
       - { row: { caller: "run", callee: "helper" } }
 
   - name: Bare require alias chains keep callable primary export identity
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias_chain/main.js'
