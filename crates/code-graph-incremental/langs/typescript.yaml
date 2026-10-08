@@ -71,6 +71,8 @@ stages:
 
   - name: retag-refs
     rules:
+      - match: '(member_expression object: $O:call_expression property: $M)'
+        replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O:__ivar property: $M)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O property: $M)'

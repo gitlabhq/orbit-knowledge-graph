@@ -91,8 +91,6 @@ tests:
       - { row: { caller: "buildCompiler", callee: "createIncrementalWebpackCompiler" } }
 
   - name: CommonJS namespace member call resolves helper method
-    # Chained calls on returned objects still lose the initial imported call.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'config/webpack.config.js'
