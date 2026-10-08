@@ -100,7 +100,7 @@ stages:
 
 # Cargo downloads (crates.io index, crate archives, git dependencies) cached by
 # Cargo.lock. Most jobs only restore it; unit-test uploads it so that dozens of
-# jobs don't each push ~550 MB. A miss means a cold fetch, which is today's
+# jobs don't each push ~440 MB. A miss means a cold fetch, which is today's
 # behavior. Trust model: MR pipelines share this non-protected cache (like the
 # sccache bucket), so scripts/ci-cargo-home-cache.sh drops any crate archive
 # that doesn't match the Cargo.lock checksum; git/checkouts is never cached.
