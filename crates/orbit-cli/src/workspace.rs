@@ -176,7 +176,6 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     }
     let git_list = |args: &[&str]| -> Option<Vec<String>> {
         let output = Command::new("git")
-            .arg("--no-optional-locks")
             .arg("-C")
             .arg(repo)
             .args(args)
