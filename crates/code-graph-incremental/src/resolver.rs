@@ -295,6 +295,28 @@ impl Resolver {
 
         let (partials, extensions, defs_by_name) =
             gather_members(trees, config.merge_same_named_types);
+        let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
+            .par_iter()
+            .map(|tree| {
+                let mut members = FxHashMap::default();
+                for member in tree.root().descendants().filter(|node| node.is(C::Def)) {
+                    let Some(name) = member.child_sym(C::DefName) else {
+                        continue;
+                    };
+                    for owner in member.ancestors() {
+                        if owner.is(C::Def) {
+                            members
+                                .entry((owner.index(), name))
+                                .or_insert(member.index());
+                        }
+                        if owner.is_class() && !owner.has(C::ImplBlock) {
+                            break;
+                        }
+                    }
+                }
+                members
+            })
+            .collect();
         let exporters: Vec<FxHashSet<usize>> = self
             .visible
             .iter()
@@ -336,6 +358,7 @@ impl Resolver {
             partials: &partials,
             extensions: &extensions,
             defs_by_name: &defs_by_name,
+            declared_members: &declared_members,
             exporters: &exporters,
             imports: &imports,
         };
@@ -470,6 +493,7 @@ struct ResolveCtx<'a> {
     partials: &'a FxHashMap<(u32, u32, usize), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     defs_by_name: &'a [FxHashMap<u32, Vec<u32>>],
+    declared_members: &'a [FxHashMap<(u32, u32), u32>],
     exporters: &'a [FxHashSet<usize>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -1218,7 +1242,15 @@ fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Optio
     std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
-        .find_map(|b| find_method_in(b, name))
+        .find_map(|owner| {
+            if owner.is(C::Def) {
+                ctx.declared_members[owner.fi() as usize]
+                    .get(&(owner.index(), name))
+                    .map(|&node| owner.jump(owner.fi(), node))
+            } else {
+                find_method_in(owner, name)
+            }
+        })
 }
 
 /// Cross-file edges for one file that the import pass cannot produce:
