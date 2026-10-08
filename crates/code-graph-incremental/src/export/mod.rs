@@ -11,6 +11,7 @@ use ontology::Ontology;
 use orbit_utils::arrow::BatchBuilder;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
+use crate::canonical::Canonical as C;
 use crate::dsl::types::Tf;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
@@ -385,6 +386,27 @@ fn write_edges(
         })
         .collect();
     let mut seen_cross_file = FxHashSet::default();
+    let mut resolved_tags = FxHashMap::<_, FxHashMap<_, bool>>::default();
+    for tag in plan
+        .graph
+        .iter()
+        .filter_map(|rule| rule.unless_direct_target_resolves_to)
+    {
+        let targets = resolved_tags.entry(tag).or_default();
+        for edge in state
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+        {
+            let target = forest.cursor(edge.to_tree, edge.to_node);
+            if target.is(C::Def) {
+                targets
+                    .entry(edge.from())
+                    .and_modify(|matches| *matches &= target.has_tag(tag))
+                    .or_insert_with(|| target.has_tag(tag));
+            }
+        }
+    }
 
     for e in &state.edges {
         let Some(&(from, from_entity)) = ids.get(&(e.from_tree, e.from_node)) else {
@@ -402,6 +424,19 @@ fn write_edges(
         if rule
             .unless_source_has
             .is_some_and(|k| sources_with[&k].contains(&(e.from_tree, e.from_node)))
+            || rule.unless_direct_target_resolves_to.is_some_and(|tag| {
+                resolved_tags[&tag].get(&e.to()) == Some(&true)
+                    && e.site.is_some_and(|site| {
+                        forest
+                            .cursor(e.from_tree, site)
+                            .child(C::Callee)
+                            .is_some_and(|callee| {
+                                callee.sym_opt().is_some()
+                                    && !callee.has(C::Member)
+                                    && !callee.has(C::Ivar)
+                            })
+                    })
+            })
         {
             continue;
         }

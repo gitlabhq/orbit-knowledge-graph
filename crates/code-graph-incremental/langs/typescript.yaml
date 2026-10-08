@@ -295,6 +295,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__def (__variable) (number))'
+        tag: { non_callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'

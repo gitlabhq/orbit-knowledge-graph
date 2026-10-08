@@ -89,6 +89,8 @@ struct GraphEdgeYaml {
     kind: String,
     #[serde(default)]
     unless_source_has: Option<String>,
+    #[serde(default)]
+    unless_direct_target_resolves_to: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -184,6 +186,7 @@ pub(super) struct GraphEdge {
     pub(super) to: usize,
     pub(super) kind: String,
     pub(super) unless_source_has: Option<EdgeKind>,
+    pub(super) unless_direct_target_resolves_to: Option<u32>,
 }
 
 /// `export.yaml` checked against the ontology and interned for one `Lang`.
@@ -278,6 +281,10 @@ impl ExportPlan {
                     to: entity_index(&g.to)?,
                     kind: g.kind.clone(),
                     unless_source_has: g.unless_source_has.as_deref().map(edge_kind).transpose()?,
+                    unless_direct_target_resolves_to: g
+                        .unless_direct_target_resolves_to
+                        .as_deref()
+                        .map(|tag| lang.syms.intern(tag)),
                 })
             })
             .collect::<Result<_, LoadError>>()?;
