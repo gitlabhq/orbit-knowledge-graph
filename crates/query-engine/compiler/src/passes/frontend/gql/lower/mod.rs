@@ -22,7 +22,7 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
     };
     lowering.pattern(query.pattern)?;
     for predicate in query.predicates {
-        lowering.predicates(predicate)?;
+        lowering.predicate(predicate)?;
     }
     lowering.promote_ids()?;
     lowering.classify()?;
@@ -206,11 +206,6 @@ impl Lowering {
     }
 
     fn classify(&mut self) -> Result<()> {
-        if !self.input.predicates.is_empty()
-            && (self.path.is_some() || self.input.nodes.iter().any(|node| node.entity.is_none()))
-        {
-            return Err(QueryError::Validation("Boolean predicates require labeled traversal or aggregation patterns; shortest paths and neighbors are unsupported".into()));
-        }
         if self.path.is_none()
             && self.input.nodes.len() == 2
             && self.input.relationships.len() == 1

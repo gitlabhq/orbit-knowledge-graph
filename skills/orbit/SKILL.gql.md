@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.33.5+gql
+version: 0.33.4+gql
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -66,8 +66,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
-- Use `NOT` to negate a predicate or an AND group. Keep a separate ID or positive filter to bound the scan.
-- There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
+- There is no `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 
 ## Iteration budget
 
