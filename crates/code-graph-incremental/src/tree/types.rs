@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use crate::canonical;
 use crate::intern::Lang;
 
-#[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Tag {
     pub key: u32,
     pub val: u32,
@@ -107,6 +107,8 @@ impl Edge {
 #[derive(Clone)]
 pub struct Tree {
     pub(crate) arena: Arena<Node>,
+    pub(crate) stored: Option<std::sync::Arc<super::store::StoredTree>>,
+    pub(crate) symbol_updates: FxHashMap<u32, u32>,
     pub(crate) root: NodeId,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
@@ -120,6 +122,8 @@ impl Tree {
         let root = arena.new_node(root_node);
         Self {
             arena,
+            stored: None,
+            symbol_updates: FxHashMap::default(),
             root,
             label: String::new(),
             tags: FxHashMap::default(),

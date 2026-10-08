@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::{Edge, EdgeKind};
+use crate::tree::EdgeKind;
 
 use super::parser::parse;
 
@@ -75,7 +75,7 @@ impl Tf {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeDir {
     Incoming,
     Outgoing,
@@ -83,7 +83,7 @@ pub enum EdgeDir {
 
 pub struct EdgeCtx<'a> {
     pub tree_index: u32,
-    pub edges: &'a [Edge],
+    pub endpoints: &'a rustc_hash::FxHashSet<(u32, u32, EdgeKind, EdgeDir)>,
 }
 
 pub enum Text {
