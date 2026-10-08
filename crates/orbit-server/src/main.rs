@@ -279,13 +279,18 @@ async fn run_webserver(
         _ = shutdown.cancelled() => Ok(()),
     };
 
-    if let Some(tracker) = analytics_tracker {
-        tracker.shutdown().await;
-    }
-
-    if let Some(tracker) = billing_tracker {
-        tracker.shutdown().await;
-    }
+    tokio::join!(
+        async {
+            if let Some(tracker) = analytics_tracker {
+                tracker.shutdown().await;
+            }
+        },
+        async {
+            if let Some(tracker) = billing_tracker {
+                tracker.shutdown().await;
+            }
+        }
+    );
 
     result
 }

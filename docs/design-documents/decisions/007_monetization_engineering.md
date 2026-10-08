@@ -392,7 +392,7 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 | `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
 | `metadata` | pipeline context | `query_type` plus execution metrics (compile and execute ms, rows) |
 
-Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting, the same way the analytics tracker does. labkit (v0.6.0+) bounds this itself. It stops attempting further sends once the collector is unreachable. It also caps how long it waits on the token source once shutdown begins. Events still waiting for a retry are abandoned rather than retried.
+Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting. This runs concurrently with the analytics tracker's own drain, so a slow or dead collector on one side can't delay the other. labkit (v0.6.0+) bounds a failing drain itself. It stops attempting further sends once the collector is unreachable, and caps how long it waits on the token source once shutdown begins. A collector that is merely slow, not failing, is not bounded this way. Drain time there is roughly the queue depth times the per-event latency, which can exceed the pod's termination grace period under a sustained slowdown. Events still waiting for a retry are abandoned rather than retried.
 
 **Indexer events (planned for GB-based deployments).** Emitted per indexing batch from the existing `EngineMetrics` at `crates/indexer/src/metrics.rs`:
 

@@ -76,11 +76,6 @@ impl SnowplowBillingTracker {
         })
     }
 
-    /// Sends every queued event, then stops labkit's background send task.
-    ///
-    /// Batches waiting for a retry are abandoned rather than retried. labkit
-    /// itself bounds this call: it stops sending once the collector is
-    /// detected unreachable, and caps how long it waits on the token source.
     pub async fn shutdown(&self) {
         tracing::info!("billing tracker shutdown: draining queued events");
         self.tracker.shutdown().await;
@@ -311,8 +306,6 @@ mod tests {
         let outcome = tokio::time::timeout(Duration::from_millis(200), tracker.shutdown()).await;
 
         assert!(outcome.is_err());
-        // labkit's per-request HTTP timeout is 5 s; finishing well before it
-        // proves the outer deadline, not labkit, ended the wait.
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(requests.load(Ordering::Relaxed), 1);
     }
