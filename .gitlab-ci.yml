@@ -98,6 +98,39 @@ stages:
 
 # Job Templates
 
+# Cargo downloads (crates.io index, crate archives, git dependencies) cached by
+# Cargo.lock. Most jobs only restore it; unit-test uploads it so that dozens of
+# jobs don't each push ~550 MB. A miss falls back to the newest default-branch
+# cache, then to a cold fetch, which is today's behavior.
+.cargo-home-cache:
+  paths: &cargo-home-paths
+    - .cargo-cache/git
+    - .cargo-cache/registry/cache
+    - .cargo-cache/registry/index
+  pull:
+    key: &cargo-home-key
+      prefix: cargo-home
+      files:
+        - Cargo.lock
+    fallback_keys:
+      - cargo-home-default-branch
+    paths: *cargo-home-paths
+    policy: pull
+  push:
+    key: *cargo-home-key
+    fallback_keys:
+      - cargo-home-default-branch
+    paths: *cargo-home-paths
+    policy: pull-push
+  # Fallback target for MRs that change Cargo.lock; only default-branch
+  # pipelines write it.
+  push-default-branch:
+    key: cargo-home-default-branch
+    paths: *cargo-home-paths
+    policy: push
+    rules:
+      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 .job-template:
   tags:
     - saas-linux-medium-amd64
@@ -105,7 +138,10 @@ stages:
   variables:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
+    - ./scripts/ci-cargo-home-cache.sh
     - mise install
+  cache:
+    - !reference [.cargo-home-cache, pull]
 
 .sccache-template:
   variables:
@@ -115,6 +151,7 @@ stages:
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
+    - ./scripts/ci-cargo-home-cache.sh
     - mise install
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
@@ -712,6 +749,9 @@ unit-test:
   extends:
     - .test-template
     - .mr-and-main-rules
+  cache:
+    - !reference [.cargo-home-cache, push]
+    - !reference [.cargo-home-cache, push-default-branch]
   tags:
     - ${RUNNER_LARGE}
   needs: []
