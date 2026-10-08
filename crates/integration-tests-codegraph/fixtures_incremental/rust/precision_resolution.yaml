@@ -137,6 +137,17 @@ fixtures:
           macros::ready!();
       }
 
+      pub fn scoped_macro_user() {
+          use local_macros::report;
+          report!(do_work());
+          report!();
+      }
+
+      pub fn other_scoped_macro_user() {
+          use other_macros::report;
+          report!();
+      }
+
       pub fn fn_pointer_from_assoc() {
           let constructor: fn() -> Service = Service::new;
           let _service = constructor();
@@ -161,6 +172,15 @@ fixtures:
       }
 
 tests:
+  - name: "macro references retain scope and call sites without interpreting token bodies"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['scoped_macro_user', 'other_scoped_macro_user']
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "scoped_macro_user", path: "local_macros::report" } }
+      - { row: { caller: "other_scoped_macro_user", path: "other_macros::report" } }
   - name: "module aliases resolve callable paths"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -187,8 +207,6 @@ tests:
       - { empty: true }
 
   - name: "external imported Rust calls target imported symbols"
-    # Known gap: Imported-symbol rows for external crates differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
@@ -209,16 +227,15 @@ tests:
     assert:
       - { empty: true }
 
-  - name: "function-scoped Rust imports only affect their own function"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
+  - name: "function-scoped imports stay local while out-of-scope calls use the wildcard"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 3 }
+      - { row: { caller: "scoped_import_out_of_scope", path: "external_actions", name: "*" } }
       - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
       - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
 
@@ -234,8 +251,6 @@ tests:
       - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
 
   - name: "qualified Rust external imports target imported symbols"
-    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'qualified_external_imported_calls'
