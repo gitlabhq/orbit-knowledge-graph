@@ -32,7 +32,6 @@ strum = { workspace = true }
 termtree = "1.0"
 toml = { workspace = true }
 zstd = "0.13"
-
 tree-sitter = "0.26.3"
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.2"
@@ -57,9 +56,6 @@ tree-sitter-ocaml = "0.25.0"
 code-graph = { path = "../code-graph" }
 ontology = { path = "../ontology" }
 orbit-utils = { path = "../utils" }
-foyer = "0.22.6"
-elsa = "1.11.2"
-tempfile.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

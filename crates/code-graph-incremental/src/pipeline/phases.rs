@@ -355,13 +355,9 @@ impl ItemPhase<Canonical> for Link {
         &self,
         env: &Env,
         run: &Sentinel,
-        Canonical(mut tree): Canonical,
+        Canonical(tree): Canonical,
     ) -> Result<LinkedFile, Killed> {
         let edges = linker::link(&tree, env, run)?;
-        if let Some(store) = &env.tree_store {
-            tree.spill(store)
-                .unwrap_or_else(|error| panic!("tree store: {error}"));
-        }
         Ok(LinkedFile { tree, edges })
     }
 }
@@ -498,13 +494,8 @@ impl Phase<DirtyGraph> for Resolve {
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            let tree = &mut state.trees[rsp.fi as usize];
-            if tree.stored.is_some() {
-                tree.symbol_updates.insert(rsp.node, rsp.sym);
-            } else {
-                let nid = tree.to_id(rsp.node);
-                tree.node_mut(nid).sym = rsp.sym;
-            }
+            let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
+            state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
@@ -546,7 +537,6 @@ impl Phase<Resolved> for Display {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
         for (fi, tree) in state.trees.iter_mut().enumerate() {
-            tree.materialize();
             let ctx = EdgeCtx {
                 tree_index: fi as u32,
                 edges: &edges,
@@ -559,10 +549,6 @@ impl Phase<Resolved> for Display {
                 &ctx,
                 &[],
             );
-            if let Some(store) = &env.tree_store {
-                tree.spill(store)
-                    .map_err(|error| crate::LoadError::new(error.to_string()))?;
-            }
         }
         Ok(Displayed { state })
     }

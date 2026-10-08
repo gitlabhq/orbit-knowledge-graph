@@ -130,21 +130,24 @@ impl<'a> Forest<'a> {
         }
     }
 
-    fn tree(&self, tree: u32) -> crate::tree::TreeRead<'_> {
+    fn tree(&self, tree: u32) -> &Tree {
         if tree == PROJECT {
-            crate::tree::TreeRead::Resident(&self.project)
+            &self.project
         } else {
-            self.trees[tree as usize].acquire()
+            &self.trees[tree as usize]
         }
     }
 
+    fn cursor(&self, tree: u32, node: u32) -> Cursor<'_> {
+        self.tree(tree).cursor(node)
+    }
+
     /// Ancestors of `(tree, node)`, crossing from a file root into the project tree.
-    fn ancestors<'b>(
-        &'b self,
-        tree: u32,
-        node: Cursor<'b>,
-    ) -> impl Iterator<Item = (u32, u32)> + 'b {
-        let own = node.ancestors().map(move |a| (tree, a.index()));
+    fn ancestors(&self, tree: u32, node: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
+        let own = self
+            .cursor(tree, node)
+            .ancestors()
+            .map(move |a| (tree, a.index()));
         let above = if tree == PROJECT {
             None
         } else {
@@ -152,20 +155,17 @@ impl<'a> Forest<'a> {
         };
         let project = above
             .into_iter()
-            .flat_map(move |file| self.project.cursor(file).ancestors())
+            .flat_map(move |file| self.cursor(PROJECT, file).ancestors())
             .map(|a| (PROJECT, a.index()));
         own.chain(project)
     }
 
-    fn all(&self) -> impl Iterator<Item = (u32, crate::tree::TreeRead<'_>)> {
+    fn all(&self) -> impl Iterator<Item = (u32, &Tree)> {
         self.trees
             .iter()
             .enumerate()
-            .map(|(i, t)| (i as u32, t.acquire()))
-            .chain(std::iter::once((
-                PROJECT,
-                crate::tree::TreeRead::Resident(&self.project),
-            )))
+            .map(|(i, t)| (i as u32, t))
+            .chain(std::iter::once((PROJECT, &self.project)))
     }
 }
 
@@ -298,7 +298,7 @@ fn write_entity(
             }
             for expanded in expansions {
                 let row = Row {
-                    tree: &tree,
+                    tree,
                     node,
                     expanded,
                 };
@@ -355,24 +355,17 @@ fn write_edges(
 
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
-    let mut located = located.into_iter().peekable();
-    while let Some(&(&(tree, _), _)) = located.peek() {
-        let acquired = forest.tree(tree);
-        while located.peek().is_some_and(|entry| entry.0.0 == tree) {
-            let Some((&(_, node), &(id, entity))) = located.next() else {
-                break;
-            };
-            for rule in plan.containment.iter().filter(|c| c.to == entity) {
-                let enclosing = forest
-                    .ancestors(tree, acquired.cursor(node))
-                    .find_map(|loc| ids.get(&loc).filter(|(_, e)| *e == rule.from));
-                if let Some(&(from_id, _)) = enclosing {
-                    rows.push(EdgeRow {
-                        source: (from_id, entity_name(rule.from)),
-                        kind: &rule.kind,
-                        target: (id, entity_name(entity)),
-                    });
-                }
+    for (&(tree, node), &(id, entity)) in located {
+        for rule in plan.containment.iter().filter(|c| c.to == entity) {
+            let enclosing = forest
+                .ancestors(tree, node)
+                .find_map(|loc| ids.get(&loc).filter(|(_, e)| *e == rule.from));
+            if let Some(&(from_id, _)) = enclosing {
+                rows.push(EdgeRow {
+                    source: (from_id, entity_name(rule.from)),
+                    kind: &rule.kind,
+                    target: (id, entity_name(entity)),
+                });
             }
         }
     }

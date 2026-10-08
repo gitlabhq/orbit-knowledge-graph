@@ -17,7 +17,6 @@ pub struct Env {
     pub members: Vec<SupportLang>,
     pub resolve: FamilyResolve,
     pub limits: Limits,
-    pub tree_store: Option<std::sync::Arc<crate::tree::TreeStore>>,
     rules: FxHashMap<SupportLang, usize>,
     compiled: Vec<LangConfig>,
 }
@@ -74,7 +73,6 @@ impl Env {
             members,
             resolve,
             limits,
-            tree_store: None,
             rules,
             compiled,
         })
