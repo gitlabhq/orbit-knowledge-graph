@@ -4,7 +4,8 @@ use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{
     Canonicalize, DirtyGraph, Each, Insert, Link, Parse, Prepare, Rewrite, Sources,
 };
-use code_graph_incremental::tree::{Cursor, EdgeKind};
+use code_graph_incremental::tree::{Compact, EdgeKind};
+type Cursor<'a> = code_graph_incremental::tree::Cursor<'a, Compact>;
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, ItemPhase, Limits, Pipeline, State, inventory};
 

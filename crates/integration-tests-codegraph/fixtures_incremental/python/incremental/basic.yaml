@@ -37,6 +37,24 @@ tests:
       - { row: { fqn: 'utils.helper', file: 'utils.py' } }
 
 steps:
+  - name: "retain linked nodes through display, reload, and display again"
+    snapshot: true
+    tests:
+      - name: "retained import still targets the same definition"
+        query: |
+          MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+          WHERE i.file_path = 'main.py'
+          RETURN d.fqn AS fqn, d.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'utils.helper', file: 'utils.py' } }
+      - name: "retained files survive the storage round trip"
+        query: |
+          MATCH (f:File)
+          RETURN f.path AS path
+        assert:
+          - { row_count: 2 }
+
   - name: "add a function to utils"
     snapshot: true
     modify:

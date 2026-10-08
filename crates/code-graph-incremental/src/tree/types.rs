@@ -1,4 +1,4 @@
-use indextree::{Arena, NodeEdge, NodeId};
+use indextree::{Arena, NodeId};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
@@ -105,17 +105,17 @@ impl Edge {
 }
 
 #[derive(Clone)]
-pub struct Tree {
-    pub(crate) arena: Arena<Node>,
-    pub(crate) root: NodeId,
+pub struct Tree<S: super::Storage<N> = super::Mutable, N: Clone = Node> {
+    pub(crate) arena: S::Nodes,
+    pub(crate) root: S::Id,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
     /// Dropped once rewriting ends.
     pub source: std::sync::Arc<str>,
 }
 
-impl Tree {
-    pub fn with_capacity(capacity: usize, root_node: Node) -> Self {
+impl<N: Clone> Tree<super::Mutable, N> {
+    pub fn with_capacity(capacity: usize, root_node: N) -> Self {
         let mut arena = Arena::with_capacity(capacity);
         let root = arena.new_node(root_node);
         Self {
@@ -127,10 +127,12 @@ impl Tree {
         }
     }
 
-    pub fn new(root_node: Node) -> Self {
+    pub fn new(root_node: N) -> Self {
         Self::with_capacity(1, root_node)
     }
+}
 
+impl Tree {
     /// A file that was not parsed: one `__source_file` node spanning its
     /// size, tagged with the reason when there is one.
     pub fn unparsed(lang: &Lang, path: &str, size: u64, reason: &str) -> Self {
@@ -150,7 +152,18 @@ impl Tree {
 
     /// A node's text: the interned sym when it has one, else its source span.
     pub fn text<'a>(&'a self, id: NodeId, lang: &'a crate::intern::Lang) -> &'a str {
-        let n = self.node(id);
+        self.text_at(Self::to_raw(id), lang)
+    }
+
+    /// A node's sym, interning its source text on first use.
+    pub fn sym_of(&self, id: NodeId, lang: &Lang) -> u32 {
+        self.sym_at(Self::to_raw(id), lang)
+    }
+}
+
+impl<S: super::Storage<Node>> Tree<S> {
+    pub(crate) fn text_at<'a>(&'a self, id: u32, lang: &'a Lang) -> &'a str {
+        let n = S::node(&self.arena, id);
         if n.sym != 0 {
             return lang.syms.resolve(n.sym);
         }
@@ -162,29 +175,27 @@ impl Tree {
             .unwrap_or("")
     }
 
-    /// A node's sym, interning its source text on first use.
-    pub fn sym_of(&self, id: NodeId, lang: &Lang) -> u32 {
-        let n = self.node(id);
+    pub(crate) fn sym_at(&self, id: u32, lang: &Lang) -> u32 {
+        let n = S::node(&self.arena, id);
         if n.sym != 0 {
             return n.sym;
         }
-        match self.text(id, lang) {
+        match self.text_at(id, lang) {
             "" => 0,
             s => lang.syms.intern(s),
         }
     }
+}
 
+impl Tree {
     #[inline]
     pub(crate) fn to_id(&self, raw: u32) -> NodeId {
-        let idx = std::num::NonZeroUsize::new(raw as usize + 1).expect("raw + 1 is nonzero");
-        self.arena
-            .get_node_id_at(idx)
-            .expect("raw ids come from this arena")
+        super::Mutable::id(&self.arena, raw)
     }
 
     #[inline]
     pub(crate) fn to_raw(id: NodeId) -> u32 {
-        usize::from(id) as u32 - 1
+        super::Mutable::index(id)
     }
 
     pub(crate) fn node(&self, id: NodeId) -> &Node {
@@ -194,7 +205,9 @@ impl Tree {
     pub(crate) fn node_mut(&mut self, id: NodeId) -> &mut Node {
         self.arena[id].get_mut()
     }
+}
 
+impl<S: super::Storage<N>, N: Clone> Tree<S, N> {
     pub fn set_tag(&mut self, node: u32, key: u32, val: u32) {
         let entry = self.tags.entry(node).or_default();
         if let Some(t) = entry.iter_mut().find(|t| t.key == key) {
@@ -216,7 +229,9 @@ impl Tree {
             .and_then(|tags| tags.iter().find(|t| t.key == key))
             .map(|t| t.val)
     }
+}
 
+impl Tree {
     pub(crate) fn append(&mut self, parent: NodeId, child: Node) -> NodeId {
         parent.append_value(child, &mut self.arena)
     }
@@ -242,16 +257,6 @@ impl Tree {
         target.remove_subtree(&mut self.arena);
     }
 
-    pub(crate) fn postorder(&self) -> Vec<NodeId> {
-        self.root
-            .reverse_traverse(&self.arena)
-            .filter_map(|edge| match edge {
-                NodeEdge::Start(id) => Some(id),
-                NodeEdge::End(_) => None,
-            })
-            .collect()
-    }
-
     pub(crate) fn preorder(&self) -> Vec<NodeId> {
         self.root.descendants(&self.arena).collect()
     }
@@ -272,35 +277,11 @@ impl Tree {
         }
     }
 
-    pub fn len(&self) -> u32 {
-        self.root.descendants(&self.arena).count() as u32
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Rebuilds the arena with only the live nodes, in preorder, so ids are
     /// dense and traversal is cache-friendly. `moved[old raw id]` is the new id.
     pub fn compact(&mut self) {
-        let mut new_arena = Arena::with_capacity(self.root.descendants(&self.arena).count());
-        let mut moved: Vec<Option<NodeId>> = vec![None; self.arena.len()];
-        for id in self.root.descendants(&self.arena) {
-            let parent = id
-                .parent(&self.arena)
-                .and_then(|p| moved[Self::to_raw(p) as usize]);
-            let new_id = match parent {
-                Some(p) => p.append_value(*self.arena[id].get(), &mut new_arena),
-                None => new_arena.new_node(*self.arena[id].get()),
-            };
-            moved[Self::to_raw(id) as usize] = Some(new_id);
-        }
-        self.tags = std::mem::take(&mut self.tags)
-            .into_iter()
-            .filter_map(|(old_raw, tags)| Some((Self::to_raw(moved[old_raw as usize]?), tags)))
-            .collect();
-        self.root = moved[Self::to_raw(self.root) as usize].expect("the root is live");
-        self.arena = new_arena;
+        let tree = std::mem::replace(self, Self::new(Node::default()));
+        *self = tree.into_compact().into();
     }
 }
 

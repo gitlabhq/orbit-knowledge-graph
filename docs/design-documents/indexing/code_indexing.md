@@ -228,6 +228,20 @@ Orbit Local rebuilds its shared DuckDB graph when the code-index revision change
 even if repository commits have not changed. Repositories are re-indexed as used;
 Orbit Remote schema versions are unaffected.
 
+The incremental engine stores trees as `Tree<Storage, Node>`. `Mutable` uses
+`indextree` for structural rewrites. `Compact` stores node payloads and five
+32-bit links in a contiguous vector. Both use the same cursor operations.
+Parsing keeps source-backed text as byte spans until a rule needs a symbol.
+Canonicalization interns surviving text, releases the source, and builds compact
+storage directly from live nodes in preorder, before linking assigns edges.
+The consuming `From` conversions preserve node IDs in both directions, including
+removed slots. `into_compact` instead removes holes and renumbers nodes; use it
+before linking. Compact storage supports symbol and tag updates in place. Display
+uses the shared matcher to apply tag-only rules directly to compact trees. Rules
+that append or replace nodes convert one file at a time to mutable storage and back.
+Incremental indexing builds new trees for changed files and retains compact trees
+for unchanged files. Snapshot loading builds compact storage directly.
+
 The incremental engine distinguishes an undefined name from a local value whose
 target is unknown. Unknown locals block fallback to same-named imports or functions.
 Rust identifier initializers use ordinary bindings. Unit struct declarations have

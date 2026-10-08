@@ -1,13 +1,19 @@
-use indextree::NodeId;
 use smallvec::{SmallVec, smallvec};
 
 use crate::intern::Lang;
-use crate::tree::Tree;
+use crate::tree::{Node, Storage, Tree};
 
 use super::types::{Cap, Pat, Text};
 
-pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Cap]) -> bool {
-    let n = t.node(id);
+pub(crate) fn matches<S: Storage<Node>>(
+    t: &Tree<S>,
+    lang: &Lang,
+    id: S::Id,
+    p: &Pat,
+    caps: &mut [Cap<S::Id>],
+) -> bool {
+    let raw = S::index(id);
+    let n = S::node(&t.arena, raw);
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } | Pat::Spread { .. } => false,
@@ -46,17 +52,22 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
             }
             match text {
                 Text::Lit(s)
-                    if n.sym != *s && (n.sym != 0 || t.text(id, lang) != lang.syms.resolve(*s)) =>
+                    if n.sym != *s
+                        && (n.sym != 0 || t.text_at(raw, lang) != lang.syms.resolve(*s)) =>
                 {
                     return false;
                 }
-                Text::Prefix(p) if !t.text(id, lang).starts_with(lang.syms.resolve(*p)) => {
+                Text::Prefix(p) if !t.text_at(raw, lang).starts_with(lang.syms.resolve(*p)) => {
                     return false;
                 }
-                Text::Regex(re) if !re.is_match(t.text(id, lang)) => return false,
+                Text::Regex(re) if !re.is_match(t.text_at(raw, lang)) => return false,
                 _ => {}
             }
-            let children: Vec<NodeId> = id.children(&t.arena).collect();
+            let children: Vec<_> = t
+                .cursor(raw)
+                .children()
+                .map(|c| S::id(&t.arena, c.index()))
+                .collect();
             let mut ci = 0;
             for (k, kid) in kids.iter().enumerate() {
                 match kid {
@@ -88,8 +99,8 @@ pub(crate) fn matches(t: &Tree, lang: &Lang, id: NodeId, p: &Pat, caps: &mut [Ca
                     }
                     Pat::Desc(inner) => {
                         let mut found = false;
-                        for desc in id.descendants(&t.arena).skip(1) {
-                            if matches(t, lang, desc, inner, caps) {
+                        for desc in t.cursor(raw).descendants() {
+                            if matches(t, lang, S::id(&t.arena, desc.index()), inner, caps) {
                                 found = true;
                                 break;
                             }
@@ -127,7 +138,7 @@ fn is_optional(p: &Pat) -> bool {
     )
 }
 
-fn mark_empty(p: &Pat, caps: &mut [Cap]) {
+fn mark_empty<I>(p: &Pat, caps: &mut [Cap<I>]) {
     if let Pat::Cap { slot, .. } = p {
         caps[*slot as usize] = SmallVec::new();
     }

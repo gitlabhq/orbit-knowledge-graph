@@ -61,7 +61,7 @@ fn python_env(limits: Limits) -> Env {
 }
 
 fn label(env: &Env, state: &State, fi: usize, node: u32) -> String {
-    let cursor: Cursor = state.trees[fi].cursor(node);
+    let cursor: Cursor<'_, code_graph_incremental::tree::Compact> = state.trees[fi].cursor(node);
     let sym = cursor
         .child_sym_of_kind(C::DefName as u16)
         .or(cursor.sym_opt())

@@ -11,7 +11,7 @@ use crate::env::Env;
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::sentinel::Limits;
-use crate::tree::{Edge, Node, Tag, Tree};
+use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
 use crate::treesitter::SupportLang;
 
 pub struct SourceFile {
@@ -26,7 +26,7 @@ impl From<(String, String)> for SourceFile {
 }
 
 pub struct State {
-    pub trees: Vec<Tree>,
+    pub trees: Vec<Tree<Compact>>,
     pub edges: Vec<Edge>,
     pub resolver: Resolver,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
@@ -75,8 +75,8 @@ impl State {
             *symbol = *mapped;
         };
         for tree in &mut self.trees {
-            for node in tree.arena.iter_mut().filter(|node| !node.is_removed()) {
-                remap(&mut node.get_mut().sym);
+            for node in &mut tree.arena {
+                remap(&mut node.node.sym);
             }
             for tag in tree.tags.values_mut().flatten() {
                 remap(&mut tag.key);
@@ -187,18 +187,20 @@ pub struct TreeSnapshot {
     pub tags: Vec<(u32, Vec<Tag>)>,
 }
 
-impl From<&Tree> for TreeSnapshot {
-    fn from(tree: &Tree) -> Self {
-        let ids: Vec<indextree::NodeId> = tree.root.descendants(&tree.arena).collect();
-        let id_to_pos: rustc_hash::FxHashMap<indextree::NodeId, u32> = ids
+impl From<&Tree<Compact>> for TreeSnapshot {
+    fn from(tree: &Tree<Compact>) -> Self {
+        let ids: Vec<_> = std::iter::once(tree.root())
+            .chain(tree.root().descendants())
+            .collect();
+        let id_to_pos: rustc_hash::FxHashMap<u32, u32> = ids
             .iter()
             .enumerate()
-            .map(|(i, &id)| (id, i as u32))
+            .map(|(i, id)| (id.index(), i as u32))
             .collect();
         let mut nodes = Vec::with_capacity(ids.len());
         for &id in &ids {
-            let n = tree.arena[id].get();
-            let parent = id.parent(&tree.arena).map_or(NONE, |p| id_to_pos[&p]);
+            let n = &tree.arena[id.index() as usize].node;
+            let parent = id.parent().map_or(NONE, |p| id_to_pos[&p.index()]);
             nodes.push(SnapshotNode {
                 kind: n.kind,
                 field: n.field,
@@ -227,33 +229,15 @@ impl From<&Tree> for TreeSnapshot {
     }
 }
 
-impl From<TreeSnapshot> for Tree {
+impl From<TreeSnapshot> for Tree<Compact> {
     fn from(snap: TreeSnapshot) -> Self {
         if snap.nodes.is_empty() {
-            return Tree::new(Node::default());
+            return Tree::new(Node::default()).into();
         }
-        let first = &snap.nodes[0];
-        let mut tree = Tree::with_capacity(
-            snap.nodes.len(),
-            Node {
-                kind: first.kind,
-                field: first.field,
-                sym: first.sym,
-                start: first.start,
-                end: first.end,
-                start_row: first.start_row,
-                start_col: first.start_col,
-                end_row: first.end_row,
-                end_col: first.end_col,
-                synth: first.synth,
-                named: first.named,
-            },
-        );
-        let mut id_map = vec![tree.root];
-        for sn in &snap.nodes[1..] {
-            let parent = id_map[sn.parent as usize];
-            let id = tree.append(
-                parent,
+        let mut arena = Vec::with_capacity(snap.nodes.len());
+        for sn in snap.nodes {
+            let id = arena.len() as u32;
+            arena.push(CompactNode::new(
                 Node {
                     kind: sn.kind,
                     field: sn.field,
@@ -267,14 +251,23 @@ impl From<TreeSnapshot> for Tree {
                     synth: sn.synth,
                     named: sn.named,
                 },
-            );
-            id_map.push(id);
+                sn.parent,
+            ));
+            if sn.parent != NONE {
+                CompactNode::link(&mut arena, sn.parent, id);
+            }
         }
-        tree.label = snap.label;
-        for (node, tags) in snap.tags {
-            tree.tags.insert(node, SmallVec::from_vec(tags));
+        Self {
+            arena,
+            root: 0,
+            label: snap.label,
+            tags: snap
+                .tags
+                .into_iter()
+                .map(|(node, tags)| (node, SmallVec::from_vec(tags)))
+                .collect(),
+            source: std::sync::Arc::from(""),
         }
-        tree
     }
 }
 

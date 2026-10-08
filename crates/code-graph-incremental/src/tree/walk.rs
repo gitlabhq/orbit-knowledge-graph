@@ -4,6 +4,7 @@ use crate::canonical::Canonical as C;
 use crate::resolver::CLASS_LIKE;
 
 use super::types::{Edge, EdgeKind, Tree};
+use super::{Mutable, Node, Storage};
 
 pub enum Step<R> {
     Into,
@@ -11,34 +12,36 @@ pub enum Step<R> {
     Out(R),
 }
 
-pub struct Walk<'a> {
-    cur: Cursor<'a>,
-    next: Option<indextree::NodeEdge>,
-    last: Option<indextree::NodeId>,
+pub struct Walk<'a, S: Storage<Node> = Mutable> {
+    cur: Cursor<'a, S>,
+    next: Option<Cursor<'a, S>>,
+    last: Option<Cursor<'a, S>>,
 }
 
-impl<'a> Iterator for Walk<'a> {
-    type Item = Cursor<'a>;
-    fn next(&mut self) -> Option<Cursor<'a>> {
-        loop {
-            let edge = self.next?;
-            if edge == indextree::NodeEdge::End(self.cur.nid()) {
-                self.next = None;
-                return None;
-            }
-            self.next = edge.next_traverse(&self.cur.tree().arena);
-            if let indextree::NodeEdge::Start(id) = edge {
-                self.last = Some(id);
-                return Some(self.cur.at(id));
-            }
-        }
+impl<'a, S: Storage<Node>> Iterator for Walk<'a, S> {
+    type Item = Cursor<'a, S>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.next?;
+        self.next = node.children().next().or_else(|| self.after(node));
+        self.last = Some(node);
+        Some(node)
     }
 }
 
-impl<'a> Walk<'a> {
+impl<'a, S: Storage<Node>> Walk<'a, S> {
+    fn after(&self, mut node: Cursor<'a, S>) -> Option<Cursor<'a, S>> {
+        while node.id != self.cur.id {
+            if let Some(id) = S::next_sibling(&node.tree().arena, node.id) {
+                return Some(node.at(id));
+            }
+            node = node.parent()?;
+        }
+        None
+    }
+
     pub fn skip_subtree(&mut self) {
-        if let Some(id) = self.last.take() {
-            self.next = indextree::NodeEdge::End(id).next_traverse(&self.cur.tree().arena);
+        if let Some(node) = self.last.take() {
+            self.next = self.after(node);
         }
     }
 
@@ -46,7 +49,7 @@ impl<'a> Walk<'a> {
     /// Return `Break(v)` to halt early, `Continue(())` to keep going.
     pub fn run<B>(
         mut self,
-        mut f: impl FnMut(Cursor<'a>, &mut Self) -> ControlFlow<B>,
+        mut f: impl FnMut(Cursor<'a, S>, &mut Self) -> ControlFlow<B>,
     ) -> Option<B> {
         while let Some(n) = self.next() {
             if let ControlFlow::Break(v) = f(n, &mut self) {
@@ -109,32 +112,35 @@ where
     })
 }
 
-#[derive(Clone, Copy)]
-pub struct Cursor<'a> {
-    trees: &'a [Tree],
+pub struct Cursor<'a, S: Storage<N> = Mutable, N: Clone = Node> {
+    trees: &'a [Tree<S, N>],
     fi: u32,
     id: u32,
 }
 
-impl<'a> Cursor<'a> {
-    pub fn new(trees: &'a [Tree], fi: u32, id: u32) -> Self {
+impl<S: Storage<N>, N: Clone> Copy for Cursor<'_, S, N> {}
+impl<S: Storage<N>, N: Clone> Clone for Cursor<'_, S, N> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, S: Storage<Node>> Cursor<'a, S> {
+    pub fn new(trees: &'a [Tree<S>], fi: u32, id: u32) -> Self {
         Self { trees, fi, id }
     }
 
     #[inline]
-    fn tree(self) -> &'a Tree {
+    fn tree(self) -> &'a Tree<S> {
         &self.trees[self.fi as usize]
     }
 
-    fn nid(self) -> indextree::NodeId {
-        self.tree().to_id(self.id)
+    fn node(self) -> &'a Node {
+        S::node(&self.tree().arena, self.id)
     }
 
-    fn at(self, nid: indextree::NodeId) -> Self {
-        Self {
-            id: Tree::to_raw(nid),
-            ..self
-        }
+    fn at(self, id: u32) -> Self {
+        Self { id, ..self }
     }
 
     #[inline]
@@ -159,12 +165,12 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     pub fn kind(self) -> u16 {
-        self.tree().node(self.nid()).kind
+        self.node().kind
     }
 
     #[inline]
     pub fn sym(self) -> u32 {
-        self.tree().node(self.nid()).sym
+        self.node().sym
     }
 
     #[inline]
@@ -185,61 +191,64 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     pub fn named(self) -> bool {
-        self.tree().node(self.nid()).named
+        self.node().named
     }
 
     #[inline]
     pub fn field(self) -> u16 {
-        self.tree().node(self.nid()).field
+        self.node().field
     }
 
     #[inline]
     pub fn start(self) -> u32 {
-        self.tree().node(self.nid()).start
+        self.node().start
     }
 
     #[inline]
     pub fn end(self) -> u32 {
-        self.tree().node(self.nid()).end
+        self.node().end
     }
 
     #[inline]
     pub fn start_row(self) -> u32 {
-        self.tree().node(self.nid()).start_row
+        self.node().start_row
     }
 
     #[inline]
     pub fn start_col(self) -> u32 {
-        self.tree().node(self.nid()).start_col
+        self.node().start_col
     }
 
     #[inline]
     pub fn end_row(self) -> u32 {
-        self.tree().node(self.nid()).end_row
+        self.node().end_row
     }
 
     #[inline]
     pub fn end_col(self) -> u32 {
-        self.tree().node(self.nid()).end_col
+        self.node().end_col
     }
 
     pub fn size(self) -> u32 {
-        self.nid().descendants(&self.tree().arena).count() as u32
+        self.descendants().count() as u32 + 1
     }
 
     pub fn parent(self) -> Option<Self> {
-        self.nid().parent(&self.tree().arena).map(|p| self.at(p))
+        S::parent(&self.tree().arena, self.id).map(|id| self.at(id))
     }
 
     pub fn children(self) -> impl Iterator<Item = Self> + 'a {
-        self.nid()
-            .children(&self.tree().arena)
-            .map(move |id| self.at(id))
+        std::iter::successors(S::first_child(&self.tree().arena, self.id), move |&id| {
+            S::next_sibling(&self.tree().arena, id)
+        })
+        .map(move |id| self.at(id))
     }
 
     pub fn children_rev(self) -> impl Iterator<Item = Self> + 'a {
-        let ids: Vec<_> = self.nid().children(&self.tree().arena).collect();
-        ids.into_iter().rev().map(move |id| self.at(id))
+        std::iter::successors(S::last_child(&self.tree().arena, self.id), move |&id| {
+            S::previous_sibling(&self.tree().arena, id)
+        })
+        .map(move |id| self.at(id))
     }
 
     pub fn children_of(self, ck: C) -> impl Iterator<Item = Self> + 'a {
@@ -252,23 +261,17 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn descendants(self) -> impl Iterator<Item = Self> + 'a {
-        self.nid()
-            .descendants(&self.tree().arena)
-            .skip(1)
-            .map(move |id| self.at(id))
+        self.walk()
     }
 
     pub fn ancestors(self) -> impl Iterator<Item = Self> + 'a {
-        self.nid()
-            .ancestors(&self.tree().arena)
-            .skip(1)
-            .map(move |id| self.at(id))
+        std::iter::successors(self.parent(), |node| node.parent())
     }
 
-    pub fn walk(self) -> Walk<'a> {
+    pub fn walk(self) -> Walk<'a, S> {
         Walk {
             cur: self,
-            next: indextree::NodeEdge::Start(self.nid()).next_traverse(&self.tree().arena),
+            next: self.children().next(),
             last: None,
         }
     }
@@ -370,14 +373,14 @@ impl<'a> Cursor<'a> {
         })
     }
 
-    pub fn for_each(self, mut f: impl FnMut(Self, &mut Walk<'a>)) {
+    pub fn for_each(self, mut f: impl FnMut(Self, &mut Walk<'a, S>)) {
         self.walk().run(|n, w| {
             f(n, w);
             ControlFlow::<()>::Continue(())
         });
     }
 
-    pub fn fold_tree<A>(self, mut init: A, mut f: impl FnMut(&mut A, Self, &mut Walk<'a>)) -> A {
+    pub fn fold_tree<A>(self, mut init: A, mut f: impl FnMut(&mut A, Self, &mut Walk<'a, S>)) -> A {
         self.walk().run(|n, w| {
             f(&mut init, n, w);
             ControlFlow::<()>::Continue(())
@@ -434,7 +437,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
-pub fn infer_return_type(def: Cursor) -> Option<u32> {
+pub fn infer_return_type<S: Storage<Node>>(def: Cursor<'_, S>) -> Option<u32> {
     if let Some(s) = def.child_sym(C::SsaReturnType) {
         return Some(s);
     }
@@ -462,7 +465,10 @@ pub fn infer_return_type(def: Cursor) -> Option<u32> {
     })
 }
 
-fn return_sym(ret: Cursor, binds: &rustc_hash::FxHashMap<u32, u32>) -> Option<u32> {
+fn return_sym<S: Storage<Node>>(
+    ret: Cursor<'_, S>,
+    binds: &rustc_hash::FxHashMap<u32, u32>,
+) -> Option<u32> {
     let ch = ret
         .children()
         .find(|c| c.is(C::Call) || c.sym_opt().is_some())?;
@@ -473,7 +479,10 @@ fn return_sym(ret: Cursor, binds: &rustc_hash::FxHashMap<u32, u32>) -> Option<u3
     }
 }
 
-pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
+pub fn find_method_in<'a, S: Storage<Node>>(
+    class: Cursor<'a, S>,
+    name: u32,
+) -> Option<Cursor<'a, S>> {
     class.descend(|n| {
         if n.is(C::Def) && n.index() != class.index() && n.child_sym(C::DefName) == Some(name) {
             return Step::Out(n);
@@ -485,14 +494,21 @@ pub fn find_method_in<'a>(class: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
     })
 }
 
-impl Tree {
+impl<S: Storage<Node>> Tree<S> {
     #[inline]
-    pub fn cursor(&self, id: u32) -> Cursor<'_> {
+    pub fn cursor(&self, id: u32) -> Cursor<'_, S> {
         Cursor::new(std::slice::from_ref(self), 0, id)
     }
 
     #[inline]
-    pub fn root(&self) -> Cursor<'_> {
-        self.cursor(Tree::to_raw(self.root))
+    pub fn root(&self) -> Cursor<'_, S> {
+        self.cursor(S::index(self.root))
+    }
+
+    pub fn len(&self) -> u32 {
+        self.root().size()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
