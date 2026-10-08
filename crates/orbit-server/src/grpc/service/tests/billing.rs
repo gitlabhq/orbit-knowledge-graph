@@ -81,6 +81,7 @@ fn billable_project_query() -> Request<impl tokio_stream::Stream<Item = ExecuteQ
     };
     let claims = Claims {
         realm: Some("SaaS".into()),
+        root_namespace_id: Some(9970),
         group_traversal_ids: vec![TraversalPathClaim {
             path: TraversalPath::new_unchecked("1/"),
             access_levels: vec![20],
