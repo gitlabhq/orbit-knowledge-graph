@@ -279,19 +279,8 @@ impl Tf {
             Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
                 let raw = Tree::to_raw(id);
-                let found = edge_ctx.is_some_and(|ctx| {
-                    ctx.edges.iter().any(|e| {
-                        e.kind == *kind
-                            && match dir {
-                                EdgeDir::Incoming => {
-                                    e.to_tree == ctx.tree_index && e.to_node == raw
-                                }
-                                EdgeDir::Outgoing => {
-                                    e.from_tree == ctx.tree_index && e.from_node == raw
-                                }
-                            }
-                    })
-                });
+                let found =
+                    edge_ctx.is_some_and(|ctx| ctx.edges.has(*kind, *dir, ctx.tree_index, raw));
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
