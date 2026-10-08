@@ -483,7 +483,17 @@ impl<'t> Fold<'t> {
             self.handle_branch(branch, Some(lhs));
         } else {
             if let Some(rhs) = rhs {
+                let first = self.edges.len();
                 self.walk_children(rhs);
+                for edge in &mut self.edges[first..] {
+                    if rhs.child(C::Member).is_some()
+                        && edge.kind == EdgeKind::Imports
+                        && edge.site.is_none()
+                        && edge.call_resolution == crate::tree::CallResolution::Reference
+                    {
+                        edge.site = Some(c.index());
+                    }
+                }
             }
             let tail = rhs.map(Cursor::tail_expr);
             let mut val = if c.has(C::SsaTyped)

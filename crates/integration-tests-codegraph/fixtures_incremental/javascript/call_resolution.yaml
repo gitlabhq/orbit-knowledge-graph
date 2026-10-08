@@ -8,10 +8,11 @@ fixtures:
     content: |
       const { value, helper } = require('./util');
       const external = require('external-sdk');
+      const saved = external.emit;
       function run() {
         helper();
         value();
-        external();
+        saved();
       }
 tests:
   - name: "a resolved call does not hide an unrelated external call"
