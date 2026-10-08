@@ -194,7 +194,6 @@ impl QuotaService {
     }
 }
 
-// Workhorse only maps GITLAB_CREDITS_EXHAUSTED to a 402, so failed checks reuse it.
 fn credits_exhausted_status(message: &str) -> Status {
     let details = ErrorDetails::with_error_info(
         REASON_GITLAB_CREDITS_EXHAUSTED,
