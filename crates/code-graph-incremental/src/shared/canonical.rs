@@ -211,8 +211,6 @@ pub enum Canonical {
     Declaration,
     #[strum(serialize = "__dispatch")]
     Dispatch,
-    #[strum(serialize = "__receiver")]
-    Receiver,
 }
 
 impl From<Canonical> for u16 {

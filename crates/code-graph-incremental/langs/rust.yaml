@@ -109,7 +109,7 @@ stages:
         replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
-        replace: '(__call (__callee (__member @$N (__object @$P) (__receiver @$R))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
@@ -327,9 +327,9 @@ stages:
       - match: '(enum_item name: $N body: $B)'
         replace: '(__def (__defname @$N) (__enum) $B)'
       - match: '(trait_item name: $N bounds: (trait_bounds $$$SUPERS:type_identifier|scoped_type_identifier) body: $B)'
-        replace: '(__def (__defname @$N) (__trait) (__dispatch) $$$SUPERS=>__supertype $B)'
+        replace: '(__def (__defname @$N) (__trait) $$$SUPERS=>__supertype $B)'
       - match: '(trait_item name: $N body: $B)'
-        replace: '(__def (__defname @$N) (__trait) (__dispatch) $B)'
+        replace: '(__def (__defname @$N) (__trait) $B)'
       # Blanket impl: impl<T> Trait for T — type matches type param, skip defname
       - match: '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B)'
         where: '$TY == $TP'
@@ -341,9 +341,9 @@ stages:
         replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
       # Generic impl: impl<T> Trait for Wrapper<T>
       - match: '(impl_item trait: $T type: (generic_type type: $TY) body: $B)'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__dispatch @$T) $B)'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__dispatch @$T) $B)'
+        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
       - match: '(impl_item type: (generic_type type: $T) body: $B)'
         replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
       - match: '(impl_item type: $T body: $B)'

@@ -289,8 +289,7 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn is_dispatch_contract(self) -> bool {
-        self.child(C::Dispatch)
-            .is_some_and(|dispatch| dispatch.sym_opt().is_none())
+        self.has(C::Trait) || self.has(C::Interface)
     }
 
     pub fn reference(self) -> Self {

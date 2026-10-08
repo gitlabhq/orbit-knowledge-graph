@@ -396,10 +396,13 @@ impl<'t> Fold<'t> {
         let from = self.enclosing();
         let first = self.edges.len();
         if let Some(member) = callee.child(C::Member) {
-            if member.has(C::Dispatch) {
+            if member.child_sym(C::Dispatch).is_some() {
                 return;
             }
-            if let Some(receiver) = member.child(C::Receiver) {
+            if let Some(receiver) = member
+                .child(C::Dispatch)
+                .and_then(|dispatch| dispatch.child(C::Object))
+            {
                 for value in self.lookup(receiver.sym()) {
                     if let Value::Call(node) = value {
                         self.edges.push(Edge {

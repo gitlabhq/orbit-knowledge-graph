@@ -883,8 +883,8 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
                     .jump(intra.from_tree, site)
                     .member()
                     .is_some_and(|member| {
-                        member.has(C::Dispatch)
-                            || member.has(C::Receiver)
+                        member.child_sym(C::Dispatch).is_some()
+                            || member.has(C::Dispatch)
                                 && target.enclosing(Cursor::is_dispatch_contract).is_some()
                     })
             }) {
@@ -1049,13 +1049,17 @@ fn dispatch(
                 Some(name) => {
                     let constraint = call
                         .member()
-                        .filter(|member| member.has(C::Receiver))
+                        .filter(|member| {
+                            member
+                                .child(C::Dispatch)
+                                .is_some_and(|dispatch| dispatch.has(C::Object))
+                        })
                         .and_then(|member| member.child(C::Object))
                         .and_then(|owner| resolve_chain(ctx, owner))
                         .filter(|owner| owner.is_dispatch_contract());
                     match constraint {
                         Some(contract) => constrained_members(ctx, class, contract, name),
-                        None if call.member().is_some_and(|member| member.has(C::Receiver)) => {
+                        None if call.member().is_some_and(|member| member.has(C::Dispatch)) => {
                             return None;
                         }
                         None => method_up(ctx, class, name, usage.from_fi()),
@@ -1172,7 +1176,10 @@ fn chain<'a>(
         return value_type(ctx, root(c)?);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
-    let targets = match m.child(C::Dispatch) {
+    let targets = match m
+        .child(C::Dispatch)
+        .filter(|dispatch| dispatch.sym_opt().is_some())
+    {
         Some(constraint) => {
             constrained_members(ctx, receiver, resolve_chain(ctx, constraint)?, m.sym())
         }
@@ -1346,11 +1353,9 @@ fn constrained_members<'a>(
         .chain(impl_blocks_of(ctx, receiver))
         .filter(|owner| {
             owner
-                .child(C::Dispatch)
-                .and_then(|constraint| resolve_chain(ctx, constraint))
-                .is_some_and(|target| {
-                    (target.fi(), target.index()) == (contract.fi(), contract.index())
-                })
+                .children_of(C::SuperType)
+                .filter_map(|constraint| resolve_chain(ctx, constraint))
+                .any(|target| (target.fi(), target.index()) == (contract.fi(), contract.index()))
         });
     let Some(implementation) = implementations.next() else {
         return Vec::new();
@@ -1475,7 +1480,7 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 continue;
             };
             match resolve_chain(ctx, object) {
-                Some(target) if m.has(C::Dispatch) => {
+                Some(target) if m.child_sym(C::Dispatch).is_some() => {
                     if let Some(contract) = m
                         .child(C::Dispatch)
                         .and_then(|constraint| resolve_chain(ctx, constraint))
@@ -1487,7 +1492,7 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                         ));
                     }
                 }
-                Some(target) if m.has(C::Receiver) && target.is_dispatch_contract() => {}
+                Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
                     let members = method_up(ctx, target, m.sym(), fi);
                     out.extend(call_edges(from, members, Some(node.index())));
