@@ -100,8 +100,8 @@ stages:
 
 # Cargo downloads (crates.io index, crate archives, git dependencies) cached by
 # Cargo.lock. Most jobs only restore it; unit-test uploads it so that dozens of
-# jobs don't each push ~550 MB. A miss falls back to the newest default-branch
-# cache, then to a cold fetch, which is today's behavior.
+# jobs don't each push ~550 MB. A miss means a cold fetch, which is today's
+# behavior.
 .cargo-home-cache:
   paths: &cargo-home-paths
     - .cargo-cache/git
@@ -112,24 +112,12 @@ stages:
       prefix: cargo-home
       files:
         - Cargo.lock
-    fallback_keys:
-      - cargo-home-default-branch
     paths: *cargo-home-paths
     policy: pull
   push:
     key: *cargo-home-key
-    fallback_keys:
-      - cargo-home-default-branch
     paths: *cargo-home-paths
     policy: pull-push
-  # Fallback target for MRs that change Cargo.lock; only default-branch
-  # pipelines write it.
-  push-default-branch:
-    key: cargo-home-default-branch
-    paths: *cargo-home-paths
-    policy: push
-    rules:
-      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 .job-template:
   tags:
@@ -751,7 +739,6 @@ unit-test:
     - .mr-and-main-rules
   cache:
     - !reference [.cargo-home-cache, push]
-    - !reference [.cargo-home-cache, push-default-branch]
   tags:
     - ${RUNNER_LARGE}
   needs: []
