@@ -417,7 +417,7 @@ tests:
       RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
 

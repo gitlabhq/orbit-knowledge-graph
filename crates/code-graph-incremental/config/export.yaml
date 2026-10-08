@@ -80,7 +80,7 @@ entities:
     source: __import|__import_type
     exclude_parent: __module_export
     expand: __name
-    id: { seed: import, columns: [file_path, import_path, identifier_name, span] }
+    id: { seed: import, columns: [file_path, import_path, identifier_name, identifier_alias, span] }
     columns:
       - { name: file_path, type: Utf8, from: ancestor_tag("file_path") }
       - name: import_type
