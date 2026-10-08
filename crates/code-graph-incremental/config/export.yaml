@@ -119,6 +119,4 @@ edges:
     - { edge: Defines, from: Definition, to: Definition, kind: DEFINES }
     - { edge: Extends, from: Definition, to: Definition, kind: EXTENDS }
     - { edge: Imports, from: ImportedSymbol, to: Definition, kind: IMPORTS }
-    # An unresolved call to an import counts as a call, unless the caller
-    # already resolved to a definition.
-    - { edge: Imports, from: Definition, to: ImportedSymbol, kind: CALLS, unless_source_has: Calls, unless_direct_target_resolves_to: non_callable }
+    - { edge: Imports, from: Definition, to: ImportedSymbol, kind: CALLS, fallback: true }

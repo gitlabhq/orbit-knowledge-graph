@@ -6,6 +6,7 @@ use crate::intern::Lang;
 #[derive(Clone, Copy)]
 pub struct ReservedTags {
     pub callable: u32,
+    pub non_callable: u32,
     pub scoped: u32,
     pub hoisted: u32,
     pub exports: u32,
@@ -19,6 +20,7 @@ impl ReservedTags {
         let k = |s| lang.syms.intern(s);
         Self {
             callable: k("callable"),
+            non_callable: k("non_callable"),
             scoped: k("scoped"),
             hoisted: k("hoisted"),
             exports: k("exports"),

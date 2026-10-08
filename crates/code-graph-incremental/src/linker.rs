@@ -444,7 +444,11 @@ impl<'t> Fold<'t> {
             return;
         }
         if let Some(obj) = c.child(C::Object) {
+            let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
+            for edge in &mut self.edges[first..] {
+                edge.call_resolution = crate::tree::CallResolution::Reference;
+            }
         }
     }
 

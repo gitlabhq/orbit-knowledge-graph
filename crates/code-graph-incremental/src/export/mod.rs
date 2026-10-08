@@ -11,13 +11,12 @@ use ontology::Ontology;
 use orbit_utils::arrow::BatchBuilder;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
-use crate::canonical::Canonical as C;
 use crate::dsl::types::Tf;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::pipeline::State;
-use crate::tree::{Cursor, EdgeKind, Tree};
+use crate::tree::{CallResolution, Cursor, Tree};
 
 mod parse;
 
@@ -371,42 +370,7 @@ fn write_edges(
         }
     }
 
-    let sources_with: FxHashMap<EdgeKind, FxHashSet<(u32, u32)>> = plan
-        .graph
-        .iter()
-        .filter_map(|g| g.unless_source_has)
-        .map(|kind| {
-            let set = state
-                .edges
-                .iter()
-                .filter(|e| e.kind == kind)
-                .map(|e| (e.from_tree, e.from_node))
-                .collect();
-            (kind, set)
-        })
-        .collect();
     let mut seen_cross_file = FxHashSet::default();
-    let mut resolved_tags = FxHashMap::<_, FxHashMap<_, bool>>::default();
-    for tag in plan
-        .graph
-        .iter()
-        .filter_map(|rule| rule.unless_direct_target_resolves_to)
-    {
-        let targets = resolved_tags.entry(tag).or_default();
-        for edge in state
-            .edges
-            .iter()
-            .filter(|edge| edge.kind == EdgeKind::Imports)
-        {
-            let target = forest.cursor(edge.to_tree, edge.to_node);
-            if target.is(C::Def) {
-                targets
-                    .entry(edge.from())
-                    .and_modify(|matches| *matches &= target.has_tag(tag))
-                    .or_insert_with(|| target.has_tag(tag));
-            }
-        }
-    }
 
     for e in &state.edges {
         let Some(&(from, from_entity)) = ids.get(&(e.from_tree, e.from_node)) else {
@@ -421,23 +385,7 @@ fn write_edges(
         let Some(rule) = rule else {
             continue;
         };
-        if rule
-            .unless_source_has
-            .is_some_and(|k| sources_with[&k].contains(&(e.from_tree, e.from_node)))
-            || rule.unless_direct_target_resolves_to.is_some_and(|tag| {
-                resolved_tags[&tag].get(&e.to()) == Some(&true)
-                    && e.site.is_some_and(|site| {
-                        forest
-                            .cursor(e.from_tree, site)
-                            .child(C::Callee)
-                            .is_some_and(|callee| {
-                                callee.sym_opt().is_some()
-                                    && !callee.has(C::Member)
-                                    && !callee.has(C::Ivar)
-                            })
-                    })
-            })
-        {
+        if rule.fallback && e.call_resolution != CallResolution::Unknown {
             continue;
         }
         let kind = rule.kind.as_str();

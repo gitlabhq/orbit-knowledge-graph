@@ -13,7 +13,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
+    CallResolution, Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type,
+    members_by_level, reachable,
 };
 use crate::treesitter::SupportLang;
 
@@ -215,7 +216,7 @@ impl Resolver {
     pub fn resolve(
         &mut self,
         trees: &[Tree],
-        edges: &[Edge],
+        edges: &mut [Edge],
         lang: &Lang,
         dirty_fis: &FxHashSet<u32>,
         support_lang: SupportLang,
@@ -285,7 +286,7 @@ impl Resolver {
         let mut extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
         let mut imports_to: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut call_at_site: FxHashMap<(u32, u32), &Edge> = FxHashMap::default();
-        for e in edges {
+        for e in edges.iter() {
             match e.kind {
                 EdgeKind::Extends => extends_of.entry(e.from()).or_default().push(e.to()),
                 EdgeKind::Imports => imports_to.entry(e.to()).or_default().push(e),
@@ -471,6 +472,50 @@ impl Resolver {
             type_edges.extend(&wave);
         }
         cross_edges.extend(type_edges);
+
+        let mut non_callable = FxHashMap::default();
+        for edge in edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+        {
+            let target = ctx.corpus.follow(edge);
+            if target.is(C::Def) {
+                non_callable
+                    .entry(edge.from())
+                    .and_modify(|known| *known &= target.has_tag(ctx.tags.non_callable))
+                    .or_insert_with(|| target.has_tag(ctx.tags.non_callable));
+            }
+        }
+        let callable_sites: FxHashSet<_> = edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Calls)
+            .filter_map(|edge| edge.site.map(|site| (edge.from_tree, site)))
+            .collect();
+        drop(ctx);
+        for edge in edges
+            .iter_mut()
+            .chain(&mut cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+        {
+            let Some(site) = edge.site else {
+                continue;
+            };
+            edge.call_resolution = CallResolution::Unknown;
+            if callable_sites.contains(&(edge.from_tree, site)) {
+                edge.call_resolution = CallResolution::Callable;
+            } else if non_callable.get(&edge.to()) == Some(&true)
+                && trees[edge.from_tree as usize]
+                    .cursor(site)
+                    .child(C::Callee)
+                    .is_some_and(|callee| {
+                        callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar)
+                    })
+            {
+                edge.call_resolution = CallResolution::NonCallable;
+            }
+        }
 
         Ok(ResolveResult {
             cross_edges,

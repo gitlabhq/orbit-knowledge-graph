@@ -483,7 +483,7 @@ impl Phase<DirtyGraph> for Resolve {
         }
         let result = state.resolver.resolve(
             &state.trees,
-            &state.edges,
+            &mut state.edges,
             &env.lang,
             &dirty,
             env.lang_id,
