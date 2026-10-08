@@ -16,7 +16,7 @@ use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::pipeline::State;
-use crate::tree::{Cursor, EdgeKind, Tree};
+use crate::tree::{CallResolution, Cursor, Tree};
 
 mod parse;
 
@@ -370,20 +370,6 @@ fn write_edges(
         }
     }
 
-    let sources_with: FxHashMap<EdgeKind, FxHashSet<(u32, u32)>> = plan
-        .graph
-        .iter()
-        .filter_map(|g| g.unless_source_has)
-        .map(|kind| {
-            let set = state
-                .edges
-                .iter()
-                .filter(|e| e.kind == kind)
-                .map(|e| (e.from_tree, e.from_node))
-                .collect();
-            (kind, set)
-        })
-        .collect();
     let mut seen_cross_file = FxHashSet::default();
 
     for e in &state.edges {
@@ -399,10 +385,7 @@ fn write_edges(
         let Some(rule) = rule else {
             continue;
         };
-        if rule
-            .unless_source_has
-            .is_some_and(|k| sources_with[&k].contains(&(e.from_tree, e.from_node)))
-        {
+        if rule.fallback && e.call_resolution != CallResolution::Unknown {
             continue;
         }
         let kind = rule.kind.as_str();
