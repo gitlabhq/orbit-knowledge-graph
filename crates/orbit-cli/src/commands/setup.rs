@@ -114,10 +114,16 @@ pub(crate) fn install(options: Options, target: Target, machine: &Machine) -> Re
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
 
-    let index_outcome = match index_repo::current_repository_root() {
+    let index_outcome = match index_repo::repository_root(&target) {
         None => IndexOutcome::OutsideRepository,
-        Some(_) if !options.index => IndexOutcome::NotIndexed,
-        Some(repo_root) => index_repo::index_repository(repo_root)?,
+        Some(repo_root) => {
+            let index_path = index_repo::index_path_for(&target, &repo_root);
+            if options.index {
+                index_repo::index_repository(repo_root, index_path)?
+            } else {
+                IndexOutcome::NotIndexed { index_path }
+            }
+        }
     };
     if let Some(command) = summary::format_try_it_command(&index_outcome) {
         tui::card("Try it", command)?;
