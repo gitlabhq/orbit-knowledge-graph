@@ -131,6 +131,12 @@ stages:
         tag_on: __name
 
       # exports.f = function f() {} / module.exports.f = ... → an exported function def
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))'
+        replace: '(__def (__defname @$N) (__function) $B)'
+        tag: { exports: '@$P' }
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression name: $N body: $B)))'
+        replace: '(__def (__defname @$N) (__function) $B)'
+        tag: { exports: '@$P' }
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))'
         replace: '(__def (__defname @$P) (__function) $B)'
         tag: { exports: '@$P' }

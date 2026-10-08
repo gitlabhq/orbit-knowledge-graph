@@ -124,6 +124,22 @@ fixtures:
         return util.default(value);
       }
 
+  - path: export_names/util.js
+    content: |
+      exports.publicName = function implementation() {};
+      module.exports.otherName = function otherImplementation() {};
+      exports.anonymous = function() {};
+      module.exports.otherAnonymous = function() {};
+  - path: export_names/main.js
+    content: |
+      const util = require('./util');
+      function run() {
+        util.publicName();
+        util.otherName();
+        util.anonymous();
+        util.otherAnonymous();
+      }
+
   - path: external/namespace.js
     content: |
       const tracker = require('external-tracker');
@@ -346,10 +362,6 @@ tests:
       - { row: { caller: "run", callee: "trimValue" } }
 
   - name: Transpiled CJS default interop resolves namespace default member calls
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'interop/main.js'
@@ -358,6 +370,19 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "defaultHelper" } }
+
+  - name: CommonJS export properties preserve named and anonymous function identities
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'export_names/main.js'
+        AND callee.file_path = 'export_names/util.js'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 4 }
+      - { row: { callee: "implementation" } }
+      - { row: { callee: "otherImplementation" } }
+      - { row: { callee: "anonymous" } }
+      - { row: { callee: "otherAnonymous" } }
 
   - name: External CommonJS calls target imported symbols
     query: |
