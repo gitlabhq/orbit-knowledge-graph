@@ -24,6 +24,8 @@ use tracing::{Level, debug};
 /// Only bounds commands too fast to hide a round trip behind their own work.
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.
 const TELEMETRY_FLUSH_TIMEOUT: Duration = Duration::from_millis(500);
+/// A detached `send-event` child has no caller waiting, so it can give the collector longer.
+const DETACHED_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
 #[command(name = "orbit", version = env!("ORBIT_VERSION"))]
@@ -605,6 +607,15 @@ enum Commands {
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
     },
+    /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
+    #[command(hide = true)]
+    SendEvent {
+        #[arg(value_name = "COMMAND")]
+        command: String,
+
+        #[arg(long, value_name = "MS")]
+        duration_ms: u64,
+    },
     /// POST a query to the remote Orbit API and stream the response.
     #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
     Query {
@@ -705,9 +716,21 @@ async fn main() -> Result<()> {
         Err(error) => error.exit(),
     };
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
-    if let Commands::HookGuard { kind, .. } = &cli.command {
-        commands::hook_guard::run(*kind);
-        return Ok(());
+    match &cli.command {
+        Commands::HookGuard { kind, .. } => {
+            let started = Instant::now();
+            commands::hook_guard::run(*kind);
+            telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+            return Ok(());
+        }
+        Commands::SendEvent {
+            command,
+            duration_ms,
+        } => {
+            send_event(command, Duration::from_millis(*duration_ms)).await;
+            return Ok(());
+        }
+        _ => {}
     }
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
@@ -773,6 +796,16 @@ fn subcommand_path(matches: &clap::ArgMatches) -> String {
         .subcommand_name()
         .map(|top| top.replace('-', "_"))
         .unwrap_or_default()
+}
+
+async fn send_event(command: &str, duration: Duration) {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let Some(tracker) = telemetry::resolve_from_env().build_tracker() else {
+        return;
+    };
+    let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
+    telemetry::emit_command_event(&tracker, command, 0, duration, coding_agent.as_deref());
+    let _ = tokio::time::timeout(DETACHED_FLUSH_TIMEOUT, tracker.shutdown()).await;
 }
 
 async fn flush_telemetry(tracker: Option<&orbit_analytics::SnowplowAnalyticsTracker>) {
@@ -897,6 +930,7 @@ async fn dispatch(
             commands::hook_guard::run(kind);
             Ok(())
         }
+        Commands::SendEvent { .. } => Ok(()),
         Commands::Query {
             query,
             file,
@@ -1302,5 +1336,9 @@ mod tests {
                 "{argv:?}"
             );
         }
+        assert!(matches!(
+            Cli::parse_from(["orbit", "send-event", "hook_guard", "--duration-ms", "3"]).command,
+            Commands::SendEvent { duration_ms: 3, .. }
+        ));
     }
 }

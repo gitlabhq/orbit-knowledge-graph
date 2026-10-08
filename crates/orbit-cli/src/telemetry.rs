@@ -51,6 +51,27 @@ impl TelemetryConfig {
     }
 }
 
+/// Hands one command event to a detached `orbit send-event` child, so a hook that runs on every
+/// tool call returns without waiting on the collector. Does nothing when telemetry is off.
+pub fn spawn_detached_event(command: &str, duration: Duration) {
+    if !resolve_from_env().enabled {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut child = std::process::Command::new(exe);
+    child
+        .args(["send-event", command, "--duration-ms"])
+        .arg(duration.as_millis().to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut child, 0);
+    let _ = child.spawn();
+}
+
 pub fn resolve_from_env() -> TelemetryConfig {
     resolve(
         |key| std::env::var(key).ok(),
