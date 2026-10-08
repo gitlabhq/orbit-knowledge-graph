@@ -437,6 +437,7 @@ Package:35674987 --> PackageFile:176991757
 ```
 
 - **Size unit**: `size` is in bytes. In the sample, the largest file is about 5 GB.
+- **Sort order**: The `llm` output lists nodes by ID, so the 5 GB file appears second. Use `"raw"` to get rows in `-f.size` order.
 
 ## Step 5: Count packages per project
 
