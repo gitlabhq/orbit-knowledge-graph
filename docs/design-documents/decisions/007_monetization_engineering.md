@@ -390,7 +390,7 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 | `instance_id` / `unique_instance_id` | JWT claims | attribution on self-managed and Dedicated |
 | `feature_qualified_name` | derived from `source_type` | `orbit_{source_type}`, for example `orbit_mcp` |
 | `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
-| `metadata` | pipeline context | `query_type` plus execution metrics (compile and execute ms, rows) |
+| `metadata` | pipeline context and server build | `query_type`, `orbit_version`, plus execution metrics (compile and execute ms, rows) |
 
 Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting. This runs concurrently with the analytics tracker's own drain, so a slow or dead collector on one side can't delay the other.
 
