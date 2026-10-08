@@ -89,7 +89,7 @@ struct GrepArgs {
     path: Vec<String>,
 
     /// More paths to search, as in `rg PATTERN [PATH...]`.
-    #[arg(value_name = "PATHS", trailing_var_arg = true)]
+    #[arg(value_name = "PATHS")]
     paths: Vec<String>,
 
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]

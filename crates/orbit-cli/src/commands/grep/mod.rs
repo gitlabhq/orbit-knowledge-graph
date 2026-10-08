@@ -55,6 +55,7 @@ pub(crate) fn run(
         .unwrap_or_default();
     let backend = LocalBackend::open(repo, db, &paths, &touched)?;
     let paths = backend.paths().to_vec();
+    check_kinds(&backend, &filter.kinds)?;
 
     let mut out = std::io::stdout().lock();
     let (Some(query), Some((mut hits, _))) = (query, scan) else {
@@ -118,5 +119,33 @@ fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
         "  {}  [{}]  {}:{}-{}",
         range.fqn, range.kind, range.file, range.start, range.end
     )?;
+    Ok(())
+}
+
+fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<()> {
+    if kinds.is_empty() {
+        return Ok(());
+    }
+    let git = backend.git();
+    let batches = backend.search().client().query_arrow_json(
+        "SELECT DISTINCT definition_type AS kind FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 ORDER BY 1",
+        &[git.project_id.into(), git.commit_sha.clone().into()],
+    )?;
+    let known = duckdb_client::string_column(&batches, "kind");
+    let unknown: Vec<&String> = kinds
+        .iter()
+        .filter(|kind| !known.iter().any(|k| k.eq_ignore_ascii_case(kind)))
+        .collect();
+    anyhow::ensure!(
+        unknown.is_empty(),
+        "unknown --kind {}; kinds in this repository: {}",
+        unknown
+            .iter()
+            .map(|k| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        known.join(", ")
+    );
     Ok(())
 }
