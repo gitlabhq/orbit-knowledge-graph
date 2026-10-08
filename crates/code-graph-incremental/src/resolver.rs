@@ -13,7 +13,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
+    CallResolution, Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type,
+    members_by_level, reachable,
 };
 use crate::treesitter::SupportLang;
 
@@ -215,7 +216,7 @@ impl Resolver {
     pub fn resolve(
         &mut self,
         trees: &[Tree],
-        edges: &[Edge],
+        edges: &mut [Edge],
         lang: &Lang,
         dirty_fis: &FxHashSet<u32>,
         support_lang: SupportLang,
@@ -285,7 +286,7 @@ impl Resolver {
         let mut extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
         let mut imports_to: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut call_at_site: FxHashMap<(u32, u32), &Edge> = FxHashMap::default();
-        for e in edges {
+        for e in edges.iter() {
             match e.kind {
                 EdgeKind::Extends => extends_of.entry(e.from()).or_default().push(e.to()),
                 EdgeKind::Imports => imports_to.entry(e.to()).or_default().push(e),
@@ -346,7 +347,24 @@ impl Resolver {
                     })
             })
             .collect();
+        let resolved_imports: FxHashSet<_> =
+            self.reqs.iter().map(|req| (req.fi, req.node)).collect();
+        let mut saved_imports: FxHashMap<_, Vec<u32>> = FxHashMap::default();
+        for edge in edges.iter().filter(|edge| {
+            edge.kind == EdgeKind::Imports && edge.call_resolution == CallResolution::Reference
+        }) {
+            if let Some(site) = edge.site
+                && let Some(import) = trees[edge.to_tree as usize].cursor(edge.to_node).parent()
+                && !resolved_imports.contains(&(edge.to_tree, import.index()))
+            {
+                saved_imports
+                    .entry((edge.from_tree, site))
+                    .or_default()
+                    .push(edge.to_node);
+            }
+        }
         let mut ctx = ResolveCtx {
+            saved_imports,
             trees,
             run,
             file_resolve_ms: env.limits.file_resolve_ms,
@@ -472,6 +490,59 @@ impl Resolver {
         }
         cross_edges.extend(type_edges);
 
+        let mut import_sites: FxHashSet<_> = edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+            .map(|edge| (edge.from(), edge.to(), edge.site))
+            .collect();
+        cross_edges.retain(|edge| {
+            edge.kind != EdgeKind::Imports
+                || edge.site.is_none()
+                || import_sites.insert((edge.from(), edge.to(), edge.site))
+        });
+
+        let mut non_callable = FxHashMap::default();
+        for edge in edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+        {
+            let target = ctx.corpus.follow(edge);
+            if target.is(C::Def) {
+                non_callable
+                    .entry(edge.from())
+                    .and_modify(|known| *known &= target.has_tag(ctx.tags.non_callable))
+                    .or_insert_with(|| target.has_tag(ctx.tags.non_callable));
+            }
+        }
+        let callable_sites: FxHashSet<_> = edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Calls)
+            .filter_map(|edge| edge.site.map(|site| (edge.from_tree, site)))
+            .collect();
+        drop(ctx);
+        for edge in edges.iter_mut().chain(&mut cross_edges).filter(|edge| {
+            edge.kind == EdgeKind::Imports && edge.call_resolution != CallResolution::Reference
+        }) {
+            let Some(site) = edge.site else {
+                continue;
+            };
+            edge.call_resolution = CallResolution::Unknown;
+            if callable_sites.contains(&(edge.from_tree, site)) {
+                edge.call_resolution = CallResolution::Callable;
+            } else if non_callable.get(&edge.to()) == Some(&true)
+                && trees[edge.from_tree as usize]
+                    .cursor(site)
+                    .child(C::Callee)
+                    .is_some_and(|callee| {
+                        callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar)
+                    })
+            {
+                edge.call_resolution = CallResolution::NonCallable;
+            }
+        }
+
         Ok(ResolveResult {
             cross_edges,
             killed,
@@ -482,6 +553,7 @@ impl Resolver {
 }
 
 struct ResolveCtx<'a> {
+    saved_imports: FxHashMap<(u32, u32), Vec<u32>>,
     trees: &'a [Tree],
     run: &'a Sentinel,
     file_resolve_ms: u64,
@@ -524,7 +596,7 @@ impl ResolveCtx<'_> {
 }
 
 fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
-    tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
+    let mut names = tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
         if !c.is(C::Def) || c.has(C::ImplBlock) {
             return;
         }
@@ -544,7 +616,22 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
                 names.insert(name, loc);
             }
         }
-    })
+    });
+    for export in tree
+        .root()
+        .children()
+        .filter(|node| node.is(C::ModuleExport))
+    {
+        if let Some(alias) = export.child_sym(C::DefaultExport)
+            && let Some(target) = tree
+                .root()
+                .children()
+                .find(|node| node.is(C::Def) && node.child_sym(C::DefName) == export.sym_opt())
+        {
+            names.insert(alias, Loc::new(fi, target.index()));
+        }
+    }
+    names
 }
 
 fn gather_imports_for(
@@ -791,6 +878,20 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         }
         for intra in ctx.imports_to(ie.from_fi(), ie.from_node) {
             let from = ctx.corpus.jump(ie.from_tree, intra.from_node);
+            if intra.site.is_some_and(|site| {
+                ctx.corpus
+                    .jump(intra.from_tree, site)
+                    .member()
+                    .is_some_and(|member| {
+                        member
+                            .child(C::Dispatch)
+                            .is_some_and(|dispatch| !dispatch.has(C::Object))
+                            || member.has(C::Dispatch)
+                                && target.enclosing(Cursor::is_dispatch_contract).is_some()
+                    })
+            }) {
+                continue;
+            }
             edges.push(call_edge(from, target, intra.site));
         }
     }
@@ -919,9 +1020,19 @@ fn dispatch(
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
             let Some(class) = class else {
+                if call
+                    .child(C::Callee)
+                    .is_some_and(|callee| callee.sym_opt().is_some())
+                    && let Some(imports) = ctx.saved_imports.get(&(producer.fi(), producer.index()))
+                {
+                    return Some(Either::Left(imports.iter().map(move |&node| Edge {
+                        site: usage.site,
+                        ..from.edge_to(from.jump(producer.fi(), node), EdgeKind::Imports)
+                    })));
+                }
                 let owner = Owner::External(external_of(ctx, producer)?);
                 let targets = extension_members(ctx, owner, call.member()?.sym(), usage.from_fi());
-                return Some(call_edges(from, targets, usage.site));
+                return Some(Either::Right(call_edges(from, targets, usage.site)));
             };
             let class = match call.member().and_then(|m| m.child(C::Object)) {
                 Some(object) if object.child(C::Member).is_some() => {
@@ -932,15 +1043,14 @@ fn dispatch(
             if call.is(C::Binding) && class.initializer().and_then(Cursor::rhs_callee).is_none() {
                 return None;
             }
-            let name = call
-                .member()
-                .map(|m| m.sym())
-                .or_else(|| class.child_sym(C::Callable));
-            let targets = match name {
-                Some(name) => method_up(ctx, class, name, usage.from_fi()),
-                None => vec![class],
+            let targets = match call.member() {
+                Some(member) => member_targets(ctx, member, class),
+                None => class.child_sym(C::Callable).map_or_else(
+                    || vec![class],
+                    |name| method_up(ctx, class, name, usage.from_fi()),
+                ),
             };
-            Some(call_edges(from, targets, usage.site))
+            Some(Either::Right(call_edges(from, targets, usage.site)))
         })
         .flatten()
         .collect()
@@ -1049,10 +1159,8 @@ fn chain<'a>(
         return value_type(ctx, root(c)?);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
-    let member = method_up(ctx, receiver, m.sym(), c.fi() as usize)
-        .into_iter()
-        .exactly_one()
-        .ok()?;
+    let targets = member_targets(ctx, m, receiver);
+    let member = targets.into_iter().exactly_one().ok()?;
     value_type(ctx, member)
 }
 
@@ -1210,6 +1318,42 @@ fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> 
     extension_members(ctx, Owner::Class(cls), name, fi)
 }
 
+fn member_targets<'a>(
+    ctx: &'a ResolveCtx,
+    member: Cursor<'a>,
+    receiver: Cursor<'a>,
+) -> Vec<Cursor<'a>> {
+    let Some(constraint) = member.child(C::Dispatch) else {
+        return method_up(ctx, receiver, member.sym(), member.fi() as usize);
+    };
+    let Some(contract) = qualified(ctx, constraint.sym(), &|name| {
+        visible_type(ctx, constraint.fi(), name)
+    })
+    .filter(|owner| owner.is_dispatch_contract()) else {
+        return Vec::new();
+    };
+    let mut implementations = std::iter::once(receiver)
+        .chain(impl_blocks_of(ctx, receiver))
+        .filter(|owner| {
+            owner
+                .children_of(C::SuperType)
+                .filter_map(|constraint| resolve_chain(ctx, constraint))
+                .any(|target| (target.fi(), target.index()) == (contract.fi(), contract.index()))
+        });
+    let Some(implementation) = implementations.next() else {
+        return Vec::new();
+    };
+    if implementations.next().is_some() {
+        return Vec::new();
+    }
+    find_method_in(implementation, member.sym())
+        .or_else(|| {
+            find_method_in(contract, member.sym()).filter(|method| !method.has(C::Declaration))
+        })
+        .into_iter()
+        .collect()
+}
+
 fn extension_members<'a>(
     ctx: &'a ResolveCtx,
     owner: Owner<'a>,
@@ -1321,6 +1465,17 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 continue;
             };
             match resolve_chain(ctx, object) {
+                Some(target)
+                    if m.child(C::Dispatch)
+                        .is_some_and(|dispatch| !dispatch.has(C::Object)) =>
+                {
+                    out.extend(call_edges(
+                        from,
+                        member_targets(ctx, m, target),
+                        Some(node.index()),
+                    ));
+                }
+                Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
                     let members = method_up(ctx, target, m.sym(), fi);
                     out.extend(call_edges(from, members, Some(node.index())));

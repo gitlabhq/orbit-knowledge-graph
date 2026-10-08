@@ -288,6 +288,10 @@ impl<'a> Cursor<'a> {
             .any(|child| CLASS_LIKE.iter().any(|&kind| child.kind() == kind))
     }
 
+    pub fn is_dispatch_contract(self) -> bool {
+        self.has(C::Trait) || self.has(C::Interface)
+    }
+
     pub fn reference(self) -> Self {
         self.child(C::Call)
             .filter(|c| c.has(C::Property))

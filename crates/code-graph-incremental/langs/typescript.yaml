@@ -7,11 +7,13 @@ config:
     parse_files:
       - name: "tsconfig.json"
         format: json
+      - name: "jsconfig.json"
+        format: json
       - name: "package.json"
         format: json
       - name: "webpack.config.js"
         format: raw
-        extract: "['\"]([^'\"]+)['\"]\\s*:\\s*path\\.\\w+\\([^,]+,\\s*['\"]([^'\"]+)['\"]"
+        extract: "['\"]?([@~a-zA-Z_$][@~a-zA-Z0-9_$/-]*)['\"]?\\s*:\\s*path\\.(?:join|resolve)\\(__dirname,\\s*['\"]([^'\"]+)['\"]"
     lookup_from:
       - __source_root
 
@@ -58,6 +60,12 @@ stages:
         replace: '(implements_clause $$$REST $$$TYPES=>__supertype)'
 
       # Import alias: capture real name as sym, alias as child
+      - match: '(import_specifier (type) name: $N alias: $A)'
+        replace: '(import_specifier @$N (__alias @$A))'
+        tag: { type_only: "true" }
+      - match: '(import_specifier (type) name: $N)'
+        replace: '(import_specifier @$N)'
+        tag: { type_only: "true" }
       - match: '(import_specifier name: $N alias: $A)'
         replace: '(import_specifier @$N (__alias @$A))'
       - match: '(import_specifier name: $N)'
@@ -71,6 +79,8 @@ stages:
 
   - name: retag-refs
     rules:
+      - match: '(member_expression object: $O:call_expression property: $M)'
+        replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O:__ivar property: $M)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O property: $M)'
@@ -100,9 +110,15 @@ stages:
 
   - name: imports
     rules:
+      - match: '(export_statement (default) value: $N:identifier)'
+        replace: '(__module_export @$N (__default_export "default"))'
       # import type { a, b } from './source'
       - match: '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) $$$SPECS->__name)'
+      - match: '(import_type_statement (import_clause (namespace_import $N:identifier)) source: (string $S:string_fragment))'
+        replace: '(__import_type (__source @$S) (__source_path @$S) (__name "*" (__alias @$N)))'
+      - match: '(import_type_statement (import_clause $N:identifier) source: (string $S:string_fragment))'
+        replace: '(__import_type (__source @$S) (__source_path @$S) (__name "default" (__alias @$N)))'
 
       # import defaultExport, { named } from './source' — combined default + named (before individual rules)
       - match: '(import_statement (import_clause $N:identifier $$$REST (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
@@ -131,6 +147,12 @@ stages:
         tag_on: __name
 
       # exports.f = function f() {} / module.exports.f = ... → an exported function def
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression name: $N body: $B)))'
+        replace: '(__def (__defname @$N) (__function) $B)'
+        tag: { exports: '@$P' }
+      - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression name: $N body: $B)))'
+        replace: '(__def (__defname @$N) (__function) $B)'
+        tag: { exports: '@$P' }
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))'
         replace: '(__def (__defname @$P) (__function) $B)'
         tag: { exports: '@$P' }
@@ -144,6 +166,8 @@ stages:
       # module.exports = function main() {} → the default export
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (function_expression name: $N body: $B)))'
         replace: '(__def (__defname @$N) (__default_export "default") (__function) $B)'
+      - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: $N:identifier))'
+        replace: '(__module_export @$N (__default_export "default"))'
 
       # export { A, B } from './source' — named re-export with source (before star)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier) source: (string $S:string_fragment))'
@@ -285,6 +309,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__def (__variable) (number))'
+        tag: { non_callable: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
@@ -330,11 +356,13 @@ resolve:
         - match: '(__file "webpack.config.js" $$$F:__field)'
           replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
-        - match: '(__file "tsconfig.json" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
-          replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+        - match: '(__file "/^(ts|js)config\\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
+          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 
     - name: aliases
       rules:
+        - match: '(__alias $V:__str)'
+          replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("^/", "")))'
         - match: '(path_alias (__arr $V:__str $$$REST))'
           replace: '(__alias @$ROOT (__str @$V|strip_prefix("./")))'
 
