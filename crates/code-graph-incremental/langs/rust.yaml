@@ -24,6 +24,8 @@ config:
 stages:
   - name: normalize
     rules:
+      - match: '(foreign_mod_item body: (declaration_list $$$ITEMS:function_signature_item))'
+        replace: '(foreign_declarations $$$ITEMS->foreign_function)'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
