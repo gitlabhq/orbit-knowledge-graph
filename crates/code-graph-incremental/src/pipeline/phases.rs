@@ -73,11 +73,6 @@ fn workset(
         } = entry;
         let manifest = decision != Decision::ListOnly && is_manifest(&path);
         let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        if decision == Decision::Parse && in_family && !manifest {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
-            continue;
-        }
         let content = manifest
             .then(|| std::fs::read_to_string(root.join(&path)).ok())
             .flatten();
@@ -92,7 +87,12 @@ fn workset(
                 content,
             });
         }
-        listed.files.push((path, size, reason));
+        if decision == Decision::Parse && in_family {
+            listed.candidates.insert(path.clone(), size);
+            candidates.push(path);
+        } else {
+            listed.files.push((path, size, reason));
+        }
     }
     Workset {
         state,
