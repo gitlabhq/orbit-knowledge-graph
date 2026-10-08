@@ -7,6 +7,8 @@ config:
     parse_files:
       - name: "tsconfig.json"
         format: json
+      - name: "jsconfig.json"
+        format: json
       - name: "package.json"
         format: json
       - name: "webpack.config.js"
@@ -102,6 +104,8 @@ stages:
 
   - name: imports
     rules:
+      - match: '(export_statement (default) value: $N:identifier)'
+        replace: '(__module_export @$N (__default_export "default"))'
       # import type { a, b } from './source'
       - match: '(import_type_statement (import_clause (named_imports $$$SPECS:import_specifier)) source: (string $S:string_fragment))'
         replace: '(__import_type (__source @$S) (__source_path @$S) $$$SPECS->__name)'
@@ -342,8 +346,8 @@ resolve:
         - match: '(__file "webpack.config.js" $$$F:__field)'
           replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
-        - match: '(__file "tsconfig.json" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
-          replace: '(__file "tsconfig.json" (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+        - match: '(__file "/^(ts|js)config\\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
+          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 
     - name: aliases
       rules:
