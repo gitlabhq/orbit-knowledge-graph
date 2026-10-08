@@ -877,6 +877,17 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             continue;
         }
         for intra in ctx.imports_to(ie.from_fi(), ie.from_node) {
+            if intra.call_resolution == CallResolution::Reference
+                && intra.site.is_some_and(|site| {
+                    let binding = ctx.corpus.jump(intra.from_tree, site);
+                    binding.is(C::Binding)
+                        && binding
+                            .child(C::Rhs)
+                            .is_some_and(|rhs| rhs.children().next().is_none())
+                })
+            {
+                continue;
+            }
             let from = ctx.corpus.jump(ie.from_tree, intra.from_node);
             if intra.site.is_some_and(|site| {
                 ctx.corpus

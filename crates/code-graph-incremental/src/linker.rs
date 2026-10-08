@@ -539,8 +539,13 @@ impl<'t> Fold<'t> {
             if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
                 for value in self.lookup(rhs.sym()) {
                     match value {
-                        Value::ImportRef(_) => {
+                        Value::ImportRef(node) => {
                             val = Value::Call(c.index());
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                call_resolution: crate::tree::CallResolution::Reference,
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Imports)
+                            });
                             self.edges.push(Edge {
                                 site: Some(c.index()),
                                 ..Edge::local(self.enclosing(), c.index(), EdgeKind::TypeFlow)
