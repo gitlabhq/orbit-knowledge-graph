@@ -245,23 +245,55 @@ impl Resolver {
     }
 }
 
+/// Everything but the trees; those follow one frame each, so neither
+/// saving nor loading holds more than one tree's snapshot at a time.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-struct FullSnapshot {
-    trees: Vec<TreeSnapshot>,
+struct Header {
     edges: Vec<Edge>,
     lang: LangSnapshot,
     resolver: ResolverSnapshot,
     configs: Vec<(String, String)>,
+    trees: u64,
 }
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 2;
+pub const SNAPSHOT_VERSION: u32 = 4;
+
+type Error = rkyv::rancor::BoxedError;
+
+fn write_frame<T>(out: &mut impl Write, value: &T) -> io::Result<()>
+where
+    T: for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                Error,
+            >,
+        >,
+{
+    let bytes = rkyv::to_bytes::<Error>(value).map_err(io::Error::other)?;
+    out.write_all(&(bytes.len() as u64).to_le_bytes())?;
+    out.write_all(&bytes)
+}
+
+fn read_frame<T>(input: &mut impl Read, buf: &mut rkyv::util::AlignedVec) -> io::Result<T>
+where
+    T: rkyv::Archive,
+    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, Error>>
+        + rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<Error>>,
+{
+    let mut len = [0u8; 8];
+    input.read_exact(&mut len)?;
+    buf.clear();
+    buf.resize(u64::from_le_bytes(len) as usize, 0);
+    input.read_exact(buf)?;
+    rkyv::from_bytes::<T, Error>(buf).map_err(io::Error::other)
+}
 
 impl State {
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
-        let snap = FullSnapshot {
-            trees: self.trees.iter().map(TreeSnapshot::from).collect(),
+        let header = Header {
             edges: self.edges.clone(),
             lang: LangSnapshot::from(&env.lang),
             resolver: self.resolver.to_snapshot(),
@@ -270,43 +302,50 @@ impl State {
                 .iter()
                 .map(|c| (c.path.clone(), c.content.clone()))
                 .collect(),
+            trees: self.trees.len() as u64,
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::BoxedError>(&snap).map_err(io::Error::other)?;
         // zstd level 3: about 4x smaller for less time than serialising.
         let mut enc = zstd::Encoder::new(std::fs::File::create(path)?, 3)?;
         enc.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
-        enc.write_all(&bytes)?;
+        write_frame(&mut enc, &header)?;
+        for tree in &self.trees {
+            write_frame(&mut enc, &TreeSnapshot::from(tree))?;
+        }
         enc.finish()?;
         Ok(())
     }
 
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
-        let mut bytes = Vec::new();
-        zstd::Decoder::new(std::fs::File::open(path)?)?.read_to_end(&mut bytes)?;
-        let (header, payload) = bytes.split_at_checked(4).ok_or_else(|| {
+        let mut input = zstd::Decoder::new(std::fs::File::open(path)?)?;
+        let mut version = [0u8; 4];
+        input.read_exact(&mut version).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "snapshot is too short to carry a version",
             )
         })?;
-        let version = u32::from_le_bytes(header.try_into().expect("four bytes"));
+        let version = u32::from_le_bytes(version);
         if version != SNAPSHOT_VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("snapshot format v{version}; this build reads v{SNAPSHOT_VERSION}"),
             ));
         }
-        let snap: FullSnapshot =
-            rkyv::from_bytes::<FullSnapshot, rkyv::rancor::BoxedError>(payload)
-                .map_err(io::Error::other)?;
+        let mut buf = rkyv::util::AlignedVec::new();
+        let header: Header = read_frame(&mut input, &mut buf)?;
         let limits = Limits::load().map_err(io::Error::other)?;
         let env =
-            Env::with_lang(lang_id, Lang::from(snap.lang), limits).map_err(io::Error::other)?;
+            Env::with_lang(lang_id, Lang::from(header.lang), limits).map_err(io::Error::other)?;
+        let mut trees = Vec::with_capacity(header.trees as usize);
+        for _ in 0..header.trees {
+            let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;
+            trees.push(tree.into());
+        }
         let state = State {
-            trees: snap.trees.into_iter().map(|t| t.into()).collect(),
-            edges: snap.edges,
-            resolver: Resolver::from_snapshot(snap.resolver, &env.lang),
-            configs: snap.configs.into_iter().map(Into::into).collect(),
+            trees,
+            edges: header.edges,
+            resolver: Resolver::from_snapshot(header.resolver, &env.lang),
+            configs: header.configs.into_iter().map(Into::into).collect(),
         };
         Ok((env, state))
     }
