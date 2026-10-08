@@ -1,4 +1,3 @@
-mod block_reason;
 mod cache;
 mod client;
 pub mod inputs;
@@ -14,7 +13,6 @@ use tonic_types::{ErrorDetails, StatusExt};
 use tracing::{info, warn};
 
 use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, REALM_SAAS, normalize_realm};
-use block_reason::label as block_reason_label;
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
 use client::{QuotaAuth, QuotaClient};
 pub use inputs::QuotaCheckInputs;
@@ -169,7 +167,7 @@ impl QuotaService {
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
                     reason = ?reason,
-                    block_reason = block_reason_label(block_reason.as_deref()),
+                    block_reason = block_reason.as_deref().unwrap_or("none"),
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: fail_closed"
@@ -185,7 +183,7 @@ impl QuotaService {
                     instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
-                    block_reason = block_reason_label(block_reason.as_deref()),
+                    block_reason = block_reason.as_deref().unwrap_or("none"),
                     cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: denied"

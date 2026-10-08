@@ -3,17 +3,15 @@ use std::time::Duration;
 use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use secrecy::ExposeSecret;
+use serde::Deserialize;
 use tracing::warn;
 
-use super::block_reason::{label as block_reason_label, parse as parse_block_reason};
 use super::key::CdotRequest;
 use crate::constants::{APP_ID, CDOT_QUOTA_PATH};
 
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 const X_LICENSE_TOKEN: HeaderName = HeaderName::from_static("x-license-token");
-
-const MAX_BLOCK_BODY_BYTES: usize = 1024;
 
 pub(crate) enum QuotaAuth {
     AdminToken { user: String, token: String },
@@ -158,7 +156,7 @@ impl QuotaClient {
 
         warn!(
             status = %status,
-            block_reason = block_reason_label(block_reason.as_deref()),
+            block_reason = block_reason.as_deref().unwrap_or("none"),
             user_id = %request.key.user_id,
             realm = %request.key.realm,
             root_namespace_id = %request.key.root_namespace_id,
@@ -180,15 +178,16 @@ impl QuotaClient {
     }
 }
 
-async fn read_block_reason(mut response: reqwest::Response) -> Option<String> {
-    let mut body = Vec::new();
-    while let Ok(Some(chunk)) = response.chunk().await {
-        body.extend_from_slice(&chunk);
-        if body.len() > MAX_BLOCK_BODY_BYTES {
-            return None;
-        }
-    }
-    parse_block_reason(&body)
+#[derive(Deserialize)]
+struct BlockBody {
+    block_reason: String,
+}
+
+async fn read_block_reason(response: reqwest::Response) -> Option<String> {
+    let body = response.bytes().await.ok()?;
+    serde_json::from_slice::<BlockBody>(&body)
+        .ok()
+        .map(|b| b.block_reason)
 }
 
 fn parse_max_age(header: Option<&HeaderValue>) -> Option<Duration> {
@@ -446,15 +445,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oversized_body_drops_block_reason() {
-        let body: &'static str = Box::leak(
-            format!(
-                r#"{{"block_reason":"license_revoked","pad":"{}"}}"#,
-                "x".repeat(MAX_BLOCK_BODY_BYTES)
-            )
-            .into_boxed_str(),
-        );
-        let url = stub_server_with_body(AxumStatus::PAYMENT_REQUIRED, None, body).await;
+    async fn non_json_402_body_has_no_block_reason() {
+        let url = stub_server_with_body(
+            AxumStatus::PAYMENT_REQUIRED,
+            None,
+            "<html>Payment Required</html>",
+        )
+        .await;
         let outcome = license_client(url).check(&license_request()).await;
         assert!(matches!(
             outcome,
