@@ -5724,6 +5724,7 @@ dependencies = [
  "flate2",
  "ignore",
  "memchr",
+ "rayon",
  "regex",
  "rustc-hash 2.1.3",
  "serde",
