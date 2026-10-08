@@ -846,6 +846,19 @@ fn build_index_output(
     }
 }
 
+/// `orbit grep` asks `git status` which matched files changed since the index. After a fresh
+/// checkout every file's cached stat data is stale and each status re-hashes the whole tree, so
+/// refresh the cache once here.
+fn refresh_git_index(repo: &Path) {
+    let _ = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["update-index", "-q", "--refresh"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 #[cfg(test)]
 mod tests {
     use super::fatal_pipeline_reason;
@@ -886,17 +899,4 @@ mod tests {
         assert!(reason.contains("DuckDB write failed"), "{reason}");
         assert!(reason.contains("2 fatal"), "{reason}");
     }
-}
-
-/// `orbit grep` asks `git status` which matched files changed since the index. After a fresh
-/// checkout every file's cached stat data is stale and each status re-hashes the whole tree, so
-/// refresh the cache once here.
-fn refresh_git_index(repo: &Path) {
-    let _ = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["update-index", "-q", "--refresh"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
 }
