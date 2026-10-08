@@ -39,7 +39,7 @@ struct Cli {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("index"))]
 struct IndexArgs {
-    /// Repository path, or a directory that holds repositories (default: current directory).
+    /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 

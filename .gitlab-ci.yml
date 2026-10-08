@@ -726,7 +726,7 @@ cli-integration-test:
   needs: []
   script:
     - cargo build -p orbit-cli
-    - cargo nextest run --profile ci --test cli --no-fail-fast
+    - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - sccache --show-stats || true
 
 .integration-test-template:
