@@ -1,5 +1,9 @@
+mod defs;
 mod local;
-mod text;
+mod rank;
+mod render;
+mod scan;
+mod term;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -71,19 +75,19 @@ pub(crate) fn run(
         None => Vec::new(),
     };
 
-    let mut terms: Vec<text::Term> = alternatives.iter().map(|a| text::Term::parse(a)).collect();
+    let mut terms: Vec<term::Term> = alternatives.iter().map(|a| term::Term::parse(a)).collect();
     if options.fixed {
-        terms = terms.iter().map(text::Term::literal).collect();
+        terms = terms.iter().map(term::Term::literal).collect();
     }
     let scan = match query.is_some() {
         true => {
-            let matcher = text::matcher(&terms, &options).or_else(|_| {
-                terms = terms.iter().map(text::Term::literal).collect();
-                text::matcher(&terms, &options)
+            let matcher = term::matcher(&terms, &options).or_else(|_| {
+                terms = terms.iter().map(term::Term::literal).collect();
+                term::matcher(&terms, &options)
             })?;
             let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
             let scope = crate::workspace::repo_relative_paths(&root, &paths);
-            let hits = text::scan(&root, &scope, &matcher, &options)?;
+            let hits = scan::scan(&root, &scope, &matcher, &options)?;
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
@@ -102,7 +106,7 @@ pub(crate) fn run(
     };
     let alternatives = terms;
     hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-    text::attach_definitions(
+    defs::attach_definitions(
         backend.search().client(),
         backend.git(),
         &mut hits,
@@ -111,8 +115,8 @@ pub(crate) fn run(
         &edited,
     )?;
     let connections = match options.output {
-        Output::Lines => text::connections(backend.search().client(), &hits)?,
-        _ => text::Connections::new(),
+        Output::Lines => defs::connections(backend.search().client(), &hits)?,
+        _ => defs::Connections::new(),
     };
     let mut header = format!("grep {query:?}");
     for path in &paths {
@@ -125,7 +129,7 @@ pub(crate) fn run(
     write!(
         out,
         "{}",
-        text::render(
+        render::render(
             &header,
             &hits,
             &alternatives,
