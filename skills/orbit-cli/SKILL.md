@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.21.0
+version: 0.22.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -49,10 +49,11 @@ orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
 
-Quote `a|b|c` for OR alternatives. Matching ignores case, `_`, and `-`, like a
-loose ripgrep. Each file is one row with every matching line in full, labeled with
-its enclosing definition. Files that define a term come first, then code, tests,
-and config or docs. The top definition's source follows.
+Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
+with regex characters match as regex. Each file is one row listing every matching
+line, grouped under its enclosing definition as `Kind name:start-end`, followed by
+`←callers` and `→callees`. Files that define a term come first, then code, tests,
+and config or docs. Read a definition's body with `context file:start-end`.
 
 Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show

@@ -77,11 +77,7 @@ pub(crate) fn run(
         &filter.kinds,
     )?;
     let connections = text::connections(backend.search().client(), &hits)?;
-    let repo_path = &backend.git().repo_path;
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    if let Some(body) = text::lookup(repo_path, &hits, &alternatives) {
-        writeln!(out, "{body}")?;
-    }
     write!(out, "{}", text::render(&hits, &alternatives, &connections))?;
     Ok(())
 }

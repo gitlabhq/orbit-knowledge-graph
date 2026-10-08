@@ -13,7 +13,6 @@ use crate::workspace::GitInfo;
 
 const VARIANT_MIN: usize = 3;
 const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", "default"];
-const TOP_SOURCE_LINES: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Def {
@@ -28,7 +27,6 @@ pub(super) struct Def {
 pub(super) type Connections = HashMap<i64, (Vec<String>, Vec<String>)>;
 
 const CONNECTION_NAMES: usize = 8;
-const LOOKUP_MAX_DEFINITIONS: usize = 3;
 /// Doc comments and attributes put a definition's name a few lines below its first line.
 const DECLARATION_LINES: usize = 10;
 
@@ -609,70 +607,6 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term], connections: &Connecti
     for (_, _, row) in rows {
         out.push_str(&row);
         out.push('\n');
-    }
-    out
-}
-
-/// When a query term exactly names a definition (at most a few), that definition's source is
-/// printed before the rows so `head` keeps it.
-pub(super) fn lookup(
-    repo: &std::path::Path,
-    hits: &[Hit],
-    alternatives: &[Term],
-) -> Option<String> {
-    alternatives.iter().find_map(|term| {
-        let plain = term.regex.is_none()
-            && term
-                .raw
-                .chars()
-                .all(|c| c.is_alphanumeric() || "_$-:.".contains(c));
-        if !plain {
-            return None;
-        }
-        let mut seen = std::collections::HashSet::new();
-        let named: Vec<&Hit> = hits
-            .iter()
-            .filter(|h| names(h, std::slice::from_ref(term)))
-            .filter(|h| h.def.as_ref().is_some_and(|d| seen.insert(d.id)))
-            .collect();
-        if named.len() > LOOKUP_MAX_DEFINITIONS {
-            return None;
-        }
-        let hit = named
-            .iter()
-            .copied()
-            .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
-        let def = hit.def.as_ref()?;
-        let label = match named.len() {
-            1 => format!("{} {}", def.kind, def.name),
-            n => format!(
-                "{} {} (1 of {n}; the others are in the rows below)",
-                def.kind, def.name
-            ),
-        };
-        Some(source_block(repo, hit, &label))
-    })
-}
-
-fn source_block(repo: &std::path::Path, hit: &Hit, label: &str) -> String {
-    let Ok(content) = std::fs::read_to_string(repo.join(&hit.file)) else {
-        return String::new();
-    };
-    let lines: Vec<&str> = content.lines().collect();
-    let start = hit.def.as_ref().map_or(hit.line, |d| d.start);
-    let def_end = hit.def.as_ref().map_or(start, |d| d.end.max(start));
-    let end = def_end.min(lines.len()).min(start + TOP_SOURCE_LINES - 1);
-    let mut out = format!("{label} — {}:{start}-{def_end}\n", hit.file);
-    for number in start..=end {
-        out.push_str(&format!("  {number}|{}\n", lines[number - 1]));
-    }
-    if def_end > end {
-        out.push_str(&format!(
-            "  rest: {} context {}:{}-{def_end}\n",
-            crate::commands::setup::spec::launcher(),
-            hit.file,
-            end + 1
-        ));
     }
     out
 }
