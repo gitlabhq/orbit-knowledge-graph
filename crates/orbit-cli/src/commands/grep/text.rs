@@ -21,6 +21,7 @@ pub(super) struct Def {
     pub(super) start: usize,
     pub(super) end: usize,
     pub(super) id: i64,
+    pub(super) kind: String,
 }
 
 /// Callers and callees of each listed definition, by definition id.
@@ -28,6 +29,8 @@ pub(super) type Connections = HashMap<i64, (Vec<String>, Vec<String>)>;
 
 const CONNECTION_NAMES: usize = 8;
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
+/// Doc comments and attributes put a definition's name a few lines below its first line.
+const DECLARATION_LINES: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Hit {
@@ -252,6 +255,7 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
                         start: starts[i] as usize,
                         end: ends[i] as usize,
                         id: ids[i],
+                        kind: kinds_col[i].clone(),
                     },
                     kind: kinds_col[i].to_lowercase(),
                     id: ids[i],
@@ -390,9 +394,10 @@ fn is_test(path: &str) -> bool {
 }
 
 fn names(hit: &Hit, alternatives: &[Term]) -> bool {
-    hit.def
-        .as_ref()
-        .is_some_and(|def| def.start == hit.line && alternatives.iter().any(|a| a.names(&def.name)))
+    hit.def.as_ref().is_some_and(|def| {
+        (def.start..=def.start + DECLARATION_LINES).contains(&hit.line)
+            && alternatives.iter().any(|a| a.names(&def.name))
+    })
 }
 
 fn assignment(raw: &str) -> Option<regex::Regex> {
@@ -472,8 +477,8 @@ fn code_row(hits: &[&Hit], connections: &Connections) -> String {
         .map(|(def, list)| {
             let label = def.map(|d| {
                 let span = match d.end > d.start {
-                    true => format!("{}:{}-{} ", d.name, d.start, d.end),
-                    false => format!("{} ", d.name),
+                    true => format!("{} {}:{}-{} ", d.kind, d.name, d.start, d.end),
+                    false => format!("{} {} ", d.kind, d.name),
                 };
                 span + &connection_label(d, connections)
             });
@@ -608,48 +613,45 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term], connections: &Connecti
     out
 }
 
-pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[Term]) -> String {
-    hits.iter()
-        .filter(|h| is_code(&h.file) && !is_test(&h.file) && defining_rank(h, alternatives) < 2)
-        .min_by_key(|h| defining_rank(h, alternatives))
-        .map(|hit| format!("\n{}", source_block(repo, hit, "Source")))
-        .unwrap_or_default()
-}
-
-/// When the query is one plain identifier that names a definition, that definition's source is
-/// the answer: it is printed before the rows so `head` keeps it.
+/// When a query term exactly names a definition (at most a few), that definition's source is
+/// printed before the rows so `head` keeps it.
 pub(super) fn lookup(
     repo: &std::path::Path,
     hits: &[Hit],
     alternatives: &[Term],
 ) -> Option<String> {
-    let [term] = alternatives else {
-        return None;
-    };
-    if term.regex.is_some()
-        || !term
-            .raw
-            .chars()
-            .all(|c| c.is_alphanumeric() || "_$-:.".contains(c))
-    {
-        return None;
-    }
-    let named: Vec<&Hit> = hits.iter().filter(|h| names(h, alternatives)).collect();
-    if named.len() > LOOKUP_MAX_DEFINITIONS {
-        return None;
-    }
-    let hit = named
-        .iter()
-        .copied()
-        .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
-    let label = match named.len() {
-        1 => format!("Definition {}", term.raw),
-        n => format!(
-            "Definition {} (1 of {n}; the others are in the rows below)",
-            term.raw
-        ),
-    };
-    Some(source_block(repo, hit, &label))
+    alternatives.iter().find_map(|term| {
+        let plain = term.regex.is_none()
+            && term
+                .raw
+                .chars()
+                .all(|c| c.is_alphanumeric() || "_$-:.".contains(c));
+        if !plain {
+            return None;
+        }
+        let mut seen = std::collections::HashSet::new();
+        let named: Vec<&Hit> = hits
+            .iter()
+            .filter(|h| names(h, std::slice::from_ref(term)))
+            .filter(|h| h.def.as_ref().is_some_and(|d| seen.insert(d.id)))
+            .collect();
+        if named.len() > LOOKUP_MAX_DEFINITIONS {
+            return None;
+        }
+        let hit = named
+            .iter()
+            .copied()
+            .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
+        let def = hit.def.as_ref()?;
+        let label = match named.len() {
+            1 => format!("{} {}", def.kind, def.name),
+            n => format!(
+                "{} {} (1 of {n}; the others are in the rows below)",
+                def.kind, def.name
+            ),
+        };
+        Some(source_block(repo, hit, &label))
+    })
 }
 
 fn source_block(repo: &std::path::Path, hit: &Hit, label: &str) -> String {
@@ -657,11 +659,7 @@ fn source_block(repo: &std::path::Path, hit: &Hit, label: &str) -> String {
         return String::new();
     };
     let lines: Vec<&str> = content.lines().collect();
-    let start = hit
-        .def
-        .as_ref()
-        .filter(|d| d.start == hit.line)
-        .map_or(hit.line, |d| d.start);
+    let start = hit.def.as_ref().map_or(hit.line, |d| d.start);
     let def_end = hit.def.as_ref().map_or(start, |d| d.end.max(start));
     let end = def_end.min(lines.len()).min(start + TOP_SOURCE_LINES - 1);
     let mut out = format!("{label} — {}:{start}-{def_end}\n", hit.file);
@@ -693,6 +691,7 @@ mod tests {
                 start,
                 end,
                 id: start as i64,
+                kind: "Function".into(),
             }),
         }
     }
@@ -740,7 +739,7 @@ mod tests {
         assert_eq!(lines[0], "No matches: nosuchxyz");
         assert_eq!(lines[1], "16 lines in 4 files");
         assert!(
-            lines[2].starts_with("  src/middleware/maintenance.js │ default:9-41 :10 "),
+            lines[2].starts_with("  src/middleware/maintenance.js │ Function default:9-41 :10 "),
             "{out}"
         );
         assert!(
@@ -748,7 +747,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            lines[3].starts_with("  src/routes/feeds.js │ default:25-38 :26 "),
+            lines[3].starts_with("  src/routes/feeds.js │ Function default:25-38 :26 "),
             "{out}"
         );
         assert!(lines[3].ends_with(":29-37"), "{out}");

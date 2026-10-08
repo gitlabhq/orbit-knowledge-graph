@@ -79,16 +79,10 @@ pub(crate) fn run(
     let connections = text::connections(backend.search().client(), &hits)?;
     let repo_path = &backend.git().repo_path;
     writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    match text::lookup(repo_path, &hits, &alternatives) {
-        Some(body) => {
-            writeln!(out, "{body}")?;
-            write!(out, "{}", text::render(&hits, &alternatives, &connections))?;
-        }
-        None => {
-            write!(out, "{}", text::render(&hits, &alternatives, &connections))?;
-            write!(out, "{}", text::top_source(repo_path, &hits, &alternatives))?;
-        }
+    if let Some(body) = text::lookup(repo_path, &hits, &alternatives) {
+        writeln!(out, "{body}")?;
     }
+    write!(out, "{}", text::render(&hits, &alternatives, &connections))?;
     Ok(())
 }
 
