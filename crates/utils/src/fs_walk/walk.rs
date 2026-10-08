@@ -18,10 +18,78 @@ pub fn walk_dir<H: FileStreamHooks>(
 ) -> Result<FileInventory, StreamError> {
     let mut inventory = Vec::new();
     let mut content = Vec::new();
+    for entry in list_entries(root)? {
+        if let Some(meta) = entry.classify(hooks, &mut content)? {
+            inventory.push(meta);
+        }
+    }
+    Ok(FileInventory::new(inventory))
+}
 
-    // git's listing semantics (matching the prior gitalisk listing): .gitignore
-    // + .git/info/exclude + dotfiles, but not ripgrep .ignore or global/ancestor
-    // ignores, and never `.git` itself (hidden(false) would enumerate it).
+/// `walk_dir` with the reading and classifying of files spread over all
+/// cores; the directory listing itself is cheap, reading is not. Each
+/// worker gets its own hooks, so counters that must be global to the walk
+/// (a total-bytes cap) do not apply here.
+pub fn walk_dir_parallel<H, F>(root: &Path, hooks: F) -> Result<FileInventory, StreamError>
+where
+    H: FileStreamHooks,
+    F: Fn() -> H + Sync,
+{
+    use rayon::prelude::*;
+    let entries = list_entries(root)?;
+    let classified: Vec<Result<Option<FileInventoryEntry>, StreamError>> = entries
+        .par_chunks(256)
+        .flat_map_iter(|chunk| {
+            let mut hooks = hooks();
+            let mut content = Vec::new();
+            chunk
+                .iter()
+                .map(|entry| entry.classify(&mut hooks, &mut content))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let inventory = classified
+        .into_iter()
+        .filter_map(Result::transpose)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(FileInventory::new(inventory))
+}
+
+struct Listed {
+    abs_path: std::path::PathBuf,
+    meta: FileInventoryEntry,
+    is_symlink: bool,
+}
+
+impl Listed {
+    fn classify<H: FileStreamHooks>(
+        &self,
+        hooks: &mut H,
+        content: &mut Vec<u8>,
+    ) -> Result<Option<FileInventoryEntry>, StreamError> {
+        // A symlink has no content to sniff and is never a parse candidate; the
+        // hooks settle it, same as the tar source.
+        let (decision, label) = if self.is_symlink {
+            hooks.on_non_regular(&self.meta)
+        } else {
+            step(hooks, &self.meta, content, |buf| {
+                std::fs::File::open(&self.abs_path)?
+                    .read_to_end(buf)
+                    .map(|_| ())
+            })?
+        };
+        let mut meta = self.meta.clone();
+        meta.decision = decision;
+        meta.label = label;
+        Ok((meta.decision != Decision::Drop).then_some(meta))
+    }
+}
+
+/// Every file below `root` with git's listing semantics (matching the prior
+/// gitalisk listing): .gitignore + .git/info/exclude + dotfiles, but not
+/// ripgrep .ignore or global/ancestor ignores, and never `.git` itself
+/// (hidden(false) would enumerate it).
+fn list_entries(root: &Path) -> Result<Vec<Listed>, StreamError> {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -32,7 +100,7 @@ pub fn walk_dir<H: FileStreamHooks>(
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git")
         .build();
-
+    let mut listed = Vec::new();
     for result in walker {
         let dir_entry = result.map_err(|e| StreamError::Io(std::io::Error::other(e)))?;
         let file_type = dir_entry.file_type();
@@ -46,30 +114,18 @@ pub fn walk_dir<H: FileStreamHooks>(
             continue;
         };
         let size = abs_path.symlink_metadata().map(|m| m.len()).unwrap_or(0);
-        let mut meta = FileInventoryEntry {
-            path: rel_path.to_string_lossy().into_owned(),
-            size,
-            decision: Decision::ListOnly,
-            label: Default::default(),
-        };
-
-        // A symlink has no content to sniff and is never a parse candidate; the
-        // hooks settle it, same as the tar source.
-        let (decision, label) = if is_symlink {
-            hooks.on_non_regular(&meta)
-        } else {
-            step(hooks, &meta, &mut content, |buf| {
-                std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
-            })?
-        };
-        meta.decision = decision;
-        meta.label = label;
-        if meta.decision != Decision::Drop {
-            inventory.push(meta);
-        }
+        listed.push(Listed {
+            abs_path: abs_path.to_path_buf(),
+            meta: FileInventoryEntry {
+                path: rel_path.to_string_lossy().into_owned(),
+                size,
+                decision: Decision::ListOnly,
+                label: Default::default(),
+            },
+            is_symlink,
+        });
     }
-
-    Ok(FileInventory::new(inventory))
+    Ok(listed)
 }
 
 #[cfg(test)]
