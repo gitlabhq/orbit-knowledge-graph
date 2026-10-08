@@ -8,7 +8,7 @@ license = "LicenseRef-EE"
 # Compile DuckDB from C++ source for a fully static, self-contained binary.
 # Use for Docker/release builds: cargo build --release --features duckdb-client/bundled
 bundled = ["static-fts"]
-static-fts = ["duckdb/bundled", "libduckdb-sys/bundled"]
+static-fts = ["duckdb/bundled", "duckdb/json", "libduckdb-sys/bundled"]
 
 [dependencies]
 duckdb = { workspace = true }

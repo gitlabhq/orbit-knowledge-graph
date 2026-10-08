@@ -70,6 +70,21 @@ pub(crate) fn open(
             ));
         }
 
+        // Every extension this client needs is linked statically, so a missing one must
+        // fail loudly instead of downloading over the network at runtime.
+        for option in [
+            c"autoload_known_extensions",
+            c"autoinstall_known_extensions",
+        ] {
+            if libduckdb_sys::duckdb_set_config(config.0, option.as_ptr(), c"false".as_ptr())
+                != libduckdb_sys::DuckDBSuccess
+            {
+                return Err(DuckDbError::Schema(
+                    "failed to disable DuckDB extension autoloading".to_string(),
+                ));
+            }
+        }
+
         let state =
             libduckdb_sys::duckdb_open_ext(path.as_ptr(), &mut database, config.0, &mut error);
         let message = take_error(error);
