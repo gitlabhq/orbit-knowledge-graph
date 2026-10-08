@@ -51,7 +51,7 @@ pub(super) fn list_commands_description(frontend: Frontend) -> String {
 
     render_prompt(
         "list_commands",
-        minijinja::context! { commands, catalog => "" },
+        minijinja::context! { commands, catalog => "", relationships => "" },
     )
 }
 
@@ -76,17 +76,22 @@ impl From<&ToolDefinition> for CommandCatalogEntry {
 }
 
 /// Description for callers that cannot afford a discovery turn: the full
-/// command catalog is inlined as compact JSON.
-pub(super) fn inline_list_commands_description(frontend: Frontend) -> String {
+/// command catalog is inlined as compact JSON, followed by the graph
+/// relationship patterns when given.
+pub(super) fn inline_list_commands_description(
+    frontend: Frontend,
+    relationships: Option<&str>,
+) -> String {
     let entries: Vec<CommandCatalogEntry> = CommandRegistry::commands_for(frontend)
         .iter()
         .map(CommandCatalogEntry::from)
         .collect();
     let catalog = serde_json::to_string(&entries).expect("command definitions serialize to JSON");
+    let relationships = relationships.unwrap_or_default();
 
     render_prompt(
         "list_commands",
-        minijinja::context! { commands => "", catalog },
+        minijinja::context! { commands => "", catalog, relationships },
     )
 }
 
@@ -174,21 +179,30 @@ impl ToolRegistry {
     }
 
     pub fn tools_for(frontend: Frontend) -> Vec<ToolDefinition> {
-        Self::tools_with_catalog(frontend, false)
+        Self::tools_with_catalog(frontend, false, None)
     }
 
     /// When `inline_catalog` is set, `list_commands` carries the full command
-    /// catalog in its description so the caller can skip the discovery turn.
-    pub fn tools_with_catalog(frontend: Frontend, inline_catalog: bool) -> Vec<ToolDefinition> {
+    /// catalog, plus the graph relationship patterns when given, in its
+    /// description so the caller can skip the discovery and schema turns.
+    pub fn tools_with_catalog(
+        frontend: Frontend,
+        inline_catalog: bool,
+        relationships: Option<&str>,
+    ) -> Vec<ToolDefinition> {
         vec![
-            Self::list_commands(frontend, inline_catalog),
+            Self::list_commands(frontend, inline_catalog, relationships),
             Self::invoke_command(),
         ]
     }
 
-    fn list_commands(frontend: Frontend, inline_catalog: bool) -> ToolDefinition {
+    fn list_commands(
+        frontend: Frontend,
+        inline_catalog: bool,
+        relationships: Option<&str>,
+    ) -> ToolDefinition {
         let description = if inline_catalog {
-            inline_list_commands_description(frontend)
+            inline_list_commands_description(frontend, relationships)
         } else {
             list_commands_description(frontend)
         };
@@ -293,6 +307,9 @@ impl CommandRegistry {
 
 #[cfg(test)]
 mod tests {
+    use ontology::Ontology;
+    use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
+
     use super::*;
 
     fn all_tools() -> Vec<ToolDefinition> {
@@ -420,8 +437,17 @@ mod tests {
         }
     }
 
+    fn relationship_patterns() -> String {
+        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
+        build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n")
+    }
+
     fn inline_description(frontend: Frontend) -> String {
-        ToolRegistry::tools_with_catalog(frontend, true)
+        inline_description_with(frontend, Some(&relationship_patterns()))
+    }
+
+    fn inline_description_with(frontend: Frontend, relationships: Option<&str>) -> String {
+        ToolRegistry::tools_with_catalog(frontend, true, relationships)
             .into_iter()
             .find(|tool| tool.name == "list_commands")
             .expect("list_commands tool")
@@ -431,11 +457,27 @@ mod tests {
     #[test]
     fn inlined_description_stays_under_size_budget() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
-            let length = inline_description(frontend).len();
+            let catalog = inline_description_with(frontend, None).len();
             assert!(
-                length < 4096,
-                "{frontend:?} inlined description is {length} B"
+                catalog < 4096,
+                "{frontend:?} inlined catalog is {catalog} B"
             );
+            let full = inline_description(frontend).len();
+            assert!(
+                full < 8192,
+                "{frontend:?} inlined catalog with relationships is {full} B"
+            );
+        }
+    }
+
+    #[test]
+    fn inlined_description_carries_relationship_patterns() {
+        let patterns = relationship_patterns();
+        for frontend in [Frontend::JsonDsl, Frontend::Gql] {
+            let description = inline_description(frontend);
+            assert!(description.contains(&patterns));
+            assert!(description.contains("(User)-[:AUTHORED]->("));
+            assert!(!inline_description_with(frontend, None).contains("Graph relationships"));
         }
     }
 

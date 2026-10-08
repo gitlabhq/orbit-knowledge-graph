@@ -1,15 +1,15 @@
 name: query_graph_gql
-version: 1.2.0
+version: 1.3.0
 summary: >-
   Traverse GitLab relationships and code structure with openCypher 9-based syntax:
   callers, imports, blast radius, joins across entity types, grouped counts.
 description: >-
   Read-only openCypher 9-based syntax (MATCH ... RETURN) over the GitLab
   Knowledge Graph. It finds callers, definitions, and imports, follows
-  relationships, measures blast radius, joins across entity types, and returns
-  grouped counts.
-  Schema: CALL db.schema('NodeName') or CALL db.schema().
+  relationships, measures blast radius, joins entity types, and groups counts.
+  Schema: CALL db.schema() or CALL db.schema('Node').
   Anchor a node by ID or literal filter. LIMIT isn't a filter.
-  Use -[:TYPE]->; max 3 hops. WHERE uses AND. One ORDER BY key.
+  Use -[:TYPE]->, bound repeats *1..3; max 3 hops.
+  WHERE uses AND. One ORDER BY key.
   LIMIT/PAGE: 1-1000 rows. No OR, general NOT, DISTINCT, count(*), OPTIONAL MATCH,
   WITH or UNION.
