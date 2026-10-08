@@ -1379,7 +1379,7 @@ fn repo_map_omitted_subcommand_runs_overview() {
 }
 
 #[test]
-fn grep_loads_bundled_extension_and_returns_discovery_results() {
+fn grep_lists_matching_lines_with_their_definitions() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
     let dd = data_dir.path();
@@ -1398,17 +1398,18 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("Definition:")
-            && stdout.contains("src/utils.py:3-4  body-only ×1")
-            && stdout.contains("4| return open(path).read()"),
+        stdout.contains(
+            "src/utils.py-3-» Function read_file:3-4 ←run\nsrc/utils.py:4:    return open(path).read()\n"
+        ),
         "{stdout}"
     );
-    let reference = stdout
-        .split_whitespace()
-        .find(|s| s.starts_with("Definition:"))
-        .unwrap();
     let repo_arg = repo.path.to_str().unwrap();
     let fqn = "src.utils.read_file";
+    let (by_name, err, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
+    assert!(ok, "{err}");
+    let reference = by_name.split_whitespace().next().unwrap().to_string();
+    assert!(reference.starts_with("Definition:"), "{by_name}");
+    let reference = reference.as_str();
     let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
     assert!(
         ok && file.starts_with("File:") && !file.contains("return open"),
@@ -1423,9 +1424,9 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
         (
             "grep",
             "App|read_file|READ_FILE",
-            "exact: App | read_file\n",
+            "src/utils.py-3-» Function read_file:3-4 ←run\nsrc/utils.py:3:def read_file(path):\n",
         ),
-        ("grep", "App|missing_symbol", "exact: App\n"),
+        ("grep", "App|missing_symbol", " (App 1, missing_symbol 0)\n"),
         ("context", "src/utils.py:3-4", "3|def read_file(path):"),
         (
             "context",
@@ -1446,7 +1447,7 @@ fn grep_loads_bundled_extension_and_returns_discovery_results() {
         let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
         assert!(!ok && out.is_empty(), "{out}\n{err}");
     }
-    for invalid in ["|", "read_file|", "read_file||App", "!!!"] {
+    for invalid in ["|", "||", " | "] {
         let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
         assert!(
             !ok && err.contains("no usable search terms"),
@@ -1489,8 +1490,8 @@ fn context_relationship_order_is_stable_across_overloads() {
         ("Target.ping", "Connections (5 indexed):"),
         ("Target", "Used via members (5 indexed):"),
     ] {
-        let (matches, stderr, ok) = run_cmd(&["grep", fqn, "--repo", repo_arg], dd);
-        assert!(ok, "grep {fqn} failed: {stderr}");
+        let (matches, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
+        assert!(ok, "context {fqn} failed: {stderr}");
         let reference = matches
             .lines()
             .filter(|line| line.trim_start().starts_with("Definition:"))

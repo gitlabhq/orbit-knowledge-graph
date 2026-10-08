@@ -1,22 +1,5 @@
 use std::collections::HashSet;
 
-pub struct GrepOutcome {
-    pub alternatives: Vec<String>,
-    pub exact_alternatives: Vec<String>,
-    pub matches: Vec<GrepMatch>,
-    pub total: usize,
-}
-
-pub struct GrepMatch {
-    pub id: i64,
-    pub score: f64,
-    pub exact_name: bool,
-    pub name_match: bool,
-    pub body_offset: Option<usize>,
-    pub body_text: String,
-    pub mentions: usize,
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RecallFilter {
     pub kinds: Vec<String>,

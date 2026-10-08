@@ -5,11 +5,9 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 use serde_json::{Map, Value};
 
-use crate::{DuckDbClient, i64_column, scalar_i64, sql_lit, string_column};
+use crate::{DuckDbClient, i64_column, sql_lit, string_column};
 use orbit_search::RecallFilter;
 use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
-
-pub const DEF_DOC_PREFIX: &str = "gl_def_doc_";
 
 pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
 
@@ -155,33 +153,12 @@ impl NodeHydrator {
     }
 }
 
-pub fn def_doc_table(project_id: i64) -> String {
-    format!("{DEF_DOC_PREFIX}{project_id}")
-}
-
-pub fn def_doc_sql(doc_table: &str, ontology: &Ontology) -> Result<String> {
-    let node = NodeHydrator::new(ontology, "Definition")?;
-    Ok(format!(
-        "CREATE OR REPLACE TABLE {doc_table} AS
-SELECT DISTINCT {commit_sha} AS commit_sha, {id} AS def_id,
-       fts_doc(def_name({fqn})) AS name,
-       fts_doc({fqn} || ' ' || {file_path}) AS context,
-       '' AS source
-FROM {table} WHERE {project_id} = ?1 AND {commit_sha} = ?2",
-        commit_sha = node.column("commit_sha")?,
-        id = node.column("id")?,
-        fqn = node.column("fqn")?,
-        file_path = node.column("file_path")?,
-        table = node.table,
-        project_id = node.column("project_id")?,
-    ))
-}
-
 pub struct DuckDbSearch {
     client: DuckDbClient,
     pid: i64,
     sha: String,
     node: NodeHydrator,
+    paths: Vec<String>,
 }
 
 impl DuckDbSearch {
@@ -191,16 +168,12 @@ impl DuckDbSearch {
         commit_sha: &str,
         paths: &[String],
     ) -> Result<Self> {
-        let sha = sql_lit(commit_sha);
-        let node = NodeHydrator::embedded("Definition")?;
-        client.load_extension("fts")?;
-        ensure_search_index(&client, project_id, &sha)?;
-        client.execute(&corpus_table_sql(project_id, &sha, paths, &node)?, &[])?;
         Ok(Self {
             client,
             pid: project_id,
             sha: commit_sha.to_string(),
-            node,
+            node: NodeHydrator::embedded("Definition")?,
+            paths: paths.to_vec(),
         })
     }
 
@@ -209,6 +182,10 @@ impl DuckDbSearch {
     }
 
     pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<NodeValue>> {
+        self.client.execute(
+            &corpus_table_sql(self.pid, &sql_lit(&self.sha), &self.paths, &self.node)?,
+            &[],
+        )?;
         let batches = query(
             &self.client,
             &format!(
@@ -245,36 +222,6 @@ fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
         let suffix = if sql.chars().count() > 120 { "…" } else { "" };
         format!("query failed: {preview}{suffix}")
     })
-}
-
-fn ensure_search_index(client: &DuckDbClient, project_id: i64, sha: &str) -> Result<()> {
-    let doc_table = def_doc_table(project_id);
-    let table_exists = scalar_i64(&client.query_arrow(&format!(
-        "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_tables()
-  WHERE table_name = {}",
-        sql_lit(&doc_table)
-    ))?) > 0;
-    let has_source = table_exists
-        && scalar_i64(&client.query_arrow(&format!(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM duckdb_columns()
-             WHERE table_name = {} AND column_name = 'source'",
-            sql_lit(&doc_table)
-        ))?) > 0;
-    let indexed = has_source
-        && scalar_i64(&client.query_arrow(&format!(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM (
-  SELECT 1 FROM {doc_table}
-  WHERE commit_sha = {sha}
-  LIMIT 1
-)"
-        ))?) > 0;
-    if !indexed {
-        anyhow::bail!(
-            "local graph has no search index for this commit; \
-             re-index the repository (`orbit index <path>`)"
-        );
-    }
-    Ok(())
 }
 
 fn corpus_table_sql(pid: i64, sha: &str, paths: &[String], node: &NodeHydrator) -> Result<String> {
@@ -328,14 +275,18 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
         .iter()
         .map(|p| {
             let p = p.trim_end_matches('/');
-            let scope = if p.contains(GLOB_CHARS) {
-                format!("{col} GLOB {}", sql_lit(p))
-            } else {
-                format!(
-                    "{col} = {} OR {col} GLOB {}",
+            let literal = format!(
+                "{col} = {} OR starts_with({col}, {})",
+                sql_lit(p),
+                sql_lit(&format!("{p}/"))
+            );
+            let scope = match p.contains(GLOB_CHARS) {
+                true => format!(
+                    "{literal} OR {col} GLOB {} OR {col} GLOB {}",
                     sql_lit(p),
                     sql_lit(&format!("{p}/*"))
-                )
+                ),
+                false => literal,
             };
             if include_excluded {
                 return format!("({scope})");

@@ -4,7 +4,8 @@ short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
   Matching ignores case, `_`, and `-`; quote `a|b|c` for OR alternatives.
-  Output has one row per file with every matching line in full, labeled with its
-  enclosing definition. Files that define a term come first, then code, tests,
+  Output is rg's `path:line:text`, and rg and grep flags such as -A, -l, -w,
+  and -g work. A `path-N-» Kind name` line before each definition's lines names
+  it with its callers and callees. Files that define a term come first, then code, tests,
   and config or docs. The top definition's source follows. Omit the query with
   `--path` to list definitions.

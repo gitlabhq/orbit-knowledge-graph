@@ -22,14 +22,6 @@ CREATE TABLE IF NOT EXISTS _orbit_meta (
 CREATE OR REPLACE MACRO def_name(fqn) AS
     regexp_replace(fqn, '^.*[:.#/]', '');
 
-CREATE OR REPLACE MACRO camel_split(txt) AS
-    regexp_replace(regexp_replace(txt, '([A-Z]+)([A-Z][a-z])', '\1 \2', 'g'),
-                   '([a-z0-9])([A-Z])', '\1 \2', 'g');
-
-CREATE OR REPLACE MACRO fts_doc(txt) AS
-    CASE WHEN camel_split(txt) = txt THEN txt
-         ELSE txt || ' ' || camel_split(txt) END;
-
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
     traversal_path VARCHAR NOT NULL,

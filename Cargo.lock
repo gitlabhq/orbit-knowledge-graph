@@ -2765,22 +2765,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
- "cc",
  "code-graph",
- "dirs",
  "duckdb",
- "flate2",
- "libduckdb-sys",
  "ontology",
  "orbit-search",
  "orbit-utils",
- "orbit-versions",
  "serde_json",
- "sha2 0.11.0",
- "tar",
  "tempfile",
  "thiserror 2.0.18",
- "ureq",
 ]
 
 [[package]]
@@ -5571,6 +5563,7 @@ dependencies = [
  "dunce",
  "gitalisk-core",
  "globset",
+ "grep-matcher",
  "grep-regex",
  "grep-searcher",
  "ignore",

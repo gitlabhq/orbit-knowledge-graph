@@ -44,8 +44,7 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
 }
 
 pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
-    let workspace::IndexedRepo { git, client, .. } =
-        workspace::open_indexed(target.repo, target.db, &target.target)?;
+    let workspace::IndexedRepo { git, client } = workspace::open_indexed(target.repo, target.db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
     let targets = resolve_targets(&client, &git, &hydrator, &target.target)?;
     let mut out = String::new();
@@ -55,10 +54,16 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     for (path, start, end) in &targets.ranges {
         render_range(&mut out, &client, &git, &hydrator, path, *start, *end)?;
     }
+    let mut shown: Vec<String> = targets
+        .ranges
+        .iter()
+        .map(|(path, ..)| path.clone())
+        .collect();
     if targets.files.is_empty() && targets.file_ids.is_empty() && targets.ids.is_empty() {
-        print!("{out}");
+        print!("{}{out}", edited_note(&git, &shown));
         return Ok(());
     }
+    shown.extend(targets.files.iter().cloned());
     let (paths, file_ids, ids) = (targets.files, targets.file_ids, targets.ids);
     let files = resolve_files(&client, &git, &paths, &file_ids)?;
     let mut nodes = definition::resolve_ids(&client, &git, &hydrator, &ids)?;
@@ -80,6 +85,7 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     for (file, file_defs) in outline(&defs) {
         let path = repo_relative(&git.repo_path, &file)?;
+        shown.push(path.clone());
         let content = std::fs::read_to_string(git.repo_path.join(path))
             .with_context(|| format!("failed to read {file}"))?;
         let lines: Vec<&str> = content.lines().collect();
@@ -95,8 +101,24 @@ pub(crate) fn run(target: crate::ContextArgs) -> Result<()> {
     out.push_str(&relations::render(
         &client, &git, &hydrator, &nodes, &members,
     )?);
-    print!("{out}");
+    print!("{}{out}", edited_note(&git, &shown));
     Ok(())
+}
+
+/// Warns that the graph describes the indexed commit when a shown file has changed since.
+fn edited_note(git: &workspace::GitInfo, shown: &[String]) -> String {
+    let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
+    files.sort_unstable();
+    files.dedup();
+    let edited = workspace::edited_since_index(&git.repo_path, &files);
+    match edited.is_empty() {
+        true => String::new(),
+        false => format!(
+            "note: edited since index {}: {}. Definitions, line spans, and connections come from that commit.\n\n",
+            git.short_sha(),
+            edited.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 #[derive(Default)]

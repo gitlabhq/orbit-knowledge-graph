@@ -11,13 +11,53 @@ use orbit_search::{RecallFilter, query_alternatives};
 use crate::commands::context;
 use local::LocalBackend;
 
+/// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
+/// nothing but the exit status with `-q`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Output {
+    #[default]
+    Lines,
+    Files,
+    Count,
+    Quiet,
+}
+
+/// The rg and grep flags a search honors.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Options {
+    pub(crate) fixed: bool,
+    pub(crate) word: bool,
+    pub(crate) invert: bool,
+    pub(crate) before: usize,
+    pub(crate) after: usize,
+    pub(crate) max_count: Option<u64>,
+    /// rg `-g` globs: a leading `!` excludes.
+    pub(crate) globs: Vec<String>,
+    pub(crate) types: Vec<String>,
+    pub(crate) types_not: Vec<String>,
+    pub(crate) max_columns: Option<usize>,
+    pub(crate) output: Output,
+}
+
+/// A search that found nothing; exits 1 without a message, as rg does.
+#[derive(Debug)]
+pub(crate) struct NoMatches;
+
+impl std::fmt::Display for NoMatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no matches")
+    }
+}
+
+impl std::error::Error for NoMatches {}
+
 pub(crate) fn run(
     query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
-    _limit: usize,
     paths: Vec<String>,
     filter: RecallFilter,
+    options: Options,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     let alternatives = match &query {
@@ -32,41 +72,34 @@ pub(crate) fn run(
     };
 
     let mut terms: Vec<text::Term> = alternatives.iter().map(|a| text::Term::parse(a)).collect();
+    if options.fixed {
+        terms = terms.iter().map(text::Term::literal).collect();
+    }
     let scan = match query.is_some() {
         true => {
-            let matcher = text::matcher(&terms).or_else(|_| {
+            let matcher = text::matcher(&terms, &options).or_else(|_| {
                 terms = terms.iter().map(text::Term::literal).collect();
-                text::matcher(&terms)
+                text::matcher(&terms, &options)
             })?;
             let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
             let scope = crate::workspace::repo_relative_paths(&root, &paths);
-            let hits = text::scan(&root, &scope, &matcher)?;
+            let hits = text::scan(&root, &scope, &matcher, &options)?;
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
-            let new = crate::commands::refresh::untracked(&root, &files);
-            Some((hits, new))
+            let edited = crate::workspace::edited_since_index(&root, &files);
+            Some((hits, edited))
         }
         false => None,
     };
-    let touched = scan
-        .as_ref()
-        .map(|(_, new)| new.clone())
-        .unwrap_or_default();
-    let backend = LocalBackend::open(repo, db, &paths, &touched)?;
+    let backend = LocalBackend::open(repo, db, &paths)?;
     let paths = backend.paths().to_vec();
     check_kinds(&backend, &filter.kinds)?;
 
     let mut out = std::io::stdout().lock();
-    let (Some(query), Some((mut hits, _))) = (query, scan) else {
+    let (Some(query), Some((mut hits, edited))) = (query, scan) else {
         return report_outline(&mut out, &backend, &paths, &filter, launcher);
     };
-    if !paths.is_empty() {
-        writeln!(out, "path: {}", paths.join(" "))?;
-    }
-    if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
-    }
     let alternatives = terms;
     hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     text::attach_definitions(
@@ -75,11 +108,37 @@ pub(crate) fn run(
         &mut hits,
         &alternatives,
         &filter.kinds,
+        &edited,
     )?;
-    let connections = text::connections(backend.search().client(), &hits)?;
-    writeln!(out, "grep {:?} @ {}", query, backend.header())?;
-    write!(out, "{}", text::render(&hits, &alternatives, &connections))?;
-    Ok(())
+    let connections = match options.output {
+        Output::Lines => text::connections(backend.search().client(), &hits)?,
+        _ => text::Connections::new(),
+    };
+    let mut header = format!("grep {query:?}");
+    for path in &paths {
+        header.push_str(&format!(" --path {path}"));
+    }
+    if !filter.kinds.is_empty() {
+        header.push_str(&format!(" --kind {}", filter.kinds.join(",")));
+    }
+    header.push_str(&format!(" @ {}", backend.header()));
+    write!(
+        out,
+        "{}",
+        text::render(
+            &header,
+            &hits,
+            &alternatives,
+            &connections,
+            &edited,
+            &options
+        )?
+    )?;
+    out.flush()?;
+    match hits.iter().any(|hit| !hit.context) {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
 }
 
 fn report_outline(

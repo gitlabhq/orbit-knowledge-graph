@@ -58,7 +58,6 @@ cargo-platform = "0.3.3"
 cpu-time = "1.0.0"
 cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
-cc = "1.4.5"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
 datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
@@ -104,6 +103,7 @@ strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
+grep-matcher = "0.1.9"
 grep-regex = "0.1.14"
 grep-searcher = "0.1.17"
 rayon = "1.11.0"
@@ -113,7 +113,6 @@ circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10505.0", features = ["vtab-arrow", "appender-arrow"] }
-libduckdb-sys = "1.10505.0"
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.1" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
@@ -124,7 +123,6 @@ toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 # Build-time fetch over plain HTTP; integrity comes from pinned checksums.
-ureq = { version = "3", default-features = false }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Drop transitive crypto providers; hint aws-lc usage so orbit-server's `fips` feature
 # resolves it implicitly. Do not add `fips` here: it would leak into build scripts,
