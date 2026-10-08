@@ -19,6 +19,10 @@ fixtures:
           urllib.parse.urlparse("https://example.com")
           ET.fromstring("<root/>")
 
+      def repeated_package_calls():
+          urllib.parse.urlparse("first")
+          urllib.parse.urlparse("second")
+
       def from_import_call():
           Client()
           helper_run()
@@ -50,9 +54,7 @@ fixtures:
 
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
-    # Known gap: a dotted package import (`import a.b as c`) produces an extra
-    # CALLS row and the alias is not carried. Tracked with the rule-file
-    # follow-ups on !2629.
+    # Package imports currently retain their module name in identifier_name.
     skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -65,6 +67,27 @@ tests:
       - { row: { caller: "main.package_import_call", path: "requests", name: null, alias: null } }
       - { row: { caller: "main.package_import_call", path: "urllib.parse", name: null, alias: null } }
       - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: null, alias: "ET" } }
+
+  - name: "dotted package calls produce one edge and preserve aliases"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'package_import_call'
+      RETURN sym.import_path AS path, sym.identifier_alias AS alias
+    assert:
+      - { row_count: 4 }
+      - { row: { path: "requests", alias: null } }
+      - { row: { path: "httpx", alias: "external_httpx" } }
+      - { row: { path: "urllib.parse", alias: null } }
+      - { row: { path: "xml.etree.ElementTree", alias: "ET" } }
+
+  - name: "separate dotted package calls retain separate edges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'repeated_package_calls'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "urllib.parse" } }
 
   - name: "from imports target imported symbols"
     query: |

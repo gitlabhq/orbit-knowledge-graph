@@ -126,8 +126,12 @@ impl<'t> Fold<'t> {
             self.handle_inline_imports(c);
             self.handle_call(c);
         } else if k == C::Member {
-            let is_callee = c.parent().is_some_and(|p| p.kind() == C::Callee);
-            if !is_callee {
+            let in_chain = c.parent().is_some_and(|parent| {
+                parent.is(C::Callee)
+                    || parent.is(C::Object)
+                        && parent.parent().is_some_and(|owner| owner.is(C::Member))
+            });
+            if !in_chain {
                 self.handle_standalone_member(c);
             }
         } else if k == C::Binding {
