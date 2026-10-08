@@ -203,7 +203,7 @@ end note
 rails -[#2E7D32]> gkg : gRPC call + JWT\n(source_type in claims)
 activate gkg #C8E6C9
 
-gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-open
+gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-closed
 cdot --[#E65100]> gkg : allow / deny
 
 gkg -[#E65100]> ch : execute query
@@ -367,6 +367,8 @@ GKG queries have no per-request namespace context. Every query scopes across all
 
 **Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting. This applies when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
 
+**Orbit behavior without a namespace.** A SaaS request whose JWT has no `root_namespace_id` skips the quota check, and its billing event is dropped (`reason=root_namespace_missing`). CustomersDot attributes SaaS usage to the root namespace, so neither can be resolved. Rails is expected to block these requests before they reach Orbit.
+
 **UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
 
 **JWT wiring.** Rails resolves `knowledge_graph_governing_namespace_id` server-side per request and sets `claims.root_namespace_id` before calling GKG. GKG continues to consume only the signed JWT claim, with no untrusted body field.
@@ -429,11 +431,11 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 // A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
 ```
 
-**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
+**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails closed and is not cached. Orbit never logs or re-serializes the claim.
 
-**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
+**Cache behavior.** GKG sends a `GET` to CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Redirects are not followed. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; failed checks are not, so the next request retries CustomersDot.
 
-**Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
+**Fail-closed.** Only a CustomersDot `200` allows the query. A `402` denies it, and so does every other outcome: `401`, `403`, `422`, any other status, a timeout, or a connection failure. This matches the AI Gateway, which denies on any quota-check error so an outage or a rejected credential cannot become unmetered usage. Failed checks return the same `RESOURCE_EXHAUSTED` status and `GITLAB_CREDITS_EXHAUSTED` reason as a `402`. Workhorse only maps that reason to a `402` response. The message differs: "Unable to verify GitLab credits" instead of "GitLab credits exhausted". Failed checks are recorded as `decision=fail_closed`. When the response body carries a CustomersDot `block_reason`, the gate logs it, including for cached denials.
 
 **Enforced builds.** A binary built with `ORBIT_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
 
