@@ -21,6 +21,7 @@ impl Column {
 
 #[derive(Clone)]
 pub enum Predicate {
+    Boolean(crate::input::BooleanExpression<Box<Predicate>>),
     Property {
         column: Column,
         filter: InputFilter,
@@ -128,6 +129,7 @@ pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
         .iter()
         .map(|(property, filter)| property_filter(&node.alias, property, filter))
         .collect();
+    predicates.extend(node.predicates.clone());
     if !node.node_ids.is_empty() {
         predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
     }

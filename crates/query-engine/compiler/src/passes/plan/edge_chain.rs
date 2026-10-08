@@ -65,6 +65,7 @@ pub struct NodePlan {
     pub selectivity: Selectivity,
     pub hydration: HydrationStrategy,
     pub filters: Vec<(String, BoundFilter)>,
+    pub predicates: Vec<super::requirements::Predicate>,
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
@@ -113,6 +114,7 @@ impl NodePlan {
                 super::helpers::FilterOwner::Entity(entity_id),
                 model,
             ),
+            predicates: Vec::new(),
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
@@ -137,6 +139,7 @@ impl NodePlan {
     /// is worth the cost of a pre-scan.
     pub fn has_selective_filters(&self) -> bool {
         !self.node_ids.is_empty()
+            || !self.predicates.is_empty()
             || self.id_range.is_some()
             || self
                 .filters
@@ -195,6 +198,14 @@ where
     let model = context.model;
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
+    for expression in &input.predicates {
+        if let Some(alias) = expression.local_node() {
+            let predicate = super::predicates::bind(expression, input, model, &hops)?;
+            let node = nodes.get_mut(alias).expect("validated predicate node");
+            node.predicates.push(predicate);
+            node.selectivity = node.selectivity.min(Selectivity::Filtered);
+        }
+    }
 
     let (mut hops, elided_fks) = if use_fk_elision {
         elide_hops(hops, &mut nodes, input, model)
@@ -241,7 +252,7 @@ where
     context.hops = hops;
     context.nodes = nodes;
     context.denormalized = denormalized;
-    let execution = if context.hops.is_empty() {
+    let mut execution = if context.hops.is_empty() {
         context.single_node()?
     } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
@@ -250,6 +261,13 @@ where
     } else {
         super::flat::plan(&context)?
     };
+    let predicates = input
+        .predicates
+        .iter()
+        .filter(|expression| expression.local_node().is_none())
+        .map(|expression| super::predicates::bind(expression, input, model, &context.hops))
+        .collect::<Result<_>>()?;
+    execution.source = execution.source.filter(predicates);
     if !context.hops.is_empty() {
         context.node_edge_mappings = execution
             .bindings
@@ -329,6 +347,9 @@ where
                         target_node,
                         referenced_column,
                     })
+                })
+                .filter(|_| {
+                    rel.filters.is_empty() && !input.predicate_references_relationship(input_index)
                 });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
@@ -397,6 +418,8 @@ fn elide_hops(
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last
+                || input.predicate_references_node(&hop.from_node)
+                || input.predicate_references_node(&hop.to_node)
                 || input.join_predicates.iter().any(|predicate| {
                     [&predicate.lhs_node, &predicate.rhs_node]
                         .into_iter()
@@ -625,6 +648,7 @@ fn determine_hydration(
     });
 
     if is_group_by_node
+        || input.predicate_references_node(alias)
         || is_group_by_property
         || is_agg_property_target
         || is_order_by_target
@@ -741,6 +765,7 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
             .filter(|np| {
                 np.hydration == HydrationStrategy::Join
                     && np.filters.is_empty()
+                    && np.predicates.is_empty()
                     && np.node_ids.is_empty()
                     && np.id_range.is_none()
                     && convergent_targets
@@ -783,6 +808,7 @@ mod tests {
             selectivity: Selectivity::Filtered,
             hydration: HydrationStrategy::Skip,
             filters: Vec::new(),
+            predicates: Vec::new(),
             node_ids: Vec::new(),
             id_range: None,
             has_traversal_path,

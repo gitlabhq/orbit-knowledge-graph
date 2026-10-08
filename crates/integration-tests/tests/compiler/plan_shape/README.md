@@ -4,6 +4,10 @@ Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture checks normalized input, selected requirements, and/or
 the emitted SQL AST. Most fixtures run through both JSON and GQL.
 
+Use the optional `predicates` list to attach native compiler predicates after frontend parsing.
+Each entry has `not`, `and`, or a leaf with `node`, `property`, `op`, and `value`.
+This tests shared predicate planning without requiring a frontend spelling.
+
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
 missing, blank, unknown, or redundant exception entries.

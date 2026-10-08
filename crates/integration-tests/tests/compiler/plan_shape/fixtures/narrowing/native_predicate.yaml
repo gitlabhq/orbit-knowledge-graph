@@ -1,0 +1,24 @@
+name: Native predicate groups retain node scans and ID constraints
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"name":"keep"},"columns":["id"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {name: 'keep'}) RETURN b.id
+predicates:
+  - not:
+      and:
+        - {node: b, property: id, op: in, value: [3, 4]}
+        - {node: b, property: name, op: eq, value: skip}
+logical:
+  expect:
+    - (Filter a.id IN [1] (NodeScan Definition AS a))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Scan Table(gl_definition) AS b)
+        - (Filter NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))
+  duckdb:
+    planned:
+      expect:
+        - (Filter NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))

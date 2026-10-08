@@ -93,6 +93,24 @@ pub fn logical(input: &Input) -> Tree {
         )
     }));
     let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
+    tree = filter(
+        input
+            .predicates
+            .iter()
+            .map(|expression| {
+                boolean_text(expression, &|leaf| {
+                    let alias = match &leaf.target {
+                        compiler::input::PredicateTarget::Node(alias) => alias.clone(),
+                        compiler::input::PredicateTarget::Relationship(index) => {
+                            format!("e{index}")
+                        }
+                    };
+                    property_filter(&alias, &leaf.property, &leaf.filter)
+                })
+            })
+            .collect(),
+        tree,
+    );
     if !input.aggregation.metrics.is_empty() || !input.aggregation.group_by.is_empty() {
         let groups = input.aggregation.group_by.iter().map(|group| {
             let value = group.property().map_or_else(
@@ -543,6 +561,9 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         }
     };
     match value {
+        Predicate::Boolean(expression) => vec![boolean_text(expression, &|leaf| {
+            planned_predicate(leaf).join(" AND ")
+        })],
         Predicate::Property { column, filter, .. } => {
             vec![property_filter(&column.source, &column.name, filter)]
         }
@@ -578,6 +599,22 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             definition,
             key,
         } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
+    }
+}
+
+fn boolean_text<T>(
+    expression: &compiler::input::BooleanExpression<T>,
+    leaf: &impl Fn(&T) -> String,
+) -> String {
+    use compiler::input::BooleanExpression;
+    match expression {
+        BooleanExpression::Leaf(value) => leaf(value),
+        BooleanExpression::Not(child) => format!("NOT ({})", boolean_text(child, leaf)),
+        BooleanExpression::And(children) => children
+            .iter()
+            .map(|child| format!("({})", boolean_text(child, leaf)))
+            .collect::<Vec<_>>()
+            .join(" AND "),
     }
 }
 

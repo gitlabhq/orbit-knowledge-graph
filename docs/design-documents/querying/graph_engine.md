@@ -53,6 +53,13 @@ The compiler supports two query frontends:
 
 ### Compiler pass pipeline
 
+Native compiler input can carry grouped predicates with `AND` and `NOT`.
+Validation and restriction check every leaf. Normalization coerces enum values within each group.
+Planning keeps referenced nodes and edges available, pushes single-node groups into node scans,
+and applies cross-alias groups after their joins. Latest-row scans recheck mutable predicates.
+Negated ID lists and bounds remain predicates rather than positive ID selectors.
+The JSON frontend does not expose this internal representation.
+
 Both frontends compile to parameterized ClickHouse SQL through shared passes.
 `crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets for graph queries.
 `compiler::gql::prepare` parses once: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves ontology metadata inside the GQL frontend without SQL.

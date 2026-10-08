@@ -17,12 +17,55 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Scenario {
     name: String,
+    #[serde(default)]
+    predicates: Vec<PredicateSetup>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+enum PredicateSetup {
+    Not {
+        not: Box<Self>,
+    },
+    And {
+        and: Vec<Self>,
+    },
+    Property {
+        node: String,
+        property: String,
+        op: compiler::input::FilterOp,
+        value: serde_json::Value,
+    },
+}
+
+impl PredicateSetup {
+    fn expression(&self) -> compiler::input::BooleanExpression<compiler::input::PropertyPredicate> {
+        use compiler::input::{BooleanExpression, InputFilter, PredicateTarget, PropertyPredicate};
+        match self {
+            Self::Not { not } => BooleanExpression::Not(Box::new(not.expression())),
+            Self::And { and } => BooleanExpression::And(and.iter().map(Self::expression).collect()),
+            Self::Property {
+                node,
+                property,
+                op,
+                value,
+            } => BooleanExpression::Leaf(PropertyPredicate {
+                target: PredicateTarget::Node(node.clone()),
+                property: property.clone(),
+                filter: InputFilter {
+                    op: Some(*op),
+                    value: Some(value.clone()),
+                    ..Default::default()
+                },
+            }),
+        }
+    }
 }
 
 impl Scenario {
@@ -238,12 +281,24 @@ fn check<M: QueryDataModel>(
             path.display(),
             scenario.name
         );
-        let input = match language.as_str() {
+        let mut input = match language.as_str() {
             "json" => frontend::json_dsl::parse(raw, model.ontology()).map(|(input, _)| input),
             "gql" => frontend::gql::parse(raw),
             _ => panic!("{label}: unknown frontend"),
         }
         .unwrap_or_else(|error| panic!("{label}: {error}"));
+        input
+            .predicates
+            .extend(scenario.predicates.iter().map(PredicateSetup::expression));
+        if !scenario.predicates.is_empty() {
+            let validator = compiler::passes::validate::Validator::new(model);
+            validator
+                .check_shape(&input)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            validator
+                .check_references(&input)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+        }
         let mut input =
             normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
         let mut options = plan::HydrationCompileOptions::default();
