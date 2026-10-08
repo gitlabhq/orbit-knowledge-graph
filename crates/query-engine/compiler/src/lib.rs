@@ -246,9 +246,6 @@ pub(crate) mod testkit {
 }
 
 #[cfg(test)]
-mod predicate_tests;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::LazyLock;

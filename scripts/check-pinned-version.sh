@@ -25,9 +25,8 @@ goon_output_format ^(crates/query-engine/formatters/src/goon/[^/]+\.rs|crates/qu
 gql_output_format  ^(crates/query-engine/formatters/src/gql/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib|text)\.rs)$
 '
 
-base_commit=$(git merge-base "$BASE_REF" HEAD)
-changed_files=$(git diff --cached --name-only "$base_commit")
-versions_diff=$(git diff --cached "$base_commit" -- config/versions.yaml)
+changed_files=$(git diff --name-only "$BASE_REF"...HEAD)
+versions_diff=$(git diff "$BASE_REF"...HEAD -- config/versions.yaml)
 failed=()
 
 while read -r pin pattern; do

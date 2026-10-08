@@ -1,0 +1,23 @@
+name: Negated node groups retain scan predicates and positive ID selectors
+query:
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)
+    WHERE a.id IN [1, 2] AND a.id >= 1 AND a.id <= 10
+      AND b.name = 'keep' AND NOT (b.id IN [3, 4] AND b.name = 'skip')
+    RETURN b.id
+missing_frontends:
+  json: JSON filters cannot express grouped negation.
+logical:
+  expect:
+    - (Filter a.id IN [1, 2], a.id >= 1, a.id <= 10 (NodeScan Definition AS a))
+    - (Filter b.name = 'keep' (NodeScan Definition AS b))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Scan Table(gl_definition) AS b)
+        - (Filter NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))
+  duckdb:
+    planned:
+      expect:
+        - (Filter NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))

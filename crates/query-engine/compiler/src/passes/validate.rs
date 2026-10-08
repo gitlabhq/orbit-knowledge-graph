@@ -654,7 +654,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         }
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
         for jp in &input.join_predicates {
-            check_comparison_properties(&jp.lhs_prop, &jp.rhs_prop)?;
             for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
                 if !node_ids.contains(&node_id.as_str()) {
                     return Err(QueryError::ReferenceError(format!(
@@ -814,17 +813,15 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
 
         for (i, rel) in input.relationships.iter().enumerate() {
             let model = self.model.get();
-            let edge_table = model.relationship_table_for_query(&rel.types);
-            let tables = model.relationship_tables(&rel.types);
+            let edge_table = rel
+                .types
+                .first()
+                .and_then(|kind| model.relationship_table(kind))
+                .unwrap_or_else(|| model.default_edge_table());
             for (prop, filter) in input.relationship_filters(i) {
                 if prop.starts_with('_') {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on private edge column \"{prop}\""
-                    )));
-                }
-                if tables.len() > 1 && !ontology::constants::EDGE_RESERVED_COLUMNS.contains(&prop) {
-                    return Err(QueryError::Validation(format!(
-                        "relationship[{i}] filter on \"{prop}\" requires a single edge table"
                     )));
                 }
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
@@ -844,7 +841,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     prop,
                     filter,
                     data_type,
-                    true,
+                    model.property_allows_like(&format!("relationship[{i}]"), prop),
                 )?;
             }
         }
