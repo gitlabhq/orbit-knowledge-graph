@@ -179,8 +179,8 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         .resolver
         .reqs()
         .iter()
-        .filter(|r| old_dirty_fis.contains(&r.target_fi))
-        .filter_map(|r| label_to_fi.get(old_labels[r.fi].as_str()))
+        .filter(|r| old_dirty_fis.contains(&(r.target_fi as usize)))
+        .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
         .map(|&fi| fi as usize)
         .collect();
 
