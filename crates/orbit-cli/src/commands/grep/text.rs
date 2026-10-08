@@ -137,6 +137,8 @@ pub(super) fn scan(
     walk.hidden(false)
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git");
+    let scope = Scope::new(paths);
+    let scope = &scope;
     let found = Mutex::new(Vec::new());
     walk.build_parallel().run(|| {
         let mut searcher = SearcherBuilder::new()
@@ -155,7 +157,7 @@ pub(super) fn scan(
                 return ignore::WalkState::Continue;
             };
             let file = relative.to_string_lossy().replace('\\', "/");
-            if globbed && !in_scope(&file, paths) {
+            if globbed && !scope.contains(&file) {
                 return ignore::WalkState::Continue;
             }
             let mut local = Vec::new();
@@ -181,14 +183,39 @@ pub(super) fn scan(
     Ok(found.into_inner().unwrap())
 }
 
-fn in_scope(path: &str, paths: &[String]) -> bool {
-    paths.iter().any(|scope| {
-        let scope = scope.trim_end_matches('/');
-        match scope.contains(['*', '?', '[']) {
-            true => globset::Glob::new(scope).is_ok_and(|g| g.compile_matcher().is_match(path)),
-            false => path == scope || path.starts_with(&format!("{scope}/")),
+/// `--path` scopes compiled once for the walk: globs into one set, the rest as path prefixes.
+struct Scope {
+    globs: globset::GlobSet,
+    prefixes: Vec<String>,
+}
+
+impl Scope {
+    fn new(paths: &[String]) -> Self {
+        let mut globs = globset::GlobSetBuilder::new();
+        let mut prefixes = Vec::new();
+        for scope in paths.iter().map(|p| p.trim_end_matches('/')) {
+            match scope.contains(['*', '?', '[']) {
+                true => {
+                    if let Ok(glob) = globset::Glob::new(scope) {
+                        globs.add(glob);
+                    }
+                }
+                false => prefixes.push(scope.to_string()),
+            }
         }
-    })
+        Self {
+            globs: globs.build().unwrap_or_else(|_| globset::GlobSet::empty()),
+            prefixes,
+        }
+    }
+
+    fn contains(&self, path: &str) -> bool {
+        self.globs.is_match(path)
+            || self.prefixes.iter().any(|scope| {
+                path.strip_prefix(scope.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            })
+    }
 }
 
 struct Candidate {
