@@ -395,6 +395,28 @@ impl<'t> Fold<'t> {
         }
         let from = self.enclosing();
         let first = self.edges.len();
+        if let Some(member) = callee.child(C::Member) {
+            if member.has(C::Dispatch) {
+                return;
+            }
+            if let Some(receiver) = member.child(C::Receiver) {
+                for value in self.lookup(receiver.sym()) {
+                    if let Value::Call(node) = value {
+                        self.edges.push(Edge {
+                            site: Some(c.index()),
+                            ..Edge::local(from, node, EdgeKind::TypeFlow)
+                        });
+                    }
+                }
+                if member.child(C::Object).is_some_and(|object| {
+                    self.lookup(object.sym()).iter().any(|value| {
+                        matches!(value, Value::LocalDef(node) if self.tree.cursor(*node).is_dispatch_contract())
+                    })
+                }) {
+                    return;
+                }
+            }
+        }
         let value = self
             .field_slot(callee)
             .map(|slot| self.read_value(slot))

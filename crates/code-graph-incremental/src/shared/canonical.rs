@@ -209,6 +209,10 @@ pub enum Canonical {
     Scope,
     #[strum(serialize = "__declaration")]
     Declaration,
+    #[strum(serialize = "__dispatch")]
+    Dispatch,
+    #[strum(serialize = "__receiver")]
+    Receiver,
 }
 
 impl From<Canonical> for u16 {

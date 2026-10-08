@@ -117,8 +117,6 @@ tests:
       - { row: { src: 'src/usage.rs', tgt: 'src/domain.rs', type: 'Method' } }
 
   - name: "trait UFCS call resolves to impl method"
-    # UFCS emits both the trait declaration and concrete implementation.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_ufcs' AND callee.name = 'run'
