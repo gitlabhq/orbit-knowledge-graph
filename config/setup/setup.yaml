@@ -9,8 +9,7 @@ instructions: |
   ## Orbit
 
   - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
-  - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
-  - Reuse shown source instead of rereading unchanged files.
+  - MANDATORY: you must read all the code definitions you need in one call: `{{orbit}} context a.rs:10-40 b.rs:88-120`.
 
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.

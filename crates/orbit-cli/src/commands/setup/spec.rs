@@ -317,7 +317,7 @@ mod tests {
                 " grep` must be used for search",
                 "Ignores case, `_`, `-`",
                 "`a|b` OR",
-                "Reuse shown source",
+                "definitions you need in one call",
             ] {
                 assert!(rendered.contains(phrase), "{launcher}: {phrase}");
             }
