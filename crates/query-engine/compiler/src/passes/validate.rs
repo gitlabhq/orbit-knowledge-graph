@@ -299,7 +299,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     self.check_field(entity, column)?;
                 }
             }
-            for (property, _) in input.node_filters(node) {
+            for property in node.filters.keys() {
                 self.check_field(entity, property)?;
             }
             check_filters(&node.filters)?;
@@ -316,61 +316,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             }
             self.check_relationship_types(&edge.types)?;
             check_filters(&edge.filters)?;
-        }
-        for expression in &input.predicates {
-            if expression.depth() > 32 {
-                return Err(QueryError::Validation(
-                    "Boolean predicate exceeds expression bounds".into(),
-                ));
-            }
-        }
-        if input.predicate_leaves().count() > 256 {
-            return Err(QueryError::Validation(
-                "Boolean predicates must not exceed 256 leaves".into(),
-            ));
-        }
-        if !input.predicates.is_empty()
-            && !matches!(
-                input.query_type,
-                QueryType::Traversal | QueryType::Aggregation
-            )
-        {
-            return Err(QueryError::Validation(
-                "Boolean predicates require traversal or aggregation".into(),
-            ));
-        }
-        for leaf in input.predicate_leaves() {
-            check_filter_entries(&leaf.property, std::slice::from_ref(&leaf.filter))?;
-            match &leaf.target {
-                crate::input::PredicateTarget::Node(alias) => {
-                    let node = input
-                        .nodes
-                        .iter()
-                        .find(|node| &node.id == alias)
-                        .ok_or_else(|| {
-                            QueryError::Validation(format!("undefined predicate node {alias}"))
-                        })?;
-                    if self
-                        .virtual_source(node.entity.as_deref().unwrap_or_default(), &leaf.property)
-                        .is_some()
-                    {
-                        return Err(QueryError::Validation(
-                            "Boolean predicates on virtual columns are unsupported".into(),
-                        ));
-                    }
-                }
-                crate::input::PredicateTarget::Relationship(index) => {
-                    if input
-                        .relationships
-                        .get(*index)
-                        .is_none_or(|edge| edge.hops.max != 1)
-                    {
-                        return Err(QueryError::Validation(
-                            "Boolean relationship predicates require a single hop".into(),
-                        ));
-                    }
-                }
-            }
         }
         if let Some(path) = &input.path {
             if path.max_depth == 0 || path.max_depth > MAX_DEPTH_CAP {
@@ -710,7 +655,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             let Some(entity) = node.entity.as_deref() else {
                 continue;
             };
-            for (prop, filter) in input.node_filters(node) {
+            for (prop, filters) in &node.filters {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
                     && self.model.get().entity_has_traversal_path(entity);
                 if !is_traversal_path_filter
@@ -745,69 +690,54 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                         )));
                     }
                     let allowed: Vec<&str> = vs.allowed_ops.iter().map(|s| s.as_str()).collect();
-                    let op = filter.op.unwrap_or(FilterOp::Eq);
-                    if !allowed.contains(&op.as_ref()) {
-                        return Err(QueryError::Validation(format!(
-                            "filter on \"{prop}\" for {entity}: operator \"{}\" is not \
-                             supported on this virtual column (allowed: {allowed:?})",
-                            op.as_ref()
-                        )));
+                    for filter in filters {
+                        let op = filter.op.unwrap_or(FilterOp::Eq);
+                        if !allowed.contains(&op.as_ref()) {
+                            return Err(QueryError::Validation(format!(
+                                "filter on \"{prop}\" for {entity}: operator \"{}\" is not \
+                                 supported on this virtual column (allowed: {allowed:?})",
+                                op.as_ref()
+                            )));
+                        }
                     }
                 }
                 let Some(data_type) = self.field_type(entity, prop) else {
                     continue;
                 };
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                    check_comparison_properties(prop, rhs_prop)?;
-                    let rhs_entity = input
-                        .nodes
-                        .iter()
-                        .find(|n| n.id == *rhs_node)
-                        .and_then(|n| n.entity.as_deref());
-                    if let Some(rhs_entity) = rhs_entity {
-                        self.check_field(rhs_entity, rhs_prop)?;
-                        if !self
-                            .model
-                            .get()
-                            .property_is_filterable(rhs_entity, rhs_prop)
-                        {
-                            return Err(QueryError::AllowlistRejected(format!(
-                                "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
-                            )));
+                for filter in filters {
+                    if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
+                        let rhs_entity = input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == *rhs_node)
+                            .and_then(|n| n.entity.as_deref());
+                        if let Some(rhs_entity) = rhs_entity {
+                            self.check_field(rhs_entity, rhs_prop)?;
+                            if !self
+                                .model
+                                .get()
+                                .property_is_filterable(rhs_entity, rhs_prop)
+                            {
+                                return Err(QueryError::AllowlistRejected(format!(
+                                    "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
+                                )));
+                            }
+                            if self.virtual_source(rhs_entity, rhs_prop).is_some() {
+                                return Err(QueryError::Validation(format!(
+                                    "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
+                                )));
+                            }
                         }
-                        if self.virtual_source(rhs_entity, rhs_prop).is_some() {
-                            return Err(QueryError::Validation(format!(
-                                "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
-                            )));
-                        }
-                        if self
-                            .field_type(rhs_entity, rhs_prop)
-                            .is_some_and(|rhs_type| rhs_type != data_type)
-                        {
-                            return Err(QueryError::Validation(
-                                "type mismatch in property comparison".into(),
-                            ));
-                        }
-                    } else {
-                        return Err(QueryError::Validation(format!(
-                            "undefined predicate node {rhs_node}"
-                        )));
+                        continue;
                     }
-                    continue;
+                    if is_traversal_path_filter {
+                        Self::check_traversal_path_filter(
+                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(entity, prop, filter, data_type)?;
                 }
-                if is_traversal_path_filter {
-                    Self::check_traversal_path_filter(
-                        &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                        filter,
-                    )?;
-                }
-                self.check_one_filter(
-                    entity,
-                    prop,
-                    filter,
-                    data_type,
-                    self.model.get().property_allows_like(entity, prop),
-                )?;
             }
         }
 
@@ -818,31 +748,22 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 .first()
                 .and_then(|kind| model.relationship_table(kind))
                 .unwrap_or_else(|| model.default_edge_table());
-            for (prop, filter) in input.relationship_filters(i) {
-                if prop.starts_with('_') {
-                    return Err(QueryError::Validation(format!(
-                        "relationship[{i}] filter on private edge column \"{prop}\""
-                    )));
-                }
+            for (prop, filters) in &rel.filters {
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\" \
                          (table \"{edge_table}\" does not have this column)"
                     )));
                 };
-                if prop == TRAVERSAL_PATH_COLUMN {
-                    Self::check_traversal_path_filter(
-                        &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-                        filter,
-                    )?;
+                for filter in filters {
+                    if prop == TRAVERSAL_PATH_COLUMN {
+                        Self::check_traversal_path_filter(
+                            &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
                 }
-                self.check_one_filter(
-                    &format!("relationship[{i}]"),
-                    prop,
-                    filter,
-                    data_type,
-                    model.property_allows_like(&format!("relationship[{i}]"), prop),
-                )?;
             }
         }
 
@@ -898,7 +819,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         prop: &str,
         filter: &InputFilter,
         data_type: DataType,
-        allows_like: bool,
     ) -> Result<()> {
         let op = filter.op.unwrap_or(FilterOp::Eq);
 
@@ -916,7 +836,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
         );
 
-        if is_like_op && !allows_like {
+        if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  string operators (contains/starts_with/ends_with) are not allowed on this field"
@@ -1427,87 +1347,57 @@ fn is_valid_filter_value(value: &serde_json::Value) -> bool {
 
 fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) -> Result<()> {
     for (property, predicates) in filters {
-        check_filter_entries(property, predicates)?;
-    }
-    Ok(())
-}
-
-fn check_comparison_properties(left: &str, right: &str) -> Result<()> {
-    if [left, right].contains(&TRAVERSAL_PATH_COLUMN) {
-        return Err(QueryError::Validation(
-            "property comparisons cannot reference traversal_path; use a literal scope filter"
-                .into(),
-        ));
-    }
-    Ok(())
-}
-
-fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()> {
-    validate_identifier(property)?;
-    if predicates.is_empty() || predicates.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
-        return Err(QueryError::Validation(format!(
-            "filter on {property:?} needs between 1 and {MAX_FILTER_ENTRIES_PER_PROPERTY} predicates"
-        )));
-    }
-    for filter in predicates {
-        let op = filter.op.unwrap_or(FilterOp::Eq);
-        if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
-            if filter.value.is_some() {
-                return Err(QueryError::Validation(
-                    "null checks cannot have a value".into(),
-                ));
-            }
-            continue;
+        validate_identifier(property)?;
+        if predicates.is_empty() || predicates.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+            return Err(QueryError::Validation(format!(
+                "filter on {property:?} needs between 1 and {MAX_FILTER_ENTRIES_PER_PROPERTY} predicates"
+            )));
         }
-        if let Some((alias, property)) = &filter.rhs_column {
-            validate_identifier(alias)?;
-            validate_identifier(property)?;
-            if !matches!(
+        for filter in predicates {
+            let op = filter.op.unwrap_or(FilterOp::Eq);
+            if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
+                if filter.value.is_some() {
+                    return Err(QueryError::Validation(
+                        "null checks cannot have a value".into(),
+                    ));
+                }
+                continue;
+            }
+            if filter.rhs_column.is_some() {
+                continue;
+            }
+            let value = filter
+                .value
+                .as_ref()
+                .ok_or_else(|| QueryError::Validation("predicate requires a value".into()))?;
+            if !is_valid_filter_value(value) {
+                return Err(QueryError::Validation(format!(
+                    "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {MAX_FILTER_STRING_LEN} characters, or lists of up to {MAX_IN_VALUES} such values"
+                )));
+            }
+            if op == FilterOp::In
+                && !value
+                    .as_array()
+                    .is_some_and(|values| values.len() <= MAX_IN_VALUES)
+            {
+                return Err(QueryError::Validation(format!(
+                    "IN requires 0-{MAX_IN_VALUES} values"
+                )));
+            }
+            if matches!(
                 op,
-                FilterOp::Eq
-                    | FilterOp::Ne
-                    | FilterOp::Gt
-                    | FilterOp::Gte
-                    | FilterOp::Lt
-                    | FilterOp::Lte
-            ) {
+                FilterOp::Contains
+                    | FilterOp::StartsWith
+                    | FilterOp::EndsWith
+                    | FilterOp::TokenMatch
+                    | FilterOp::AllTokens
+                    | FilterOp::AnyTokens
+            ) && !value.is_string()
+            {
                 return Err(QueryError::Validation(
-                    "property comparisons require a comparison operator".into(),
+                    "text predicates require a string".into(),
                 ));
             }
-            continue;
-        }
-        let value = filter
-            .value
-            .as_ref()
-            .ok_or_else(|| QueryError::Validation("predicate requires a value".into()))?;
-        if !is_valid_filter_value(value) {
-            return Err(QueryError::Validation(format!(
-                "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {MAX_FILTER_STRING_LEN} characters, or lists of up to {MAX_IN_VALUES} such values"
-            )));
-        }
-        if op == FilterOp::In
-            && !value
-                .as_array()
-                .is_some_and(|values| values.len() <= MAX_IN_VALUES)
-        {
-            return Err(QueryError::Validation(format!(
-                "IN requires 0-{MAX_IN_VALUES} values"
-            )));
-        }
-        if matches!(
-            op,
-            FilterOp::Contains
-                | FilterOp::StartsWith
-                | FilterOp::EndsWith
-                | FilterOp::TokenMatch
-                | FilterOp::AllTokens
-                | FilterOp::AnyTokens
-        ) && !value.is_string()
-        {
-            return Err(QueryError::Validation(
-                "text predicates require a string".into(),
-            ));
         }
     }
     Ok(())

@@ -50,86 +50,6 @@ pub struct Input {
     pub options: QueryOptions,
     #[serde(skip)]
     pub join_predicates: Vec<JoinPredicate>,
-    #[serde(skip)]
-    pub predicates: Vec<BooleanExpression<PropertyPredicate>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum BooleanExpression<T> {
-    Leaf(T),
-    And(Vec<Self>),
-    Not(Box<Self>),
-}
-
-impl<T> BooleanExpression<T> {
-    pub fn leaves(&self) -> impl Iterator<Item = &T> {
-        let mut pending = vec![self];
-        std::iter::from_fn(move || {
-            while let Some(expression) = pending.pop() {
-                match expression {
-                    Self::Leaf(leaf) => return Some(leaf),
-                    Self::And(children) => pending.extend(children.iter().rev()),
-                    Self::Not(child) => pending.push(child),
-                }
-            }
-            None
-        })
-    }
-
-    pub fn try_map<U, E>(
-        self,
-        map: &mut impl FnMut(T) -> Result<U, E>,
-    ) -> Result<BooleanExpression<U>, E> {
-        Ok(match self {
-            Self::Leaf(leaf) => BooleanExpression::Leaf(map(leaf)?),
-            Self::And(children) => BooleanExpression::And(
-                children
-                    .into_iter()
-                    .map(|child| child.try_map(map))
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Not(child) => BooleanExpression::Not(Box::new(child.try_map(map)?)),
-        })
-    }
-
-    pub fn depth(&self) -> usize {
-        match self {
-            Self::Leaf(_) => 0,
-            Self::And(children) => 1 + children.iter().map(Self::depth).max().unwrap_or(0),
-            Self::Not(child) => 1 + child.depth(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PredicateTarget {
-    Node(String),
-    Relationship(usize),
-}
-
-#[derive(Debug, Clone)]
-pub struct PropertyPredicate {
-    pub target: PredicateTarget,
-    pub property: String,
-    pub filter: InputFilter,
-}
-
-impl BooleanExpression<PropertyPredicate> {
-    pub fn local_node(&self) -> Option<&str> {
-        let PredicateTarget::Node(alias) = &self.leaves().next()?.target else {
-            return None;
-        };
-        self.leaves()
-            .all(|leaf| {
-                matches!(&leaf.target, PredicateTarget::Node(node) if node == alias)
-                    && leaf
-                        .filter
-                        .rhs_column
-                        .as_ref()
-                        .is_none_or(|(node, _)| node == alias)
-            })
-            .then_some(alias)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,58 +62,6 @@ pub struct JoinPredicate {
 }
 
 impl Input {
-    pub fn node_filters<'a>(
-        &'a self,
-        node: &'a InputNode,
-    ) -> impl Iterator<Item = (&'a str, &'a InputFilter)> {
-        node.filters
-            .iter()
-            .flat_map(|(property, filters)| {
-                filters
-                    .iter()
-                    .map(move |filter| (property.as_str(), filter))
-            })
-            .chain(self.predicate_leaves().filter_map(move |leaf| {
-                matches!(&leaf.target, PredicateTarget::Node(alias) if alias == &node.id)
-                    .then_some((leaf.property.as_str(), &leaf.filter))
-            }))
-    }
-
-    pub fn relationship_filters(&self, index: usize) -> impl Iterator<Item = (&str, &InputFilter)> {
-        self.relationships[index]
-            .filters
-            .iter()
-            .flat_map(|(property, filters)| {
-                filters
-                    .iter()
-                    .map(move |filter| (property.as_str(), filter))
-            })
-            .chain(self.predicate_leaves().filter_map(move |leaf| {
-                (leaf.target == PredicateTarget::Relationship(index))
-                    .then_some((leaf.property.as_str(), &leaf.filter))
-            }))
-    }
-
-    pub fn predicate_leaves(&self) -> impl Iterator<Item = &PropertyPredicate> {
-        self.predicates.iter().flat_map(BooleanExpression::leaves)
-    }
-
-    pub fn predicate_references_node(&self, alias: &str) -> bool {
-        self.predicate_leaves().any(|leaf| {
-            matches!(&leaf.target, PredicateTarget::Node(node) if node == alias)
-                || leaf
-                    .filter
-                    .rhs_column
-                    .as_ref()
-                    .is_some_and(|(node, _)| node == alias)
-        })
-    }
-
-    pub fn predicate_references_relationship(&self, index: usize) -> bool {
-        self.predicate_leaves()
-            .any(|leaf| leaf.target == PredicateTarget::Relationship(index))
-    }
-
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
@@ -223,7 +91,6 @@ impl Default for Input {
             order_by: None,
             options: QueryOptions::default(),
             join_predicates: Vec::new(),
-            predicates: Vec::new(),
         }
     }
 }

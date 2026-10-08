@@ -49,11 +49,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
         if !target.fk_needs_join || !visited.insert(&fk.target_node) {
             continue;
         }
-        if target.filters.is_empty()
-            && target.predicates.is_empty()
-            && target.node_ids.is_empty()
-            && target.id_range.is_none()
-        {
+        if target.filters.is_empty() && target.node_ids.is_empty() && target.id_range.is_none() {
             continue;
         }
         let name = format!("_candidate_{}", fk.target_node);
@@ -90,7 +86,6 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
                 Some(name.clone())
             } else if traversal
                 && target.filters.is_empty()
-                && target.predicates.is_empty()
                 && target.node_ids.is_empty()
                 && target.id_range.is_none()
                 && center_node.has_selective_filters()

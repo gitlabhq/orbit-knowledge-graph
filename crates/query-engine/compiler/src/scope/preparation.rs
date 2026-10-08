@@ -20,7 +20,7 @@ pub fn prepare(
         requirements: Vec::new(),
         table_scans: Default::default(),
     };
-    if input.query_type != QueryType::Aggregation || !input.predicates.is_empty() {
+    if input.query_type != QueryType::Aggregation {
         return scope;
     }
 

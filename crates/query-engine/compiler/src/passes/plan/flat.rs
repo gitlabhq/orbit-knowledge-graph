@@ -262,14 +262,15 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         let dedup = self.facts.hops.len() >= 2;
         if !multi_hop && !dedup && self.facts.aggregate() {
             let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
-            let predicates = self
+            let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
+            predicates.extend(membership);
             return Ok(PhysicalSource::Latest {
                 sort_key: sort_key.to_vec(),
                 alias: alias.clone(),
                 aggregate_condition: predicates,
-                input: Box::new(scan(false).filter(membership)),
+                input: Box::new(scan(false)),
             });
         }
         let edge = if multi_hop {

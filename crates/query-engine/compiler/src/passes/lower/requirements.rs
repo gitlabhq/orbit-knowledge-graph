@@ -10,7 +10,6 @@ pub(super) fn column(value: &Column) -> Expr {
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
-        Predicate::Boolean(expression) => boolean_expression(expression),
         Predicate::Property {
             column: value,
             filter,
@@ -56,43 +55,6 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             cte_name: definition.clone(),
             column: key.clone(),
         },
-    }
-}
-
-fn boolean_expression(expression: &crate::input::BooleanExpression<Box<Predicate>>) -> Expr {
-    use crate::input::BooleanExpression;
-    match expression {
-        BooleanExpression::Leaf(leaf) => {
-            let expression = predicate(leaf);
-            if let Predicate::Property {
-                column: value,
-                filter,
-                ..
-            } = leaf.as_ref()
-                && filter.op == Some(crate::input::FilterOp::In)
-                && filter
-                    .value
-                    .as_ref()
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|values| !values.is_empty())
-            {
-                Expr::func(
-                    Function::If,
-                    vec![
-                        Expr::unary(Op::IsNull, column(value)),
-                        Expr::lit(serde_json::Value::Null),
-                        expression,
-                    ],
-                )
-            } else {
-                expression
-            }
-        }
-        BooleanExpression::And(children) => {
-            Expr::conjoin(children.iter().map(boolean_expression).collect())
-                .unwrap_or_else(|| Expr::lit(true))
-        }
-        BooleanExpression::Not(child) => Expr::unary(Op::Not, boolean_expression(child)),
     }
 }
 

@@ -19,44 +19,36 @@ pub fn ordered_filters(
     properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            filters.iter().map(|filter| {
+            let (metadata, table) = match owner {
+                FilterOwner::Entity(entity) => (
+                    model
+                        .property_for_entity_id(entity, property)
+                        .map(|property| (Some(property.id), Some(property.data_type))),
+                    model.query_backend().entity_table(entity),
+                ),
+                FilterOwner::Table(table) => (
+                    Some((None, model.table_column_type(table, property))),
+                    Some(table),
+                ),
+            };
+            let (property_id, data_type) = metadata.unwrap_or_default();
+            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
+            filters.iter().map(move |filter| {
                 (
                     property.clone(),
-                    bind_filter(property, filter.clone(), &owner, model),
+                    BoundFilter {
+                        filter: filter.clone(),
+                        property: property_id,
+                        data_type,
+                        selectivity: property_id
+                            .map(|property| model.property_selectivity(property))
+                            .unwrap_or_default(),
+                        in_sort_key,
+                    },
                 )
             })
         })
         .collect()
-}
-
-pub fn bind_filter(
-    property: &str,
-    filter: InputFilter,
-    owner: &FilterOwner<'_>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
-) -> BoundFilter {
-    let (metadata, table) = match owner {
-        FilterOwner::Entity(entity) => (
-            model
-                .property_for_entity_id(*entity, property)
-                .map(|property| (Some(property.id), Some(property.data_type))),
-            model.query_backend().entity_table(*entity),
-        ),
-        FilterOwner::Table(table) => (
-            Some((None, model.table_column_type(table, property))),
-            Some(*table),
-        ),
-    };
-    let (property_id, data_type) = metadata.unwrap_or_default();
-    BoundFilter {
-        filter,
-        property: property_id,
-        data_type,
-        selectivity: property_id
-            .map(|property| model.property_selectivity(property))
-            .unwrap_or_default(),
-        in_sort_key: table.is_some_and(|table| model.in_sort_key(table, property)),
-    }
 }
 
 pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {

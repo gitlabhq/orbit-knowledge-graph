@@ -1,8 +1,0 @@
-description: Negated path filters still obey the caller's scope
-config:
-  security: {org_id: 1, paths: ["1/100/"]}
-query:
-  gql: |
-    MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
-expect:
-  compile_error: authorized
