@@ -70,8 +70,8 @@ pub(crate) fn open(
             ));
         }
 
-        // Every extension this client needs is linked statically, so a missing one must
-        // fail loudly instead of downloading over the network at runtime.
+        // Extensions this client needs are linked statically, so never download or install
+        // one at runtime; a missing statically linked extension (like json) now fails.
         for option in [
             c"autoload_known_extensions",
             c"autoinstall_known_extensions",
