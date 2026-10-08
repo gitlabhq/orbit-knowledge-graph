@@ -119,6 +119,6 @@ curl --request POST \
 ## What to try next
 
 - [What GitLab Orbit indexes](../indexed-data.md) - understand coverage before writing queries
-- [Schema reference](schema.md) - explore the 28 node types and their properties
+- [Schema reference](schema.md) - explore the node types and their properties
 - [Cookbook](cookbook.md) - copy-paste queries for common use cases
 - [Get started with GitLab Orbit Local](../local/getting-started.md) - query a local repository offline

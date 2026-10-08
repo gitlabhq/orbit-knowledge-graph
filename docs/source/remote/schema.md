@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Full reference for all 27 GitLab Orbit node types across 6 domains, including properties and their types.
+description: Reference for GitLab Orbit node types by domain, including their key properties.
 title: Schema reference
 ---
 
@@ -26,7 +26,7 @@ title: Schema reference
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit indexes 27 node types across 6 domains. Use these as entity names in your queries.
+GitLab Orbit indexes the node types below, grouped by domain. Use these as entity names in your queries.
 
 To fetch the live schema at any time:
 
@@ -90,6 +90,14 @@ glab orbit ontology
 | `VulnerabilityIdentifier` | CVE, CWE, or other external reference | `id`, `external_type`, `external_id`, `name`, `url` |
 | `VulnerabilityOccurrence` | Specific occurrence of a vulnerability (`Vulnerabilities::Finding` in Rails) | `id`, `uuid`, `severity`, `report_type`, `detection_method`, `cve`, `location` |
 | `VulnerabilityScanner` | Security scanner | `id`, `external_id`, `name`, `vendor` |
+
+## Packages
+
+| Node type | Description | Key properties |
+|-----------|-------------|----------------|
+| `Package` | Package published to the package registry | `id`, `name`, `version`, `package_type`, `status`, `created_at` |
+| `PackageFile` | File in a package, such as a `.tgz`, `.jar`, or `.whl` | `id`, `file_name`, `size`, `file_sha256`, `status` |
+| `Dependency` | Dependency declared by a package | `id`, `name`, `version_pattern` |
 
 ## Notes
 
