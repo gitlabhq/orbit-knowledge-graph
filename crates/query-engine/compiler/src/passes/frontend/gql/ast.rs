@@ -1,7 +1,9 @@
 use pest::Span;
 use serde_json::Value;
 
-use crate::input::{Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit};
+use crate::input::{
+    BooleanExpression, Direction, FilterOp, OrderDirection, PropertyRef, TruncateUnit,
+};
 
 pub(super) enum Statement<'i> {
     Query(Box<Query<'i>>),
@@ -10,7 +12,7 @@ pub(super) enum Statement<'i> {
 
 pub(super) struct Query<'i> {
     pub pattern: Pattern<'i>,
-    pub predicates: Vec<Comparison<'i>>,
+    pub predicates: Vec<BooleanExpression<Comparison<'i>>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
     pub limit: Option<Limit<'i>>,

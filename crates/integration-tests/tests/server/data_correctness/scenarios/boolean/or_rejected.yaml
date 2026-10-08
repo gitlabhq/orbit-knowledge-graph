@@ -1,0 +1,10 @@
+description: GQL rejects OR predicates before query execution
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id = 4000 OR wi.id = 4001
+    RETURN wi.state LIMIT 10
+
+expect:
+  compile_error: "Orbit query syntax"
