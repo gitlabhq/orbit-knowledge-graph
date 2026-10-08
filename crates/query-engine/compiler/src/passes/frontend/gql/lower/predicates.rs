@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::input::{FilterOp, InputFilter, InputIdRange};
+use crate::input::{
+    BooleanExpression, FilterOp, InputFilter, InputIdRange, PredicateTarget, PropertyPredicate,
+};
 use crate::{QueryError, Result};
 use serde_json::Value;
 
@@ -9,6 +11,70 @@ use super::super::invalid;
 use super::Lowering;
 
 impl Lowering {
+    pub(super) fn predicates(
+        &mut self,
+        expression: BooleanExpression<Comparison<'_>>,
+    ) -> Result<()> {
+        match expression {
+            BooleanExpression::And(children) => {
+                for child in children {
+                    self.predicates(child)?;
+                }
+            }
+            BooleanExpression::Leaf(comparison) => self.predicate(comparison)?,
+            expression => {
+                let expression =
+                    expression.try_map(&mut |comparison| self.property_predicate(comparison))?;
+                self.input.predicates.push(expression);
+            }
+        }
+        Ok(())
+    }
+
+    fn property_predicate(&self, comparison: Comparison<'_>) -> Result<PropertyPredicate> {
+        let target = self.predicate_target(&comparison.property.node.value, comparison.span)?;
+        let rhs_column = if let Some(rhs) = comparison.rhs_property {
+            let rhs_target = self.predicate_target(&rhs.node.value, rhs.span)?;
+            if !matches!(
+                (&target, rhs_target),
+                (PredicateTarget::Node(_), PredicateTarget::Node(_))
+            ) {
+                return Err(invalid(
+                    comparison.span,
+                    "property comparisons involving relationships are unsupported",
+                ));
+            }
+            Some((rhs.node.value, rhs.property.value))
+        } else {
+            None
+        };
+        Ok(PropertyPredicate {
+            target,
+            property: comparison.property.property.value,
+            filter: InputFilter {
+                op: Some(comparison.op),
+                value: comparison.value,
+                rhs_column,
+            },
+        })
+    }
+
+    fn predicate_target(&self, alias: &str, span: pest::Span<'_>) -> Result<PredicateTarget> {
+        if self.input.nodes.iter().any(|node| node.id == alias) {
+            Ok(PredicateTarget::Node(alias.into()))
+        } else if let Some(index) = self.edges.get(alias) {
+            if self.input.relationships[*index].hops.max != 1 {
+                return Err(invalid(
+                    span,
+                    "a variable-length relationship binds a list; relationship-list predicates are unsupported",
+                ));
+            }
+            Ok(PredicateTarget::Relationship(*index))
+        } else {
+            Err(invalid(span, &format!("undefined variable {alias}")))
+        }
+    }
+
     pub(super) fn map_filters(
         entries: Vec<MapEntry<'_>>,
         filters: &mut HashMap<String, Vec<InputFilter>>,
@@ -26,91 +92,44 @@ impl Lowering {
     }
 
     pub(super) fn predicate(&mut self, comparison: Comparison<'_>) -> Result<()> {
-        let Comparison {
-            span,
+        let PropertyPredicate {
+            target,
             property,
-            op,
-            value,
-            rhs_property,
-        } = comparison;
-
-        if let Some(rhs) = rhs_property {
-            let lhs_node = property.node.value;
-            let lhs_prop = property.property.value;
-            let rhs_node = rhs.node.value;
-            let rhs_prop = rhs.property.value;
-            let lhs_known = self.input.nodes.iter().any(|n| n.id == lhs_node)
-                || self.edges.contains_key(&lhs_node);
-            let rhs_known = self.input.nodes.iter().any(|n| n.id == rhs_node)
-                || self.edges.contains_key(&rhs_node);
-            if !lhs_known {
-                return Err(invalid(span, &format!("undefined variable {lhs_node}")));
+            filter,
+        } = self.property_predicate(comparison)?;
+        match target {
+            PredicateTarget::Node(alias) => {
+                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
+                    && &alias != rhs_node
+                {
+                    self.input
+                        .join_predicates
+                        .push(crate::input::JoinPredicate {
+                            lhs_node: alias,
+                            lhs_prop: property,
+                            op: filter.op.unwrap_or(FilterOp::Eq),
+                            rhs_node: rhs_node.clone(),
+                            rhs_prop: rhs_prop.clone(),
+                        });
+                } else {
+                    self.input
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.id == alias)
+                        .expect("resolved node")
+                        .filters
+                        .entry(property)
+                        .or_default()
+                        .push(filter);
+                }
             }
-            if !rhs_known {
-                return Err(invalid(span, &format!("undefined variable {rhs_node}")));
-            }
-            if !matches!(
-                op,
-                FilterOp::Eq
-                    | FilterOp::Ne
-                    | FilterOp::Gt
-                    | FilterOp::Lt
-                    | FilterOp::Gte
-                    | FilterOp::Lte
-            ) {
-                return Err(invalid(
-                    span,
-                    "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
-                ));
-            }
-            if lhs_node == rhs_node {
-                self.input
-                    .nodes
-                    .iter_mut()
-                    .find(|n| n.id == lhs_node)
-                    .ok_or_else(|| invalid(span, &format!("undefined variable {lhs_node}")))?
+            PredicateTarget::Relationship(index) => {
+                self.input.relationships[index]
                     .filters
-                    .entry(lhs_prop)
+                    .entry(property)
                     .or_default()
-                    .push(InputFilter {
-                        op: Some(op),
-                        rhs_column: Some((rhs_node, rhs_prop)),
-                        ..Default::default()
-                    });
-            } else {
-                self.input
-                    .join_predicates
-                    .push(crate::input::JoinPredicate {
-                        lhs_node,
-                        lhs_prop,
-                        op,
-                        rhs_node,
-                        rhs_prop,
-                    });
+                    .push(filter);
             }
-            return Ok(());
-        }
-
-        let filter = InputFilter {
-            op: Some(op),
-            value,
-            ..Default::default()
-        };
-        let node = property.node.value;
-        let key = property.property.value;
-        if let Some(node) = self.input.nodes.iter_mut().find(|n| n.id == node) {
-            node.filters.entry(key).or_default().push(filter);
-        } else if let Some(index) = self.edges.get(&node) {
-            let edge = &mut self.input.relationships[*index];
-            if edge.hops.max != 1 {
-                return Err(invalid(
-                    span,
-                    "a variable-length relationship binds a list; relationship-list predicates are unsupported",
-                ));
-            }
-            edge.filters.entry(key).or_default().push(filter);
-        } else {
-            return Err(invalid(span, &format!("undefined variable {node}")));
         }
         Ok(())
     }

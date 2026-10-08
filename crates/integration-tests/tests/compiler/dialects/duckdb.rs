@@ -526,6 +526,105 @@ fn compile_gql(cypher: &str) -> Result<compiler::passes::codegen::CompiledQueryC
 }
 
 #[test]
+fn gql_boolean_predicates_execute_with_nulls_groups_and_cross_aliases() {
+    let ontology = std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap());
+    let compile_query = |query: &str| compile_local(query, Frontend::Gql, &ontology).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        duckdb_client::DuckDbClient::open(&directory.path().join("predicates.duckdb")).unwrap();
+    database.initialize_schema(
+         "CREATE TABLE gl_definition(id BIGINT, name VARCHAR, definition_type VARCHAR, project_id BIGINT DEFAULT 1, traversal_path VARCHAR DEFAULT '1/', _deleted BOOLEAN DEFAULT false, _version BIGINT DEFAULT 1);
+          INSERT INTO gl_definition(id, name, definition_type) VALUES (1, 'alice', 'active'), (2, 'bob', 'blocked'), (3, NULL, 'active'), (4, 'carol', NULL), (10, 'first', 'target'), (20, 'second', 'target');
+         CREATE TABLE gl_edge(source_id BIGINT, source_kind VARCHAR, target_id BIGINT, target_kind VARCHAR, relationship_kind VARCHAR, traversal_path VARCHAR, _deleted BOOLEAN DEFAULT false);
+          INSERT INTO gl_edge(source_id, source_kind, target_id, target_kind, relationship_kind, traversal_path) VALUES (1, 'Definition', 10, 'Definition', 'CALLS', '1/'), (2, 'Definition', 20, 'Definition', 'CALLS', '1/'), (3, 'Definition', 10, 'Definition', 'CALLS', '1/'), (4, 'Definition', 20, 'Definition', 'CALLS', '1/');"
+    ).unwrap();
+    let ids = |query: &str| {
+        let sql = compile_query(query).base.render();
+        let batches = database
+            .query_arrow(&sql)
+            .unwrap_or_else(|error| panic!("{error}: {sql}"));
+        batches
+            .iter()
+            .flat_map(|batch| {
+                let ids = batch.column_by_name("u_id").unwrap();
+                (0..batch.num_rows())
+                    .map(move |row| arrow::util::display::array_value_to_string(ids, row).unwrap())
+            })
+            .collect::<Vec<_>>()
+    };
+    for (predicate, expected) in [
+        ("NOT u.name IN ['alice', 'bob']", vec!["4"]),
+        ("NOT u.name IN ['alice']", vec!["2", "4"]),
+        ("NOT u.name IN []", vec!["1", "2", "3", "4"]),
+        ("u.name IN []", vec![]),
+        (
+            "u.name = 'alice' AND NOT u.definition_type = 'blocked'",
+            vec!["1"],
+        ),
+        (
+            "NOT (u.name = 'alice' AND u.definition_type = 'active')",
+            vec!["2", "4"],
+        ),
+        (
+            "NOT u.name = 'alice' AND u.definition_type = 'active'",
+            vec![],
+        ),
+        (
+            "(u.name = 'bob' AND NOT u.definition_type = 'active')",
+            vec!["2"],
+        ),
+        (
+            "NOT (u.name = 'alice' AND NOT (u.id = 1 AND u.definition_type = 'active'))",
+            vec!["1", "2", "4"],
+        ),
+        (
+            "NOT (u.name IS NOT NULL AND u.definition_type IS NOT NULL)",
+            vec!["3", "4"],
+        ),
+        ("NOT NOT u.name = 'alice'", vec!["1"]),
+        ("NOT u.name CONTAINS 'ali'", vec!["2", "4"]),
+        ("NOT u.name STARTS WITH 'ali'", vec!["2", "4"]),
+        ("NOT u.name ENDS WITH 'rol'", vec!["1", "2"]),
+        ("NOT u.name IS NULL", vec!["1", "2", "4"]),
+        ("NOT u.id >= 3", vec!["1", "2"]),
+        ("NOT u.id IN [1, 2] AND u.id < 4", vec!["3"]),
+    ] {
+        let query = format!(
+            "MATCH (u:Definition) WHERE u.id <= 4 AND ({predicate}) RETURN u.id ORDER BY u.id"
+        );
+        assert_eq!(ids(&query), expected, "{query}");
+    }
+    for (predicate, expected) in [
+        (
+            "NOT (u.name = 'alice' AND p.name = 'first')",
+            vec!["2", "4"],
+        ),
+        (
+            "NOT (u.name IN ['alice'] AND edge.target_id = 10)",
+            vec!["2", "4"],
+        ),
+        (
+            "NOT (u.name = 'alice' AND edge.target_id = 20)",
+            vec!["1", "2", "3", "4"],
+        ),
+    ] {
+        let query = format!(
+            "MATCH (u:Definition)-[edge:CALLS]->(p:Definition) WHERE {predicate} RETURN u.id, p.id ORDER BY u.id"
+        );
+        assert_eq!(ids(&query), expected, "{query}");
+    }
+    let sql = compile_query("MATCH (u:Definition)-[edge:CALLS]->(p:Definition) WHERE NOT (u.name IN ['alice'] AND edge.target_id = 10) RETURN count(u) AS total").base.render();
+    let batches = database
+        .query_arrow(&sql)
+        .unwrap_or_else(|error| panic!("{error}: {sql}"));
+    assert_eq!(
+        arrow::util::display::array_value_to_string(batches[0].column_by_name("total").unwrap(), 0)
+            .unwrap(),
+        "2"
+    );
+}
+
+#[test]
 fn gql_untyped_edge_pattern() {
     let r = compile_gql("MATCH (u:User {id: 1})-[e]->(n:Note) RETURN n.confidential");
     assert!(r.is_ok(), "{}", r.unwrap_err());

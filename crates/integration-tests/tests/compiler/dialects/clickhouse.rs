@@ -1332,7 +1332,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH () RETURN *",
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
-        "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
+        "MATCH (u:User {id: 1}) WHERE u.id = 1 OR u.id = 2 RETURN u",
+        "MATCH (u:User {id: 1}) WHERE NOT (u.id = 1 OR u.id = 2) RETURN u",
         "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
@@ -1457,6 +1458,22 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
+    for predicate in [
+        format!("{}u.id = 1", "NOT ".repeat(33)),
+        std::iter::repeat_n("NOT u.id = 1", 257)
+            .collect::<Vec<_>>()
+            .join(" AND "),
+    ] {
+        let query = format!("MATCH (u:User {{id: 1}}) WHERE {predicate} RETURN u");
+        let error = compiler::compile(
+            &query,
+            compiler::Frontend::Gql,
+            &test_ontology(),
+            &test_ctx(),
+        )
+        .unwrap_err();
+        assert!(error.is_client_safe());
+    }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
     assert!(
         compiler::compile(
@@ -1465,7 +1482,8 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
             &test_ontology(),
             &test_ctx()
         )
-        .is_err()
+        .is_err(),
+        "{query}"
     );
 }
 

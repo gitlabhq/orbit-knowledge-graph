@@ -99,10 +99,22 @@ text, so change nothing else between pages. In raw output, the token is
 `pagination.next_cursor`. Check `pagination.truncated`: when true, the result
 window is incomplete. Do not report the returned rows as a complete list.
 
+## Negation
+
+`NOT` binds before `AND`. Use parentheses to negate a whole group:
+`NOT (callee.name STARTS WITH 'test_' AND callee.name ENDS WITH '_spec')`.
+Use `AND NOT callee.name IN ['debug', 'trace']` to exclude listed names.
+Null values do not pass negated membership in a nonempty list.
+`NOT callee.name IN []` is true, even for null values.
+
+Keep a separate ID or positive filter to bound the scan.
+Negated groups work in traversal and aggregation queries over labeled nodes and single-hop named relationships.
+They cannot reference virtual fields, shortest paths, neighbors, or relationship lists.
+
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
+subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
 
 ## Recipes
@@ -252,7 +264,7 @@ column. Common causes:
 - `-[AUTHORED]->` instead of `-[:AUTHORED]->`. Without the colon the name is a variable.
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
-- Unsupported syntax: `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
+- Unsupported syntax: `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
 - `PAGE ... AFTER` with a cursor from a different query. The cursor binds to the query text.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.
