@@ -50,10 +50,12 @@ orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crate
 ```
 
 Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
-with regex characters match as regex. Each file is one row listing every matching
-line, grouped under its enclosing definition as `Kind name:start-end`, followed by
-`←callers` and `→callees`. Files that define a term come first, then code, tests,
-and config or docs. Read a definition's body with `context file:start-end`.
+with regex characters match as regex. Output is rg's: `path:line:text` for each
+match. The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`,
+`-F`, `-v`, `-g`, `--include`, `-t`. Before the lines of each definition, a
+`path-N-» Kind name:start-end ←callers →callees` line names it. Files that
+define a term come first, then code, tests, and config or docs. Read a
+definition's body with `context file:start-end`.
 
 Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show

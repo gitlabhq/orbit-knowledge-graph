@@ -4,8 +4,6 @@ mod error;
 mod helpers;
 mod params;
 pub mod search;
-#[cfg(feature = "static-fts")]
-mod static_fts;
 
 pub use client::DuckDbClient;
 pub use converter::{DuckDbConverter, LocalGraphData, convert_v2_graph};

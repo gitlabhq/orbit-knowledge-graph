@@ -65,22 +65,88 @@ struct IndexArgs {
 struct GrepArgs {
     #[arg(
         value_name = "QUERY",
-        required_unless_present = "path",
+        required_unless_present_any = ["path", "regexp"],
         help = "One query. Quote 'a|b|c' for OR alternatives; omit with --path to list definitions."
     )]
     query: Option<String>,
+
+    /// A pattern to search for, as with `rg -e`; repeatable. QUERY is then read as a path.
+    #[arg(short = 'e', long, value_name = "PATTERN")]
+    regexp: Vec<String>,
+
+    /// Match each pattern as a literal string, not a regex.
+    #[arg(short = 'F', long)]
+    fixed_strings: bool,
+
+    /// Only match whole words.
+    #[arg(short = 'w', long)]
+    word_regexp: bool,
+
+    /// Print the lines that do not match.
+    #[arg(short = 'v', long)]
+    invert_match: bool,
+
+    /// Print NUM lines after each match.
+    #[arg(short = 'A', long, value_name = "NUM")]
+    after_context: Option<usize>,
+
+    /// Print NUM lines before each match.
+    #[arg(short = 'B', long, value_name = "NUM")]
+    before_context: Option<usize>,
+
+    /// Print NUM lines before and after each match; `-NUM` works too.
+    #[arg(short = 'C', long = "context", value_name = "NUM")]
+    context_lines: Option<usize>,
+
+    /// Stop after NUM matching lines in each file.
+    #[arg(short = 'm', long, value_name = "NUM")]
+    max_count: Option<u64>,
+
+    /// Print only the paths of files with matches.
+    #[arg(short = 'l', long)]
+    files_with_matches: bool,
+
+    /// Print each matching file with its number of matching lines.
+    #[arg(short = 'c', long)]
+    count: bool,
+
+    /// Print nothing; exit 0 when something matches and 1 otherwise.
+    #[arg(short = 'q', long)]
+    quiet: bool,
+
+    /// Search only files matching GLOB, or skip them with a leading `!`, as with `rg -g`;
+    /// repeatable.
+    #[arg(short = 'g', long, value_name = "GLOB")]
+    glob: Vec<String>,
+
+    /// Search only files whose name matches GLOB, as with `grep --include`; repeatable.
+    #[arg(long, value_name = "GLOB")]
+    include: Vec<String>,
+
+    /// Skip files whose name matches GLOB, as with `grep --exclude`; repeatable.
+    #[arg(long, value_name = "GLOB")]
+    exclude: Vec<String>,
+
+    /// Skip directories named DIR, as with `grep --exclude-dir`; repeatable.
+    #[arg(long, value_name = "DIR")]
+    exclude_dir: Vec<String>,
+
+    /// Search only files of TYPE, such as `rust` or `py`, as with `rg -t`; repeatable.
+    #[arg(short = 't', long = "type", value_name = "TYPE")]
+    file_type: Vec<String>,
+
+    /// Skip files of TYPE, as with `rg -T`; repeatable.
+    #[arg(short = 'T', long, value_name = "TYPE")]
+    type_not: Vec<String>,
 
     /// Repository path (default: current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
 
-    #[arg(
-        long,
-        default_value = "10",
-        value_parser = parse_positive_usize,
-        help = "Maximum matched definitions across all alternatives"
-    )]
-    limit: usize,
+    /// Print `[Omitted long line]` in place of lines longer than NUM bytes, as with `rg -M`
+    /// (default: print every line in full).
+    #[arg(short = 'M', long, value_name = "NUM")]
+    max_columns: Option<usize>,
 
     /// Only search definitions under this repo-relative directory or file
     /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
@@ -107,14 +173,156 @@ const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
 
-fn parse_positive_usize(value: &str) -> Result<usize, String> {
-    let value = value
-        .parse::<usize>()
-        .map_err(|_| "expected a positive integer".to_string())?;
-    if value == 0 {
-        return Err("expected a positive integer".to_string());
+fn run_grep(args: GrepArgs) -> Result<()> {
+    use commands::grep::{Options, Output};
+    let mut paths = args.path;
+    let query = match args.regexp.is_empty() {
+        true => args.query,
+        false => {
+            paths.extend(args.query);
+            Some(args.regexp.join("|"))
+        }
+    };
+    paths.extend(args.paths);
+    let globs = args
+        .glob
+        .into_iter()
+        .chain(args.include)
+        .chain(args.exclude.into_iter().map(|glob| format!("!{glob}")))
+        .chain(
+            args.exclude_dir
+                .into_iter()
+                .map(|dir| format!("!{}/", dir.trim_end_matches('/'))),
+        )
+        .collect();
+    let around = args.context_lines.unwrap_or(0);
+    let options = Options {
+        fixed: args.fixed_strings,
+        word: args.word_regexp,
+        invert: args.invert_match,
+        before: args.before_context.unwrap_or(around),
+        after: args.after_context.unwrap_or(around),
+        max_count: args.max_count,
+        globs,
+        types: args.file_type,
+        types_not: args.type_not,
+        max_columns: args.max_columns,
+        output: match (args.quiet, args.files_with_matches, args.count) {
+            (true, _, _) => Output::Quiet,
+            (_, true, _) => Output::Files,
+            (_, _, true) => Output::Count,
+            _ => Output::Lines,
+        },
+    };
+    commands::grep::run(
+        query,
+        args.repo,
+        args.db,
+        paths,
+        orbit_search::RecallFilter {
+            kinds: kind_names(args.kind),
+        },
+        options,
+    )
+}
+
+/// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
+/// case, skipping binaries, regex syntax, file names, and quiet errors.
+const GREP_NOOP_SHORTS: &str = "nrRiIEPHhsS";
+const GREP_NOOP_LONGS: &[&str] = &[
+    "binary-files",
+    "color",
+    "colour",
+    "dereference-recursive",
+    "extended-regexp",
+    "heading",
+    "ignore-case",
+    "line-number",
+    "no-filename",
+    "no-heading",
+    "no-messages",
+    "perl-regexp",
+    "recursive",
+    "smart-case",
+    "with-filename",
+];
+
+/// Lets `orbit grep` take rg and grep invocations as agents write them, so a stray flag costs no
+/// turn: flags it already behaves as are dropped, unsupported ones are dropped with a warning,
+/// and `-NUM` means `-C NUM`.
+fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    if args.get(1).and_then(|arg| arg.to_str()) != Some("grep") {
+        return args;
     }
-    Ok(value)
+    let command = Cli::command();
+    let Some(grep) = command.find_subcommand("grep") else {
+        return args;
+    };
+    let short = |c: char| grep.get_arguments().find(|arg| arg.get_short() == Some(c));
+    let long = |name: &str| {
+        grep.get_arguments()
+            .find(|arg| arg.get_long() == Some(name))
+    };
+    let takes_value = |arg: &clap::Arg| arg.get_action().takes_values();
+    let mut out = args[..2].to_vec();
+    let mut rest = args.into_iter().skip(2);
+    while let Some(arg) = rest.next() {
+        let Some(text) = arg.to_str().map(str::to_string) else {
+            out.push(arg);
+            continue;
+        };
+        if text == "--" {
+            out.push(arg);
+            out.extend(rest);
+            break;
+        }
+        if let Some(body) = text.strip_prefix("--") {
+            let name = body.split('=').next().unwrap_or(body);
+            match long(name) {
+                Some(found) => {
+                    let value_next = takes_value(found) && !body.contains('=');
+                    out.push(arg);
+                    if value_next {
+                        out.extend(rest.next());
+                    }
+                }
+                None if name == "help" => out.push(arg),
+                None if GREP_NOOP_LONGS.contains(&name) => {}
+                None => eprintln!("orbit grep: ignoring unsupported flag --{name}"),
+            }
+            continue;
+        }
+        let Some(cluster) = text.strip_prefix('-').filter(|c| !c.is_empty()) else {
+            out.push(arg);
+            continue;
+        };
+        if cluster.chars().all(|c| c.is_ascii_digit()) {
+            out.extend(["-C".into(), cluster.into()]);
+            continue;
+        }
+        let (mut kept, mut value_next) = (String::new(), false);
+        for (at, c) in cluster.char_indices() {
+            match short(c) {
+                Some(found) if takes_value(found) => {
+                    let value = &cluster[at + c.len_utf8()..];
+                    kept.push(c);
+                    kept.push_str(value);
+                    value_next = value.is_empty();
+                    break;
+                }
+                Some(_) => kept.push(c),
+                None if GREP_NOOP_SHORTS.contains(c) => {}
+                None => eprintln!("orbit grep: ignoring unsupported flag -{c}"),
+            }
+        }
+        if !kept.is_empty() {
+            out.push(format!("-{kept}").into());
+        }
+        if value_next {
+            out.extend(rest.next());
+        }
+    }
+    out
 }
 
 fn parse_kinds(value: &str) -> Result<Kinds, String> {
@@ -341,7 +549,7 @@ enum Commands {
     /// Print the version string and exit.
     Version,
     Index(IndexArgs),
-    Grep(GrepArgs),
+    Grep(Box<GrepArgs>),
     Context(ContextArgs),
     Sql(SqlArgs),
     Schema(SchemaArgs),
@@ -489,8 +697,18 @@ enum McpCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let matches = Cli::command().get_matches();
+    let matches = match Cli::command()
+        .try_get_matches_from(tolerate_grep_flags(std::env::args_os().collect()))
+    {
+        Ok(matches) => matches,
+        Err(_) if std::env::args().any(|arg| arg == "hook-guard") => return Ok(()),
+        Err(error) => error.exit(),
+    };
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
+    if let Commands::HookGuard { kind, .. } = &cli.command {
+        commands::hook_guard::run(*kind);
+        return Ok(());
+    }
 
     let coding_agent = telemetry::detect_coding_agent(|key| std::env::var(key).ok());
 
@@ -525,6 +743,7 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
     } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
+    } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
     }
@@ -583,27 +802,7 @@ async fn dispatch(
             verbose,
             db,
         }) => commands::index::run(path, threads, stats, verbose, db),
-        Commands::Grep(GrepArgs {
-            query,
-            repo,
-            limit,
-            mut path,
-            paths,
-            kind,
-            db,
-        }) => commands::grep::run(
-            query,
-            repo,
-            db,
-            limit,
-            {
-                path.extend(paths);
-                path
-            },
-            orbit_search::RecallFilter {
-                kinds: kind_names(kind),
-            },
-        ),
+        Commands::Grep(args) => run_grep(*args),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
             query,
@@ -783,7 +982,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs, tolerate_grep_flags};
     use clap::{CommandFactory, Parser};
 
     #[test]
@@ -898,10 +1097,10 @@ mod tests {
         );
 
         assert!(matches!(
-            Cli::parse_from(["orbit", "grep", "who calls this", "--limit", "5"]).command,
+            Cli::parse_from(["orbit", "grep", "who calls this"]).command,
             Commands::Grep(_)
         ));
-        assert!(Cli::try_parse_from(["orbit", "grep", "App", "--limit", "0"]).is_err());
+        assert!(Cli::try_parse_from(["orbit", "grep", "App", "--limit", "5"]).is_err());
         assert!(matches!(
             Cli::parse_from(["orbit", "sql", "SELECT 1"]).command,
             Commands::Sql(_)
@@ -1051,6 +1250,43 @@ mod tests {
                 "{removed}"
             );
         }
+    }
+
+    #[test]
+    fn grep_takes_rg_and_grep_flags_as_agents_write_them() {
+        let parse = |line: &str| {
+            let args = line.split_whitespace().map(Into::into).collect();
+            match Cli::try_parse_from(tolerate_grep_flags(args))
+                .unwrap()
+                .command
+            {
+                Commands::Grep(args) => *args,
+                _ => unreachable!(),
+            }
+        };
+        let args = parse("orbit grep -rnI -i --color=never -o foo src");
+        assert_eq!(
+            (args.query.as_deref(), args.paths.as_slice()),
+            (Some("foo"), ["src".to_string()].as_slice())
+        );
+        let args = parse("orbit grep -nA3 -B 2 -5 -w foo");
+        assert_eq!(
+            (args.after_context, args.before_context, args.context_lines),
+            (Some(3), Some(2), Some(5))
+        );
+        assert!(args.word_regexp);
+        let args =
+            parse("orbit grep -e foo -e bar src --include=*.rs --exclude-dir node_modules -l");
+        assert_eq!(args.regexp, ["foo", "bar"]);
+        assert_eq!(args.query.as_deref(), Some("src"));
+        assert_eq!(
+            (args.include, args.exclude_dir),
+            (vec!["*.rs".to_string()], vec!["node_modules".to_string()])
+        );
+        assert!(args.files_with_matches);
+        assert_eq!(parse("orbit grep -- -foo").query.as_deref(), Some("-foo"));
+        let other: Vec<std::ffi::OsString> = ["orbit", "sql", "-o"].map(Into::into).to_vec();
+        assert_eq!(tolerate_grep_flags(other.clone()), other);
     }
 
     #[test]

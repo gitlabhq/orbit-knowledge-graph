@@ -25,7 +25,7 @@ const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.s
 
 /// Per-file byte cap for local indexing; files above it are recorded as nodes
 /// but not loaded or parsed.
-pub(crate) const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
 #[derive(Serialize)]
 pub(crate) struct IndexOutput {
@@ -706,16 +706,6 @@ fn index_repo(
 
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
-    let doc_table = duckdb_client::search::def_doc_table(git.project_id);
-    client
-        .execute(
-            &duckdb_client::search::def_doc_sql(&doc_table, ontology)?,
-            &[
-                serde_json::json!(git.project_id),
-                serde_json::json!(git.commit_sha),
-            ],
-        )
-        .context("failed to build the search documents")?;
     workspace::set_status(
         &client,
         &key,
@@ -768,15 +758,6 @@ fn clear_project(
     client
         .delete_project(git.project_id, &node_tables, edge_table)
         .context("failed to clear existing project data")?;
-    client
-        .execute(
-            &format!(
-                "DROP TABLE IF EXISTS {}",
-                duckdb_client::search::def_doc_table(git.project_id)
-            ),
-            &[],
-        )
-        .context("failed to clear existing search index")?;
     Ok(())
 }
 

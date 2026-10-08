@@ -1,13 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use std::path::Path;
 use std::sync::Mutex;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use duckdb_client::search::NodeHydrator;
 use duckdb_client::{DuckDbClient, i64_column, sql_lit, string_column};
-use grep_regex::RegexMatcherBuilder;
-use grep_searcher::{BinaryDetection, SearcherBuilder, sinks};
+use grep_matcher::Matcher;
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
+use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkMatch};
+
+use super::{Options, Output};
 
 use crate::workspace::GitInfo;
 
@@ -36,6 +39,8 @@ pub(super) struct Hit {
     pub(super) line: usize,
     pub(super) text: String,
     pub(super) def: Option<Def>,
+    /// A `-A`/`-B`/`-C` line around a match rather than a match.
+    pub(super) context: bool,
 }
 
 pub(super) struct Term {
@@ -83,13 +88,6 @@ impl Term {
         }
     }
 
-    fn matches(&self, text: &str) -> bool {
-        match &self.regex {
-            Some((line, _)) => line.is_match(text),
-            None => compact(text).contains(&compact(&self.raw)),
-        }
-    }
-
     fn names(&self, name: &str) -> bool {
         match &self.regex {
             Some((_, whole)) => whole.is_match(name),
@@ -105,10 +103,9 @@ fn compact(text: &str) -> String {
         .collect()
 }
 
-const LINE_TEXT_CHARS: usize = 400;
 const DEF_FILES_PER_QUERY: usize = 500;
 
-pub(super) fn matcher(alternatives: &[Term]) -> Result<grep_regex::RegexMatcher> {
+pub(super) fn matcher(alternatives: &[Term], options: &Options) -> Result<RegexMatcher> {
     let pattern = alternatives
         .iter()
         .map(|term| format!("(?:{})", term.pattern()))
@@ -116,20 +113,57 @@ pub(super) fn matcher(alternatives: &[Term]) -> Result<grep_regex::RegexMatcher>
         .join("|");
     Ok(RegexMatcherBuilder::new()
         .case_insensitive(true)
+        .word(options.word)
         .line_terminator(Some(b'\n'))
         .build(&pattern)?)
+}
+
+/// Collects one file's matches and `-A`/`-B`/`-C` context lines, stopping after `-m` matches.
+struct Collect<'a> {
+    file: &'a str,
+    hits: Vec<Hit>,
+    max_count: Option<u64>,
+    matched: u64,
+}
+
+impl Collect<'_> {
+    fn push(&mut self, line: Option<u64>, bytes: &[u8], context: bool) {
+        self.hits.push(Hit {
+            file: self.file.to_string(),
+            line: line.unwrap_or(0) as usize,
+            text: String::from_utf8_lossy(bytes)
+                .trim_end_matches(['\n', '\r'])
+                .to_string(),
+            def: None,
+            context,
+        });
+    }
+}
+
+impl Sink for Collect<'_> {
+    type Error = std::io::Error;
+
+    fn matched(&mut self, _: &Searcher, found: &SinkMatch<'_>) -> std::io::Result<bool> {
+        self.push(found.line_number(), found.bytes(), false);
+        self.matched += 1;
+        Ok(self.max_count.is_none_or(|max| self.matched < max))
+    }
+
+    fn context(&mut self, _: &Searcher, around: &SinkContext<'_>) -> std::io::Result<bool> {
+        self.push(around.line_number(), around.bytes(), true);
+        Ok(true)
+    }
 }
 
 pub(super) fn scan(
     repo: &Path,
     paths: &[String],
-    matcher: &grep_regex::RegexMatcher,
+    matcher: &RegexMatcher,
+    options: &Options,
 ) -> Result<Vec<Hit>> {
-    let globbed = paths.iter().any(|p| p.contains(['*', '?', '[']));
-    let roots: Vec<std::path::PathBuf> = match paths.is_empty() || globbed {
-        true => vec![repo.to_path_buf()],
-        false => paths.iter().map(|p| repo.join(p)).collect(),
-    };
+    let scope = Scope::new(repo, paths)?;
+    let scope = &scope;
+    let roots = scope.roots(repo);
     let mut walk = ignore::WalkBuilder::new(&roots[0]);
     for root in &roots[1..] {
         walk.add(root);
@@ -137,13 +171,34 @@ pub(super) fn scan(
     walk.hidden(false)
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git");
-    let scope = Scope::new(paths);
-    let scope = &scope;
+    if !options.globs.is_empty() {
+        let mut globs = ignore::overrides::OverrideBuilder::new(repo);
+        for glob in &options.globs {
+            globs
+                .add(glob)
+                .with_context(|| format!("invalid glob {glob:?}"))?;
+        }
+        walk.overrides(globs.build()?);
+    }
+    if !options.types.is_empty() || !options.types_not.is_empty() {
+        let mut types = ignore::types::TypesBuilder::new();
+        types.add_defaults();
+        for name in &options.types {
+            types.select(name);
+        }
+        for name in &options.types_not {
+            types.negate(name);
+        }
+        walk.types(types.build()?);
+    }
     let found = Mutex::new(Vec::new());
     walk.build_parallel().run(|| {
         let mut searcher = SearcherBuilder::new()
             .binary_detection(BinaryDetection::quit(0))
             .line_number(true)
+            .invert_match(options.invert)
+            .before_context(options.before)
+            .after_context(options.after)
             .build();
         let found = &found;
         Box::new(move |entry| {
@@ -157,25 +212,18 @@ pub(super) fn scan(
                 return ignore::WalkState::Continue;
             };
             let file = relative.to_string_lossy().replace('\\', "/");
-            if globbed && !scope.contains(&file) {
+            if !scope.contains(&file) {
                 return ignore::WalkState::Continue;
             }
-            let mut local = Vec::new();
-            let _ = searcher.search_path(
-                matcher,
-                entry.path(),
-                sinks::Lossy(|line, text| {
-                    local.push(Hit {
-                        file: file.clone(),
-                        line: line as usize,
-                        text: text.trim().chars().take(LINE_TEXT_CHARS).collect(),
-                        def: None,
-                    });
-                    Ok(true)
-                }),
-            );
-            if !local.is_empty() {
-                found.lock().unwrap().extend(local);
+            let mut sink = Collect {
+                file: &file,
+                hits: Vec::new(),
+                max_count: options.max_count,
+                matched: 0,
+            };
+            let _ = searcher.search_path(matcher, entry.path(), &mut sink);
+            if sink.matched > 0 {
+                found.lock().unwrap().extend(sink.hits);
             }
             ignore::WalkState::Continue
         })
@@ -183,39 +231,76 @@ pub(super) fn scan(
     Ok(found.into_inner().unwrap())
 }
 
-/// `--path` scopes compiled once for the walk: globs into one set, the rest as path prefixes.
+/// `--path` scopes compiled once for the walk. Paths that exist are literal, even with glob
+/// characters such as `app/[slug]`; the rest are globs over files and directories.
 struct Scope {
-    globs: globset::GlobSet,
+    globs: Option<globset::GlobSet>,
     prefixes: Vec<String>,
 }
 
 impl Scope {
-    fn new(paths: &[String]) -> Self {
+    fn new(repo: &Path, paths: &[String]) -> Result<Self> {
+        let root = dunce::canonicalize(repo)?;
         let mut globs = globset::GlobSetBuilder::new();
-        let mut prefixes = Vec::new();
-        for scope in paths.iter().map(|p| p.trim_end_matches('/')) {
-            match scope.contains(['*', '?', '[']) {
-                true => {
-                    if let Ok(glob) = globset::Glob::new(scope) {
-                        globs.add(glob);
+        let (mut globbed, mut prefixes, mut missing, mut outside) =
+            (false, Vec::new(), Vec::new(), Vec::new());
+        for path in paths.iter().map(|p| p.trim_end_matches('/')) {
+            match dunce::canonicalize(repo.join(path)) {
+                Ok(full) if full.starts_with(&root) => prefixes.push(path.to_string()),
+                Ok(_) => outside.push(path),
+                Err(_) if path.contains(['*', '?', '[']) => {
+                    for pattern in [path.to_string(), format!("{path}/**")] {
+                        globs.add(
+                            globset::Glob::new(&pattern)
+                                .with_context(|| format!("invalid path glob {path:?}"))?,
+                        );
                     }
+                    globbed = true;
                 }
-                false => prefixes.push(scope.to_string()),
+                Err(_) => missing.push(path),
             }
         }
-        Self {
-            globs: globs.build().unwrap_or_else(|_| globset::GlobSet::empty()),
+        anyhow::ensure!(
+            outside.is_empty(),
+            "paths outside the repository: {}",
+            outside.join(", ")
+        );
+        anyhow::ensure!(
+            missing.is_empty(),
+            "no such path in the repository: {}",
+            missing.join(", ")
+        );
+        Ok(Self {
+            globs: globbed.then(|| globs.build()).transpose()?,
             prefixes,
+        })
+    }
+
+    fn roots(&self, repo: &Path) -> Vec<std::path::PathBuf> {
+        if self.globs.is_some() || self.prefixes.is_empty() {
+            return vec![repo.to_path_buf()];
         }
+        let mut sorted = self.prefixes.clone();
+        sorted.sort();
+        let mut kept: Vec<String> = Vec::new();
+        for path in sorted {
+            if !kept.iter().any(|outer| within(&path, outer)) {
+                kept.push(path);
+            }
+        }
+        kept.iter().map(|path| repo.join(path)).collect()
     }
 
     fn contains(&self, path: &str) -> bool {
-        self.globs.is_match(path)
-            || self.prefixes.iter().any(|scope| {
-                path.strip_prefix(scope.as_str())
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-            })
+        self.globs.as_ref().is_none_or(|globs| {
+            globs.is_match(path) || self.prefixes.iter().any(|scope| within(path, scope))
+        })
     }
+}
+
+fn within(path: &str, scope: &str) -> bool {
+    path.strip_prefix(scope)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 struct Candidate {
@@ -230,9 +315,14 @@ pub(super) fn attach_definitions(
     hits: &mut Vec<Hit>,
     alternatives: &[Term],
     kinds: &[String],
+    edited: &BTreeSet<String>,
 ) -> Result<()> {
     let node = NodeHydrator::embedded("Definition")?;
-    let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
+    let mut files: Vec<&str> = hits
+        .iter()
+        .map(|h| h.file.as_str())
+        .filter(|file| !edited.contains(*file))
+        .collect();
     files.dedup();
     let mut by_file: HashMap<String, Vec<Candidate>> = HashMap::new();
     for chunk in files.chunks(DEF_FILES_PER_QUERY) {
@@ -303,10 +393,17 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
                     )
                 })
         });
-        let keep = wanted.is_empty() || best.is_some_and(|c| wanted.contains(&c.kind));
+        let keep =
+            hit.context || wanted.is_empty() || best.is_some_and(|c| wanted.contains(&c.kind));
         hit.def = best.map(|c| c.def.clone());
         keep
     });
+    let matched: std::collections::HashSet<String> = hits
+        .iter()
+        .filter(|hit| !hit.context)
+        .map(|hit| hit.file.clone())
+        .collect();
+    hits.retain(|hit| matched.contains(&hit.file));
     Ok(())
 }
 
@@ -448,71 +545,6 @@ fn defining_rank(hit: &Hit, alternatives: &[Term]) -> u8 {
     }
 }
 
-const SEP: &str = " │ ";
-const FULL_LINES: usize = 3;
-const LINE_CHARS: usize = 160;
-
-fn located(lines: &[&Hit]) -> String {
-    let mut parts: Vec<String> = lines
-        .iter()
-        .take(FULL_LINES)
-        .map(|h| match h.text.chars().count() > LINE_CHARS {
-            true => format!(
-                ":{} {}…",
-                h.line,
-                h.text.chars().take(LINE_CHARS).collect::<String>()
-            ),
-            false => format!(":{} {}", h.line, h.text),
-        })
-        .collect();
-    let rest: Vec<usize> = lines.iter().skip(FULL_LINES).map(|h| h.line).collect();
-    if !rest.is_empty() {
-        parts.push(runs(&rest));
-    }
-    parts.join(SEP)
-}
-
-fn runs(lines: &[usize]) -> String {
-    let mut parts = Vec::new();
-    let mut index = 0;
-    while index < lines.len() {
-        let mut end = index;
-        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
-            end += 1;
-        }
-        parts.push(match end > index {
-            true => format!(":{}-{}", lines[index], lines[end]),
-            false => format!(":{}", lines[index]),
-        });
-        index = end + 1;
-    }
-    parts.join(" ")
-}
-
-fn code_row(hits: &[&Hit], connections: &Connections) -> String {
-    let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
-    for hit in hits {
-        match groups.last_mut() {
-            Some((def, list)) if *def == hit.def.as_ref() => list.push(hit),
-            _ => groups.push((hit.def.as_ref(), vec![hit])),
-        }
-    }
-    groups
-        .iter()
-        .map(|(def, list)| {
-            let label = def.map(|d| {
-                let span = match d.end > d.start {
-                    true => format!("{} {}:{}-{} ", d.kind, d.name, d.start, d.end),
-                    false => format!("{} {} ", d.kind, d.name),
-                };
-                span + &connection_label(d, connections)
-            });
-            format!("{}{}", label.unwrap_or_default(), located(list))
-        })
-        .collect::<Vec<_>>()
-        .join(SEP)
-}
-
 fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>)>, usize, usize) {
     let mut templates: HashMap<String, Vec<usize>> = HashMap::new();
     for (index, (file, _)) in files.iter().enumerate() {
@@ -586,8 +618,15 @@ fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>
     (rows, merged_files, merged_lines)
 }
 
-pub(super) fn render(hits: &[Hit], alternatives: &[Term], connections: &Connections) -> String {
-    let mut files: Vec<(String, Vec<&Hit>)> = Vec::new();
+/// Graph context rides on rg's context-line form (`path-N-`), so every line keeps its path.
+const NOTE: &str = "» ";
+
+type Row<'a> = (String, Vec<&'a Hit>);
+
+/// Files in reading order: defining code first, then other code, tests, and text files, each
+/// group by match count.
+fn ranked<'a>(hits: &'a [Hit], alternatives: &[Term], collapse: bool) -> Vec<Row<'a>> {
+    let mut files: Vec<Row<'a>> = Vec::new();
     for hit in hits {
         match files.last_mut() {
             Some((file, list)) if *file == hit.file => list.push(hit),
@@ -595,47 +634,128 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term], connections: &Connecti
         }
     }
     let (code, text): (Vec<_>, Vec<_>) = files.into_iter().partition(|(file, _)| is_code(file));
-    let (text, _, merged_lines) = collapse_variants(text);
-    let mut rows: Vec<(u8, usize, String)> = code
-        .iter()
+    let text = match collapse {
+        true => collapse_variants(text).0,
+        false => text,
+    };
+    let matches = |list: &[&Hit]| list.iter().filter(|h| !h.context).count();
+    let mut rows: Vec<(u8, usize, Row<'a>)> = code
+        .into_iter()
         .map(|(file, list)| {
             let best = list
                 .iter()
+                .filter(|h| !h.context)
                 .map(|h| defining_rank(h, alternatives))
                 .min()
                 .unwrap_or(2);
-            let class = if is_test(file) { 3 } else { best };
-            (
-                class,
-                list.len(),
-                format!("  {file}{SEP}{}", code_row(list, connections)),
-            )
+            let class = if is_test(&file) { 3 } else { best };
+            (class, matches(&list), (file, list))
         })
-        .chain(text.iter().map(|(file, list)| {
-            let class = if is_test(file) { 5 } else { 4 };
-            (class, list.len(), format!("  {file}{SEP}{}", located(list)))
+        .chain(text.into_iter().map(|(file, list)| {
+            let class = if is_test(&file) { 5 } else { 4 };
+            (class, matches(&list), (file, list))
         }))
         .collect();
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    rows.into_iter().map(|(_, _, row)| row).collect()
+}
+
+fn definition_note(def: &Def, connections: &Connections) -> String {
+    let span = match def.end > def.start {
+        true => format!("{} {}:{}-{}", def.kind, def.name, def.start, def.end),
+        false => format!("{} {}", def.kind, def.name),
+    };
+    format!("{span} {}", connection_label(def, connections))
+        .trim_end()
+        .to_string()
+}
+
+pub(super) fn render(
+    header: &str,
+    hits: &[Hit],
+    alternatives: &[Term],
+    connections: &Connections,
+    edited: &BTreeSet<String>,
+    options: &Options,
+) -> Result<String> {
+    let rows = ranked(hits, alternatives, options.output == Output::Lines);
     let mut out = String::new();
-    let missing: Vec<&str> = alternatives
-        .iter()
-        .filter(|a| !hits.iter().any(|h| a.matches(&h.text)))
-        .map(|a| a.raw.as_str())
-        .collect();
-    if !missing.is_empty() {
-        out.push_str(&format!("No matches: {}\n", missing.join(" | ")));
+    let matched = |list: &[&Hit]| list.iter().filter(|h| !h.context).count();
+    match options.output {
+        Output::Quiet => return Ok(out),
+        Output::Files => {
+            for (file, _) in &rows {
+                out.push_str(&format!("{file}\n"));
+            }
+            return Ok(out);
+        }
+        Output::Count => {
+            for (file, list) in &rows {
+                out.push_str(&format!("{file}:{}\n", matched(list)));
+            }
+            return Ok(out);
+        }
+        Output::Lines => {}
     }
+    let shown: Vec<&Hit> = rows
+        .iter()
+        .flat_map(|(_, list)| list.iter().copied())
+        .filter(|h| !h.context)
+        .collect();
+    let per_term = match alternatives.len() > 1 && !shown.is_empty() && !options.invert {
+        true => {
+            let counts = alternatives
+                .iter()
+                .map(|term| {
+                    let only = matcher(std::slice::from_ref(term), options)?;
+                    let lines = shown
+                        .iter()
+                        .filter(|h| only.is_match(h.text.as_bytes()).unwrap_or(false))
+                        .count();
+                    Ok(format!("{} {lines}", term.raw))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            format!(" ({})", counts.join(", "))
+        }
+        false => String::new(),
+    };
     out.push_str(&format!(
-        "{} lines in {} files\n",
-        hits.len() - merged_lines,
+        "{header}: {} lines in {} files{per_term}\n",
+        shown.len(),
         rows.len()
     ));
-    for (_, _, row) in rows {
-        out.push_str(&row);
-        out.push('\n');
+    let separated = options.before > 0 || options.after > 0;
+    let mut previous: Option<(&str, usize)> = None;
+    for (file, list) in &rows {
+        let mut current: Option<&Def> = None;
+        for (index, hit) in list.iter().enumerate() {
+            if separated && previous.is_some_and(|(f, l)| f != hit.file || hit.line != l + 1) {
+                out.push_str("--\n");
+            }
+            previous = Some((&hit.file, hit.line));
+            if index == 0 && edited.contains(&hit.file) {
+                out.push_str(&format!(
+                    "{file}-{}-{NOTE}edited since index; definitions not shown\n",
+                    hit.line
+                ));
+            }
+            if let Some(def) = hit.def.as_ref().filter(|def| current != Some(*def)) {
+                out.push_str(&format!(
+                    "{file}-{}-{NOTE}{}\n",
+                    def.start,
+                    definition_note(def, connections)
+                ));
+            }
+            current = hit.def.as_ref();
+            let text = match options.max_columns.is_some_and(|max| hit.text.len() > max) {
+                true => "[Omitted long line]",
+                false => hit.text.as_str(),
+            };
+            let sep = if hit.context { '-' } else { ':' };
+            out.push_str(&format!("{file}{sep}{}{sep}{text}\n", hit.line));
+        }
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -654,11 +774,24 @@ mod tests {
                 id: start as i64,
                 kind: "Function".into(),
             }),
+            context: false,
         }
     }
 
+    fn show(hits: &[Hit], terms: &[Term], options: &Options) -> String {
+        render(
+            "grep",
+            hits,
+            terms,
+            &Connections::new(),
+            &BTreeSet::new(),
+            options,
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn every_hit_is_listed_with_definitions_first_and_no_counts_hidden() {
+    fn lines_print_like_rg_with_definitions_noted_and_defining_files_first() {
         let terms = vec![Term::parse("maintenanceMode"), Term::parse("nosuchxyz")];
         let mut hits = vec![
             hit(
@@ -676,7 +809,7 @@ mod tests {
             hit(
                 "src/middleware/maintenance.js",
                 11,
-                "if (!meta.config.maintenanceMode) {",
+                "    if (!meta.config.maintenanceMode) {",
                 Some(("default", 9, 41)),
             ),
             hit(
@@ -686,7 +819,7 @@ mod tests {
                 Some(("describe", 1201, 1230)),
             ),
         ];
-        for line in 26..=37 {
+        for line in 26..=27 {
             hits.push(hit(
                 "src/routes/feeds.js",
                 line,
@@ -695,27 +828,123 @@ mod tests {
             ));
         }
         hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-        let out = render(&hits, &terms, &Connections::new());
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(lines[0], "No matches: nosuchxyz");
-        assert_eq!(lines[1], "16 lines in 4 files");
+        let out = show(&hits, &terms, &Options::default());
+        assert_eq!(
+            out,
+            "grep: 6 lines in 4 files (maintenanceMode 6, nosuchxyz 0)
+src/middleware/maintenance.js-9-» Function default:9-41
+src/middleware/maintenance.js:10:middleware.maintenanceMode = helpers.try(
+src/middleware/maintenance.js:11:    if (!meta.config.maintenanceMode) {
+src/routes/feeds.js-25-» Function default:25-38
+src/routes/feeds.js:26:app.get('/x', middleware.maintenanceMode, y);
+src/routes/feeds.js:27:app.get('/x', middleware.maintenanceMode, y);
+test/controllers.js-1201-» Function describe:1201-1230
+test/controllers.js:1203:meta.config.maintenanceMode = 1;
+install/data/defaults.json:130:\"maintenanceMode\": 0,
+"
+        );
+        let files = Options {
+            output: Output::Files,
+            ..Options::default()
+        };
+        assert_eq!(
+            show(&hits, &terms, &files),
+            "src/middleware/maintenance.js\nsrc/routes/feeds.js\ntest/controllers.js\ninstall/data/defaults.json\n"
+        );
+        let count = Options {
+            output: Output::Count,
+            ..Options::default()
+        };
         assert!(
-            lines[2].starts_with("  src/middleware/maintenance.js │ Function default:9-41 :10 "),
+            show(&hits, &terms, &count)
+                .starts_with("src/middleware/maintenance.js:2\nsrc/routes/feeds.js:2\n")
+        );
+        let quiet = Options {
+            output: Output::Quiet,
+            ..Options::default()
+        };
+        assert_eq!(show(&hits, &terms, &quiet), "");
+    }
+
+    #[test]
+    fn context_lines_use_dashes_and_groups_are_separated() {
+        let mut around = hit("src/a.rs", 2, "let x = 1;", Some(("run", 1, 9)));
+        around.context = true;
+        let hits = vec![
+            around,
+            hit("src/a.rs", 3, "go();", Some(("run", 1, 9))),
+            hit("src/a.rs", 8, "go();", Some(("run", 1, 9))),
+        ];
+        let options = Options {
+            before: 1,
+            ..Options::default()
+        };
+        assert_eq!(
+            show(&hits, &[Term::parse("go")], &options),
+            "grep: 2 lines in 1 files
+src/a.rs-1-» Function run:1-9
+src/a.rs-2-let x = 1;
+src/a.rs:3:go();
+--
+src/a.rs:8:go();
+"
+        );
+    }
+
+    #[test]
+    fn edited_code_files_are_noted_without_definitions() {
+        let hits = vec![
+            hit("src/a.rs", 3, "fn go() {}", None),
+            hit("src/b.rs", 4, "go();", Some(("run", 1, 9))),
+        ];
+        let edited = BTreeSet::from(["src/a.rs".to_string()]);
+        let out = render(
+            "grep",
+            &hits,
+            &[Term::parse("go")],
+            &Connections::new(),
+            &edited,
+            &Options::default(),
+        )
+        .unwrap();
+        assert!(
+            out.contains(
+                "src/a.rs-3-» edited since index; definitions not shown\nsrc/a.rs:3:fn go() {}\n"
+            ),
             "{out}"
         );
         assert!(
-            lines[2].ends_with(":11 if (!meta.config.maintenanceMode) {"),
+            out.contains("src/b.rs-1-» Function run:1-9\nsrc/b.rs:4:go();\n"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn alternatives_are_counted_and_long_lines_print_whole_unless_capped() {
+        let long = format!("{} go()", "x".repeat(500));
+        let hits = vec![
+            hit("src/a.rs", 3, "fn go() { stop() }", None),
+            hit("src/a.rs", 4, &long, None),
+        ];
+        let terms = [Term::parse("go"), Term::parse("stop"), Term::parse("nope")];
+        let out = show(&hits, &terms, &Options::default());
         assert!(
-            lines[3].starts_with("  src/routes/feeds.js │ Function default:25-38 :26 "),
+            out.starts_with("grep: 2 lines in 1 files (go 2, stop 1, nope 0)\n"),
             "{out}"
         );
-        assert!(lines[3].ends_with(":29-37"), "{out}");
-        assert!(lines[4].starts_with("  test/controllers.js"), "{out}");
+        assert!(out.contains(&format!("src/a.rs:4:{long}\n")), "{out}");
+        let capped = Options {
+            max_columns: Some(100),
+            ..Options::default()
+        };
+        let out = show(&hits, &terms, &capped);
+        assert!(out.contains("src/a.rs:4:[Omitted long line]\n"), "{out}");
         assert!(
-            lines[5].starts_with("  install/data/defaults.json │ :130 "),
-            "{out}"
+            show(&hits, &terms[..1], &Options::default()).starts_with("grep: 2 lines in 1 files\n")
+        );
+        assert_eq!(
+            show(&[], &terms, &Options::default()),
+            "grep: 0 lines in 0 files\n"
         );
     }
 
@@ -732,30 +961,49 @@ mod tests {
                 )
             })
             .collect();
-        let out = render(
+        let out = show(
             &hits,
             &[Term::parse("maintenanceMode")],
-            &Connections::new(),
+            &Options::default(),
         );
-        assert!(
-            out.contains("public/language/{en-GB,+3}/advanced.json"),
-            "{out}"
+        assert_eq!(
+            out,
+            "grep: 1 lines in 1 files\npublic/language/{en-GB,+3}/advanced.json:2:\"maintenance-mode\": \"x\"\n"
         );
-        assert!(out.starts_with("1 lines in 1 files\n"), "{out}");
+    }
+
+    fn finds(term: &str, text: &str, options: &Options) -> bool {
+        matcher(&[Term::parse(term)], options)
+            .unwrap()
+            .is_match(text.as_bytes())
+            .unwrap()
     }
 
     #[test]
     fn regex_terms_match_like_ripgrep_and_bad_patterns_fall_back_to_literals() {
-        assert!(Term::parse(r"\bCveDetail\b").matches("x := CveDetail{}"));
-        assert!(!Term::parse(r"\bCveDetail\b").matches("CveDetails"));
-        assert!(Term::parse(r"type .* struct\{\}").matches("type key struct{}"));
-        assert!(Term::parse(r"route\(").matches(".route(\"/x\")"));
-        assert!(Term::parse("route(").matches(".route(\"/x\")"));
-        assert!(Term::parse("????").matches("x = '????'"));
-        assert!(Term::parse("^rand").matches("rand = \"0.10\""));
-        assert!(!Term::parse("^rand").matches("x.rand = 1"));
-        assert!(Term::parse("mark_in_sync").matches("markInSync()"));
+        let plain = Options::default();
+        assert!(finds(r"\bCveDetail\b", "x := CveDetail{}", &plain));
+        assert!(!finds(r"\bCveDetail\b", "CveDetails", &plain));
+        assert!(finds(r"type .* struct\{\}", "type key struct{}", &plain));
+        assert!(finds(r"route\(", ".route(\"/x\")", &plain));
+        assert!(finds("^rand", "rand = \"0.10\"", &plain));
+        assert!(!finds("^rand", "x.rand = 1", &plain));
+        assert!(finds("mark_in_sync", "markInSync()", &plain));
         assert!(Term::parse("on.*Login").names("onLogin"));
+        let literal = |raw: &str, text: &str| {
+            matcher(&[Term::parse(raw).literal()], &plain)
+                .unwrap()
+                .is_match(text.as_bytes())
+                .unwrap()
+        };
+        assert!(literal("route(", ".route(\"/x\")"));
+        assert!(literal("????", "x = '????'"));
+        let word = Options {
+            word: true,
+            ..Options::default()
+        };
+        assert!(finds("detail", "a detail here", &word));
+        assert!(!finds("detail", "CveDetails", &word));
     }
 
     #[test]
@@ -772,10 +1020,11 @@ mod tests {
         write("dist/c.js", "markInSync();\n");
         write(".github/ci.yml", "run: mark-in-sync\n");
         let term = Term::parse("markInSync");
-        let matcher = matcher(&[term]).unwrap();
+        let options = Options::default();
+        let matcher = matcher(&[term], &options).unwrap();
         let files = |paths: &[&str]| {
             let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-            let mut found: Vec<String> = scan(repo.path(), &paths, &matcher)
+            let mut found: Vec<String> = scan(repo.path(), &paths, &matcher, &options)
                 .unwrap()
                 .into_iter()
                 .map(|h| format!("{}:{}", h.file, h.line))
@@ -791,6 +1040,77 @@ mod tests {
         assert_eq!(
             files(&["src/**/*.ts", ".github"]),
             [".github/ci.yml:1", "src/nested/b.ts:1"]
+        );
+        assert_eq!(
+            files(&["src", "src/nested"]),
+            ["src/a.rs:1", "src/nested/b.ts:1"]
+        );
+        assert_eq!(files(&["s*/nested"]), ["src/nested/b.ts:1"]);
+        write("app/[slug]/page.tsx", "markInSync();\n");
+        assert_eq!(files(&["app/[slug]"]), ["app/[slug]/page.tsx:1"]);
+        for bad in ["nope", "src/[*.ts", ".."] {
+            let paths = vec![bad.to_string()];
+            assert!(
+                scan(repo.path(), &paths, &matcher, &options).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn scan_honors_rg_globs_types_context_inversion_and_max_count() {
+        let repo = tempfile::tempdir().unwrap();
+        let write = |path: &str, body: &str| {
+            let full = repo.path().join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, body).unwrap();
+        };
+        write("src/a.rs", "one\ngo();\ntwo\ngo();\n");
+        write("src/b.py", "go()\n");
+        write("vendor/c.rs", "go();\n");
+        let term = Term::parse("go");
+        let run = |options: Options| {
+            let found = matcher(std::slice::from_ref(&term), &options).unwrap();
+            let mut lines: Vec<String> = scan(repo.path(), &[], &found, &options)
+                .unwrap()
+                .into_iter()
+                .map(|h| format!("{}{}{}", h.file, if h.context { '-' } else { ':' }, h.line))
+                .collect();
+            lines.sort();
+            lines
+        };
+        let with = |globs: &[&str]| Options {
+            globs: globs.iter().map(|g| g.to_string()).collect(),
+            ..Options::default()
+        };
+        assert_eq!(run(with(&["*.py"])), ["src/b.py:1"]);
+        assert_eq!(
+            run(with(&["!vendor/"])),
+            ["src/a.rs:2", "src/a.rs:4", "src/b.py:1"]
+        );
+        assert_eq!(
+            run(Options {
+                types: vec!["rust".into()],
+                ..Options::default()
+            }),
+            ["src/a.rs:2", "src/a.rs:4", "vendor/c.rs:1"]
+        );
+        assert_eq!(
+            run(Options {
+                before: 1,
+                max_count: Some(1),
+                globs: vec!["src/a.rs".into()],
+                ..Options::default()
+            }),
+            ["src/a.rs-1", "src/a.rs:2"]
+        );
+        assert_eq!(
+            run(Options {
+                invert: true,
+                globs: vec!["src/a.rs".into()],
+                ..Options::default()
+            }),
+            ["src/a.rs:1", "src/a.rs:3"]
         );
     }
 }

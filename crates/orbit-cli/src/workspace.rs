@@ -142,14 +142,9 @@ pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
 pub struct IndexedRepo {
     pub git: GitInfo,
     pub client: DuckDbClient,
-    pub edited: usize,
 }
 
-pub fn open_indexed(
-    repo: Option<PathBuf>,
-    db: Option<PathBuf>,
-    touched: &[String],
-) -> Result<IndexedRepo> {
+pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let db = resolve_db_path(db)?;
     let top_level = git_toplevel(&repo_path)
@@ -167,21 +162,67 @@ pub fn open_indexed(
             );
         }
     }
-    let edited = crate::commands::refresh::refresh_worktree(
-        &git,
-        &db,
-        &repo_relative_paths(&git.repo_path, touched),
-    )
-    .unwrap_or_else(|error| {
-        tracing::warn!("working-tree refresh failed: {error:#}");
-        0
-    });
     let client = crate::sql::open_graph(Some(db))?;
-    Ok(IndexedRepo {
-        git,
-        client,
-        edited,
-    })
+    Ok(IndexedRepo { git, client })
+}
+
+/// The repo-relative `files` whose working-tree contents differ from the indexed commit:
+/// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
+/// and line spans do not fit these files. Empty when git cannot answer.
+pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
+    let mut edited = std::collections::BTreeSet::new();
+    if files.is_empty() {
+        return edited;
+    }
+    let git_list = |args: &[&str]| -> Option<Vec<String>> {
+        let output = Command::new("git")
+            .arg("--no-optional-locks")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())?;
+        Some(
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|field| !field.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    };
+    let Some(status) = git_list(&[
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+        "--ignore-submodules=all",
+    ]) else {
+        return edited;
+    };
+    let mut changed = std::collections::HashSet::new();
+    let mut fields = status.into_iter();
+    while let Some(entry) = fields.next() {
+        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+            continue;
+        };
+        if code.contains(['R', 'C']) {
+            fields.next();
+        }
+        changed.insert(path.to_string());
+    }
+    let tracked: std::collections::HashSet<String> = git_list(&["ls-files", "-z"])
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    edited.extend(
+        files
+            .iter()
+            .filter(|file| changed.contains(**file) || !tracked.contains(**file))
+            .map(|file| file.to_string()),
+    );
+    edited
 }
 
 /// Repo-relative forms of `paths` given relative to the current directory, the repo, or absolute.
@@ -194,6 +235,15 @@ pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
         .iter()
         .flat_map(|p| p.split(','))
         .map(str::trim)
+        .map(|path| {
+            path.rsplit_once(':')
+                .filter(|(file, range)| {
+                    !file.is_empty()
+                        && !range.is_empty()
+                        && range.chars().all(|c| c.is_ascii_digit() || c == '-')
+                })
+                .map_or(path, |(file, _)| file)
+        })
         .filter_map(|path| {
             let relative = [cwd.join(path), repo.join(path)]
                 .into_iter()
@@ -805,6 +855,56 @@ mod tests {
             repos.len(),
             repos
         );
+    }
+
+    #[test]
+    fn edited_since_index_lists_changed_renamed_and_untracked_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = temp.path().join("repo");
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .output()
+                .unwrap()
+                .status;
+            assert!(status.success(), "git {args:?}");
+        };
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        for file in ["a.c", "src/x.rs", "src/same.rs"] {
+            std::fs::write(repo.join(file), "x\n").unwrap();
+        }
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&["commit", "-qm", "init"]);
+        git(&["mv", "a.c", "b.c"]);
+        std::fs::write(repo.join("src/x.rs"), "y\n").unwrap();
+        std::fs::write(repo.join("new.rs"), "n\n").unwrap();
+        let edited = edited_since_index(&repo, &["b.c", "src/x.rs", "src/same.rs", "new.rs"]);
+        assert_eq!(
+            edited.into_iter().collect::<Vec<_>>(),
+            ["b.c", "new.rs", "src/x.rs"]
+        );
+    }
+
+    #[test]
+    fn repo_relative_paths_drop_line_ranges() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("src/a.rs"), "").unwrap();
+        let paths = ["src/a.rs:10-20".to_string(), "Foo::bar".to_string()];
+        assert_eq!(repo_relative_paths(&repo, &paths), ["src/a.rs", "Foo::bar"]);
     }
 
     #[test]

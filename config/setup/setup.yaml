@@ -14,4 +14,4 @@ instructions: |
 nudge_search: |
   MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with `--path`/`--kind`.
 template_vars:
-  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. Every matching line, one row per file."
+  reminder: "[orbit] Grep means run {{orbit}} grep 'words'. rg output plus enclosing definitions."

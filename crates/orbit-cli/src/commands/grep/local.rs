@@ -7,7 +7,6 @@ use crate::workspace;
 
 pub(super) struct LocalBackend {
     search: DuckDbSearch,
-    header: String,
     git: workspace::GitInfo,
     paths: Vec<String>,
 }
@@ -17,20 +16,11 @@ impl LocalBackend {
         repo: Option<PathBuf>,
         db: Option<PathBuf>,
         paths: &[String],
-        touched: &[String],
     ) -> Result<Self> {
-        let workspace::IndexedRepo {
-            git,
-            client,
-            edited,
-        } = workspace::open_indexed(repo, db, touched)?;
+        let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
         let paths = workspace::repo_relative_paths(&git.repo_path, paths);
         Ok(Self {
             search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, &paths)?,
-            header: match edited {
-                0 => git.short_sha().to_string(),
-                n => format!("{} + {n} edited files", git.short_sha()),
-            },
             paths,
             git,
         })
@@ -45,7 +35,7 @@ impl LocalBackend {
     }
 
     pub(super) fn header(&self) -> &str {
-        &self.header
+        self.git.short_sha()
     }
 
     pub(super) fn search(&self) -> &DuckDbSearch {
