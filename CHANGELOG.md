@@ -1,3 +1,22 @@
+## [0.139.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.138.0...v0.139.0) (2026-10-08)
+
+### Features
+
+* **billing:** add Orbit version to billing event metadata ([2f2cf47](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2f2cf47959127085a34643b5322fe0c6f5d74868)) by Sharmad Nachnolkar
+* **billing:** drain the billing tracker on server shutdown ([6e7f483](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e7f483cba08de6d82c67525dd7b80361196f99e)) by Sharmad Nachnolkar
+* **billing:** fail closed on quota check errors ([ffca7f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ffca7f7c2129f44ca0ac85aa44a2c568add2dc1f)) by Sharmad Nachnolkar
+* **code-graph-incremental:** track local callable value flow ([761cc61](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/761cc61b5962b18f6d479489edcccea82fbe9967)) by Michael Usachenko
+* inline graph relationships and clearer GQL errors for the Duo Orbit agent ([dd19cef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd19cef93ccd40771d67309fa9a2aa2b262d4a2e)) by Aaron Algutifan
+* **orbit-server:** describe Orbit tools by capability ([7eafe3d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7eafe3d2942050c4a486a4daa47ba64296a1fd14)) by Dmitry Gruzd
+
+### Fixes
+
+* **cli:** resolve repository subdirectories and --dir for index and setup ([b3305a2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b3305a20826cc498c9014d06e55542fe0bf8917f)) by Dmitry Gruzd
+
+### Performance
+
+* **code-graph-incremental:** reduce indexing work and compact resolver state ([ba3b4bd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ba3b4bdce396e2af9387ff508593c495ec7dbcf2)) by Michael Usachenko
+
 ## [0.138.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.137.1...v0.138.0) (2026-10-07)
 
 ### Features
