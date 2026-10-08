@@ -20,7 +20,14 @@ pub(super) struct Def {
     pub(super) name: String,
     pub(super) start: usize,
     pub(super) end: usize,
+    pub(super) id: i64,
 }
+
+/// Callers and callees of each listed definition, by definition id.
+pub(super) type Connections = HashMap<i64, (Vec<String>, Vec<String>)>;
+
+const CONNECTION_NAMES: usize = 8;
+const LOOKUP_MAX_DEFINITIONS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Hit {
@@ -244,6 +251,7 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
                         name: names[i].clone(),
                         start: starts[i] as usize,
                         end: ends[i] as usize,
+                        id: ids[i],
                     },
                     kind: kinds_col[i].to_lowercase(),
                     id: ids[i],
@@ -271,6 +279,98 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
         keep
     });
     Ok(())
+}
+
+pub(super) fn connections(client: &DuckDbClient, hits: &[Hit]) -> Result<Connections> {
+    let mut ids: Vec<i64> = hits
+        .iter()
+        .filter_map(|h| h.def.as_ref().map(|d| d.id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    type Named = Vec<(bool, String)>;
+    let mut raw: HashMap<i64, (Named, Named)> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(Connections::new());
+    }
+    let list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+    client.execute(
+        &format!(
+            "CREATE OR REPLACE TEMP TABLE grep_defs AS SELECT unnest([{list}]::BIGINT[]) AS id"
+        ),
+        &[],
+    )?;
+    {
+        let callers = client.query_arrow_json(
+            "SELECT DISTINCT e.target_id AS def, d.name AS name, d.file_path AS file
+FROM gl_edge e JOIN gl_definition d ON d.id = e.source_id
+WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition'
+  AND e.target_kind = 'Definition' AND e.target_id IN (SELECT id FROM grep_defs)
+  AND e.source_id <> e.target_id",
+            &[],
+        )?;
+        let callees = client.query_arrow_json(
+            "WITH calls AS (
+  SELECT e.source_id, e.target_id, e.target_kind FROM gl_edge e
+  JOIN grep_defs g ON g.id = e.source_id
+  WHERE e.relationship_kind = 'CALLS' AND e.source_id <> e.target_id
+)
+SELECT DISTINCT c.source_id AS def, d.name AS name, d.file_path AS file
+FROM calls c JOIN gl_definition d ON d.id = c.target_id
+WHERE c.target_kind = 'Definition'
+UNION
+SELECT DISTINCT c.source_id AS def,
+       COALESCE(NULLIF(i.identifier_alias, ''), NULLIF(i.identifier_name, ''), i.import_path) AS name,
+       i.file_path AS file
+FROM calls c JOIN gl_imported_symbol i ON i.id = c.target_id
+WHERE c.target_kind = 'ImportedSymbol'",
+            &[],
+        )?;
+        for (batches, callers_side) in [(callers, true), (callees, false)] {
+            let (defs, names, files) = (
+                i64_column(&batches, "def"),
+                string_column(&batches, "name"),
+                string_column(&batches, "file"),
+            );
+            for ((def, name), file) in defs.into_iter().zip(names).zip(files) {
+                if name.is_empty() {
+                    continue;
+                }
+                let entry = raw.entry(def).or_default();
+                match callers_side {
+                    true => entry.0.push((is_test(&file), name)),
+                    false => entry.1.push((is_test(&file), name)),
+                }
+            }
+        }
+    }
+    let names = |mut list: Named| {
+        list.sort();
+        let mut seen = std::collections::HashSet::new();
+        list.into_iter()
+            .filter_map(|(_, name)| seen.insert(name.clone()).then_some(name))
+            .collect::<Vec<_>>()
+    };
+    Ok(raw
+        .into_iter()
+        .map(|(def, (callers, callees))| (def, (names(callers), names(callees))))
+        .collect())
+}
+
+fn connection_label(def: &Def, connections: &Connections) -> String {
+    let Some((callers, callees)) = connections.get(&def.id) else {
+        return String::new();
+    };
+    let side = |arrow: &str, names: &[String], noun: &str| match names.len() {
+        0 => String::new(),
+        n if n > CONNECTION_NAMES => format!("{arrow}{n} {noun} "),
+        _ => format!("{arrow}{} ", names.join(",")),
+    };
+    format!(
+        "{}{}",
+        side("←", callers, "callers"),
+        side("→", callees, "callees")
+    )
 }
 
 fn is_code(path: &str) -> bool {
@@ -359,7 +459,7 @@ fn runs(lines: &[usize]) -> String {
     parts.join(" ")
 }
 
-fn code_row(hits: &[&Hit]) -> String {
+fn code_row(hits: &[&Hit], connections: &Connections) -> String {
     let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
     for hit in hits {
         match groups.last_mut() {
@@ -370,9 +470,12 @@ fn code_row(hits: &[&Hit]) -> String {
     groups
         .iter()
         .map(|(def, list)| {
-            let label = def.map(|d| match d.end > d.start {
-                true => format!("{}:{}-{} ", d.name, d.start, d.end),
-                false => format!("{} ", d.name),
+            let label = def.map(|d| {
+                let span = match d.end > d.start {
+                    true => format!("{}:{}-{} ", d.name, d.start, d.end),
+                    false => format!("{} ", d.name),
+                };
+                span + &connection_label(d, connections)
             });
             format!("{}{}", label.unwrap_or_default(), located(list))
         })
@@ -453,7 +556,7 @@ fn collapse_variants(files: Vec<(String, Vec<&Hit>)>) -> (Vec<(String, Vec<&Hit>
     (rows, merged_files, merged_lines)
 }
 
-pub(super) fn render(hits: &[Hit], alternatives: &[Term]) -> String {
+pub(super) fn render(hits: &[Hit], alternatives: &[Term], connections: &Connections) -> String {
     let mut files: Vec<(String, Vec<&Hit>)> = Vec::new();
     for hit in hits {
         match files.last_mut() {
@@ -475,7 +578,7 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term]) -> String {
             (
                 class,
                 list.len(),
-                format!("  {file}{SEP}{}", code_row(list)),
+                format!("  {file}{SEP}{}", code_row(list, connections)),
             )
         })
         .chain(text.iter().map(|(file, list)| {
@@ -506,13 +609,50 @@ pub(super) fn render(hits: &[Hit], alternatives: &[Term]) -> String {
 }
 
 pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[Term]) -> String {
-    let Some(hit) = hits
-        .iter()
+    hits.iter()
         .filter(|h| is_code(&h.file) && !is_test(&h.file) && defining_rank(h, alternatives) < 2)
         .min_by_key(|h| defining_rank(h, alternatives))
-    else {
-        return String::new();
+        .map(|hit| format!("\n{}", source_block(repo, hit, "Source")))
+        .unwrap_or_default()
+}
+
+/// When the query is one plain identifier that names a definition, that definition's source is
+/// the answer: it is printed before the rows so `head` keeps it.
+pub(super) fn lookup(
+    repo: &std::path::Path,
+    hits: &[Hit],
+    alternatives: &[Term],
+) -> Option<String> {
+    let [term] = alternatives else {
+        return None;
     };
+    if term.regex.is_some()
+        || !term
+            .raw
+            .chars()
+            .all(|c| c.is_alphanumeric() || "_$-:.".contains(c))
+    {
+        return None;
+    }
+    let named: Vec<&Hit> = hits.iter().filter(|h| names(h, alternatives)).collect();
+    if named.len() > LOOKUP_MAX_DEFINITIONS {
+        return None;
+    }
+    let hit = named
+        .iter()
+        .copied()
+        .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
+    let label = match named.len() {
+        1 => format!("Definition {}", term.raw),
+        n => format!(
+            "Definition {} (1 of {n}; the others are in the rows below)",
+            term.raw
+        ),
+    };
+    Some(source_block(repo, hit, &label))
+}
+
+fn source_block(repo: &std::path::Path, hit: &Hit, label: &str) -> String {
     let Ok(content) = std::fs::read_to_string(repo.join(&hit.file)) else {
         return String::new();
     };
@@ -524,7 +664,7 @@ pub(super) fn top_source(repo: &std::path::Path, hits: &[Hit], alternatives: &[T
         .map_or(hit.line, |d| d.start);
     let def_end = hit.def.as_ref().map_or(start, |d| d.end.max(start));
     let end = def_end.min(lines.len()).min(start + TOP_SOURCE_LINES - 1);
-    let mut out = format!("\nSource — {}:{start}-{def_end}\n", hit.file);
+    let mut out = format!("{label} — {}:{start}-{def_end}\n", hit.file);
     for number in start..=end {
         out.push_str(&format!("  {number}|{}\n", lines[number - 1]));
     }
@@ -552,6 +692,7 @@ mod tests {
                 name: name.into(),
                 start,
                 end,
+                id: start as i64,
             }),
         }
     }
@@ -594,7 +735,7 @@ mod tests {
             ));
         }
         hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-        let out = render(&hits, &terms);
+        let out = render(&hits, &terms, &Connections::new());
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "No matches: nosuchxyz");
         assert_eq!(lines[1], "16 lines in 4 files");
@@ -631,7 +772,11 @@ mod tests {
                 )
             })
             .collect();
-        let out = render(&hits, &[Term::parse("maintenanceMode")]);
+        let out = render(
+            &hits,
+            &[Term::parse("maintenanceMode")],
+            &Connections::new(),
+        );
         assert!(
             out.contains("public/language/{en-GB,+3}/advanced.json"),
             "{out}"
