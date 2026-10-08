@@ -55,7 +55,7 @@ fn workset(
     state: State,
     root: PathBuf,
     entries: Vec<FileInventoryEntry>,
-    dirty: FxHashSet<usize>,
+    dirty: FxHashSet<u32>,
 ) -> Workset<SourcePaths> {
     let manifest_names = &env.resolve.config.parse_files;
     let is_manifest = |path: &str| {
@@ -141,14 +141,19 @@ impl Phase<ReindexInput> for Remap {
 /// `Parse` entries this crate has a grammar for become the lazy workset,
 /// Drops the dirty trees, renumbers what remains, and returns the retained
 /// files whose resolution depended on a dropped one.
-fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<usize> {
+fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<u32> {
     state.trees.retain(|t| !dirty.contains(t.label.as_str()));
 
     let label_to_fi: FxHashMap<&str, u32> = state
         .trees
         .iter()
         .enumerate()
-        .map(|(i, t)| (t.label.as_str(), i as u32))
+        .map(|(i, t)| {
+            (
+                t.label.as_str(),
+                u32::try_from(i).expect("file index exceeds u32"),
+            )
+        })
         .collect();
 
     state.edges = state
@@ -169,19 +174,19 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         })
         .collect();
 
-    let old_dirty_fis: FxHashSet<usize> = old_labels
+    let old_dirty_fis: FxHashSet<u32> = old_labels
         .iter()
         .enumerate()
         .filter(|(_, l)| dirty.contains(l.as_str()))
-        .map(|(i, _)| i)
+        .map(|(i, _)| u32::try_from(i).expect("file index exceeds u32"))
         .collect();
-    let reverse_dirty: FxHashSet<usize> = state
+    let reverse_dirty: FxHashSet<u32> = state
         .resolver
         .reqs()
         .iter()
-        .filter(|r| old_dirty_fis.contains(&(r.target_fi as usize)))
+        .filter(|r| old_dirty_fis.contains(&r.target_fi))
         .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
-        .map(|&fi| fi as usize)
+        .copied()
         .collect();
 
     let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
@@ -381,12 +386,12 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             listed,
         } = input;
         for file in items {
-            let fi = state.trees.len();
+            let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
             state.trees.push(file.tree);
             state.edges.extend(file.edges.into_iter().map(|mut e| {
-                e.from_tree = fi as u32;
-                e.to_tree = fi as u32;
+                e.from_tree = fi;
+                e.to_tree = fi;
                 e
             }));
         }
@@ -489,8 +494,8 @@ impl Phase<DirtyGraph> for Resolve {
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            let nid = state.trees[rsp.fi].to_id(rsp.node);
-            state.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+            let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
+            state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
@@ -502,7 +507,7 @@ impl Phase<DirtyGraph> for Resolve {
                     .file_timings
                     .into_iter()
                     .map(|(fi, elapsed)| FileTiming {
-                        path: state.trees[fi].label.clone(),
+                        path: state.trees[fi as usize].label.clone(),
                         phase: "resolve".to_string(),
                         elapsed,
                     }),

@@ -35,7 +35,7 @@ pub struct ReindexInput {
 pub struct Workset<C> {
     pub state: State,
     pub items: C,
-    pub dirty: FxHashSet<usize>,
+    pub dirty: FxHashSet<u32>,
     pub listed: Listed,
 }
 
@@ -70,7 +70,7 @@ pub struct LinkedFile {
 
 pub struct DirtyGraph {
     pub state: State,
-    pub dirty: FxHashSet<usize>,
+    pub dirty: FxHashSet<u32>,
 }
 
 pub struct Resolved {
