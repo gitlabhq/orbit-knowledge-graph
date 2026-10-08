@@ -154,11 +154,11 @@ pub fn compile_input_model(
     model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    use query_graph::{LatestRows, QueryGraph};
+    use query_graph::QueryGraph;
     passes::restrict::restrict(&mut input, model.as_ref(), security)?;
-    let mut graph = QueryGraph::<_, LatestRows<'_>>::new(model.as_ref());
+    let mut graph = QueryGraph::new(model.as_ref());
     let root = graph.plan_with_options(&input, options)?;
-    let graph = graph.lower_operations();
+    let graph = graph.lower();
     let base = passes::codegen::clickhouse::codegen_graph(
         graph,
         root,

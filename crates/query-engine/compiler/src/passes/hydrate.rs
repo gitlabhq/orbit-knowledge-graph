@@ -1,9 +1,8 @@
 use std::collections::HashSet;
-use std::convert::Infallible;
 
 use crate::ast::Node;
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
-use crate::query_graph::{BlockId, QueryGraph};
+use crate::query_graph::{LoweredGraph, QueryId};
 use crate::types::SecurityContext;
 use query_data_model::{EntityId, PropertyRealization, QueryDataModel};
 
@@ -79,14 +78,17 @@ pub fn generate_hydration_plan(
 
 pub fn generate_graph_hydration<'a, M: QueryDataModel + ?Sized>(
     input: &Input,
-    graph: &QueryGraph<'a, M, Infallible>,
-    root: BlockId,
+    graph: &LoweredGraph<'a, M>,
+    root: QueryId,
     security: &SecurityContext,
 ) -> HydrationPlan {
+    let graph = graph.graph();
     let projected = graph
-        .outputs(root)
+        .rows(root)
         .expect("constructed result")
-        .map(|output| graph.output_label(output).expect("declared output"))
+        .columns()
+        .iter()
+        .map(|column| column.name())
         .collect::<HashSet<_>>();
     hydration_for_projection(input, graph.catalog(), security, |alias| {
         projected.contains(alias)

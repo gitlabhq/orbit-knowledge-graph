@@ -1,11 +1,8 @@
 mod security;
 
-use compiler::query_graph::{
-    Expression as E, GraphError, JoinKind, Port, QueryGraph, ReadMode, ScanInput,
-};
+use compiler::query_graph::api::*;
 use query_data_model::QueryDataModel;
 use query_engine::compiler::{self, Frontend, HydrationPlan, QueryError, SecurityContext};
-use std::convert::Infallible;
 
 #[test]
 fn wildcard_selection_preserves_empty_resolution() {
@@ -118,180 +115,126 @@ fn query_graph_relationship_scope_contract() {
         .map(|alias| (alias.to_string(), ScopeProof::literal("1/42/")))
         .collect();
     let scope = scope::prepare(&mut input, proofs, model.as_ref());
-    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
-    let root = graph.query();
+    let mut graph = QueryGraph::new(model.as_ref());
     let table = model.relationship_table("CALLS").unwrap();
     assert!(!model.table_path_scopable(table));
-    let edge = graph.scan(root, table, "edge").unwrap();
-    graph.bind_scan(edge, ScanInput::Relationship(0)).unwrap();
-    let projection = graph
-        .project_values(
-            graph.read_relation(edge, ReadMode::Raw).unwrap(),
-            [(
-                "id".into(),
-                E::Column(graph.stored_column(edge, "source_id").unwrap()),
-            )],
-        )
+    let root = graph
+        .query(|q| {
+            let edge = q.scan(table, Read::Raw)?.labeled("e0")?;
+            let id = edge.column("source_id")?;
+            q.select(edge, [id.named("id")])
+        })
         .unwrap();
-    graph.finish_query(projection).unwrap();
-    let graph = scope::apply_graph(graph, root, &scope, &input).unwrap();
-    let sql = graph.render(root).unwrap();
-    assert!(sql.contains("startsWith") && sql.contains("1/42/"), "{sql}");
+    let graph = scope::apply_graph(graph.lower(), root, &scope, &input).unwrap();
+    let (sql, params) = graph.render(root).unwrap();
+    assert!(sql.contains("startsWith"));
+    assert!(params.values().any(|parameter| parameter.value == "1/42/"));
 }
 
 #[test]
 fn query_graph_subquery_visibility_contract() {
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
-    let root = graph.query();
-    let body = graph.query();
-    let projection = graph
-        .project_values(
-            graph.unit_relation(body).unwrap(),
-            [("id".into(), E::Integer(7))],
-        )
+    let mut graph = QueryGraph::new(model.as_ref());
+    let root = graph
+        .query(|q| {
+            let definition = q.cte("keys", |q| q.values([lit(7).named("id")]))?;
+            let keys = q.read(definition)?;
+            let key = keys.column("id")?;
+            let rows = q.values([lit(7).named("id")])?;
+            assert!(matches!(q.filter(rows, key.eq(7)), Err(Error::Column)));
+            let rows = q.values([lit(7).named("id")])?;
+            let id = rows.column("id")?;
+            q.filter_in(rows, id, keys, key)
+        })
         .unwrap();
-    let key = projection.outputs().next().unwrap().0;
-    graph.finish_query(projection).unwrap();
-    let definition = graph.define(root, body, "keys").unwrap();
-    let reference = graph.reference(root, definition, "keys").unwrap();
-    let key = graph.output_column(reference, key).unwrap();
-    assert!(matches!(
-        graph.filter_relation(
-            graph.unit_relation(root).unwrap(),
-            E::equal(E::Column(key), E::Integer(7))
-        ),
-        Err(GraphError::OperationVisibility)
-    ));
-    let source = graph
-        .filter_relation(
-            graph.unit_relation(root).unwrap(),
-            E::InQuery {
-                value: Box::new(E::Integer(7)),
-                key,
-            },
-        )
-        .unwrap();
-    let projection = graph
-        .project_values(source, [("id".into(), E::Integer(7))])
-        .unwrap();
-    graph.finish_query(projection).unwrap();
-    let (sql, _) = graph.render_parameterized(root).unwrap();
+    let (sql, _) = graph.lower().render(root).unwrap();
     assert!(sql.contains("IN (SELECT"), "{sql}");
 }
 
 #[test]
 fn query_graph_scalar_subquery_contract() {
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
-    let root = graph.query();
-    let body = graph.query();
+    let mut graph = QueryGraph::new(model.as_ref());
+    let mut escaped = None;
+    let root = graph
+        .query(|q| {
+            assert!(matches!(
+                q.values([count().named("count")]),
+                Err(Error::Aggregate)
+            ));
+            let body = q.subquery(|q| {
+                let rows = q.values([lit(1).named("id")])?;
+                q.aggregate(rows, [], [count().named("count")])
+            })?;
+            let scalar = q.scalar(body, "count")?;
+            escaped = Some(scalar.clone());
+            q.values([scalar.named("count")])
+        })
+        .unwrap();
     assert!(matches!(
-        graph.project_values(
-            graph.unit_relation(body).unwrap(),
-            [("count".into(), E::Count)]
-        ),
-        Err(GraphError::AggregatePlacement)
+        graph.query(|q| q.values([escaped.unwrap().named("count")])),
+        Err(Error::Scope)
     ));
-    let aggregate = graph
-        .aggregate_relation(graph.unit_relation(body).unwrap(), vec![])
-        .unwrap();
-    let projection = graph
-        .project_values(aggregate, [("count".into(), E::Count)])
-        .unwrap();
-    let output = projection.outputs().next().unwrap().0;
-    graph.finish_query(projection).unwrap();
-    let scalar = graph.scalar_query(root, output, "scalar").unwrap();
-    let foreign = graph.query();
-    assert!(matches!(
-        graph.project_values(
-            graph.unit_relation(foreign).unwrap(),
-            [("count".into(), scalar.clone())]
-        ),
-        Err(GraphError::OutsideBlock)
-    ));
-    let projection = graph
-        .project_values(
-            graph.unit_relation(root).unwrap(),
-            [("count".into(), scalar)],
-        )
-        .unwrap();
-    graph.finish_query(projection).unwrap();
-    let sql = graph.render(root).unwrap();
-    assert!(sql.contains("(SELECT") && sql.contains("COUNT(*)"), "{sql}");
+    let (sql, _) = graph.lower().render(root).unwrap();
+    assert!(sql.contains("(SELECT") && sql.contains("count()"), "{sql}");
 }
 
 #[test]
 fn query_graph_rebinds_nested_computations_between_blocks() {
     let model = compiler::data_model::clickhouse(super::setup::embedded_ontology()).unwrap();
-    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
-    let original = graph.query();
-    let first = graph
-        .scan(original, model.entity_table("Project").unwrap(), "project")
-        .unwrap();
-    let id = E::Column(graph.stored_column(first, "id").unwrap());
-    let condition = E::Or(
-        Box::new(E::equal(id.clone(), E::Integer(1))),
-        Box::new(E::Greater(
-            Box::new(E::Add(Box::new(id.clone()), Box::new(E::Integer(2)))),
-            Box::new(E::Integer(10)),
-        )),
-    );
-    let value = E::JsonObject(vec![
-        (
-            "count".into(),
-            E::ToString(Box::new(E::CountIf(Box::new(condition.clone())))),
-        ),
-        (
-            "sum".into(),
-            E::ToString(Box::new(E::Sum {
-                value: Box::new(id),
-                condition: Some(Box::new(condition)),
-            })),
-        ),
-        (
-            "path".into(),
-            E::LatestPath {
-                path: graph.stored_column(first, "traversal_path").unwrap(),
-                version: graph.stored_column(first, "_version").unwrap(),
-                deletion: graph.stored_column(first, "_deleted").unwrap(),
-            },
-        ),
-    ]);
-    let source = graph
-        .aggregate_relation(graph.read_relation(first, ReadMode::Raw).unwrap(), vec![])
-        .unwrap();
-    let projection = graph
-        .project_values(source, [("summary".into(), value.clone())])
-        .unwrap();
-    graph.finish_query(projection).unwrap();
-    let root = graph.query();
-    let second = graph
-        .scan(root, model.entity_table("Project").unwrap(), "project")
-        .unwrap();
-    let source = graph
-        .aggregate_relation(graph.read_relation(second, ReadMode::Raw).unwrap(), vec![])
-        .unwrap();
-    assert!(matches!(
-        graph.project_values(source, [("summary".into(), value.clone())]),
-        Err(GraphError::OutsideBlock)
-    ));
-    let rebound = value
-        .rebind(&|column| {
-            let Port::Stored(stored) = column.port() else {
-                panic!("stored source")
-            };
-            graph.stored_port(second, stored)
+    let mut graph = QueryGraph::new(model.as_ref());
+    let mut escaped = None;
+    graph
+        .query(|q| {
+            let rows = q.scan(model.entity_table("Project").unwrap(), Read::Raw)?;
+            let id = rows.column("id")?;
+            escaped = Some(count().filter(id.eq(1).or(id.add(2).gt(10))));
+            q.select(rows, [id.named("id")])
         })
         .unwrap();
-    let source = graph
-        .aggregate_relation(graph.read_relation(second, ReadMode::Raw).unwrap(), vec![])
+    let root = graph
+        .query(|q| {
+            let rows = q.scan(model.entity_table("Project").unwrap(), Read::Raw)?;
+            let measure = escaped.unwrap().rewrite(&mut |value| {
+                if let ExprKind::Column(column) = value.kind() {
+                    Ok(rows.column(column.name())?.expr())
+                } else {
+                    Ok(value)
+                }
+            })?;
+            let id = rows.column("id")?;
+            let condition = id.eq(1).or(id.add(2).gt(10));
+            let path = rows.column("traversal_path")?;
+            let version = rows.column("_version")?;
+            let rows = q.aggregate(
+                rows,
+                [],
+                [
+                    measure.named("count"),
+                    Expr::aggregate(Aggregate::Sum, [id.expr()])
+                        .filter(condition)
+                        .named("sum"),
+                    Expr::aggregate(Aggregate::ArgMax, [path.expr(), version.expr()]).named("path"),
+                ],
+            )?;
+            let fields = ["count", "sum", "path"]
+                .into_iter()
+                .map(|name| {
+                    rows.column(name)
+                        .map(|column| Expr::call(Function::ToString, [column.expr()]))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            q.select(
+                rows,
+                [Expr::call(
+                    Function::JsonObject(vec!["count".into(), "sum".into(), "path".into()]),
+                    fields,
+                )
+                .named("summary")],
+            )
+        })
         .unwrap();
-    let projection = graph
-        .project_values(source, [("summary".into(), rebound)])
-        .unwrap();
-    graph.finish_query(projection).unwrap();
-    let (sql, params) = graph.render_parameterized(root).unwrap();
+    let (sql, params) = graph.lower().render(root).unwrap();
     assert!(
         sql.contains("argMaxOrNull") && sql.contains("countIf") && sql.contains("sumIf"),
         "{sql}"
@@ -316,44 +259,36 @@ fn query_graph_stored_identity_contract() {
     let id = users.column("id").unwrap();
     assert_eq!(users.resolve(id.id()), Some(id));
     assert!(projects.resolve(id.id()).is_none() && foreign_users.resolve(id.id()).is_none());
-    let mut graph = QueryGraph::<_, Infallible>::new(model.as_ref());
-    let root = graph.query();
-    let first = graph.scan_stored(root, users, "first").unwrap();
-    let second = graph.scan_stored(root, users, "second").unwrap();
-    let first_id = graph.stored_port(first, id).unwrap();
-    let second_id = graph.stored_port(second, id).unwrap();
-    assert_ne!(first_id, second_id);
-    assert_eq!(first_id.port(), second_id.port());
-    assert!(graph.scan_stored(root, foreign_users, "foreign").is_err());
-    assert!(
-        graph
-            .stored_port(first, projects.column("id").unwrap())
-            .is_err()
-    );
-    assert!(
-        graph
-            .stored_port(first, foreign_users.column("id").unwrap())
-            .is_err()
-    );
-    let source = graph
-        .join_relations(
-            graph.read_relation(first, ReadMode::Current).unwrap(),
-            graph.read_relation(second, ReadMode::Current).unwrap(),
-            JoinKind::Inner,
-            E::equal(E::Column(first_id), E::Column(second_id)),
-        )
+    let mut graph = QueryGraph::new(model.as_ref());
+    let mut foreign = None;
+    let mut other_graph = QueryGraph::new(other.as_ref());
+    other_graph
+        .query(|q| {
+            let rows = q.scan(foreign_users.name(), Read::Current)?;
+            foreign = Some(rows.column("id")?);
+            Ok(rows)
+        })
         .unwrap();
-    let projection = graph
-        .project_values(
-            source,
-            [
-                ("first_id".into(), E::Column(first_id)),
-                ("second_id".into(), E::Column(second_id)),
-            ],
-        )
+    let root = graph
+        .query(|q| {
+            let first = q.scan(users.name(), Read::Current)?;
+            let second = q.scan(users.name(), Read::Current)?;
+            let first_id = first.column("id")?;
+            let second_id = second.column("id")?;
+            assert_ne!(first_id, second_id);
+            let invalid = q.scan(users.name(), Read::Current)?;
+            assert!(matches!(
+                q.filter(invalid, foreign.as_ref().unwrap().eq(7)),
+                Err(Error::Scope)
+            ));
+            let rows = q.join(first, second, first_id.eq(&second_id))?;
+            q.select(
+                rows,
+                [first_id.named("first_id"), second_id.named("second_id")],
+            )
+        })
         .unwrap();
-    graph.finish_query(projection).unwrap();
-    let (sql, _) = graph.render_parameterized(root).unwrap();
+    let (sql, _) = graph.lower().render(root).unwrap();
     assert!(
         sql.contains("AS \"first_id\"") && sql.contains("AS \"second_id\""),
         "{sql}"

@@ -2,7 +2,6 @@ use orbit_server_config::QueryConfig;
 use orbit_utils::query_types::ParamBindings;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::convert::Infallible;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
 use crate::ast::{
@@ -10,7 +9,7 @@ use crate::ast::{
 };
 use crate::error::{QueryError, Result};
 use crate::passes::enforce::ResultContext;
-use crate::query_graph::{BlockId, QueryGraph};
+use crate::query_graph::{LoweredGraph, QueryId};
 
 pub fn codegen(
     ast: &Node,
@@ -31,12 +30,12 @@ pub fn codegen(
 }
 
 pub fn codegen_graph<'a, M: query_data_model::QueryDataModel + ?Sized>(
-    graph: QueryGraph<'a, M, Infallible>,
-    root: BlockId,
+    graph: LoweredGraph<'a, M>,
+    root: QueryId,
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let (mut sql, params) = graph.render_parameterized(root)?;
+    let (mut sql, params) = graph.render(root)?;
     append_settings(&mut sql, &query_config)?;
     Ok(ParameterizedQuery {
         sql,

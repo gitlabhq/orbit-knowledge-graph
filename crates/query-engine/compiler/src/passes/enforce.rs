@@ -5,10 +5,9 @@ use crate::constants::{
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use crate::query_graph::{BlockId, Expression, GraphError, OperationKind, QueryGraph};
+use crate::query_graph::{LoweredGraph, QueryId, lit};
 use query_data_model::{EntityAuthConfig, QueryDataModel};
 use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedactionNode {
@@ -93,11 +92,11 @@ impl ResultContext {
 }
 
 pub fn enforce_graph_return<'a, M: QueryDataModel + ?Sized>(
-    mut graph: QueryGraph<'a, M, Infallible>,
-    root: BlockId,
+    graph: LoweredGraph<'a, M>,
+    root: QueryId,
     input: &Input,
-) -> Result<(QueryGraph<'a, M, Infallible>, ResultContext)> {
-    let model = graph.catalog();
+) -> Result<(LoweredGraph<'a, M>, ResultContext)> {
+    let model = graph.graph().catalog();
     let mut context = ResultContext::new().with_query_type(input.query_type);
     context.entity_auth.clone_from(model.entity_auth());
     if matches!(
@@ -115,122 +114,106 @@ pub fn enforce_graph_return<'a, M: QueryDataModel + ?Sized>(
         return Ok((graph, context));
     }
     let grouped = crate::input::node_group_ids(&input.aggregation.group_by).collect::<HashSet<_>>();
-    let mut outputs = Vec::new();
-    let mut additional_groups = Vec::new();
-    for (index, node) in input.nodes.iter().enumerate() {
-        if input.query_type == QueryType::Aggregation && !grouped.contains(node.id.as_str()) {
-            continue;
-        }
-        let name = node
-            .entity
-            .as_deref()
-            .ok_or_else(|| QueryError::Enforcement("node has no entity".into()))?;
-        let entity = model
-            .entity(name)
-            .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{name}'")))?;
-        let redaction = model.redaction_id_column(entity.id).unwrap_or("id");
-        let identity = graph.input_identity(root, input, index)?;
-        let authorization = graph.authorization_identity(root, input, index)?;
-        let mut columns = vec![(redaction_id_column(&node.id), authorization)];
-        if redaction != "id" {
-            columns.push((primary_key_column(&node.id), identity));
-        }
-        if model.entity_has_traversal_path(name)
-            && let Ok(relation) = graph.input_node(root, index)
-        {
-            columns.push((
-                traversal_path_column(&node.id),
-                graph.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?,
-            ));
-        }
-        for (label, column) in columns {
-            let value = Expression::Column(column);
-            if input.query_type == QueryType::Aggregation && !additional_groups.contains(&value) {
-                additional_groups.push(value.clone());
+    let graph = graph.map_result(root, |q, rows| {
+        let (rows, mut outputs, measures) = if input.query_type == QueryType::Aggregation {
+            let (rows, groups, measures) = rows.remove_limit()?.into_aggregate()?;
+            (rows, groups, Some(measures))
+        } else {
+            let (rows, outputs) = rows.into_select()?;
+            (rows, outputs, None)
+        };
+        for node in &input.nodes {
+            if input.query_type == QueryType::Aggregation && !grouped.contains(node.id.as_str()) {
+                continue;
             }
-            outputs.push((label, value));
-        }
-        outputs.push((
-            redaction_type_column(&node.id),
-            Expression::Text(name.into()),
-        ));
-        context.add_node(&node.id, name);
-    }
-    if !additional_groups.is_empty() {
-        graph = graph.rewrite_query(root, |graph, query| {
-            let (operation, outputs) = query.into_projection()?;
-            let OperationKind::Limit { input, count } = operation.into_kind() else {
-                return Err(GraphError::AggregateBoundary);
-            };
-            let OperationKind::Aggregate { input, mut groups } = input.into_kind() else {
-                return Err(GraphError::AggregateBoundary);
-            };
-            for value in additional_groups {
-                if !groups.contains(&value) {
-                    groups.push(value);
+            let name = node
+                .entity
+                .as_deref()
+                .ok_or_else(|| QueryError::Enforcement("node has no entity".into()))?;
+            let entity = model
+                .entity(name)
+                .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{name}'")))?;
+            let redaction = model.redaction_id_column(entity.id).unwrap_or("id");
+            let identity = rows.column_from(&node.id, "id")?;
+            let authorization = rows.column_from(&node.id, redaction)?;
+            let mut columns = vec![(redaction_id_column(&node.id), authorization)];
+            if redaction != "id" {
+                columns.push((primary_key_column(&node.id), identity));
+            }
+            if model.entity_has_traversal_path(name) {
+                columns.push((
+                    traversal_path_column(&node.id),
+                    rows.column_from(&node.id, ontology::TRAVERSAL_PATH_COLUMN)?,
+                ));
+            }
+            for (label, column) in columns {
+                if !outputs.iter().any(|output| output.name == label) {
+                    outputs.push(column.named(label));
                 }
             }
-            let operation = graph.aggregate_relation(*input, groups)?;
-            graph.project_values(graph.limit_relation(operation, count)?, outputs)
-        })?;
-    }
-    if input.query_type != QueryType::Aggregation {
-        for (index, relationship) in input.relationships.iter().enumerate() {
-            let (source, target) = if relationship.direction == crate::input::Direction::Incoming {
-                (&relationship.to, &relationship.from)
-            } else {
-                (&relationship.from, &relationship.to)
-            };
-            let entity = |alias: &str| {
-                input
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == alias)
-                    .and_then(|node| node.entity.as_deref())
-                    .ok_or(GraphError::MissingOutput)
-            };
-            let prefix = if relationship.hops.max > 1 {
-                format!("hop_e{index}_")
-            } else {
-                format!("e{index}_")
-            };
-            for (suffix, value) in [
-                (
-                    "type",
-                    relationship
-                        .types
-                        .as_slice()
-                        .first()
-                        .map(String::as_str)
-                        .unwrap_or("*"),
-                ),
-                ("src_type", entity(source)?),
-                ("dst_type", entity(target)?),
-            ] {
-                let label = format!("{prefix}{suffix}");
-                if !graph.outputs(root)?.any(|output| {
-                    graph
-                        .output_label(output)
-                        .is_ok_and(|existing| existing == label)
-                }) {
-                    outputs.push((label, Expression::Text(value.into())));
-                }
-            }
-            context.add_edge(EdgeMeta {
-                type_column: format!("{prefix}type"),
-                src_column: format!("{prefix}src"),
-                src_type_column: format!("{prefix}src_type"),
-                dst_column: format!("{prefix}dst"),
-                dst_type_column: format!("{prefix}dst_type"),
-                path_column: (relationship.hops.max > 1).then(|| format!("{prefix}path_nodes")),
-                column_prefix: prefix,
-                rel_types: relationship.types.as_slice().to_vec(),
-                from_alias: relationship.from.clone(),
-                to_alias: relationship.to.clone(),
-            });
+            outputs.push(lit(name).named(redaction_type_column(&node.id)));
+            context.add_node(&node.id, name);
         }
-    }
-    graph.extend_result(root, outputs)?;
+        if input.query_type != QueryType::Aggregation {
+            for (index, relationship) in input.relationships.iter().enumerate() {
+                let (source, target) =
+                    if relationship.direction == crate::input::Direction::Incoming {
+                        (&relationship.to, &relationship.from)
+                    } else {
+                        (&relationship.from, &relationship.to)
+                    };
+                let entity = |alias: &str| {
+                    input
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == alias)
+                        .and_then(|node| node.entity.as_deref())
+                        .ok_or(crate::query_graph::Error::Column)
+                };
+                let prefix = if relationship.hops.max > 1 {
+                    format!("hop_e{index}_")
+                } else {
+                    format!("e{index}_")
+                };
+                for (suffix, value) in [
+                    (
+                        "type",
+                        relationship
+                            .types
+                            .as_slice()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("*"),
+                    ),
+                    ("src_type", entity(source)?),
+                    ("dst_type", entity(target)?),
+                ] {
+                    let label = format!("{prefix}{suffix}");
+                    if !outputs.iter().any(|output| output.name == label) {
+                        outputs.push(lit(value).named(label));
+                    }
+                }
+                context.add_edge(EdgeMeta {
+                    type_column: format!("{prefix}type"),
+                    src_column: format!("{prefix}src"),
+                    src_type_column: format!("{prefix}src_type"),
+                    dst_column: format!("{prefix}dst"),
+                    dst_type_column: format!("{prefix}dst_type"),
+                    path_column: (relationship.hops.max > 1).then(|| format!("{prefix}path_nodes")),
+                    column_prefix: prefix,
+                    rel_types: relationship.types.as_slice().to_vec(),
+                    from_alias: relationship.from.clone(),
+                    to_alias: relationship.to.clone(),
+                });
+            }
+        }
+        if let Some(measures) = measures {
+            let rows = q.aggregate(rows, outputs, measures)?;
+            Ok::<_, QueryError>(q.limit(rows, input.limit)?)
+        } else {
+            Ok(q.select(rows, outputs)?)
+        }
+    })?;
     Ok((graph, context))
 }
 

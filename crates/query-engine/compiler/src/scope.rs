@@ -25,7 +25,6 @@ impl QueryScope {
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 use ontology::TraversalPathKind;
 
-const LOOKUP_ALIAS: &str = "_scope";
 pub(crate) const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 

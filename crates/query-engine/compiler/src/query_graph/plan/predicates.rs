@@ -1,6 +1,111 @@
-use super::*;
+use super::super::api::*;
 use crate::input::{Direction, FilterOp, InputFilter, InputNode, InputRelationship};
-use query_data_model::{DenormalizedDirection, DenormalizedKey};
+use orbit_utils::query_types::SqlType;
+use query_data_model::{DenormalizedDirection, DenormalizedKey, QueryDataModel};
+
+pub(super) fn compare(left: Expr, operator: FilterOp, right: Expr) -> Result<Expr> {
+    let operator = match operator {
+        FilterOp::Eq => Operator::Equal,
+        FilterOp::Ne => Operator::NotEqual,
+        FilterOp::Gt => Operator::Greater,
+        FilterOp::Gte => Operator::GreaterEqual,
+        FilterOp::Lt => Operator::Less,
+        FilterOp::Lte => Operator::LessEqual,
+        FilterOp::In => Operator::In,
+        _ => return Err(Error::Type),
+    };
+    Ok(left.binary(operator, right))
+}
+
+pub(super) fn property(column: &Column, filter: &InputFilter, in_sort_key: bool) -> Result<Expr> {
+    if filter.rhs_column.is_some() {
+        return Err(Error::Column);
+    }
+    let operator = filter.op.unwrap_or(FilterOp::Eq);
+    if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) {
+        let function = if operator == FilterOp::IsNull {
+            Function::IsNull
+        } else {
+            Function::IsNotNull
+        };
+        return Ok(Expr::call(function, [column.expr()]));
+    }
+    let value = filter.value.as_ref().ok_or(Error::Type)?;
+    let ValueType::Scalar(data_type) = column.data_type() else {
+        return Err(Error::Type);
+    };
+    let argument = if operator == FilterOp::In {
+        let values = value.as_array().ok_or(Error::Type)?;
+        if values.is_empty() {
+            return Ok(lit(false));
+        }
+        Expr::literal(data_type.to_array(), value.clone())
+    } else {
+        Expr::literal(*data_type, value.clone())
+    };
+    let function = match operator {
+        FilterOp::Contains => Function::Contains,
+        FilterOp::StartsWith => Function::StartsWith,
+        FilterOp::EndsWith => Function::EndsWith,
+        FilterOp::TokenMatch => Function::TokenMatch,
+        FilterOp::AllTokens => Function::AllTokens,
+        FilterOp::AnyTokens => Function::AnyTokens,
+        _ => return compare(column.expr(), operator, argument),
+    };
+    let fold = |value| {
+        if in_sort_key {
+            value
+        } else {
+            Expr::call(Function::Lower, [value])
+        }
+    };
+    Ok(Expr::call(function, [fold(column.expr()), fold(argument)]))
+}
+
+pub(super) fn identity(rows: &Rows<'_>, node: &InputNode) -> Result<Vec<Expr>> {
+    let column = rows.column(&node.id_property)?;
+    let mut predicates = Vec::new();
+    if let [id] = node.node_ids.as_slice() {
+        predicates.push(column.eq(*id));
+    } else if !node.node_ids.is_empty() {
+        predicates.push(column.expr().binary(
+            Operator::In,
+            Expr::literal(SqlType::Int64.to_array(), node.node_ids.clone().into()),
+        ));
+    }
+    if let Some(range) = &node.id_range {
+        predicates.push(column.ge(range.start).and(column.le(range.end)));
+    }
+    Ok(predicates)
+}
+
+pub(super) fn node(
+    model: &(impl QueryDataModel + ?Sized),
+    rows: &Rows<'_>,
+    node: &InputNode,
+) -> Result<Vec<Expr>> {
+    let entity = node.entity.as_deref().ok_or(Error::Outputs)?;
+    let table = model
+        .entity_table(entity)
+        .ok_or_else(|| Error::Unknown(entity.into()))?;
+    let mut predicates = identity(rows, node)?;
+    let mut properties = node.filters.iter().collect::<Vec<_>>();
+    properties.sort_by_key(|(name, _)| *name);
+    for (name, filters) in properties {
+        if model.virtual_source(entity, name).is_some() {
+            continue;
+        }
+        let name = model
+            .property_column_named(entity, name)
+            .ok_or_else(|| Error::Unknown(name.clone()))?;
+        let column = rows.column(name)?;
+        for filter in filters {
+            predicates.push(property(&column, filter, model.in_sort_key(table, name))?);
+        }
+    }
+    predicates.push(rows.column(ontology::DELETED_COLUMN)?.eq(false));
+    Ok(predicates)
+}
 
 pub(super) fn edge_tag<'a>(
     model: &'a (impl QueryDataModel + ?Sized),
@@ -45,162 +150,4 @@ pub(super) fn edge_tag<'a>(
         .map(|filter| crate::passes::plan::helpers::denorm_tag_values(&facts.tag_key, filter))
         .collect::<Option<_>>()?;
     Some((&facts.edge_column, values))
-}
-
-impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M, LatestRows<'a>> {
-    pub(super) fn node_source(
-        &self,
-        relation: RelationId,
-        node: &InputNode,
-    ) -> Result<PhysicalOperation<'a>> {
-        let mut operation = self.read_relation(relation, ReadMode::Current)?;
-        for predicate in self.node_predicates(relation, node)? {
-            operation = self.filter_relation(operation, predicate)?;
-        }
-        Ok(operation)
-    }
-
-    pub(super) fn node_predicates(
-        &self,
-        relation: RelationId,
-        node: &InputNode,
-    ) -> Result<Vec<Expression<'a>>> {
-        let entity = node.entity.as_deref().ok_or(GraphError::MissingOutput)?;
-        let Source::Stored(table) = self.relation(relation)?.source else {
-            return Err(GraphError::MissingOutput);
-        };
-        let mut predicates =
-            Expression::identity_predicates(self.stored_column(relation, &node.id_property)?, node);
-        let mut properties = node.filters.iter().collect::<Vec<_>>();
-        properties.sort_by_key(|(name, _)| *name);
-        for (name, filters) in properties {
-            if self.catalog.virtual_source(entity, name).is_some() {
-                continue;
-            }
-            let name = self
-                .catalog
-                .property_column_named(entity, name)
-                .ok_or_else(|| GraphError::UnknownStored(name.clone()))?;
-            let stored = table.column(name).ok_or(GraphError::MissingOutput)?;
-            let column = self.stored_port(relation, stored)?;
-            for filter in filters {
-                predicates.push(self.filter_predicate(column, stored, filter)?);
-            }
-        }
-        predicates.push(Expression::equal(
-            Expression::Column(self.stored_column(relation, ontology::DELETED_COLUMN)?),
-            Expression::Boolean(false),
-        ));
-        Ok(predicates)
-    }
-
-    pub(super) fn narrowed_node(
-        &mut self,
-        root: BlockId,
-        relation: RelationId,
-        key: ColumnRef<'a>,
-        candidate: (DefinitionId, OutputId),
-        predicates: &[Expression<'a>],
-    ) -> Result<PhysicalOperation<'a>> {
-        let mut operation = self.narrow(
-            root,
-            self.read_relation(relation, ReadMode::Raw)?,
-            key,
-            candidate,
-        )?;
-        for predicate in predicates {
-            if self.sort_key_predicate(predicate)? {
-                operation = self.filter_relation(operation, predicate.clone())?;
-            }
-        }
-        operation = self.latest_relation(
-            operation,
-            self.stored_column(relation, ontology::VERSION_COLUMN)?,
-            None,
-        )?;
-        for predicate in predicates {
-            operation = self.filter_relation(operation, predicate.clone())?;
-        }
-        self.materialize_relation(operation, relation)
-    }
-
-    pub(super) fn sort_key_predicate(&self, predicate: &Expression<'a>) -> Result<bool> {
-        let mut immutable = true;
-        predicate.columns(&mut |column| {
-            immutable &= matches!(column.port, Port::Stored(stored) if self.catalog.in_sort_key(stored.table().name(), stored.name()));
-            Ok(())
-        })?;
-        Ok(immutable)
-    }
-
-    pub(super) fn filter_predicate(
-        &self,
-        column: ColumnRef<'a>,
-        property: StoredColumnRef<'a>,
-        filter: &InputFilter,
-    ) -> Result<Expression<'a>> {
-        if filter.rhs_column.is_some() {
-            return Err(GraphError::UnsupportedInput("nonliteral filter".into()));
-        }
-        let operator = filter.op.unwrap_or(FilterOp::Eq);
-        let argument = match filter.value.as_ref() {
-            _ if matches!(operator, FilterOp::IsNull | FilterOp::IsNotNull) => None,
-            Some(serde_json::Value::Array(values)) if operator == FilterOp::In => {
-                if values.is_empty() {
-                    return Ok(Expression::Boolean(false));
-                }
-                Some(Expression::Array(
-                    values
-                        .iter()
-                        .map(|value| filter_literal(property, value))
-                        .collect::<Result<_>>()?,
-                ))
-            }
-            Some(value) => Some(filter_literal(property, value)?),
-            None => return Err(GraphError::UnsupportedInput("filter value".into())),
-        };
-        let value = Expression::Column(column);
-        Ok(if operator == FilterOp::Eq {
-            Expression::equal(value, argument.ok_or(GraphError::ExpressionType)?)
-        } else {
-            Expression::Predicate {
-                operator,
-                value: Box::new(value),
-                argument: argument.map(Box::new),
-                fold_case: !self
-                    .catalog
-                    .in_sort_key(property.table().name(), property.name()),
-            }
-        })
-    }
-}
-
-fn filter_literal<'a>(
-    property: StoredColumnRef<'a>,
-    value: &serde_json::Value,
-) -> Result<Expression<'a>> {
-    let typed = match property.data_type() {
-        Some(ontology::DataType::Date) => Some(SqlType::Date),
-        Some(ontology::DataType::DateTime) => Some(SqlType::Timestamp {
-            precision: 6,
-            timezone: None,
-        }),
-        Some(ontology::DataType::Float) => Some(SqlType::Float64),
-        _ => None,
-    };
-    if let Some(data_type) = typed {
-        return Ok(Expression::Literal {
-            data_type,
-            value: value.clone(),
-        });
-    }
-    match value {
-        serde_json::Value::String(value) => Ok(Expression::Text(value.clone())),
-        serde_json::Value::Bool(value) => Ok(Expression::Boolean(*value)),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(Expression::Integer)
-            .ok_or_else(|| GraphError::UnsupportedInput("filter value".into())),
-        _ => Err(GraphError::UnsupportedInput("filter value".into())),
-    }
 }

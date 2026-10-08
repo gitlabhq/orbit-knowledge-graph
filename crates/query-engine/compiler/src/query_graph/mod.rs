@@ -1,639 +1,329 @@
+use query_data_model::QueryDataModel;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_utils::query_types::SqlType;
-use query_data_model::QueryDataModel;
-use query_data_model::storage::{StoredColumnRef, StoredTableRef};
+pub mod api;
+mod construct;
+mod expr;
+mod plan;
+mod rewrite;
+mod sql;
+
+pub use api::{
+    Aggregate, Column, Expr, ExprKind, Function, Named, Operator, Order, QueryScope, ValueType,
+    array, array_concat, count, lit, singleton_if, tuple,
+};
 
 static NEXT_GRAPH: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BlockId {
-    owner: u64,
-    slot: usize,
-}
-
-impl std::fmt::Debug for BlockId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "b{}", self.slot)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RelationId {
-    block: BlockId,
-    slot: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct OutputId {
-    block: BlockId,
-    slot: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DefinitionId {
-    block: BlockId,
-    slot: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ColumnRef<'catalog> {
-    relation: RelationId,
-    port: Port<'catalog>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Port<'catalog> {
-    Stored(StoredColumnRef<'catalog>),
-    Output(OutputId),
-}
-
-impl<'catalog> ColumnRef<'catalog> {
-    pub fn relation(self) -> RelationId {
-        self.relation
-    }
-    pub fn port(self) -> Port<'catalog> {
-        self.port
-    }
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum GraphError {
-    #[error("declaration belongs to another graph")]
-    ForeignGraph,
-    #[error("unknown stored table or column: {0}")]
-    UnknownStored(String),
-    #[error("operation requires a projection")]
-    ExpectedSelect,
-    #[error("column is not exposed by this relation")]
-    MissingOutput,
-    #[error("relation is outside this query block")]
-    OutsideBlock,
-    #[error("UNION requires nonempty arms with equal output widths")]
-    UnionShape,
-    #[error("block has multiple structural owners or a structural cycle")]
-    BlockOwnership,
-    #[error("definition is not visible at this reference")]
-    DefinitionVisibility,
-    #[error("latest-row selection requires one stored relation and its full catalog sort key")]
-    LatestShape,
-    #[error("query requires at least one output")]
-    EmptyProjection,
-    #[error("UNION outputs have incompatible types")]
-    UnionType,
-    #[error("expression operands have incompatible types")]
-    ExpressionType,
-    #[error("join conditions must match the declared relation occurrences")]
-    JoinShape,
-    #[error("semi-join outputs cannot reference the filtering relation")]
-    SemiJoinOutput,
-    #[error("nonaggregate outputs must reference grouping columns")]
-    Grouping,
-    #[error("operation references a value not exposed by its input")]
-    OperationVisibility,
-    #[error("relation occurrence is used more than once in a block operation")]
-    ReusedRelation,
-    #[error("expansion requires an array value")]
-    ExpectedArray,
-    #[error("aggregate expression requires an aggregation boundary and cannot be nested")]
-    AggregatePlacement,
-    #[error("grouped computations must be projected before another relational operation")]
-    AggregateBoundary,
-    #[error("replacement must preserve output identities, labels, and types")]
-    OutputContract,
-    #[error("query has already been constructed")]
-    FinishedQuery,
-    #[error("unsupported input: {0}")]
-    UnsupportedInput(String),
+pub enum Error {
+    #[error("reference belongs to another graph or query")]
+    Scope,
+    #[error("unknown table or column: {0}")]
+    Unknown(String),
+    #[error("column is not available from this input")]
+    Column,
+    #[error("expression has incompatible types")]
+    Type,
+    #[error("aggregate must be a measure and cannot contain another aggregate")]
+    Aggregate,
+    #[error("a source occurrence cannot appear in both join inputs")]
+    ReusedSource,
+    #[error("query is unfinished or already has an owner")]
+    Ownership,
+    #[error("CTE is not visible in this query")]
+    CteScope,
+    #[error("query outputs must be nonempty and UNION arms must have matching types")]
+    Outputs,
+    #[error("latest-row selection needs one raw scan and its full replacement key")]
+    Latest,
+    #[error("replacement changes the consumer's input contract")]
+    Replacement,
 }
 
-type Result<T> = std::result::Result<T, GraphError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-impl From<GraphError> for crate::error::QueryError {
-    fn from(error: GraphError) -> Self {
+impl From<Error> for crate::error::QueryError {
+    fn from(error: Error) -> Self {
         Self::Lowering(error.to_string())
     }
 }
 
-pub struct QueryGraph<'catalog, M: QueryDataModel + ?Sized, L> {
-    catalog: &'catalog M,
-    owner: u64,
-    blocks: Vec<Block<'catalog, L>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct QueryId {
+    graph: u64,
+    slot: usize,
 }
 
-struct Block<'a, L> {
-    owner: Option<BlockId>,
-    visible: HashSet<DefinitionId>,
-    required: HashSet<DefinitionId>,
-    definitions: Vec<Definition>,
-    relations: Vec<Relation<'a>>,
-    operation: Option<QueryOperation<'a, L>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Cte {
+    query: QueryId,
+    scope: QueryId,
 }
 
-pub struct QueryOperation<'a, L> {
-    block: BlockId,
-    outputs: Vec<Output<'a>>,
-    kind: QueryKind<'a, L>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Read {
+    Raw,
+    Current,
 }
 
-enum QueryKind<'a, L> {
-    Project(Relational<'a, L>),
-    UnionAll(Vec<BlockId>),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    Inner,
+    Cross,
+    Semi,
+    Membership,
 }
 
-pub struct Output<'a> {
-    label: String,
-    data_type: ValueType,
-    value: Option<Expression<'a>>,
+#[derive(Debug)]
+pub struct Rows<'a> {
+    scope: QueryId,
+    lowered: bool,
+    kind: OperationKind<'a>,
+    columns: Vec<Column>,
+    sources: HashSet<u64>,
 }
 
-impl<'a> Output<'a> {
-    pub fn label(&self) -> &str {
-        &self.label
+#[derive(Debug)]
+pub enum OperationKind<'a> {
+    Scan {
+        table: query_data_model::storage::StoredTableRef<'a>,
+        label: Option<String>,
+        read: Read,
+        source: u64,
+    },
+    Read {
+        query: QueryId,
+        source: u64,
+    },
+    Unit,
+    Filter {
+        input: Box<Rows<'a>>,
+        predicate: Expr,
+    },
+    Join {
+        left: Box<Rows<'a>>,
+        right: Box<Rows<'a>>,
+        kind: Join,
+        condition: Expr,
+    },
+    Select {
+        input: Box<Rows<'a>>,
+        values: Vec<Named>,
+    },
+    Aggregate {
+        input: Box<Rows<'a>>,
+        groups: Vec<Named>,
+        measures: Vec<Named>,
+    },
+    Expand {
+        input: Box<Rows<'a>>,
+        value: Named,
+    },
+    Sort {
+        input: Box<Rows<'a>>,
+        keys: Vec<Order>,
+    },
+    Limit {
+        input: Box<Rows<'a>>,
+        count: u32,
+    },
+    Latest {
+        input: Box<Rows<'a>>,
+        keys: Vec<Column>,
+        version: Column,
+    },
+    FirstBy {
+        input: Box<Rows<'a>>,
+        keys: Vec<Column>,
+    },
+    Union {
+        arms: Vec<QueryId>,
+    },
+}
+
+impl<'a> Rows<'a> {
+    pub fn labeled(mut self, label: impl Into<String>) -> Result<Self> {
+        let OperationKind::Scan { label: name, .. } = &mut self.kind else {
+            return Err(Error::Replacement);
+        };
+        *name = Some(label.into());
+        Ok(self)
     }
-    pub fn data_type(&self) -> &ValueType {
-        &self.data_type
+
+    pub fn kind(&self) -> &OperationKind<'a> {
+        &self.kind
     }
-    pub fn value(&self) -> Option<&Expression<'a>> {
-        self.value.as_ref()
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+    pub fn column(&self, name: &str) -> Result<Column> {
+        let mut matches = self.columns.iter().filter(|column| column.name() == name);
+        let column = matches.next().ok_or_else(|| Error::Unknown(name.into()))?;
+        if matches.next().is_some() {
+            return Err(Error::Column);
+        }
+        Ok(column.clone())
+    }
+
+    pub fn column_from(&self, label: &str, name: &str) -> Result<Column> {
+        let mut found = None;
+        self.walk(&mut |rows| {
+            if let OperationKind::Scan {
+                label: Some(source),
+                ..
+            } = rows.kind()
+                && source == label
+            {
+                let column = rows.column(name)?;
+                if self.columns.contains(&column) && found.replace(column).is_some() {
+                    return Err(Error::Column);
+                }
+            }
+            Ok(())
+        })?;
+        found.ok_or(Error::Column)
+    }
+    pub fn remove_filter(self) -> Result<Self> {
+        match self.kind {
+            OperationKind::Filter { input, .. } => Ok(*input),
+            _ => Err(Error::Replacement),
+        }
+    }
+    fn scalar(&self) -> bool {
+        match &self.kind {
+            OperationKind::Unit => true,
+            OperationKind::Aggregate { groups, .. } => groups.is_empty(),
+            OperationKind::Select { input, .. } | OperationKind::Sort { input, .. } => {
+                input.scalar()
+            }
+            OperationKind::Limit { input, count } => *count > 0 && input.scalar(),
+            _ => false,
+        }
+    }
+    fn wrap(self, make: impl FnOnce(Box<Self>) -> OperationKind<'a>) -> Self {
+        Self {
+            scope: self.scope,
+            lowered: self.lowered,
+            columns: self.columns.clone(),
+            sources: self.sources.clone(),
+            kind: make(Box::new(self)),
+        }
     }
 }
 
-struct Definition {
-    hint: String,
-    body: BlockId,
+struct Query<'a> {
+    parent: Option<QueryId>,
+    attached: bool,
+    visible: HashSet<Cte>,
+    definitions: Vec<(String, Cte)>,
+    rows: Option<Rows<'a>>,
 }
 
-pub struct Relation<'catalog> {
-    pub hint: String,
-    pub source: Source<'catalog>,
-    pub input: Option<ScanInput>,
+pub struct QueryGraph<'a, M: QueryDataModel + ?Sized> {
+    catalog: &'a M,
+    id: u64,
+    next_source: u64,
+    lowered: bool,
+    queries: Vec<Query<'a>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScanInput {
-    Node(usize),
-    Relationship(usize),
-}
+pub struct LoweredGraph<'a, M: QueryDataModel + ?Sized>(QueryGraph<'a, M>);
 
-#[derive(Debug, Clone, Copy)]
-pub enum Source<'catalog> {
-    Stored(StoredTableRef<'catalog>),
-    Derived(BlockId),
-    Definition(DefinitionId),
-}
-
-impl<'a, M: QueryDataModel + ?Sized, L> QueryGraph<'a, M, L> {
+impl<'a, M: QueryDataModel + ?Sized> QueryGraph<'a, M> {
     pub fn new(catalog: &'a M) -> Self {
         Self {
             catalog,
-            owner: NEXT_GRAPH.fetch_add(1, Ordering::Relaxed),
-            blocks: vec![],
+            id: NEXT_GRAPH.fetch_add(1, Ordering::Relaxed),
+            next_source: 0,
+            lowered: false,
+            queries: vec![],
         }
     }
 
-    pub fn query(&mut self) -> BlockId {
-        self.allocate(HashSet::new())
-    }
-
-    pub fn query_in(&mut self, scope: BlockId) -> Result<BlockId> {
-        let visible = self.visible_definitions(scope)?;
-        Ok(self.allocate(visible))
-    }
-
-    pub fn scan(
+    pub fn query(
         &mut self,
-        block: BlockId,
-        table: &str,
-        hint: impl Into<String>,
-    ) -> Result<RelationId> {
-        let table = self
-            .catalog
-            .stored_table(table)
-            .ok_or_else(|| GraphError::UnknownStored(table.into()))?;
-        self.scan_stored(block, table, hint)
-    }
-
-    pub fn scan_stored(
-        &mut self,
-        block: BlockId,
-        table: StoredTableRef<'a>,
-        hint: impl Into<String>,
-    ) -> Result<RelationId> {
-        if self
-            .catalog
-            .stored_table(table.name())
-            .is_none_or(|owned| owned.id() != table.id())
-        {
-            return Err(GraphError::ForeignGraph);
-        }
-        self.add_relation(block, Source::Stored(table), hint.into())
-    }
-
-    pub fn derive(
-        &mut self,
-        block: BlockId,
-        body: BlockId,
-        hint: impl Into<String>,
-    ) -> Result<RelationId> {
-        self.require_building(block)?;
-        self.require_attachment(block, body)?;
-        self.attach(block, body)?;
-        self.add_relation(block, Source::Derived(body), hint.into())
-    }
-
-    pub fn define(
-        &mut self,
-        block: BlockId,
-        body: BlockId,
-        hint: impl Into<String>,
-    ) -> Result<DefinitionId> {
-        self.require_building(block)?;
-        self.require_attachment(block, body)?;
-        self.attach(block, body)?;
-        let definitions = &mut self.block_mut(block)?.definitions;
-        let id = DefinitionId {
-            block,
-            slot: definitions.len(),
-        };
-        definitions.push(Definition {
-            hint: hint.into(),
-            body,
-        });
-        Ok(id)
-    }
-
-    pub fn reference(
-        &mut self,
-        block: BlockId,
-        definition: DefinitionId,
-        hint: impl Into<String>,
-    ) -> Result<RelationId> {
-        self.definition(definition)?;
-        self.require_building(block)?;
-        if !self.visible_definitions(block)?.contains(&definition) {
-            return Err(GraphError::DefinitionVisibility);
-        }
-        if definition.block != block {
-            self.block_mut(block)?.required.insert(definition);
-        }
-        self.add_relation(block, Source::Definition(definition), hint.into())
-    }
-
-    pub fn union_all(&mut self, arms: Vec<BlockId>, labels: Vec<String>) -> Result<BlockId> {
-        let first = *arms.first().ok_or(GraphError::UnionShape)?;
-        if labels.is_empty() || self.query_operation(first)?.outputs.len() != labels.len() {
-            return Err(GraphError::UnionShape);
-        }
-        let types = self
-            .query_operation(first)?
-            .outputs
-            .iter()
-            .map(|output| output.data_type.clone())
-            .collect::<Vec<_>>();
-        let mut visible = self.block(first)?.visible.clone();
-        let mut seen = HashSet::new();
-        for arm in &arms {
-            let block = self.block(*arm)?;
-            if block.owner.is_some() || !seen.insert(*arm) {
-                return Err(GraphError::BlockOwnership);
-            }
-            let operation = self.query_operation(*arm)?;
-            if operation.outputs.len() != labels.len() {
-                return Err(GraphError::UnionShape);
-            }
-            if operation
-                .outputs
-                .iter()
-                .zip(&types)
-                .any(|(output, ty)| output.data_type != *ty)
-            {
-                return Err(GraphError::UnionType);
-            }
-            visible.retain(|definition| block.visible.contains(definition));
-        }
-        for arm in &arms {
-            if !self.block(*arm)?.required.is_subset(&visible) {
-                return Err(GraphError::DefinitionVisibility);
-            }
-        }
-        let block = self.allocate(visible);
-        for arm in &arms {
-            self.attach(block, *arm)?;
-        }
-        let outputs = labels
-            .into_iter()
-            .zip(types)
-            .map(|(label, data_type)| Output {
-                label,
-                data_type,
-                value: None,
-            })
-            .collect();
-        self.block_mut(block)?.operation = Some(QueryOperation {
-            block,
-            outputs,
-            kind: QueryKind::UnionAll(arms),
-        });
-        Ok(block)
-    }
-
-    pub fn stored_column(&self, relation: RelationId, name: &str) -> Result<ColumnRef<'a>> {
-        let Source::Stored(table) = self.relation(relation)?.source else {
-            return Err(GraphError::MissingOutput);
-        };
-        let column = table
-            .column(name)
-            .ok_or_else(|| GraphError::UnknownStored(format!("{}.{name}", table.name())))?;
-        self.stored_port(relation, column)
-    }
-
-    pub fn column(&self, relation: RelationId, name: &str) -> Result<ColumnRef<'a>> {
-        let Some(body) = self.relation_body(relation)? else {
-            return self.stored_column(relation, name);
-        };
-        let output = self
-            .outputs(body)?
-            .find(|output| self.output_label(*output).is_ok_and(|label| label == name))
-            .ok_or(GraphError::MissingOutput)?;
-        self.output_column(relation, output)
-    }
-
-    pub fn stored_port(
-        &self,
-        relation: RelationId,
-        column: StoredColumnRef<'a>,
-    ) -> Result<ColumnRef<'a>> {
-        let Source::Stored(table) = self.relation(relation)?.source else {
-            return Err(GraphError::MissingOutput);
-        };
-        if table.id() != column.table().id() {
-            return Err(GraphError::OutsideBlock);
-        }
-        Ok(ColumnRef {
-            relation,
-            port: Port::Stored(column),
-        })
-    }
-
-    pub fn output_column(&self, relation: RelationId, output: OutputId) -> Result<ColumnRef<'a>> {
-        self.output(output)?;
-        if self.relation_body(relation)? != Some(output.block) {
-            return Err(GraphError::MissingOutput);
-        }
-        Ok(ColumnRef {
-            relation,
-            port: Port::Output(output),
-        })
-    }
-
-    pub fn check_column(&self, block: BlockId, column: ColumnRef<'a>) -> Result<()> {
-        self.block(block)?;
-        if column.relation.block != block {
-            return Err(GraphError::OutsideBlock);
-        }
-        match column.port {
-            Port::Stored(stored) => {
-                self.stored_port(column.relation, stored)?;
-            }
-            Port::Output(output) => {
-                self.output_column(column.relation, output)?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn outputs(
-        &self,
-        block: BlockId,
-    ) -> Result<impl Iterator<Item = OutputId> + use<'a, M, L>> {
-        let count = self.query_operation(block)?.outputs.len();
-        Ok((0..count).map(move |slot| OutputId { block, slot }))
-    }
-
-    pub fn output(&self, output: OutputId) -> Result<&Output<'a>> {
-        self.query_operation(output.block)?
-            .outputs
-            .get(output.slot)
-            .ok_or(GraphError::MissingOutput)
-    }
-
-    pub fn output_label(&self, output: OutputId) -> Result<&str> {
-        Ok(self.output(output)?.label())
-    }
-
-    pub fn projection(&self, output: OutputId) -> Result<&Expression<'a>> {
-        self.output(output)?
-            .value()
-            .ok_or(GraphError::ExpectedSelect)
-    }
-
-    pub fn union_inputs(&self, output: OutputId) -> Result<Vec<OutputId>> {
-        self.output(output)?;
-        let arms = self
-            .union_arms(output.block)?
-            .ok_or(GraphError::UnionShape)?;
-        Ok(arms
-            .iter()
-            .map(|block| OutputId {
-                block: *block,
-                slot: output.slot,
-            })
-            .collect())
-    }
-
-    pub fn union_arms(&self, block: BlockId) -> Result<Option<&[BlockId]>> {
-        Ok(match &self.query_operation(block)?.kind {
-            QueryKind::UnionAll(arms) => Some(arms),
-            QueryKind::Project(_) => None,
-        })
-    }
-
-    pub fn operation(&self, block: BlockId) -> Result<&Relational<'a, L>> {
-        match &self.query_operation(block)?.kind {
-            QueryKind::Project(input) => Ok(input),
-            QueryKind::UnionAll(_) => Err(GraphError::ExpectedSelect),
-        }
+        build: impl FnOnce(&mut QueryScope<'_, 'a, M>) -> Result<Rows<'a>>,
+    ) -> Result<QueryId> {
+        self.build_query(None, HashSet::new(), build)
     }
 
     pub fn catalog(&self) -> &'a M {
         self.catalog
     }
-
-    pub fn relations(
-        &self,
-        block: BlockId,
-    ) -> Result<impl Iterator<Item = RelationId> + use<'a, M, L>> {
-        let count = self.block(block)?.relations.len();
-        Ok((0..count).map(move |slot| RelationId { block, slot }))
+    pub fn rows(&self, id: QueryId) -> Result<&Rows<'a>> {
+        self.get(id)?.rows.as_ref().ok_or(Error::Ownership)
     }
 
-    pub fn blocks(&self) -> impl Iterator<Item = BlockId> + use<'a, M, L> {
-        let owner = self.owner;
-        (0..self.blocks.len()).map(move |slot| BlockId { owner, slot })
-    }
-
-    pub fn relation(&self, relation: RelationId) -> Result<&Relation<'a>> {
-        self.block(relation.block)?
-            .relations
-            .get(relation.slot)
-            .ok_or(GraphError::MissingOutput)
-    }
-
-    pub fn definition_hint(&self, definition: DefinitionId) -> Result<&str> {
-        Ok(&self.definition(definition)?.hint)
-    }
-
-    pub fn definitions(
-        &self,
-        block: BlockId,
-    ) -> Result<impl Iterator<Item = (DefinitionId, BlockId)> + '_> {
+    pub fn definitions(&self, id: QueryId) -> Result<impl Iterator<Item = (&str, QueryId)>> {
         Ok(self
-            .block(block)?
+            .get(id)?
             .definitions
             .iter()
-            .enumerate()
-            .map(move |(slot, definition)| (DefinitionId { block, slot }, definition.body)))
+            .map(|(name, definition)| (name.as_str(), definition.query)))
     }
 
-    fn query_operation(&self, block: BlockId) -> Result<&QueryOperation<'a, L>> {
-        self.block(block)?
-            .operation
-            .as_ref()
-            .ok_or(GraphError::EmptyProjection)
-    }
-
-    fn definition(&self, id: DefinitionId) -> Result<&Definition> {
-        self.block(id.block)?
-            .definitions
-            .get(id.slot)
-            .ok_or(GraphError::DefinitionVisibility)
-    }
-
-    fn relation_body(&self, relation: RelationId) -> Result<Option<BlockId>> {
-        Ok(match self.relation(relation)?.source {
-            Source::Stored(_) => None,
-            Source::Derived(body) => Some(body),
-            Source::Definition(definition) => Some(self.definition(definition)?.body),
-        })
-    }
-
-    fn visible_definitions(&self, block: BlockId) -> Result<HashSet<DefinitionId>> {
-        let declaration = self.block(block)?;
-        let mut visible = declaration.visible.clone();
-        visible.extend((0..declaration.definitions.len()).map(|slot| DefinitionId { block, slot }));
-        Ok(visible)
-    }
-
-    fn require_building(&self, block: BlockId) -> Result<()> {
-        if self.block(block)?.operation.is_some() {
-            return Err(GraphError::FinishedQuery);
-        }
-        Ok(())
-    }
-
-    fn require_attachment(&self, parent: BlockId, child: BlockId) -> Result<()> {
-        self.query_operation(child)?;
-        let declaration = self.block(child)?;
-        if declaration.owner.is_some() {
-            return Err(GraphError::BlockOwnership);
-        }
-        let mut ancestor = Some(parent);
-        while let Some(block) = ancestor {
-            if block == child {
-                return Err(GraphError::BlockOwnership);
-            }
-            ancestor = self.block(block)?.owner;
-        }
-        if !declaration
-            .required
-            .is_subset(&self.visible_definitions(parent)?)
-        {
-            return Err(GraphError::DefinitionVisibility);
-        }
-        Ok(())
-    }
-
-    fn attach(&mut self, parent: BlockId, child: BlockId) -> Result<()> {
-        let required = self
-            .block(child)?
-            .required
-            .iter()
-            .filter(|definition| definition.block != parent)
-            .copied()
-            .collect::<Vec<_>>();
-        self.block_mut(parent)?.required.extend(required);
-        self.block_mut(child)?.owner = Some(parent);
-        Ok(())
-    }
-
-    fn block(&self, id: BlockId) -> Result<&Block<'a, L>> {
-        if id.owner != self.owner {
-            return Err(GraphError::ForeignGraph);
-        }
-        self.blocks.get(id.slot).ok_or(GraphError::BlockOwnership)
-    }
-
-    fn block_mut(&mut self, id: BlockId) -> Result<&mut Block<'a, L>> {
-        if id.owner != self.owner {
-            return Err(GraphError::ForeignGraph);
-        }
-        self.blocks
-            .get_mut(id.slot)
-            .ok_or(GraphError::BlockOwnership)
-    }
-
-    fn allocate(&mut self, visible: HashSet<DefinitionId>) -> BlockId {
-        let id = BlockId {
-            owner: self.owner,
-            slot: self.blocks.len(),
-        };
-        self.blocks.push(Block {
-            owner: None,
-            visible,
-            required: HashSet::new(),
-            definitions: vec![],
-            relations: vec![],
-            operation: None,
-        });
-        id
-    }
-
-    fn add_relation(
+    fn build_query(
         &mut self,
-        block: BlockId,
-        source: Source<'a>,
-        hint: String,
-    ) -> Result<RelationId> {
-        self.require_building(block)?;
-        let relations = &mut self.block_mut(block)?.relations;
-        let id = RelationId {
-            block,
-            slot: relations.len(),
+        parent: Option<QueryId>,
+        visible: HashSet<Cte>,
+        build: impl FnOnce(&mut QueryScope<'_, 'a, M>) -> Result<Rows<'a>>,
+    ) -> Result<QueryId> {
+        let id = QueryId {
+            graph: self.id,
+            slot: self.queries.len(),
         };
-        relations.push(Relation {
-            hint,
-            source,
-            input: None,
+        self.queries.push(Query {
+            parent,
+            attached: false,
+            visible,
+            definitions: vec![],
+            rows: None,
         });
+        let scope = &mut QueryScope { graph: self, id };
+        let rows = build(scope)?;
+        scope.require_rows(&rows)?;
+        if rows.columns.is_empty() {
+            return Err(Error::Outputs);
+        }
+        self.queries[id.slot].rows = Some(rows);
         Ok(id)
     }
+
+    fn get(&self, id: QueryId) -> Result<&Query<'a>> {
+        if id.graph != self.id {
+            return Err(Error::Scope);
+        }
+        self.queries.get(id.slot).ok_or(Error::Ownership)
+    }
+
+    fn source(&mut self) -> u64 {
+        let source = self.next_source;
+        self.next_source += 1;
+        source
+    }
+
+    fn columns(
+        &mut self,
+        scope: QueryId,
+        values: impl IntoIterator<Item = (String, ValueType)>,
+    ) -> (u64, Vec<Column>) {
+        let source = self.source();
+        let columns = values
+            .into_iter()
+            .enumerate()
+            .map(|(slot, (name, data_type))| {
+                Column(Arc::new(expr::ColumnData {
+                    scope,
+                    source,
+                    slot,
+                    name,
+                    data_type,
+                }))
+            })
+            .collect();
+        (source, columns)
+    }
 }
-
-mod construction;
-mod explain;
-mod expression;
-mod lower;
-mod outputs;
-mod plan;
-mod relational;
-mod render;
-mod types;
-mod walk;
-
-pub use expression::{Expression, ValueType};
-pub use relational::{
-    JoinKind, LatestRows, LoweredOperation, OperationKind, PhysicalOperation, ReadMode, Relational,
-};
-pub use walk::BlockView;

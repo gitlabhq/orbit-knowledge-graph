@@ -362,8 +362,8 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                     path,
                     &mut failures,
                     |input, options| {
-                        use compiler::query_graph::{LatestRows, QueryGraph};
-                        let mut graph = QueryGraph::<_, LatestRows<'_>>::new(&remote);
+                        use compiler::query_graph::QueryGraph;
+                        let mut graph = QueryGraph::new(&remote);
                         let root = graph.plan_with_options(input, options)?;
                         let planned = match input.query_type {
                             compiler::QueryType::Hydration => {
@@ -377,9 +377,9 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                             }
                             _ => explain::query_graph(&graph, root),
                         };
-                        let graph = graph.lower_operations();
-                        let emitted = explain::query_graph(&graph, root);
-                        graph.render_parameterized(root)?;
+                        let graph = graph.lower();
+                        let emitted = explain::query_graph(graph.graph(), root);
+                        graph.render(root)?;
                         Ok((planned, emitted))
                     },
                 ),

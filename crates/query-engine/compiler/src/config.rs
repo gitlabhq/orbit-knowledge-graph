@@ -1,6 +1,5 @@
 use orbit_server_config::QueryConfig;
 use query_data_model::QueryDataModel;
-use std::convert::Infallible;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
@@ -15,7 +14,7 @@ use crate::passes::{
     check, codegen, cursor, enforce, hydrate, lower, normalize, plan, relationships,
     response_policy, restrict, security, settings, validate,
 };
-use crate::query_graph::{BlockId, LatestRows, QueryGraph};
+use crate::query_graph::{LoweredGraph, OperationKind, QueryGraph, QueryId, Read};
 use crate::types::SecurityContext;
 
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
@@ -29,12 +28,12 @@ fn require<T>(value: Option<T>, field: &str) -> Result<T> {
 pub enum GraphStage<'graph, 'catalog> {
     Logical(&'graph Input),
     Planned(
-        &'graph QueryGraph<'catalog, query_data_model::ClickHouseDataModel, LatestRows<'catalog>>,
-        BlockId,
+        &'graph QueryGraph<'catalog, query_data_model::ClickHouseDataModel>,
+        QueryId,
     ),
     Emitted(
-        &'graph QueryGraph<'catalog, query_data_model::ClickHouseDataModel, Infallible>,
-        BlockId,
+        &'graph QueryGraph<'catalog, query_data_model::ClickHouseDataModel>,
+        QueryId,
     ),
 }
 
@@ -96,12 +95,11 @@ fn compile_graph_context(
     let input = require(context.take_input(), "input")?;
     let scope = require(context.take_scope_proofs(), "scope_proofs")?;
     let mut pagination = require(context.take_pagination(), "pagination")?;
-    let mut graph = QueryGraph::<_, LatestRows<'_>>::new(model.as_ref());
+    let mut graph = QueryGraph::new(model.as_ref());
     let root = graph.plan(&input)?;
     observe(GraphStage::Planned(&graph, root))?;
-    let mut graph = graph.lower_operations();
-    observe(GraphStage::Emitted(&graph, root))?;
-    response_policy::apply_graph_excerpts(&mut graph, root, &input)?;
+    let graph = graph.lower();
+    observe(GraphStage::Emitted(graph.graph(), root))?;
     let (graph, result_context) = enforce::enforce_graph_return(graph, root, &input)?;
     let mut graph = crate::scope::apply_graph(graph, root, &scope, &input)?;
     if !security_context.scope_proofs.is_empty() {
@@ -111,9 +109,10 @@ fn compile_graph_context(
     let graph = security::apply_graph_security(graph, root, &security_context)?;
     let (graph, root, key_count) = cursor::apply_graph(graph, root, &input, pagination.query_hash)?;
     pagination.key_count = key_count;
+    let graph = response_policy::apply_graph_excerpts(graph, root, &input)?;
     check::check_graph(&graph, root, &security_context)?;
     let hydration = hydrate::generate_graph_hydration(&input, &graph, root, &security_context);
-    let query_config = graph_settings(&graph, &input)?;
+    let query_config = graph_settings(&graph, root, &input)?;
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     let base = codegen::clickhouse::codegen_graph(graph, root, result_context, query_config)?;
     Ok(CompiledQueryContext {
@@ -127,15 +126,24 @@ fn compile_graph_context(
 }
 
 fn graph_settings(
-    graph: &QueryGraph<'_, query_data_model::ClickHouseDataModel, Infallible>,
+    graph: &LoweredGraph<'_, query_data_model::ClickHouseDataModel>,
+    root: QueryId,
     input: &Input,
 ) -> Result<QueryConfig> {
     let mut config = settings::resolve(input.query_type.into());
-    for block in graph.blocks() {
-        config.compiler_derived.optimize_move_to_prewhere_if_final |= graph
-            .operation(block)
-            .is_ok_and(|operation| operation.reads_current());
-        if graph.definitions(block)?.next().is_some() {
+    let graph = graph.graph();
+    for query in graph.reachable(root)? {
+        graph.rows(query)?.walk(&mut |rows| {
+            config.compiler_derived.optimize_move_to_prewhere_if_final |= matches!(
+                rows.kind(),
+                OperationKind::Scan {
+                    read: Read::Current,
+                    ..
+                }
+            );
+            Ok::<_, crate::query_graph::Error>(())
+        })?;
+        if graph.definitions(query)?.next().is_some() {
             config
                 .compiler_derived
                 .use_index_for_in_with_subqueries_max_values = Some(IN_SUBQUERY_INDEX_MAX_VALUES);

@@ -1,41 +1,42 @@
-use query_data_model::QueryDataModel;
-use std::convert::Infallible;
-
 use super::{PathScopeId, QueryScope, ScopeSource};
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use crate::input::Input;
-use crate::query_graph::{
-    BlockId, Expression, OperationKind, QueryGraph, ReadMode, ScanInput, Source,
+use crate::query_graph::api::{
+    Aggregate, Expr, Function, LoweredGraph, OperationKind, QueryId, Read, lit,
 };
+use orbit_utils::query_types::SqlType;
+use query_data_model::QueryDataModel;
 
 pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
-    graph: QueryGraph<'a, M, Infallible>,
-    root: BlockId,
+    graph: LoweredGraph<'a, M>,
+    root: QueryId,
     scope: &QueryScope,
     input: &Input,
-) -> Result<QueryGraph<'a, M, Infallible>> {
-    graph.rewrite_operations(root, |graph, operation| {
-        let OperationKind::Source { relation, .. } = operation.kind() else {
-            return Ok(operation);
+) -> Result<LoweredGraph<'a, M>> {
+    graph.rewrite(root, |q, rows| {
+        let OperationKind::Scan {
+            table,
+            label: Some(label),
+            ..
+        } = rows.kind()
+        else {
+            return Ok(rows);
         };
-        let relation = *relation;
-        let declaration = graph.relation(relation)?;
-        let Source::Stored(table) = declaration.source else {
-            return Ok(operation);
-        };
-        let proof = match declaration.input {
-            Some(ScanInput::Node(index)) if graph.catalog().table_path_scopable(table.name()) => {
-                scope.nodes.get(&input.nodes[index].id)
-            }
-            Some(ScanInput::Relationship(index)) => {
-                scope.relationships.get(index).and_then(Option::as_ref)
-            }
-            _ => None,
+        let proof = if input.nodes.iter().any(|node| node.id == *label)
+            && q.catalog().table_path_scopable(table.name())
+        {
+            scope.nodes.get(label)
+        } else {
+            label
+                .strip_prefix('e')
+                .and_then(|index| index.parse::<usize>().ok())
+                .and_then(|index| scope.relationships.get(index))
+                .and_then(Option::as_ref)
         };
         let Some(proof) = proof else {
-            return Ok(operation);
+            return Ok(rows);
         };
-        let column = graph.stored_column(relation, ontology::TRAVERSAL_PATH_COLUMN)?;
+        let column = rows.column(ontology::TRAVERSAL_PATH_COLUMN)?;
         let required = scope
             .requirements
             .iter()
@@ -43,103 +44,77 @@ pub fn apply_graph<'a, M: QueryDataModel + ?Sized>(
         let mut predicates = Vec::new();
         for source in &proof.sources {
             let path = match source {
-                ScopeSource::Literal(path) => Expression::Text(path.clone()),
+                ScopeSource::Literal(path) => lit(path.clone()),
                 ScopeSource::Lookup {
                     source_table,
                     key_column,
                     value,
-                } => lookup_path(graph, operation.block(), source_table, key_column, value)?,
+                } => lookup_path(q, source_table, key_column, value)?,
             };
-            let mut predicate = Expression::StartsWith(
-                Box::new(Expression::Column(column)),
-                Box::new(path.clone()),
-            );
+            let mut predicate = column.starts_with(path.clone());
             if let Some((min, max)) = proof.depth {
                 predicate = if min == 0 && max == 0 {
-                    Expression::equal(Expression::Column(column), path.clone())
+                    column.eq(path.clone())
                 } else {
-                    let depth = Expression::PathDepth(Box::new(Expression::Column(column)));
-                    let bound = |hops| {
-                        Expression::Add(
-                            Box::new(Expression::PathDepth(Box::new(path.clone()))),
-                            Box::new(Expression::Integer(i64::from(hops))),
-                        )
-                    };
-                    Expression::And(
-                        Box::new(predicate),
-                        Box::new(Expression::And(
-                            Box::new(Expression::GreaterEqual(
-                                Box::new(depth.clone()),
-                                Box::new(bound(min)),
-                            )),
-                            Box::new(Expression::LessEqual(Box::new(depth), Box::new(bound(max)))),
-                        )),
-                    )
+                    let depth = Expr::call(Function::PathDepth, [column.expr()]);
+                    let base = Expr::call(Function::PathDepth, [path.clone()]);
+                    predicate
+                        .and(depth.clone().ge(base.clone().add(i64::from(min))))
+                        .and(depth.le(base.add(i64::from(max))))
                 };
             }
-            let unresolved = Expression::Text(super::UNRESOLVED_PATH.into());
             predicates.push(if required {
-                Expression::And(
-                    Box::new(predicate),
-                    Box::new(Expression::Predicate {
-                        operator: crate::input::FilterOp::Ne,
-                        value: Box::new(path),
-                        argument: Some(Box::new(unresolved)),
-                        fold_case: false,
-                    }),
-                )
+                predicate.and(path.ne(super::UNRESOLVED_PATH))
             } else {
-                Expression::Or(
-                    Box::new(predicate),
-                    Box::new(Expression::equal(path, unresolved)),
-                )
+                predicate.or(path.eq(super::UNRESOLVED_PATH))
             });
         }
-        let predicate = predicates
-            .into_iter()
-            .reduce(|left, right| Expression::Or(Box::new(left), Box::new(right)))
-            .unwrap_or(Expression::Boolean(false));
-        Ok(graph.filter_relation(operation, predicate)?)
+        Ok(q.filter(
+            rows,
+            predicates
+                .into_iter()
+                .reduce(Expr::or)
+                .unwrap_or_else(|| lit(false)),
+        )?)
     })
 }
 
 fn lookup_path<'a, M: QueryDataModel + ?Sized>(
-    graph: &mut QueryGraph<'a, M, Infallible>,
-    parent: BlockId,
+    q: &mut crate::query_graph::QueryScope<'_, 'a, M>,
     table: &str,
     key: &str,
     value: &PathScopeId,
-) -> Result<Expression<'a>> {
-    let table = graph
-        .catalog()
-        .stored_table(table)
-        .ok_or_else(|| QueryError::Lowering(format!("unknown scope table {table}")))?;
-    let lookup = graph.query_in(parent)?;
-    let scan = graph.scan_stored(lookup, table, super::LOOKUP_ALIAS)?;
-    let (read, value) = match value {
-        PathScopeId::Numeric(value) => (ReadMode::Raw, Expression::Integer(*value)),
-        PathScopeId::Text(value) => (ReadMode::Current, Expression::Text(value.clone())),
-    };
-    let operation = graph.filter_relation(
-        graph.read_relation(scan, read)?,
-        Expression::equal(Expression::Column(graph.stored_column(scan, key)?), value),
-    )?;
-    let operation = graph.aggregate_relation(operation, vec![])?;
-    let projection = graph.project_values(
-        operation,
-        [(
-            ontology::TRAVERSAL_PATH_COLUMN.into(),
-            Expression::LatestPath {
-                path: graph.stored_column(scan, ontology::TRAVERSAL_PATH_COLUMN)?,
-                version: graph.stored_column(scan, ontology::VERSION_COLUMN)?,
-                deletion: graph.stored_column(scan, ontology::DELETED_COLUMN)?,
-            },
-        )],
-    )?;
-    graph.finish_query(projection)?;
-    let output = graph
-        .outputs(lookup)?
-        .next()
-        .ok_or(crate::query_graph::GraphError::EmptyProjection)?;
-    Ok(graph.scalar_query(parent, output, super::LOOKUP_ALIAS)?)
+) -> crate::query_graph::Result<Expr> {
+    let lookup = q.subquery(|q| {
+        let (read, value) = match value {
+            PathScopeId::Numeric(value) => (Read::Raw, lit(*value)),
+            PathScopeId::Text(value) => (Read::Current, lit(value.clone())),
+        };
+        let rows = q.scan(table, read)?;
+        let predicate = rows.column(key)?.eq(value);
+        let path = rows.column(ontology::TRAVERSAL_PATH_COLUMN)?;
+        let deleted = rows.column(ontology::DELETED_COLUMN)?;
+        let version = rows.column(ontology::VERSION_COLUMN)?;
+        let rows = q.filter(rows, predicate)?;
+        let rows = q.aggregate(
+            rows,
+            [],
+            [
+                Expr::aggregate(Aggregate::ArgMax, [path.expr(), version.expr()]).named("path"),
+                Expr::aggregate(Aggregate::ArgMax, [deleted.expr(), version.expr()])
+                    .named("deleted"),
+            ],
+        )?;
+        let value = Expr::call(
+            Function::If,
+            [
+                rows.column("deleted")?.expr(),
+                Expr::literal(SqlType::String, serde_json::Value::Null),
+                rows.column("path")?.expr(),
+            ],
+        );
+        let value = Expr::call(Function::Coalesce, [value, lit(super::UNRESOLVED_PATH)]);
+        q.select(rows, [value.named("path")])
+    })?;
+    q.scalar(lookup, "path")
 }
