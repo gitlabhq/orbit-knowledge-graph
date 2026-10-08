@@ -34,6 +34,9 @@ uses GitLab Orbit to traverse the graph and answer.
 This page is a library of prompts that work. Each one turns your agent into an
 expert on your own projects.
 
+For a step-by-step walkthrough of package registry queries, see
+[Tutorial: Answer package registry questions with GitLab Orbit](package-registry-tutorial.md).
+
 ## How to use this page
 
 1. Connect an agent to GitLab Orbit. GitLab Duo Agent Platform has GitLab Orbit built in.
