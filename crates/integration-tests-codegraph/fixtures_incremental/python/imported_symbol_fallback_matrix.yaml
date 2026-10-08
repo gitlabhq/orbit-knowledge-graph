@@ -54,8 +54,6 @@ fixtures:
 
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
-    # Package imports currently retain their module name in identifier_name.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'package_import_call'
@@ -63,22 +61,10 @@ tests:
       ORDER BY path
     assert:
       - { row_count: 4 }
-      - { row: { caller: "main.package_import_call", path: "httpx", name: null, alias: "external_httpx" } }
-      - { row: { caller: "main.package_import_call", path: "requests", name: null, alias: null } }
-      - { row: { caller: "main.package_import_call", path: "urllib.parse", name: null, alias: null } }
-      - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: null, alias: "ET" } }
-
-  - name: "dotted package calls produce one edge and preserve aliases"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.name = 'package_import_call'
-      RETURN sym.import_path AS path, sym.identifier_alias AS alias
-    assert:
-      - { row_count: 4 }
-      - { row: { path: "requests", alias: null } }
-      - { row: { path: "httpx", alias: "external_httpx" } }
-      - { row: { path: "urllib.parse", alias: null } }
-      - { row: { path: "xml.etree.ElementTree", alias: "ET" } }
+      - { row: { caller: "main.package_import_call", path: "httpx", name: "httpx", alias: "external_httpx" } }
+      - { row: { caller: "main.package_import_call", path: "requests", name: "requests", alias: null } }
+      - { row: { caller: "main.package_import_call", path: "urllib.parse", name: "urllib.parse", alias: null } }
+      - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: "xml.etree.ElementTree", alias: "ET" } }
 
   - name: "separate dotted package calls retain separate edges"
     query: |
