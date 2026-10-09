@@ -60,7 +60,6 @@ GitLab Orbit Remote exposes the same graph through three surfaces. Pick the one 
 | MCP | Claude Code, Codex, other AI agents | One-time agent configuration |
 | REST API | Scripts, dashboards, custom tooling | API token |
 
-
 ### GitLab Duo Agent Platform (no setup required)
 
 GitLab Orbit is wired into GitLab Duo Agent Platform. The GitLab Duo Agent, Planner Agent, Security Analyst Agent, Data Analyst Agent, CI Expert Agent, and Developer Flow call GitLab Orbit's `list_commands` and `invoke_command` tools automatically, running commands such as `query_graph` and `get_graph_schema`, when a question is best answered by graph traversal. No tool selection or configuration required.

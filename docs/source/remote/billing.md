@@ -70,4 +70,3 @@ query scans do not change the cost.
 A query that fails costs nothing.
 
 Queries that GitLab provides for common questions cost the same as the queries you write yourself.
-
