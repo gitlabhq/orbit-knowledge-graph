@@ -30,14 +30,17 @@ tree, run `git commit --amend --no-edit --allow-empty` and push with
 `--force-with-lease`. If the lease is rejected, someone else pushed: stop and
 investigate.
 
-Never push `Run CI` or `chore: trigger pipeline` commits. The only exception is
-a refused force-push (protected branch). Then run `git reset --soft
-origin/<branch>` and push an empty commit with a real message, such as
+Never add a commit whose only purpose is to start CI, such as `Run CI` or
+`chore: trigger pipeline`. The only exception is a refused force-push (protected
+branch). Then run `git reset --soft origin/<branch>` and push an empty commit
+with a real message, such as
 `git commit --allow-empty -m "chore: start merge request pipeline"`.
 
 Do not use `glab ci run`. It creates a branch pipeline that MR-only rules can
 filter out. With `--mr`, it reuses the stale merge ref and can be skipped.
-Afterwards, check that the MR's head pipeline exists and is not skipped.
+
+After either push, wait for a new MR head pipeline and check that it is not
+skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
