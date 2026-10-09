@@ -27,6 +27,10 @@ fn load_unprefixed_ontology() -> ontology::Ontology {
     else {
         return ontology::Ontology::load_embedded().expect("embedded ontology should load");
     };
+    load_ontology_overlay(&name)
+}
+
+pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
     let dir = format!("{}/overlays/{name}", env!("SEEDS_DIR"));
     assert!(
         std::path::Path::new(&dir).is_dir(),

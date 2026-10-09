@@ -1,4 +1,5 @@
 use crate::synth::config::{FakeDataConfig, StringKind};
+use crate::synth::constants::SEEDED_BASE_TIME_MILLIS;
 use chrono::Utc;
 use ontology::{DataType, Field};
 use rand::rngs::Xoshiro256PlusPlus;
@@ -229,7 +230,7 @@ impl FakeValueGenerator {
         Self {
             rng: Xoshiro256PlusPlus::seed_from_u64(seed),
             counter: 0,
-            now_millis: Utc::now().timestamp_millis(),
+            now_millis: SEEDED_BASE_TIME_MILLIS,
             buf: String::with_capacity(64),
             pools,
         }
