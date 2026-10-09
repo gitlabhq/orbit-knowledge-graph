@@ -22,7 +22,11 @@ struct Scenario {
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
+    validation_error: Option<String>,
+    restriction_error: Option<String>,
+    #[serde(default)]
     logical: Assertions,
+    #[serde(default)]
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
 }
@@ -40,7 +44,15 @@ enum PredicateSetup {
         node: String,
         property: String,
         op: compiler::input::FilterOp,
-        value: serde_json::Value,
+        value: Option<serde_json::Value>,
+        rhs_column: Option<(String, String)>,
+    },
+    Relationship {
+        relationship: usize,
+        property: String,
+        op: compiler::input::FilterOp,
+        value: Option<serde_json::Value>,
+        rhs_column: Option<(String, String)>,
     },
 }
 
@@ -55,13 +67,29 @@ impl PredicateSetup {
                 property,
                 op,
                 value,
+                rhs_column,
             } => BooleanExpression::Leaf(PropertyPredicate {
                 target: PredicateTarget::Node(node.clone()),
                 property: property.clone(),
                 filter: InputFilter {
                     op: Some(*op),
-                    value: Some(value.clone()),
-                    ..Default::default()
+                    value: value.clone(),
+                    rhs_column: rhs_column.clone(),
+                },
+            }),
+            Self::Relationship {
+                relationship,
+                property,
+                op,
+                value,
+                rhs_column,
+            } => BooleanExpression::Leaf(PropertyPredicate {
+                target: PredicateTarget::Relationship(*relationship),
+                property: property.clone(),
+                filter: InputFilter {
+                    op: Some(*op),
+                    value: value.clone(),
+                    rhs_column: rhs_column.clone(),
                 },
             }),
         }
@@ -292,15 +320,31 @@ fn check<M: QueryDataModel>(
             .extend(scenario.predicates.iter().map(PredicateSetup::expression));
         if !scenario.predicates.is_empty() {
             let validator = compiler::passes::validate::Validator::new(model);
-            validator
+            let result = validator
                 .check_shape(&input)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
-            validator
-                .check_references(&input)
-                .unwrap_or_else(|error| panic!("{label}: {error}"));
+                .and_then(|()| validator.check_references(&input));
+            if let Some(expected) = &scenario.validation_error {
+                let error = result.expect_err(&label);
+                assert!(
+                    error.is_client_safe() && error.to_string().contains(expected),
+                    "{label}: {error}"
+                );
+                continue;
+            }
+            result.unwrap_or_else(|error| panic!("{label}: {error}"));
         }
         let mut input =
             normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+        if let Some(expected) = &scenario.restriction_error {
+            let security = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+            let error = compiler::passes::restrict::restrict(&mut input, model, &security)
+                .expect_err(&label);
+            assert!(
+                error.is_client_safe() && error.to_string().contains(expected),
+                "{label}: {error}"
+            );
+            continue;
+        }
         input.extract_scan_filters();
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
@@ -370,13 +414,27 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             orbit_utils::yaml::from_str(&std::fs::read_to_string(path).unwrap())
                 .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         assert!(
-            !scenario.physical.is_empty() && !scenario.query.is_empty(),
+            (!scenario.physical.is_empty()
+                || scenario.validation_error.is_some()
+                || scenario.restriction_error.is_some())
+                && !scenario.query.is_empty(),
             "{}: missing query arms or backend assertions",
             path.display()
         );
         scenario
             .validate_frontends()
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        if scenario.validation_error.is_some() || scenario.restriction_error.is_some() {
+            assert!(
+                !scenario.predicates.is_empty()
+                    && !(scenario.validation_error.is_some()
+                        && scenario.restriction_error.is_some())
+            );
+            check(&scenario, &remote, "clickhouse", path, |input, options| {
+                plan::plan_clickhouse(input, &remote, options, &HashSet::new())
+            });
+            continue;
+        }
         for backend in scenario.physical.keys() {
             match backend.as_str() {
                 "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {

@@ -1,0 +1,11 @@
+name: Native negated path predicates cannot escape authorized scope
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}
+  gql: |
+    MATCH (p:Project {id: 1}) RETURN p
+predicates:
+  - not:
+      and:
+        - {node: p, property: traversal_path, op: starts_with, value: '2/'}
+restriction_error: authorized

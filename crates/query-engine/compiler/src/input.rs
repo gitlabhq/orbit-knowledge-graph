@@ -99,11 +99,19 @@ impl<T> BooleanExpression<T> {
     }
 
     pub fn depth(&self) -> usize {
-        match self {
-            Self::Leaf(_) => 0,
-            Self::And(children) => 1 + children.iter().map(Self::depth).max().unwrap_or(0),
-            Self::Not(child) => 1 + child.depth(),
+        let mut pending = vec![(self, 0)];
+        let mut maximum = 0;
+        while let Some((expression, depth)) = pending.pop() {
+            maximum = maximum.max(depth);
+            match expression {
+                Self::Leaf(_) => {}
+                Self::And(children) => {
+                    pending.extend(children.iter().map(|child| (child, depth + 1)))
+                }
+                Self::Not(child) => pending.push((child, depth + 1)),
+            }
         }
+        maximum
     }
 }
 

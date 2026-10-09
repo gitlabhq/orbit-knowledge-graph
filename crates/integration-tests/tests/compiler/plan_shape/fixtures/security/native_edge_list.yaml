@@ -1,0 +1,9 @@
+name: Native negation rejects multi-hop relationship predicates
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}]}
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS*1..2]->(b:Definition) RETURN a, b
+predicates:
+  - not: {relationship: 0, property: source_id, op: eq, value: 1}
+validation_error: single hop
