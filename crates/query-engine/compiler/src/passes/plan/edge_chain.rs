@@ -199,7 +199,7 @@ where
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
     for expression in &input.predicates {
-        if let Some(alias) = expression.local_node() {
+        if let Some(alias) = super::predicates::local_node(expression) {
             let predicate = super::predicates::bind(expression, input, model, &hops)?;
             let node = nodes.get_mut(alias).expect("validated predicate node");
             node.predicates.push(predicate);
@@ -264,7 +264,7 @@ where
     let predicates = input
         .predicates
         .iter()
-        .filter(|expression| expression.local_node().is_none())
+        .filter(|expression| super::predicates::local_node(expression).is_none())
         .map(|expression| super::predicates::bind(expression, input, model, &context.hops))
         .collect::<Result<_>>()?;
     execution.source = execution.source.filter(predicates);
@@ -349,7 +349,11 @@ where
                     })
                 })
                 .filter(|_| {
-                    rel.filters.is_empty() && !input.predicate_references_relationship(input_index)
+                    rel.filters.is_empty()
+                        && !super::predicates::references(
+                            input,
+                            PredicateTarget::Relationship(input_index),
+                        )
                 });
             let from_entity = entities.get(rel.from.as_str()).copied().unwrap_or_default();
             let to_entity = entities.get(rel.to.as_str()).copied().unwrap_or_default();
@@ -418,8 +422,11 @@ fn elide_hops(
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last
-                || input.predicate_references_node(&hop.from_node)
-                || input.predicate_references_node(&hop.to_node)
+                || super::predicates::references(
+                    input,
+                    PredicateTarget::Node(hop.from_node.clone()),
+                )
+                || super::predicates::references(input, PredicateTarget::Node(hop.to_node.clone()))
                 || input.join_predicates.iter().any(|predicate| {
                     [&predicate.lhs_node, &predicate.rhs_node]
                         .into_iter()
@@ -648,7 +655,7 @@ fn determine_hydration(
     });
 
     if is_group_by_node
-        || input.predicate_references_node(alias)
+        || super::predicates::references(input, PredicateTarget::Node(alias.to_string()))
         || is_group_by_property
         || is_agg_property_target
         || is_order_by_target

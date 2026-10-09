@@ -55,20 +55,18 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
             }
         }
     }
-    for leaf in input
-        .predicates
-        .iter_mut()
-        .flat_map(crate::input::BooleanExpression::leaves_mut)
-    {
-        if let crate::input::PredicateTarget::Node(alias) = &leaf.target
-            && let Some(entity) = input
-                .nodes
-                .iter()
-                .find(|node| &node.id == alias)
-                .and_then(|node| node.entity.as_deref())
-        {
-            coerce_filter(&mut leaf.filter, model.property(entity, &leaf.property));
-        }
+    for expression in &mut input.predicates {
+        expression.visit_mut(&mut |leaf| {
+            if let crate::input::PredicateTarget::Node(alias) = &leaf.target
+                && let Some(entity) = input
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == alias)
+                    .and_then(|node| node.entity.as_deref())
+            {
+                coerce_filter(&mut leaf.filter, model.property(entity, &leaf.property));
+            }
+        });
     }
     infer_wildcard_relationship_kinds(&mut input, model);
     Ok(input)

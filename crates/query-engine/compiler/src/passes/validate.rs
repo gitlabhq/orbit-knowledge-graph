@@ -360,6 +360,12 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     }
                 }
                 crate::input::PredicateTarget::Relationship(index) => {
+                    if leaf.property.starts_with('_') {
+                        return Err(QueryError::Validation(format!(
+                            "relationship[{index}] filter on private edge column \"{}\"",
+                            leaf.property
+                        )));
+                    }
                     if input
                         .relationships
                         .get(*index)
@@ -652,55 +658,53 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 "cross-node property comparisons are only supported in traversal queries".into(),
             ));
         }
-        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
         for jp in &input.join_predicates {
-            for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
-                if !node_ids.contains(&node_id.as_str()) {
-                    return Err(QueryError::ReferenceError(format!(
-                        "join predicate references undefined node \"{node_id}\""
-                    )));
-                }
-                let entity = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == *node_id)
-                    .and_then(|n| n.entity.as_deref());
-                if let Some(entity) = entity {
-                    self.check_field(entity, prop)?;
-                    if !self.model.get().property_is_filterable(entity, prop) {
-                        return Err(QueryError::AllowlistRejected(format!(
-                            "join predicate on \"{prop}\" for {entity}: field is not filterable"
-                        )));
-                    }
-                    if self.virtual_source(entity, prop).is_some() {
-                        return Err(QueryError::Validation(format!(
-                            "property comparison cannot reference virtual column \"{prop}\" on {entity}"
-                        )));
-                    }
-                }
-            }
-            let lhs_entity = input
+            self.check_property_comparison(
+                input,
+                (&jp.lhs_node, &jp.lhs_prop),
+                (&jp.rhs_node, &jp.rhs_prop),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn check_property_comparison(
+        &self,
+        input: &Input,
+        left: (&str, &str),
+        right: (&str, &str),
+    ) -> Result<()> {
+        let resolve = |(alias, property): (&str, &str)| {
+            let entity = input
                 .nodes
                 .iter()
-                .find(|n| n.id == jp.lhs_node)
-                .and_then(|n| n.entity.as_deref());
-            let rhs_entity = input
-                .nodes
-                .iter()
-                .find(|n| n.id == jp.rhs_node)
-                .and_then(|n| n.entity.as_deref());
-            if let (Some(le), Some(re)) = (lhs_entity, rhs_entity) {
-                let lhs_type = self.field_type(le, &jp.lhs_prop);
-                let rhs_type = self.field_type(re, &jp.rhs_prop);
-                if let (Some(lt), Some(rt)) = (lhs_type, rhs_type)
-                    && lt != rt
-                {
-                    return Err(QueryError::Validation(format!(
-                        "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
-                        jp.lhs_node, jp.lhs_prop, jp.rhs_node, jp.rhs_prop
-                    )));
-                }
+                .find(|node| node.id == alias)
+                .and_then(|node| node.entity.as_deref())
+                .ok_or_else(|| {
+                    QueryError::ReferenceError(format!(
+                        "property comparison references undefined node \"{alias}\""
+                    ))
+                })?;
+            self.check_field(entity, property)?;
+            if !self.model.get().property_is_filterable(entity, property) {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "filter on \"{property}\" for {entity}: field is not filterable"
+                )));
             }
+            if self.virtual_source(entity, property).is_some() {
+                return Err(QueryError::Validation(format!(
+                    "property comparison cannot reference virtual column \"{property}\" on {entity}"
+                )));
+            }
+            Ok(self.field_type(entity, property))
+        };
+        if let (Some(left_type), Some(right_type)) = (resolve(left)?, resolve(right)?)
+            && left_type != right_type
+        {
+            return Err(QueryError::Validation(format!(
+                "type mismatch in property comparison: {}.{} is {left_type:?} but {}.{} is {right_type:?}",
+                left.0, left.1, right.0, right.1
+            )));
         }
         Ok(())
     }
@@ -710,7 +714,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             let Some(entity) = node.entity.as_deref() else {
                 continue;
             };
-            for (prop, filter) in input.node_filters(node) {
+            for (prop, filters) in input.node_filters(node) {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
                     && self.model.get().entity_has_traversal_path(entity);
                 if !is_traversal_path_filter
@@ -745,63 +749,38 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                         )));
                     }
                     let allowed: Vec<&str> = vs.allowed_ops.iter().map(|s| s.as_str()).collect();
-                    let op = filter.op.unwrap_or(FilterOp::Eq);
-                    if !allowed.contains(&op.as_ref()) {
-                        return Err(QueryError::Validation(format!(
-                            "filter on \"{prop}\" for {entity}: operator \"{}\" is not \
+                    for filter in filters {
+                        let op = filter.op.unwrap_or(FilterOp::Eq);
+                        if !allowed.contains(&op.as_ref()) {
+                            return Err(QueryError::Validation(format!(
+                                "filter on \"{prop}\" for {entity}: operator \"{}\" is not \
                              supported on this virtual column (allowed: {allowed:?})",
-                            op.as_ref()
-                        )));
+                                op.as_ref()
+                            )));
+                        }
                     }
                 }
                 let Some(data_type) = self.field_type(entity, prop) else {
                     continue;
                 };
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                    check_comparison_properties(prop, rhs_prop)?;
-                    let rhs_entity = input
-                        .nodes
-                        .iter()
-                        .find(|n| n.id == *rhs_node)
-                        .and_then(|n| n.entity.as_deref());
-                    if let Some(rhs_entity) = rhs_entity {
-                        self.check_field(rhs_entity, rhs_prop)?;
-                        if !self
-                            .model
-                            .get()
-                            .property_is_filterable(rhs_entity, rhs_prop)
-                        {
-                            return Err(QueryError::AllowlistRejected(format!(
-                                "filter on \"{rhs_prop}\" for {rhs_entity}: field is not filterable"
-                            )));
-                        }
-                        if self.virtual_source(rhs_entity, rhs_prop).is_some() {
-                            return Err(QueryError::Validation(format!(
-                                "property comparison cannot reference virtual column \"{rhs_prop}\" on {rhs_entity}"
-                            )));
-                        }
-                        if self
-                            .field_type(rhs_entity, rhs_prop)
-                            .is_some_and(|rhs_type| rhs_type != data_type)
-                        {
-                            return Err(QueryError::Validation(
-                                "type mismatch in property comparison".into(),
-                            ));
-                        }
-                    } else {
-                        return Err(QueryError::Validation(format!(
-                            "undefined predicate node {rhs_node}"
-                        )));
+                for filter in filters {
+                    if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
+                        check_comparison_properties(prop, rhs_prop)?;
+                        self.check_property_comparison(
+                            input,
+                            (&node.id, prop),
+                            (rhs_node, rhs_prop),
+                        )?;
+                        continue;
                     }
-                    continue;
+                    if is_traversal_path_filter {
+                        Self::check_traversal_path_filter(
+                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(entity, prop, filter, data_type)?;
                 }
-                if is_traversal_path_filter {
-                    Self::check_traversal_path_filter(
-                        &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                        filter,
-                    )?;
-                }
-                self.check_one_filter(entity, prop, filter, data_type)?;
             }
         }
 
@@ -812,25 +791,22 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 .first()
                 .and_then(|kind| model.relationship_table(kind))
                 .unwrap_or_else(|| model.default_edge_table());
-            for (prop, filter) in input.relationship_filters(i) {
-                if prop.starts_with('_') {
-                    return Err(QueryError::Validation(format!(
-                        "relationship[{i}] filter on private edge column \"{prop}\""
-                    )));
-                }
+            for (prop, filters) in input.relationship_filters(i) {
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\" \
                          (table \"{edge_table}\" does not have this column)"
                     )));
                 };
-                if prop == TRAVERSAL_PATH_COLUMN {
-                    Self::check_traversal_path_filter(
-                        &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-                        filter,
-                    )?;
+                for filter in filters {
+                    if prop == TRAVERSAL_PATH_COLUMN {
+                        Self::check_traversal_path_filter(
+                            &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
                 }
-                self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
             }
         }
 

@@ -5,6 +5,37 @@ use crate::input::{BooleanExpression, Input, PredicateTarget, PropertyPredicate}
 use crate::{QueryError, Result};
 use query_data_model::QueryDataModel;
 
+pub(super) fn local_node(expression: &BooleanExpression<PropertyPredicate>) -> Option<&str> {
+    let PredicateTarget::Node(alias) = &expression.leaves().next()?.target else {
+        return None;
+    };
+    expression
+        .leaves()
+        .all(|leaf| {
+            matches!(&leaf.target, PredicateTarget::Node(node) if node == alias)
+                && leaf
+                    .filter
+                    .rhs_column
+                    .as_ref()
+                    .is_none_or(|(node, _)| node == alias)
+        })
+        .then_some(alias)
+}
+
+pub(super) fn references(input: &Input, target: PredicateTarget) -> bool {
+    input.predicate_leaves().any(|leaf| {
+        leaf.target == target
+            || match &target {
+                PredicateTarget::Node(alias) => leaf
+                    .filter
+                    .rhs_column
+                    .as_ref()
+                    .is_some_and(|(node, _)| node == alias),
+                PredicateTarget::Relationship(_) => false,
+            }
+    })
+}
+
 pub(super) fn bind(
     expression: &BooleanExpression<PropertyPredicate>,
     input: &Input,
