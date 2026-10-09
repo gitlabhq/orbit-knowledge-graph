@@ -18,7 +18,6 @@ use super::{
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
-use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
@@ -449,19 +448,7 @@ impl Phase<DirtyGraph> for Resolve {
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
         let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
-        let paths: Vec<&str> = state
-            .trees
-            .iter()
-            .map(|t| t.label.as_str())
-            .chain(state.configs.iter().map(|f| f.path.as_str()))
-            .collect();
-        let walk = ProjectTree::build(
-            &env.lang,
-            &env.resolve.config,
-            &env.resolve.stages,
-            &paths,
-            Some(&state.configs),
-        );
+        let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
             .iter()

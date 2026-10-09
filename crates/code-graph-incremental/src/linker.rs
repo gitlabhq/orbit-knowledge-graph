@@ -558,7 +558,7 @@ impl<'t> Fold<'t> {
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
-            if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
+            if let Some(rhs) = c.bare_rhs() {
                 for value in self.lookup(rhs.sym()) {
                     match value {
                         Value::ImportRef(node) => {

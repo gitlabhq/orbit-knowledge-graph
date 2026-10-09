@@ -8,6 +8,7 @@ use lasso::Key;
 use smallvec::SmallVec;
 
 use crate::env::Env;
+use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::sentinel::Limits;
@@ -34,6 +35,22 @@ pub struct State {
 }
 
 impl State {
+    pub(crate) fn project_tree(&self, env: &Env) -> WalkResult {
+        let paths: Vec<_> = self
+            .trees
+            .iter()
+            .map(|tree| tree.label.as_str())
+            .chain(self.configs.iter().map(|file| file.path.as_str()))
+            .collect();
+        ProjectTree::build(
+            &env.lang,
+            &env.resolve.config,
+            &env.resolve.stages,
+            &paths,
+            Some(&self.configs),
+        )
+    }
+
     pub fn new(env: &Env) -> Self {
         Self {
             trees: Vec::new(),
@@ -337,12 +354,16 @@ impl State {
             let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;
             trees.push(tree.into());
         }
-        let state = State {
+        let mut state = State {
             trees,
             edges: header.edges,
             resolver: Resolver::from_snapshot(header.resolver, &env.lang),
             configs: header.configs.into_iter().map(Into::into).collect(),
         };
+        let walk = state.project_tree(&env);
+        state
+            .resolver
+            .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
         Ok((env, state))
     }
 }

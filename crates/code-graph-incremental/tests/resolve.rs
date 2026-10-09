@@ -145,6 +145,25 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     );
     let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
     let (resolved, _) = resolve_repo(&env, repo.path());
+    let snapshot = tempfile::NamedTempFile::new().unwrap();
+    resolved.state.save(&env, snapshot.path()).unwrap();
+    let (env, state) = State::load(snapshot.path(), SupportLang::JavaScript).unwrap();
+    let (context, resolved) = templates::reindex(
+        Context::new(&env),
+        state,
+        repo.path(),
+        Changes {
+            changed: vec![],
+            removed: vec![],
+        },
+    )
+    .unwrap()
+    .finish();
+    assert!(context.report.files.is_empty());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [pair("main.js:caller", "package/first.js:run")]
+    );
     write_all(
         repo.path(),
         &[("package/package.json", r#"{"main":"second.js"}"#)],
@@ -172,6 +191,64 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     assert_eq!(
         cross_file(&env, &resolved.state, EdgeKind::Calls),
         [pair("main.js:caller", "package/second.js:run")]
+    );
+}
+
+#[test]
+fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[
+            ("left.js", "export function left() {}"),
+            ("right.js", "export function right() {}"),
+            (
+                "first.js",
+                "export * from './left'; export * from './right'; export * from './second';",
+            ),
+            ("second.js", "export * from './first';"),
+            (
+                "main.js",
+                "import { left, right } from './second'; function caller() { left(); right(); }",
+            ),
+            ("unrelated.js", "function untouched() {}"),
+        ],
+    );
+    let env = Env::with_limits(SupportLang::JavaScript, Limits::UNLIMITED).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    write_all(
+        repo.path(),
+        &[
+            ("left.js", "export function left() { const value = 1; }"),
+            ("right.js", "export function right() { const value = 2; }"),
+        ],
+    );
+    let changes = Changes {
+        changed: inventory::classify(repo.path(), ["left.js".into(), "right.js".into()]),
+        removed: vec![],
+    };
+    let (context, resolved) =
+        templates::reindex(Context::new(&env), resolved.state, repo.path(), changes)
+            .unwrap()
+            .finish();
+    let mut resolved_files: Vec<_> = context
+        .report
+        .files
+        .iter()
+        .filter(|file| file.phase == "resolve")
+        .map(|file| file.path.as_str())
+        .collect();
+    resolved_files.sort();
+    assert_eq!(
+        resolved_files,
+        ["first.js", "left.js", "main.js", "right.js", "second.js"]
+    );
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [
+            pair("main.js:caller", "left.js:left"),
+            pair("main.js:caller", "right.js:right"),
+        ]
     );
 }
 
