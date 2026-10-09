@@ -171,22 +171,21 @@ stages:
       interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Jobs that pull alpine through the group dependency proxy. The proxy needs the
-# job user to hold at least Guest on the top-level group, which bot accounts
-# (project members only) lack, so it answers 404. The runner pulls the job image
-# before any script runs, so the choice is made at pipeline creation: bot users
-# get the public image, everyone else the proxy.
+# Jobs that pull alpine through the group dependency proxy. The proxy answers
+# 404 when the job user lacks at least Guest on the top-level group, as with
+# project-only bot accounts. The runner pulls the job image before any script
+# runs, so the choice is made at pipeline creation. The login match is a
+# heuristic: a match only falls back to the public image, which is always safe.
 .alpine-image-mr-only:
   variables:
     ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   image: ${ALPINE_IMAGE}
   rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)/
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)|^service_account_/
       interruptible: true
       variables:
         ALPINE_IMAGE: alpine:latest
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      interruptible: true
+    - !reference [.mr-only-rules, rules]
 
 .canonical-only-rules:
   rules:
