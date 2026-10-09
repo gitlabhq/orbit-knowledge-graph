@@ -228,12 +228,30 @@ impl Resolver {
         run: &Sentinel,
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
-        self.file_index = build_file_index(trees, lang, support_lang, index_names);
+        let previous_index = std::mem::replace(
+            &mut self.file_index,
+            build_file_index(trees, lang, support_lang, index_names),
+        );
         for (directory, path) in entrypoints {
             if let Some(target) = self.file_index.get(path) {
                 self.file_index.keys.insert(directory.clone(), target);
             }
         }
+
+        let index_changed = previous_index.keys != self.file_index.keys;
+        let known_imports: FxHashSet<_> = self.reqs.iter().map(|req| (req.fi, req.node)).collect();
+        let discovery_files = (0..trees.len() as u32)
+            .filter(|fi| index_changed && !dirty_fis.contains(fi))
+            .collect();
+        let (discovered, _) = gather_imports_for(
+            trees,
+            lang,
+            &self.file_index,
+            lookup_prefixes,
+            &config.external,
+            &discovery_files,
+            aliases,
+        );
 
         let mut redirected: FxHashSet<u32> = self
             .reqs
@@ -243,6 +261,12 @@ impl Resolver {
                     .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
+            .chain(
+                discovered
+                    .iter()
+                    .filter(|req| !known_imports.contains(&(req.fi, req.node)))
+                    .map(|req| req.fi),
+            )
             .collect();
         if !redirected.is_empty() {
             let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();

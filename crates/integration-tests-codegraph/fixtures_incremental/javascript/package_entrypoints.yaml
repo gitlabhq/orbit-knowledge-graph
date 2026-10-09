@@ -92,3 +92,18 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { file: 'node_modules/widget/index.js' } }
+  - name: restore previously unresolved package
+    snapshot: true
+    modify:
+      - path: node_modules/@scope/widget/package.json
+        content: |
+          { "main": "./start.js" }
+    tests:
+      - name: "restoring metadata resolves the unchanged consumer again"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'caller' AND target.name = 'scoped'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: 'node_modules/@scope/widget/start.js' } }
