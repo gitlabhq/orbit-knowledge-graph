@@ -835,26 +835,31 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
     );
 }
 
+/// `orbit` with no credentials and no glab on PATH, so skills commands never
+/// reach a real login or instance.
+fn hermetic_skills_cmd(cache: &std::path::Path) -> std::process::Command {
+    let mut cmd = orbit_cmd();
+    for key in [
+        "ORBIT_API_BASE_URL",
+        "ORBIT_AUTH_HEADER_NAME",
+        "ORBIT_AUTH_HEADER_VALUE",
+        "GITLAB_TOKEN",
+        "GITLAB_URL",
+    ] {
+        cmd.env_remove(key);
+    }
+    cmd.env("PATH", "/nonexistent-orbit-test-path")
+        .env("XDG_CACHE_HOME", cache);
+    cmd
+}
+
 #[test]
 fn skills_lists_and_serves_local_content_without_remote_environment() {
     let cache = tempfile::TempDir::new().unwrap();
-    // No credentials and no glab on PATH: never reach a real login or instance.
-    let orbit_cmd = || {
-        let mut cmd = orbit_cmd();
-        for key in [
-            "ORBIT_API_BASE_URL",
-            "ORBIT_AUTH_HEADER_NAME",
-            "ORBIT_AUTH_HEADER_VALUE",
-            "GITLAB_TOKEN",
-            "GITLAB_URL",
-        ] {
-            cmd.env_remove(key);
-        }
-        cmd.env("PATH", "/nonexistent-orbit-test-path")
-            .env("XDG_CACHE_HOME", cache.path());
-        cmd
-    };
-    let listing = orbit_cmd().arg("skills").output().unwrap();
+    let listing = hermetic_skills_cmd(cache.path())
+        .arg("skills")
+        .output()
+        .unwrap();
     assert!(listing.status.success());
     assert_eq!(
         String::from_utf8_lossy(&listing.stderr).trim(),
@@ -864,7 +869,7 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
     assert!(listing.starts_with("orbit — "));
     assert!(listing.contains("Orbit CLI"));
 
-    let manifest = orbit_cmd()
+    let manifest = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "orbit"])
         .output()
         .unwrap();
@@ -882,7 +887,7 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         "references/local/sql.md",
         "references/local/repo_map.md",
     ] {
-        let out = orbit_cmd()
+        let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
             .unwrap();
@@ -896,15 +901,15 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         );
     }
 
-    let canonical = orbit_cmd()
+    let canonical = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "orbit", "references/local/sql.md"])
         .output()
         .unwrap();
-    let named_alias = orbit_cmd()
+    let named_alias = hermetic_skills_cmd(cache.path())
         .args(["skills", "orbit", "references/local/sql.md"])
         .output()
         .unwrap();
-    let path_alias = orbit_cmd()
+    let path_alias = hermetic_skills_cmd(cache.path())
         .args(["skills", "references/local/sql.md"])
         .output()
         .unwrap();
@@ -918,10 +923,13 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         "the discovery hint must be manifest-only, not appended to subfiles"
     );
 
-    let singular_alias = orbit_cmd().args(["skill", "SKILL.md"]).output().unwrap();
+    let singular_alias = hermetic_skills_cmd(cache.path())
+        .args(["skill", "SKILL.md"])
+        .output()
+        .unwrap();
     assert!(singular_alias.status.success());
 
-    let repo_map_ref = orbit_cmd()
+    let repo_map_ref = hermetic_skills_cmd(cache.path())
         .args(["skills", "references/local/repo_map.md"])
         .output()
         .unwrap()
@@ -955,7 +963,8 @@ fn skills_help_presents_get_as_the_canonical_command() {
 
 #[test]
 fn skills_reject_unknown_names_and_paths() {
-    let unknown_name = orbit_cmd()
+    let cache = tempfile::TempDir::new().unwrap();
+    let unknown_name = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "unknown-name"])
         .output()
         .unwrap();
@@ -965,7 +974,7 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(error.contains("unknown skill name") && error.contains("orbit"));
     assert!(error.contains("skills get <name> [path]"));
 
-    let path_as_name = orbit_cmd()
+    let path_as_name = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "references/local/sql.md"])
         .output()
         .unwrap();
@@ -982,7 +991,7 @@ fn skills_reject_unknown_names_and_paths() {
         "/etc/passwd",
         "references/local/../../../secret",
     ] {
-        let out = orbit_cmd()
+        let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
             .unwrap();
