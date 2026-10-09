@@ -952,18 +952,19 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             QueryType::Neighbors
                 if input.nodes.first().is_none_or(|n| !node_has_selectivity(n)) =>
             {
-                return Err(QueryError::Validation(
-                    "neighbors requires node_ids or filters on the center node \
-                     to avoid scanning all edges"
-                        .into(),
-                ));
+                return Err(QueryError::Validation(format!(
+                    "neighbors requires filters or node_ids on the center node \
+                     to avoid scanning all edges (an id_range counts only up to \
+                     {MAX_ID_RANGE_SPAN} IDs)"
+                )));
             }
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
-                return Err(QueryError::Validation(
-                    "add a filter or node ID on at least one node".into(),
-                ));
+                return Err(QueryError::Validation(format!(
+                    "add filters or node_ids to at least one node \
+                     (an id_range counts only up to {MAX_ID_RANGE_SPAN} IDs)"
+                )));
             }
             _ => {}
         }
@@ -2591,7 +2592,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2623,7 +2624,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
         assert_ok(
             r#"{
@@ -2644,7 +2645,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2670,7 +2671,7 @@ mod tests {
                 "group_by": ["p"],
                 "aggregations": [{"count": "u", "as": "c"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2684,7 +2685,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
         assert_ok(
             r#"{
