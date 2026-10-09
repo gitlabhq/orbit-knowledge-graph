@@ -67,16 +67,20 @@ fn read_origin_url() -> Option<String> {
 }
 
 fn split_host_and_path(url: &str) -> Option<(String, String)> {
-    let (host, path) = match reqwest::Url::parse(url) {
-        Ok(url) => (url.host_str()?.to_string(), url.path().to_string()),
-        Err(_) => {
-            let (user_and_host, path) = url.split_once(':')?;
-            let host = user_and_host.rsplit('@').next()?;
-            (host.to_string(), path.to_string())
-        }
-    };
+    let (host, path) = split_url_with_host(url).or_else(|| split_scp_remote(url))?;
     let full_path = path.trim_matches('/').trim_end_matches(".git").to_string();
     (!full_path.is_empty()).then_some((host, full_path))
+}
+
+fn split_url_with_host(url: &str) -> Option<(String, String)> {
+    let url = reqwest::Url::parse(url).ok()?;
+    Some((url.host_str()?.to_string(), url.path().to_string()))
+}
+
+fn split_scp_remote(url: &str) -> Option<(String, String)> {
+    let (user_and_host, path) = url.split_once(':')?;
+    let host = user_and_host.rsplit('@').next()?;
+    Some((host.to_string(), path.to_string()))
 }
 
 fn build_missing_scope_error() -> RemoteError {

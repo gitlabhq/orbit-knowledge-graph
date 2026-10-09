@@ -191,11 +191,13 @@ fn graph_status_sends_full_path_query() {
 #[test]
 fn graph_status_without_scope_inspects_the_origin_remote_project() {
     for remote in [
-        "git@127.0.0.1:my-group/my-project.git",
-        "ssh://git@127.0.0.1:2222/my-group/my-project.git",
-        "https://127.0.0.1/my-group/my-project",
+        "git@localhost:my-group/my-project.git",
+        "localhost:my-group/my-project.git",
+        "ssh://git@localhost:2222/my-group/my-project.git",
+        "https://localhost/my-group/my-project",
     ] {
         let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let base_url = base_url.replace("127.0.0.1", "localhost");
         let clone = tempfile::tempdir().expect("tempdir");
         for args in [
             ["init", "--quiet"].as_slice(),
