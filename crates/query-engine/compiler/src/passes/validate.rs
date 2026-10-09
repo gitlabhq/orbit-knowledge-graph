@@ -744,7 +744,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                         "relationship property comparisons are unsupported".into(),
                     ));
                 }
-                let Some(data_type) = model.edge_filter_type(edge_table, prop) else {
+                let Some(data_type) = model.table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\" \
                          (table \"{edge_table}\" does not have this column)"
