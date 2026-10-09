@@ -1,5 +1,5 @@
 name: grep
-version: 2.1.0
+version: 2.1.1
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -7,5 +7,5 @@ description: >-
   Each file is one row with its matching lines grouped under their enclosing
   `Kind name:start-end ←callers →callees`. Files that define a term come first,
   then code, tests, and config or docs. A definition the query names prints
-  first with its source. rg and grep flags such as -A, -l, -w, and -g work.
-  Omit the query with `--path` to list definitions.
+  first with its source. Pass paths as with rg; rg and grep flags such as
+  -A, -l, -w, and -g work.

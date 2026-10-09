@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.23.0
+version: 0.23.1
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -44,8 +44,8 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ```shell
 orbit index .
-orbit grep "rate limit" --path src --kind Method,Function
-orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
+orbit grep "rate limit" src --kind Method,Function
+orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
 

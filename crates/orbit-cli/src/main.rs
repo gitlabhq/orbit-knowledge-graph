@@ -67,8 +67,8 @@ struct IndexArgs {
 struct GrepArgs {
     #[arg(
         value_name = "QUERY",
-        required_unless_present_any = ["path", "regexp"],
-        help = "One query. Quote 'a|b|c' for OR alternatives; omit with --path to list definitions."
+        required_unless_present = "regexp",
+        help = "One query. Quote 'a|b|c' for OR alternatives."
     )]
     query: Option<String>,
 
@@ -150,14 +150,9 @@ struct GrepArgs {
     #[arg(short = 'M', long, value_name = "NUM")]
     max_columns: Option<usize>,
 
-    /// Only search definitions under this repo-relative directory or file
-    /// (e.g. `crates/query-engine`); repeatable, and accepts globs such as
-    /// `crates/*/src/lib.rs`.
-    #[arg(long, value_name = "PATH")]
-    path: Vec<String>,
-
-    /// More paths to search, as in `rg PATTERN [PATH...]`.
-    #[arg(value_name = "PATHS")]
+    /// Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the current
+    /// directory or the repository, and globs such as `crates/*/src/lib.rs` work.
+    #[arg(value_name = "PATH")]
     paths: Vec<String>,
 
     #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
@@ -177,7 +172,7 @@ struct Kinds(Vec<String>);
 
 fn run_grep(args: GrepArgs) -> Result<()> {
     use commands::grep::{Options, Output};
-    let mut paths = args.path;
+    let mut paths = Vec::new();
     let query = match args.regexp.is_empty() {
         true => args.query,
         false => {

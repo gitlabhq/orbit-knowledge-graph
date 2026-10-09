@@ -9,10 +9,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use duckdb_client::search::NodeValue;
 use orbit_search::{RecallFilter, query_alternatives};
 
-use crate::commands::context;
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
@@ -67,9 +65,8 @@ pub(crate) fn run(
     let alternatives = match &query {
         Some(query) => query_alternatives(query).map_err(|_| {
             anyhow::anyhow!(
-                "no usable search terms in query: {query:?} — to list every definition in a \
-                 file or directory instead, run `{launcher} grep --path <path>`; for a file's \
-                 definition map and connections, `{launcher} context <path>`"
+                "no usable search terms in query: {query:?} — for a file's definitions and \
+                 connections, run `{launcher} context <path>`"
             )
         })?,
         None => Vec::new(),
@@ -102,12 +99,12 @@ pub(crate) fn run(
 
     let mut out = std::io::stdout().lock();
     let (Some(query), Some((mut hits, edited))) = (query, scan) else {
-        return report_outline(&mut out, &backend, &paths, &filter, launcher);
+        anyhow::bail!("orbit grep needs a pattern, as with rg");
     };
     let alternatives = terms;
     hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     defs::attach_definitions(
-        backend.search().client(),
+        backend.client(),
         backend.git(),
         &mut hits,
         &alternatives,
@@ -115,12 +112,12 @@ pub(crate) fn run(
         &edited,
     )?;
     let connections = match options.output {
-        Output::Lines => defs::connections(backend.search().client(), &hits)?,
+        Output::Lines => defs::connections(backend.client(), &hits)?,
         _ => defs::Connections::new(),
     };
     let mut header = format!("grep {query:?}");
     for path in &paths {
-        header.push_str(&format!(" --path {path}"));
+        header.push_str(&format!(" {path}"));
     }
     if !filter.kinds.is_empty() {
         header.push_str(&format!(" --kind {}", filter.kinds.join(",")));
@@ -153,48 +150,12 @@ pub(crate) fn run(
     }
 }
 
-fn report_outline(
-    out: &mut impl Write,
-    backend: &LocalBackend,
-    paths: &[String],
-    filter: &RecallFilter,
-    launcher: &str,
-) -> Result<()> {
-    writeln!(out, "outline {} @ {}", paths.join(" "), backend.header())?;
-    if !filter.kinds.is_empty() {
-        writeln!(out, "kind: {}", filter.kinds.join(" "))?;
-    }
-    let rows = backend.search().list_corpus(filter)?;
-    if rows.is_empty() {
-        writeln!(
-            out,
-            "\nNo indexed definitions under that path. Paths are repo-relative, as printed by `{launcher} grep`."
-        )?;
-        return Ok(());
-    }
-    writeln!(out, "\nDefinitions ({}):", rows.len())?;
-    for node in &rows {
-        report_definition(out, node)?;
-    }
-    Ok(())
-}
-
-fn report_definition(out: &mut impl Write, node: &NodeValue) -> Result<()> {
-    let range = context::source_range(node)?;
-    writeln!(
-        out,
-        "  {}  [{}]  {}:{}-{}",
-        range.fqn, range.kind, range.file, range.start, range.end
-    )?;
-    Ok(())
-}
-
 fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<()> {
     if kinds.is_empty() {
         return Ok(());
     }
     let git = backend.git();
-    let batches = backend.search().client().query_arrow_json(
+    let batches = backend.client().query_arrow_json(
         "SELECT DISTINCT definition_type AS kind FROM gl_definition
          WHERE project_id = ?1 AND commit_sha = ?2 ORDER BY 1",
         &[git.project_id.into(), git.commit_sha.clone().into()],
