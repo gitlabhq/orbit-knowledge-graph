@@ -1,0 +1,14 @@
+description: Native negation on a public property reaches query execution
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[2],"columns":["username"]}]}
+  gql: |
+    MATCH (u:User {id: 2}) RETURN u.username
+expect:
+  predicates:
+    - not: {node: u, property: username, op: eq, value: alice}
+  node_count: 1
+  nodes:
+    User:
+      ids: [2]
+      rows: [{id: 2, username: bob}]

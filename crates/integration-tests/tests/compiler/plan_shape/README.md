@@ -10,8 +10,7 @@ This tests shared predicate planning without requiring a frontend spelling.
 
 Native leaves can target `relationship: <index>` instead of a node.
 Use `rhs_column: [node, property]` for a property comparison.
-`validation_error` and `restriction_error` assert client-safe rejection before planning.
-Restriction fixtures run with a non-admin security context scoped to `1/`.
+Rejection and authorization cases belong in the data-correctness query scenarios.
 
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects

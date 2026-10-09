@@ -1,0 +1,10 @@
+description: Native negation rejects virtual properties
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[1]}]}
+  gql: |
+    MATCH (f:File {id: 1}) RETURN f
+expect:
+  predicates:
+    - not: {node: f, property: content, op: eq, value: text}
+  compile_error: virtual columns

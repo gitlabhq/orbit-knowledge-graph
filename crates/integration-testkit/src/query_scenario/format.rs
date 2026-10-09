@@ -81,6 +81,8 @@ pub struct ExpectedIndex {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
+    #[serde(default)]
+    pub predicates: Vec<crate::predicates::PredicateSetup>,
     /// Run the query N times and assert all responses are identical.
     #[serde(default)]
     pub repeat_count: Option<usize>,

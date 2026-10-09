@@ -1471,6 +1471,46 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
 }
 
 #[test]
+fn native_predicate_bounds() {
+    use compiler::input::{
+        BooleanExpression, FilterOp, InputFilter, PredicateTarget, PropertyPredicate,
+    };
+    let model = query_data_model::ClickHouseDataModel::derive(embedded_ontology()).unwrap();
+    let validator = compiler::passes::validate::Validator::new(&model);
+    let mut input =
+        compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let leaf = BooleanExpression::Leaf(PropertyPredicate {
+        target: PredicateTarget::Node("u".into()),
+        property: "id".into(),
+        filter: InputFilter {
+            op: Some(FilterOp::Eq),
+            value: Some(1.into()),
+            ..Default::default()
+        },
+    });
+    let mut deep = leaf.clone();
+    for _ in 0..1024 {
+        deep = BooleanExpression::Not(Box::new(deep));
+    }
+    input.predicates = vec![deep];
+    assert!(
+        validator
+            .check_shape(&input)
+            .unwrap_err()
+            .to_string()
+            .contains("expression bounds")
+    );
+    input.predicates = vec![BooleanExpression::And(vec![leaf; 257])];
+    assert!(
+        validator
+            .check_shape(&input)
+            .unwrap_err()
+            .to_string()
+            .contains("256 leaves")
+    );
+}
+
+#[test]
 fn orbit_query_schema_caps_reject_with_the_json_category() {
     let cases = [
         (

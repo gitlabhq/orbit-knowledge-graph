@@ -133,6 +133,12 @@ async fn writes_extra_data_then_queries(ctx: &TestContext) {
 
 ## ResponseView
 
+Query scenarios can attach an `expect.predicates` list for native compiler coverage.
+Entries use `not`, `and`, or a leaf with `node` or `relationship`, `property`, `op`,
+and either `value` or `rhs_column: [node, property]`.
+The runner parses each query, attaches the native predicates, and runs the shared compiler pipeline.
+Use `expect.compile_error` for validation and authorization failures.
+
 `ResponseView` wraps the `GraphResponse` returned by the query pipeline and provides
 typed helpers for looking up nodes, edges, and paths. It also enforces that tests
 actually assert the query features they exercise.
