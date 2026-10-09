@@ -170,6 +170,15 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
+    let ontology = cfg
+        .ontology_overlay
+        .as_ref()
+        .map_or_else(load_ontology, |name| {
+            Arc::new(
+                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
+            )
+        });
+    let data_model = derive_clickhouse_data_model(&ontology);
 
     for (frontend_key, query_str) in &scenario.query {
         let Ok(frontend) = frontend_key.parse::<Frontend>() else {
@@ -177,7 +186,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             continue;
         };
         run_frontend(
-            &ctx,
+            (&ctx, &data_model),
             (frontend, frontend_key),
             query_str,
             &security,
@@ -190,7 +199,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 }
 
 async fn run_frontend(
-    ctx: &TestContext,
+    (ctx, data_model): (&TestContext, &Arc<query_data_model::ClickHouseDataModel>),
     (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
@@ -199,9 +208,8 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
-    let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile_model(query, frontend, &data_model, security) {
+    let compiled = match compile_model(query, frontend, data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -271,20 +279,13 @@ async fn run_frontend(
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
-            ctx,
-            frontend,
-            query,
-            &data_model,
-            security,
-            redaction,
-            expect,
-            label,
+            ctx, frontend, query, data_model, security, redaction, expect, label,
         )
         .await;
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+    let resp = execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
@@ -292,7 +293,7 @@ async fn run_frontend(
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
             let rerun =
-                execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+                execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
