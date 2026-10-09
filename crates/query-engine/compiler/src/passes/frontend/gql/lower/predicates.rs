@@ -39,55 +39,19 @@ impl Lowering {
             let lhs_prop = property.property.value;
             let rhs_node = rhs.node.value;
             let rhs_prop = rhs.property.value;
-            let lhs_known = self.input.nodes.iter().any(|n| n.id == lhs_node)
-                || self.edges.contains_key(&lhs_node);
-            let rhs_known = self.input.nodes.iter().any(|n| n.id == rhs_node)
-                || self.edges.contains_key(&rhs_node);
-            if !lhs_known {
-                return Err(invalid(span, &format!("undefined variable {lhs_node}")));
-            }
-            if !rhs_known {
-                return Err(invalid(span, &format!("undefined variable {rhs_node}")));
-            }
-            if !matches!(
-                op,
-                FilterOp::Eq
-                    | FilterOp::Ne
-                    | FilterOp::Gt
-                    | FilterOp::Lt
-                    | FilterOp::Gte
-                    | FilterOp::Lte
-            ) {
-                return Err(invalid(
-                    span,
-                    "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
+            self.input
+                .predicates
+                .push(crate::input::BooleanExpression::Leaf(
+                    crate::input::PropertyPredicate {
+                        target: crate::input::PredicateTarget::Node(lhs_node),
+                        property: lhs_prop,
+                        filter: InputFilter {
+                            op: Some(op),
+                            rhs_column: Some((rhs_node, rhs_prop)),
+                            ..Default::default()
+                        },
+                    },
                 ));
-            }
-            if lhs_node == rhs_node {
-                self.input
-                    .nodes
-                    .iter_mut()
-                    .find(|n| n.id == lhs_node)
-                    .ok_or_else(|| invalid(span, &format!("undefined variable {lhs_node}")))?
-                    .filters
-                    .entry(lhs_prop)
-                    .or_default()
-                    .push(InputFilter {
-                        op: Some(op),
-                        rhs_column: Some((rhs_node, rhs_prop)),
-                        ..Default::default()
-                    });
-            } else {
-                self.input
-                    .join_predicates
-                    .push(crate::input::JoinPredicate {
-                        lhs_node,
-                        lhs_prop,
-                        op,
-                        rhs_node,
-                        rhs_prop,
-                    });
-            }
             return Ok(());
         }
 

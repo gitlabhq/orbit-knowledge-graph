@@ -219,6 +219,7 @@ pub fn restrict(
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
     enforce_traversal_path_filters(input, model, security_ctx)?;
+    input.extract_scan_filters();
     let scope_proofs = stamp_edge_scope_proofs(input, model);
 
     if security_ctx.admin {
@@ -299,18 +300,6 @@ pub fn restrict(
                         "filter on \"{property}\" for {entity}: field requires administrator access"
                     )));
                 }
-            }
-        }
-    }
-
-    for jp in &input.join_predicates {
-        for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
-            if let Some(entity) = entity_of(input, node_id)
-                && admin_only(model, entity, prop)
-            {
-                return Err(QueryError::Restrict(format!(
-                    "filter on \"{prop}\" for {entity}: field requires administrator access"
-                )));
             }
         }
     }

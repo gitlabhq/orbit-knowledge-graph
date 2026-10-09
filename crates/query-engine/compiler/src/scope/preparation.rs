@@ -153,10 +153,6 @@ fn scope_only_container(
             .order_by
             .as_ref()
             .is_some_and(|order| order.node == node.id)
-        && !input
-            .join_predicates
-            .iter()
-            .any(|predicate| predicate.lhs_node == node.id || predicate.rhs_node == node.id)
 }
 
 fn relationship_proof(

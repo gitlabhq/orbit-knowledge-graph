@@ -39,11 +39,13 @@ pub(super) fn lower(source: &str, query: Query<'_>) -> Result<(Input, u64)> {
                 after,
             });
             lowering.input.options.include_debug_sql = query.debug;
+            lowering.input.collect_predicates();
             return Ok((lowering.input, statement_hash(source, span)));
         }
         None => {}
     };
     lowering.input.options.include_debug_sql = query.debug;
+    lowering.input.collect_predicates();
     Ok((lowering.input, 0))
 }
 
