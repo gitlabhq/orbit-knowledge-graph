@@ -324,22 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn traversal_records_returned_nodes_in_return_order() {
-        let returned = |query| super::super::parse(query).unwrap().returned_nodes;
-        assert_eq!(
-            returned(
-                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(w:WorkItem) RETURN w, p.name"
-            ),
-            Some(vec!["w".to_string(), "p".to_string()])
-        );
-        assert_eq!(returned("MATCH (u:User {id: 1}) RETURN *"), None);
-        assert_eq!(
-            returned("MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group) RETURN u, count(g) AS n"),
-            None
-        );
-    }
-
-    #[test]
     fn statement_hash_ignores_page_and_formatting() {
         let base = hash("MATCH (u:User) RETURN u PAGE 5");
         for query in [

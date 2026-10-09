@@ -180,37 +180,6 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
 }
 
 #[test]
-fn traversal_prints_only_returned_nodes_in_return_order() {
-    let mut output = output(
-        json!({"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group"}, {"id": "u", "entity": "User"}, {"id": "p", "entity": "Project"}]}),
-        &[("g", "Group"), ("u", "User"), ("p", "Project")],
-        vec![
-            column("_gkg_g_id", ints(&[22])),
-            column("_gkg_g_type", strings(&["Group"])),
-            column("_gkg_u_id", ints(&[1])),
-            column("_gkg_u_type", strings(&["User"])),
-            column("_gkg_p_id", ints(&[7])),
-            column("_gkg_p_type", strings(&["Project"])),
-        ],
-        None,
-    );
-    Arc::get_mut(&mut output.compiled)
-        .unwrap()
-        .input
-        .returned_nodes = Some(vec!["p".into(), "u".into()]);
-    assert_eq!(
-        encode(&output),
-        "+--------------------------------------+\n\
-         | p                  | u               |\n\
-         +--------------------------------------+\n\
-         | (:Project {id: 7}) | (:User {id: 1}) |\n\
-         +--------------------------------------+\n\
-         \n\
-         1 row\n"
-    );
-}
-
-#[test]
 fn node_groups_render_as_nodes() {
     let output = output(
         json!({"query_type": "aggregation",

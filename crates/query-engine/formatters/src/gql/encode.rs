@@ -27,11 +27,13 @@ type Table = (Vec<String>, Vec<Vec<String>>);
 fn node_table(output: &PipelineOutput) -> Table {
     let context = &output.result_context;
     let prefixes = edge_prefixes(context);
-    let input = &output.compiled.input;
-    let aliases: Vec<String> = input
-        .returned_nodes
-        .clone()
-        .unwrap_or_else(|| input.nodes.iter().map(|n| n.id.clone()).collect());
+    let aliases: Vec<String> = output
+        .compiled
+        .input
+        .nodes
+        .iter()
+        .map(|n| n.id.clone())
+        .collect();
     let rows = output
         .query_result
         .authorized_rows()

@@ -33,7 +33,7 @@ impl Lowering {
             }
             self.input.query_type = QueryType::Aggregation;
         }
-        let mut selected = Vec::new();
+        let mut selected = HashSet::new();
         let mut property_nodes = HashSet::new();
         for item in items {
             let alias = item.alias.map(|alias| alias.value);
@@ -117,7 +117,7 @@ impl Lowering {
                         .ok_or_else(|| {
                             invalid(span, "node projection references an undefined variable")
                         })?;
-                    if select(&mut selected, &variable) {
+                    if selected.insert(variable.clone()) {
                         node.columns = Some(ColumnSelection::List(columns));
                     } else if !aggregate
                         || !matches!(&node.columns, Some(ColumnSelection::List(previous)) if previous.iter().collect::<HashSet<_>>() == property_set)
@@ -164,7 +164,7 @@ impl Lowering {
                             .ok_or_else(|| {
                                 invalid(span, "property projection references an undefined node")
                             })?;
-                        if select(&mut selected, &node) {
+                        if selected.insert(node.clone()) {
                             property_nodes.insert(node.clone());
                             input_node.columns = Some(ColumnSelection::List(Vec::new()));
                         } else if !property_nodes.contains(&node) {
@@ -200,9 +200,6 @@ impl Lowering {
                 }
             }
         }
-        if self.input.query_type == QueryType::Traversal {
-            self.input.returned_nodes = Some(selected);
-        }
         Ok(())
     }
 
@@ -213,7 +210,7 @@ impl Lowering {
         all: bool,
         alias: Option<String>,
         aggregate: bool,
-        selected: &mut Vec<String>,
+        selected: &mut HashSet<String>,
     ) -> Result<()> {
         let variable = variable.value;
         let dynamic =
@@ -234,7 +231,7 @@ impl Lowering {
             if all {
                 self.input.options.dynamic_columns = DynamicColumnMode::All;
             }
-            if !select(selected, &variable) {
+            if !selected.insert(variable) {
                 return Err(invalid(span, "duplicate graph projection"));
             }
             return Ok(());
@@ -256,7 +253,7 @@ impl Lowering {
                     "line {line}, column {column}: projection references undefined node \"{variable}\""
                 ))
             })?;
-        if !select(selected, &variable)
+        if !selected.insert(variable.clone())
             && (!aggregate
                 || !matches!(
                     (all, &node.columns),
@@ -358,12 +355,4 @@ impl Lowering {
         }
         Ok(())
     }
-}
-
-fn select(selected: &mut Vec<String>, variable: &str) -> bool {
-    let new = !selected.iter().any(|existing| existing == variable);
-    if new {
-        selected.push(variable.to_owned());
-    }
-    new
 }
