@@ -239,8 +239,8 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the versioned-schema gate. `orbit-server`'s build script fails if versioned
-ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
+The migration ledger is the versioned-schema gate. The `unit-test` CI job runs an `orbit-server` test that fails on drift. It covers versioned
+ontology sources, generated versioned DDL, and auxiliary schema, each compared with the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`). It also fails if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
 and does not advance the schema pin or re-index graph data. The snapshot command refuses to
