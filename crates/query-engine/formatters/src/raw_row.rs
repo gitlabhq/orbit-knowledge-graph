@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use types::{NodeRef, QueryResultRow};
 
 use super::column_value_to_json;
+use super::graph::is_reserved_node_key;
 
 pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     let mut obj = serde_json::Map::new();
@@ -62,7 +63,11 @@ fn node_ref_to_json(node: &NodeRef) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("id".to_string(), json!(node.id.to_string()));
     obj.insert("entity_type".to_string(), json!(node.entity_type));
-    for (key, value) in &node.properties {
+    for (key, value) in node
+        .properties
+        .iter()
+        .filter(|(key, _)| !is_reserved_node_key(key))
+    {
         obj.insert(key.clone(), column_value_to_json(value));
     }
     Value::Object(obj)

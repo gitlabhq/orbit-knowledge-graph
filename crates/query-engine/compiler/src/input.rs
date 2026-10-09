@@ -50,6 +50,8 @@ pub struct Input {
     pub options: QueryOptions,
     #[serde(skip)]
     pub join_predicates: Vec<JoinPredicate>,
+    #[serde(skip)]
+    pub returned_nodes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +93,7 @@ impl Default for Input {
             order_by: None,
             options: QueryOptions::default(),
             join_predicates: Vec::new(),
+            returned_nodes: None,
         }
     }
 }
