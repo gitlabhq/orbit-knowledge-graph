@@ -14,7 +14,34 @@ fixtures:
         value();
         saved();
       }
+      function objectIsNotCallable() {
+        const object = { callback: external.emit };
+        object();
+      }
+      function objectInitializer() {
+        const object = { value: external.emit() };
+      }
+      function copiedObjectIsNotCallable() {
+        const object = { callback: external.emit };
+        const copy = object;
+        copy();
+      }
 tests:
+  - name: "an object containing an imported callback is not itself a call to the import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
+      RETURN sym.import_path
+    assert:
+      - { empty: true }
+  - name: "calls inside object initializers still reach the import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'objectInitializer'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'external-sdk' } }
   - name: "a resolved call does not hide an unrelated external call"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)

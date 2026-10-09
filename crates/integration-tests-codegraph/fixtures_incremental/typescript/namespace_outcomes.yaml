@@ -1,5 +1,9 @@
 name: "Namespace misses differ from external and unknown values"
 fixtures:
+  - path: dynamic.js
+    content: |
+      function privateHelper() {}
+      module.exports = loadExports();
   - path: local.ts
     content: |
       export function existing() {}
@@ -17,24 +21,28 @@ fixtures:
       import * as external from 'external-sdk';
       import * as barrel from './barrel';
       import * as renamed from './renamed';
+      import * as dynamic from './dynamic';
       export function missing() { local.missing(); }
       export function known() { local.existing(); }
       export function uncertain() { local.unknown(); }
       export function remote() { external.missing(); }
       export function reexported() { barrel.missing(); }
       export function localExport() { renamed.renamed(); }
+      export function dynamicExport() { dynamic.available(); }
 tests:
-  - name: "only unknown targets retain imported-symbol fallback"
+  - name: "unresolved namespace targets retain fallback until exports are proven complete"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
       WHERE caller.file_path = 'main.ts'
       RETURN caller.name AS caller
     assert:
-      - { row_count: 4 }
+      - { row_count: 6 }
+      - { row: { caller: missing } }
       - { row: { caller: uncertain } }
       - { row: { caller: remote } }
       - { row: { caller: reexported } }
       - { row: { caller: localExport } }
+      - { row: { caller: dynamicExport } }
   - name: "existing members still resolve"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)

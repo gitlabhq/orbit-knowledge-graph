@@ -554,30 +554,6 @@ impl Resolver {
             .filter(|edge| edge.kind == EdgeKind::Calls)
             .filter_map(|edge| edge.site.map(|site| (edge.from_tree, site)))
             .collect();
-        let mut missing_members = FxHashSet::default();
-        for req in &self.reqs {
-            let module = ctx.corpus.jump(req.target_fi, req.anchor);
-            if module.children().next().is_none() || module.has(C::ModuleExport) {
-                continue;
-            }
-            let import = ctx.corpus.jump(req.fi, req.node);
-            let exports = req.exports(trees, &self.visible);
-            for edge in ctx.imports_to(req.fi as usize, req.node) {
-                let Some((site, member)) = edge
-                    .site
-                    .and_then(|site| Some((site, ctx.corpus.jump(edge.from_tree, site).member()?)))
-                else {
-                    continue;
-                };
-                let namespace = import.names().any(|name| {
-                    name.sym() == ctx.wildcard_sym
-                        && name.child_sym(C::Alias) == member.child_sym(C::Object)
-                });
-                if namespace && !exports.contains_key(&member.sym()) {
-                    missing_members.insert((edge.from(), edge.to(), site));
-                }
-            }
-        }
         drop(ctx);
         for edge in edges.iter_mut().chain(&mut cross_edges).filter(|edge| {
             edge.kind == EdgeKind::Imports && edge.call_resolution != CallResolution::Reference
@@ -588,16 +564,13 @@ impl Resolver {
             edge.call_resolution = CallResolution::Unknown;
             if callable_sites.contains(&(edge.from_tree, site)) {
                 edge.call_resolution = CallResolution::Callable;
-            } else if missing_members.contains(&(edge.from(), edge.to(), site))
-                || non_callable.get(&edge.to()) == Some(&true)
-                    && trees[edge.from_tree as usize]
-                        .cursor(site)
-                        .child(C::Callee)
-                        .is_some_and(|callee| {
-                            callee.sym_opt().is_some()
-                                && !callee.has(C::Member)
-                                && !callee.has(C::Ivar)
-                        })
+            } else if non_callable.get(&edge.to()) == Some(&true)
+                && trees[edge.from_tree as usize]
+                    .cursor(site)
+                    .child(C::Callee)
+                    .is_some_and(|callee| {
+                        callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar)
+                    })
             {
                 edge.call_resolution = CallResolution::NonCallable;
             }
