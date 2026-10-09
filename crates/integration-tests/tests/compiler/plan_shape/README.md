@@ -12,6 +12,9 @@ Native leaves can target `relationship: <index>` instead of a node.
 Use `rhs_column: [node, property]` for a property comparison.
 Rejection and authorization cases belong in the data-correctness query scenarios.
 
+Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
+for one fixture. Other fixtures keep the default ontology.
+
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
 missing, blank, unknown, or redundant exception entries.
