@@ -837,9 +837,29 @@ fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
 
 #[test]
 fn skills_lists_and_serves_local_content_without_remote_environment() {
+    let cache = tempfile::TempDir::new().unwrap();
+    // No credentials and no glab on PATH: never reach a real login or instance.
+    let orbit_cmd = || {
+        let mut cmd = orbit_cmd();
+        for key in [
+            "ORBIT_API_BASE_URL",
+            "ORBIT_AUTH_HEADER_NAME",
+            "ORBIT_AUTH_HEADER_VALUE",
+            "GITLAB_TOKEN",
+            "GITLAB_URL",
+        ] {
+            cmd.env_remove(key);
+        }
+        cmd.env("PATH", "/nonexistent-orbit-test-path")
+            .env("XDG_CACHE_HOME", cache.path());
+        cmd
+    };
     let listing = orbit_cmd().arg("skills").output().unwrap();
     assert!(listing.status.success());
-    assert!(listing.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&listing.stderr).trim(),
+        "warning: no GitLab credential found; using the embedded local skill"
+    );
     let listing = String::from_utf8(listing.stdout).unwrap();
     assert!(listing.starts_with("orbit — "));
     assert!(listing.contains("Orbit CLI"));
