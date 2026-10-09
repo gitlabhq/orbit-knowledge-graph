@@ -1,3 +1,4 @@
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
