@@ -1,0 +1,44 @@
+name: "Namespace reexports preserve their module identity"
+fixtures:
+  - path: left.ts
+    content: |
+      export function run() { leftBody(); }
+      function leftBody() {}
+  - path: right.ts
+    content: |
+      export function run() { rightBody(); }
+      function rightBody() {}
+  - path: barrel.ts
+    content: |
+      export * as left from './left';
+      export * as right from './right';
+      export function run() { unrelatedBody(); }
+      function unrelatedBody() {}
+  - path: main.ts
+    content: |
+      import { left, right } from './barrel';
+      export function useLeft() { left.run(); }
+      export function useRight() { right.run(); }
+tests:
+  - name: "same-named members resolve only in their own namespace"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+      WHERE caller.name IN ['useLeft', 'useRight']
+      RETURN caller.name AS caller, body.name AS body
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: useLeft, body: leftBody } }
+      - { row: { caller: useRight, body: rightBody } }
+steps:
+  - name: restore namespace identities
+    snapshot: true
+    tests:
+      - name: "snapshot loading preserves separate namespace targets"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+          WHERE caller.name IN ['useLeft', 'useRight']
+          RETURN caller.name AS caller, body.name AS body
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: useLeft, body: leftBody } }
+          - { row: { caller: useRight, body: rightBody } }

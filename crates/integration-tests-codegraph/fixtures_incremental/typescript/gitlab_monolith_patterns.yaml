@@ -59,6 +59,14 @@ fixtures:
       export { fetchFlags } from './actions';
       export * as featureFlagModule from './modules';
       export { default as legacyAdapter } from './legacy_adapter';
+  - path: app/assets/javascripts/feature_flags/consumer.ts
+    content: |
+      import { fetchFlags, featureFlagModule, legacyAdapter } from './store';
+      export function useStore() {
+        fetchFlags('project');
+        featureFlagModule.buildFlagName('project');
+        legacyAdapter('project');
+      }
   - path: app/assets/javascripts/projects/your_work/components/app.ts
     content: |
       export default function renderProjects(name: string): string {
@@ -198,21 +206,16 @@ tests:
       - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "buildFlagName" } }
       - { row: { name: "DEFAULT_SCOPE", alias: null, target: "DEFAULT_SCOPE" } }
 
-  - name: feature flag barrel import preserves underlying module targets
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
+  - name: feature flag barrel imports call the underlying definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/index.ts'
-      RETURN d.fqn AS fqn
+      MATCH (caller:Definition)-[:CALLS]->(d:Definition)
+      WHERE caller.name = 'useStore'
+      RETURN d.name AS name, d.file_path AS file
     assert:
-      - { row_count: 4 }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::fetchFlags" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::featureFlagModule" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::legacyAdapter" } }
+      - { row_count: 3 }
+      - { row: { name: fetchFlags, file: 'app/assets/javascripts/feature_flags/store/actions.ts' } }
+      - { row: { name: buildFlagName, file: 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts' } }
+      - { row: { name: legacyAdapter, file: 'app/assets/javascripts/feature_flags/store/legacy_adapter.js' } }
 
   - name: imported constants from alias barrels do not create false call edges
     query: |

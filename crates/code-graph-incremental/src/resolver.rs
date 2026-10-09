@@ -784,6 +784,16 @@ fn propagate_reexports(
                 let hint = c.child_sym(C::SsaHint).filter(|&h| h == wildcard_sym);
                 let ns = hint.unwrap_or(c.sym());
                 if ns == wildcard_sym {
+                    if let Some(alias) = c.child_sym(C::Alias)
+                        && c.ancestors().any(|node| node.is(C::ModuleExport))
+                    {
+                        export(
+                            req.fi as usize,
+                            alias,
+                            Loc::new(req.target_fi as usize, req.anchor),
+                        );
+                        continue;
+                    }
                     for (&ds, &loc) in exports.iter() {
                         export(req.fi as usize, ds, loc);
                     }
@@ -875,11 +885,6 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         })
         .collect();
 
-    let target_files: Vec<usize> = std::iter::once(tfi)
-        .chain(import_edges.iter().map(|e| e.to_fi()))
-        .unique()
-        .collect();
-
     let mut edges: Vec<Edge> = import_edges.clone();
 
     for edge in ctx.imports_to(fi, req.node) {
@@ -892,13 +897,24 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             continue;
         };
         let local = |n: Cursor| n.child_sym(C::Alias).unwrap_or(n.sym());
-        if !import
+        let Some(name) = import
             .names()
-            .any(|n| m.child_sym(C::Object) == Some(local(n)))
-        {
+            .find(|n| m.child_sym(C::Object) == Some(local(*n)))
+        else {
             continue;
-        }
+        };
         let exports = req.exports(ctx.trees, ctx.visible);
+        let targets = name_targets(ctx, req, name);
+        let target_files: Vec<usize> = targets
+            .iter()
+            .filter(|target| target.node == 0)
+            .map(|target| target.fi as usize)
+            .collect();
+        let target_files = if target_files.is_empty() {
+            vec![tfi]
+        } else {
+            target_files
+        };
         let members = target_files
             .iter()
             .filter_map(|&t| match t == tfi {

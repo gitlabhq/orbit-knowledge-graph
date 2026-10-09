@@ -176,6 +176,8 @@ stages:
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
 
       # export * from './source' — star re-export (no export_clause)
+      - match: '(export_statement (namespace_export $N:identifier) source: (string $S:string_fragment))'
+        replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N))))'
       - match: '(export_statement source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*")))'
 
