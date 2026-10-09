@@ -18,6 +18,8 @@ workflow:
       variables:
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
       variables:
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
@@ -31,6 +33,8 @@ workflow:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
@@ -43,6 +47,8 @@ workflow:
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
@@ -156,12 +162,30 @@ stages:
 .mr-only-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
 
 .mr-and-main-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Jobs that pull alpine through the group dependency proxy. The proxy answers
+# 404 when the job user lacks at least Guest on the top-level group, as with
+# project-only bot accounts. The runner pulls the job image before any script
+# runs, so the choice is made at pipeline creation. The login match is a
+# heuristic: a match only falls back to the public image, which is always safe.
+.alpine-image-mr-only:
+  variables:
+    ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: ${ALPINE_IMAGE}
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)|^service_account_/
+      interruptible: true
+      variables:
+        ALPINE_IMAGE: alpine:latest
+    - !reference [.mr-only-rules, rules]
 
 .canonical-only-rules:
   rules:
@@ -425,11 +449,10 @@ iglu-schema-check:
 
 system-note-actions-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   # Verifies config/vendored/system_note_metadata.actions matches Rails
   # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
@@ -439,11 +462,10 @@ system-note-actions-check:
 
 duckdb-fts-sources-sync-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   script:
     - apk add --no-cache bash git gzip tar yq
@@ -595,6 +617,7 @@ secret_detection:
 
 check_docs_markdown:
   stage: docs
+  needs: []
   extends:
     - .mr-only-rules
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
@@ -609,6 +632,7 @@ check_docs_markdown:
 
 check_docs_i18n_markdown:
   stage: docs
+  needs: []
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
   parallel:
     matrix:
@@ -628,6 +652,7 @@ check_docs_i18n_markdown:
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
+  needs: []
   extends:
     - .mr-only-rules
   variables:
@@ -971,8 +996,7 @@ code-indexing-benchmark-v2-analyze:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - git fetch --tags
-    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1s/^v//p')
+    - BASE_VERSION=$(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' | sed -n '1s#.*refs/tags/v##p')
     - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
