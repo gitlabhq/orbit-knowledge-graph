@@ -133,7 +133,7 @@ stages:
       - match: '(method_parameters $$$P)'
         replace: '(method_parameters $$$P=>__binding)'
       - match: '(block_parameters $$$P)'
-        replace: '(block_parameters $$$P=>__binding)'
+        replace: '(block_parameters $$$P=>block_local)'
       - match: '(lambda_parameters $$$P)'
         replace: '(lambda_parameters $$$P=>__binding)'
       - match: '(exception_variable $V:identifier)'
@@ -261,6 +261,15 @@ stages:
     rules:
       - match: '(__ssa_return $V:instance_variable)'
         replace: '(__ssa_return (__rhs (__ivar @$V|strip=@)))'
+
+  - name: lexical-scopes
+    rules:
+      - match: '(block_local)'
+        replace: '(__binding @$ROOT (__declaration))'
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
+      - match: '(do_block $$$B)'
+        replace: '(__scope $$$B)'
 
   - name: tag-defs
     rules:

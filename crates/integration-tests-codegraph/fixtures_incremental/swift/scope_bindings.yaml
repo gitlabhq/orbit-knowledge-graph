@@ -1,0 +1,94 @@
+name: "Swift: lexical binding ownership"
+fixtures:
+  - path: local/main.swift
+    content: |
+      func first() {}
+      func second() {}
+
+      func run() {
+          let f = first
+          do {
+              let f = second
+          }
+          f()
+      }
+  - path: callable/main.swift
+    content: |
+      func first() {}
+
+      func run() {
+          let f = first
+          f()
+      }
+  - path: shadow/main.swift
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      class Second {
+          func pong() {}
+      }
+
+      func run() {
+          let f = First()
+          do {
+              let f = Second()
+          }
+          f.ping()
+      }
+  - path: control/main.swift
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      func run() {
+          let f = First()
+          f.ping()
+      }
+  - path: typed/main.swift
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      func run(f: First) {
+          f.ping()
+      }
+  - path: parameter/main.swift
+    content: |
+      class First {
+          func ping() {}
+      }
+
+      class Second {
+          func pong() {}
+      }
+
+      func run(f: First) {
+          do {
+              let f: Second = Second()
+          }
+          f.ping()
+      }
+tests:
+  - name: "Local shadows preserve callable and receiver bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 16 }
+      - { row: { file: local/main.swift, target: first } }
+      - { row: { file: callable/main.swift, target: first } }
+      - { row: { file: shadow/main.swift, target: First } }
+      - { row: { file: shadow/main.swift, target: Second } }
+      - { row: { file: shadow/main.swift, target: ping } }
+      - { row: { file: control/main.swift, target: First } }
+      - { row: { file: control/main.swift, target: ping } }
+      - { row: { file: typed/main.swift, target: First } }
+      - { row: { file: typed/main.swift, target: ping } }
+      - { row: { file: parameter/main.swift, target: First } }
+      - { row: { file: parameter/main.swift, target: Second } }
+      - { row: { file: parameter/main.swift, target: ping } }

@@ -1,0 +1,46 @@
+name: "PHP: function-local variables and explicit globals"
+fixtures:
+  - path: callable/main.php
+    content: |
+      <?php
+      function first() {}
+
+      $f = 'first';
+
+      function run() {
+          $f();
+      }
+  - path: implicit/main.php
+    content: |
+      <?php
+      class Service {
+          function ping() {}
+      }
+
+      $f = new Service();
+
+      function run() {
+          $f->ping();
+      }
+  - path: explicit/main.php
+    content: |
+      <?php
+      class Service {
+          function ping() {}
+      }
+
+      $f = new Service();
+
+      function run() {
+          global $f;
+          $f->ping();
+      }
+tests:
+  - name: "Functions inherit only explicitly global variables"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { file: explicit/main.php, target: ping } }

@@ -565,5 +565,7 @@ async fn list_tools_inlines_the_command_catalog_only_for_dws_callers() {
     }
 
     assert!(descriptions[0].contains("\"name\":\"query_graph\""));
+    assert!(descriptions[0].contains("(User)-[:AUTHORED]->("));
     assert!(!descriptions[1].contains("\"name\":\"query_graph\""));
+    assert!(!descriptions[1].contains("Graph relationships"));
 }

@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use orbit_utils::fs_walk::{Decision, FileInventoryEntry};
 use rayon::prelude::*;
@@ -11,15 +12,16 @@ use arrow::record_batch::RecordBatch;
 use ontology::Ontology;
 
 use super::{
-    Canonical, Context, DirtyGraph, Displayed, Error, Exported, ItemPhase, Lazy, LinkedFile,
-    Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, Sources, State, Workset,
+    Canonical, Context, DirtyGraph, Displayed, Error, Exported, FileTiming, ItemPhase, Labelled,
+    LinkedFile, Listed, Parsed, Phase, ReindexInput, Resolved, Rewritten, SourceFile, SourcePaths,
+    Sources, State, Workset,
 };
 use crate::env::Env;
 use crate::export::{self, Envelope};
 use crate::file_tree::ProjectTree;
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
-use crate::pattern::{self, EdgeCtx};
+use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
 use crate::tree::{Edge, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
@@ -27,7 +29,7 @@ use crate::treesitter::{self, SupportLang};
 pub struct Prepare;
 
 impl Phase<Sources> for Prepare {
-    type Output = Workset<Lazy<SourceFile>>;
+    type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "prepare".into()
@@ -53,8 +55,8 @@ fn workset(
     state: State,
     root: PathBuf,
     entries: Vec<FileInventoryEntry>,
-    dirty: FxHashSet<usize>,
-) -> Workset<Lazy<SourceFile>> {
+    dirty: FxHashSet<u32>,
+) -> Workset<SourcePaths> {
     let manifest_names = &env.resolve.config.parse_files;
     let is_manifest = |path: &str| {
         let name = path.rsplit('/').next().unwrap_or(path);
@@ -71,11 +73,6 @@ fn workset(
         } = entry;
         let manifest = decision != Decision::ListOnly && is_manifest(&path);
         let in_family = SupportLang::from_path(&path).is_some_and(|l| env.in_family(l));
-        if decision == Decision::Parse && in_family && !manifest {
-            listed.candidates.insert(path.clone(), size);
-            candidates.push(path);
-            continue;
-        }
         let content = manifest
             .then(|| std::fs::read_to_string(root.join(&path)).ok())
             .flatten();
@@ -90,15 +87,19 @@ fn workset(
                 content,
             });
         }
-        listed.files.push((path, size, reason));
+        if decision == Decision::Parse && in_family {
+            listed.candidates.insert(path.clone(), size);
+            candidates.push(path);
+        } else {
+            listed.files.push((path, size, reason));
+        }
     }
-    let items = candidates.into_iter().filter_map(move |path| {
-        let content = std::fs::read_to_string(root.join(&path)).ok()?;
-        Some(SourceFile { path, content })
-    });
     Workset {
         state,
-        items: Box::new(items),
+        items: SourcePaths {
+            root,
+            paths: candidates,
+        },
         dirty,
         listed,
     }
@@ -110,7 +111,7 @@ fn workset(
 pub struct Remap;
 
 impl Phase<ReindexInput> for Remap {
-    type Output = Workset<Lazy<SourceFile>>;
+    type Output = Workset<SourcePaths>;
 
     fn name(&self) -> Cow<'static, str> {
         "remap".into()
@@ -140,14 +141,19 @@ impl Phase<ReindexInput> for Remap {
 /// `Parse` entries this crate has a grammar for become the lazy workset,
 /// Drops the dirty trees, renumbers what remains, and returns the retained
 /// files whose resolution depended on a dropped one.
-fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<usize> {
+fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> FxHashSet<u32> {
     state.trees.retain(|t| !dirty.contains(t.label.as_str()));
 
     let label_to_fi: FxHashMap<&str, u32> = state
         .trees
         .iter()
         .enumerate()
-        .map(|(i, t)| (t.label.as_str(), i as u32))
+        .map(|(i, t)| {
+            (
+                t.label.as_str(),
+                u32::try_from(i).expect("file index exceeds u32"),
+            )
+        })
         .collect();
 
     state.edges = state
@@ -168,19 +174,19 @@ fn remap(state: &mut State, old_labels: &[String], dirty: &FxHashSet<&str>) -> F
         })
         .collect();
 
-    let old_dirty_fis: FxHashSet<usize> = old_labels
+    let old_dirty_fis: FxHashSet<u32> = old_labels
         .iter()
         .enumerate()
         .filter(|(_, l)| dirty.contains(l.as_str()))
-        .map(|(i, _)| i)
+        .map(|(i, _)| u32::try_from(i).expect("file index exceeds u32"))
         .collect();
-    let reverse_dirty: FxHashSet<usize> = state
+    let reverse_dirty: FxHashSet<u32> = state
         .resolver
         .reqs()
         .iter()
         .filter(|r| old_dirty_fis.contains(&r.target_fi))
-        .filter_map(|r| label_to_fi.get(old_labels[r.fi].as_str()))
-        .map(|&fi| fi as usize)
+        .filter_map(|r| label_to_fi.get(old_labels[r.fi as usize].as_str()))
+        .copied()
         .collect();
 
     let mut dependents = state.resolver.remap(old_labels, &label_to_fi);
@@ -195,6 +201,7 @@ pub struct Each<P>(pub P);
 impl<C, P> Phase<Workset<C>> for Each<P>
 where
     C: IntoParallel,
+    C::Item: Labelled,
     P: ItemPhase<C::Item> + Sync,
     P::Output: Send,
 {
@@ -212,16 +219,31 @@ where
             listed,
         } = input;
         let (env, run, phase) = (context.env, &context.run, &self.0);
-        let (items, killed): (Vec<_>, Vec<_>) = items
+        let (outcomes, timings): (Vec<_>, Vec<_>) = items
             .into_parallel()
-            .map(|item| phase.run(env, run, item))
-            .partition_map(|r| match r {
-                Ok(v) => rayon::iter::Either::Left(v),
-                Err(k) => rayon::iter::Either::Right(k),
-            });
+            .map(|item| {
+                let path = item.label().to_string();
+                let started = Instant::now();
+                let outcome = phase.run(env, run, item);
+                (outcome, (path, started.elapsed()))
+            })
+            .unzip();
         context.run.check()?;
-        for k in killed {
-            context.skip(k);
+        let phase_name = self.0.name();
+        context
+            .report
+            .files
+            .extend(timings.into_iter().map(|(path, elapsed)| FileTiming {
+                path,
+                phase: phase_name.to_string(),
+                elapsed,
+            }));
+        let mut items = Vec::with_capacity(outcomes.len());
+        for outcome in outcomes {
+            match outcome {
+                Ok(v) => items.push(v),
+                Err(k) => context.skip(k),
+            }
         }
         Ok(Workset {
             state,
@@ -246,10 +268,13 @@ impl<T: Send> IntoParallel for Vec<T> {
     }
 }
 
-impl<T: Send> IntoParallel for Lazy<T> {
-    type Item = T;
-    fn into_parallel(self) -> impl ParallelIterator<Item = T> {
-        self.par_bridge()
+impl IntoParallel for SourcePaths {
+    type Item = SourceFile;
+    fn into_parallel(self) -> impl ParallelIterator<Item = SourceFile> {
+        self.paths.into_par_iter().filter_map(move |path| {
+            let content = std::fs::read_to_string(self.root.join(&path)).ok()?;
+            Some(SourceFile { path, content })
+        })
     }
 }
 
@@ -361,12 +386,12 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             listed,
         } = input;
         for file in items {
-            let fi = state.trees.len();
+            let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
             state.trees.push(file.tree);
             state.edges.extend(file.edges.into_iter().map(|mut e| {
-                e.from_tree = fi as u32;
-                e.to_tree = fi as u32;
+                e.from_tree = fi;
+                e.to_tree = fi;
                 e
             }));
         }
@@ -458,7 +483,7 @@ impl Phase<DirtyGraph> for Resolve {
         }
         let result = state.resolver.resolve(
             &state.trees,
-            &state.edges,
+            &mut state.edges,
             &env.lang,
             &dirty,
             env.lang_id,
@@ -469,11 +494,24 @@ impl Phase<DirtyGraph> for Resolve {
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            let nid = state.trees[rsp.fi].to_id(rsp.node);
-            state.trees[rsp.fi].node_mut(nid).sym = rsp.sym;
+            let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
+            state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
+        context
+            .report
+            .files
+            .extend(
+                result
+                    .file_timings
+                    .into_iter()
+                    .map(|(fi, elapsed)| FileTiming {
+                        path: state.trees[fi as usize].label.clone(),
+                        phase: "resolve".to_string(),
+                        elapsed,
+                    }),
+            );
         for k in result.killed {
             context.skip(k);
         }
@@ -497,10 +535,11 @@ impl Phase<Resolved> for Display {
         Resolved { mut state }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
+        let edges = EdgeIndex::new(&state.edges);
         for (fi, tree) in state.trees.iter_mut().enumerate() {
             let ctx = EdgeCtx {
                 tree_index: fi as u32,
-                edges: &state.edges,
+                edges: &edges,
             };
             let _ = pattern::apply_rewrites_with_edges(
                 tree,

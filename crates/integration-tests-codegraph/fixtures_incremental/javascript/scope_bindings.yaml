@@ -1,0 +1,26 @@
+name: "JavaScript: parameter and iteration bindings"
+fixtures:
+  - path: parameter/main.js
+    content: |
+      function first() {}
+
+      function run(first) {
+          first();
+      }
+  - path: iteration/main.js
+    content: |
+      function first() {}
+
+      function run() {
+          for (let first of [() => {}]) {
+              first();
+          }
+      }
+tests:
+  - name: "Parameters and loop bindings block outer function fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS target
+    assert:
+      - { empty: true }

@@ -1,0 +1,31 @@
+name: "Ruby: block parameter ownership"
+fixtures:
+  - path: shadow/main.rb
+    content: |
+      def first
+      end
+
+      def run
+        f = -> { first() }
+        [1].each { |f| f.to_s }
+        f.call
+      end
+  - path: control/main.rb
+    content: |
+      def first
+      end
+
+      def run
+        f = -> { first() }
+        f.call
+      end
+tests:
+  - name: "Block parameters do not replace outer callable bindings"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: shadow/main.rb, target: f } }
+      - { row: { file: control/main.rb, target: f } }

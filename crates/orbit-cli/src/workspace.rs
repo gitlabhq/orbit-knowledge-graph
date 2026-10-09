@@ -54,17 +54,27 @@ impl Workspace {
     }
 
     /// Discover git repos in a directory, including nested repos when
-    /// the path itself is a git repo. Returns canonical paths.
+    /// the path itself is a git repo. A folder inside a repository, with no
+    /// repositories below it, resolves to that repository's root. Returns
+    /// canonical paths.
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
         let mut discovered = discover_repos(&canonical);
+        let found_any = !discovered.is_empty();
         discovered.retain(|repo| *repo == canonical || !is_ignored_by_enclosing_repo(repo));
-        if discovered.is_empty() && is_git_repo(&canonical) {
-            Ok(vec![canonical])
-        } else {
-            Ok(discovered)
+        if !discovered.is_empty() {
+            return Ok(discovered);
         }
+        if is_git_repo(&canonical) {
+            return Ok(vec![canonical]);
+        }
+        // Climbing after repos were found but filtered out would index an
+        // enclosing repository the user did not point at.
+        if found_any {
+            return Ok(Vec::new());
+        }
+        Ok(git_toplevel(&canonical).into_iter().collect())
     }
 }
 
@@ -456,6 +466,39 @@ mod tests {
             .current_dir(path)
             .output()
             .unwrap();
+    }
+
+    fn workspace_in(root: &Path) -> Workspace {
+        Workspace::open(root.join("orbit-home")).unwrap()
+    }
+
+    #[test]
+    fn resolve_repos_climbs_from_a_subdirectory_to_its_repository() {
+        let scratch = tempfile::TempDir::new().unwrap();
+        let repo = scratch.path().join("repo");
+        init_repo(&repo);
+        std::fs::create_dir_all(repo.join("src/deep")).unwrap();
+
+        let resolved = workspace_in(scratch.path())
+            .resolve_repos(&repo.join("src/deep"))
+            .unwrap();
+
+        assert_eq!(resolved, vec![dunce::canonicalize(&repo).unwrap()]);
+    }
+
+    #[test]
+    fn resolve_repos_does_not_climb_when_every_nested_repo_is_ignored() {
+        let scratch = tempfile::TempDir::new().unwrap();
+        let dotfiles = scratch.path().join("home");
+        init_repo(&dotfiles);
+        std::fs::write(dotfiles.join(".gitignore"), "*\n").unwrap();
+        init_repo(&dotfiles.join("workspace/a"));
+
+        let resolved = workspace_in(scratch.path())
+            .resolve_repos(&dotfiles.join("workspace"))
+            .unwrap();
+
+        assert!(resolved.is_empty(), "{resolved:?}");
     }
 
     const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));

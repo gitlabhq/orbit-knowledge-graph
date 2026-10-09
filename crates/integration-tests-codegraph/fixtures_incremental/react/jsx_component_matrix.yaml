@@ -227,8 +227,6 @@ tests:
       - { empty: true }
 
   - name: External React and JSX package calls target imported symbols
-    # Known gap: Imported-symbol fallback and type-only exclusions differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'Home'
@@ -241,10 +239,6 @@ tests:
       - { row: { caller: "Home", path: "react", name: "default" } }
 
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
-
-    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Home'
@@ -261,7 +255,6 @@ tests:
       - { not: true, row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "Icons" } }
 
   - name: Resolved JSX component calls do not emit imported-symbol fallback
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn IN [
@@ -271,7 +264,7 @@ tests:
         'NamespaceDefaultHost',
         'PlainJsx'
       ]
-        AND NOT sym.import_path IN ['react', '@external/ui']
+        AND sym.import_path <> 'react' AND sym.import_path <> '@external/ui'
       RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
@@ -300,10 +293,6 @@ tests:
       - { row: { caller: "IconButton", callee_file: "src/components/button.tsx", callee: "Button" } }
 
   - name: JSX fragments children aliases and default imports resolve
-
-    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn IN ['FragmentHost', 'AliasDefaultHost', 'NamespaceDefaultHost']

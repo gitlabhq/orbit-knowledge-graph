@@ -1,0 +1,46 @@
+name: "Zig: lexical binding ownership"
+fixtures:
+  - path: siblings/main.zig
+    content: |
+      fn first() void {}
+      fn second() void {}
+
+      fn run() void {
+          {
+              const f = first;
+              f();
+          }
+          {
+              const f = second;
+              f();
+          }
+      }
+  - path: control/main.zig
+    content: |
+      fn first() void {}
+
+      fn run() void {
+          const f = first;
+          f();
+      }
+  - path: inaccessible/main.zig
+    content: |
+      fn run() void {
+          {
+              const hidden = struct {
+                  fn ping() void {}
+              };
+          }
+          hidden.ping();
+      }
+tests:
+  - name: "Sibling bindings resolve independently and local containers do not escape"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { file: siblings/main.zig, target: first } }
+      - { row: { file: siblings/main.zig, target: second } }
+      - { row: { file: control/main.zig, target: first } }

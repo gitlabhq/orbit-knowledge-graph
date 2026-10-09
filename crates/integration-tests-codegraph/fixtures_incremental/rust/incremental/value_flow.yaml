@@ -1,0 +1,132 @@
+name: "Rust: callable value flow survives snapshots and edits"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_incremental_value_flow_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn first() {}
+      pub fn second() {}
+      pub struct Holder {
+          pub callback: fn(),
+      }
+
+      pub fn record_call() {
+          let holder = Holder { callback: first };
+          (holder.callback)();
+      }
+
+      pub fn tuple_call() {
+          let (_, callback) = (second, first);
+          callback();
+      }
+
+tests:
+  - name: "initial record and tuple calls select only the first target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['record_call', 'tuple_call'] AND callee.name IN ['first', 'second']
+      RETURN caller.name AS caller, callee.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: record_call, target: first } }
+      - { row: { caller: tuple_call, target: first } }
+
+steps:
+  - name: roundtrip the snapshot without source edits
+    snapshot: true
+    tests:
+      - name: "snapshot roundtrip retains exact callback targets"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name IN ['record_call', 'tuple_call'] AND callee.name IN ['first', 'second']
+          RETURN caller.name AS caller, callee.fqn AS target
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: record_call, target: first } }
+          - { row: { caller: tuple_call, target: first } }
+
+  - name: replace the record and tuple callback targets
+    snapshot: true
+    modify:
+      - path: src/lib.rs
+        content: |
+          pub fn first() {}
+          pub fn second() {}
+          pub struct Holder {
+              pub callback: fn(),
+          }
+
+          pub fn record_call() {
+              let holder = Holder { callback: second };
+              (holder.callback)();
+          }
+
+          pub fn tuple_call() {
+              let (_, callback) = (first, second);
+              callback();
+          }
+    tests:
+      - name: "edited callbacks call the replacement and drop stale edges"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name IN ['record_call', 'tuple_call'] AND callee.name IN ['first', 'second']
+          RETURN caller.name AS caller, callee.fqn AS target
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: record_call, target: second } }
+          - { row: { caller: tuple_call, target: second } }
+
+  - name: remove known callback targets while retaining callable sites
+    snapshot: true
+    modify:
+      - path: src/lib.rs
+        content: |
+          pub fn first() {}
+          pub fn second() {}
+          pub struct Holder {
+              pub callback: fn(),
+          }
+
+          pub fn record_call(callback: fn()) {
+              let holder = Holder { callback };
+              (holder.callback)();
+          }
+
+          pub fn tuple_call(callback: fn()) {
+              let (_, callback) = (first, callback);
+              callback();
+          }
+    tests:
+      - name: "opaque replacements leave no stale callback calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name IN ['record_call', 'tuple_call'] AND callee.name IN ['first', 'second']
+          RETURN caller.name AS caller, callee.fqn AS target
+        assert:
+          - { empty: true }
+
+      - name: "removing callback bindings preserves both target definitions"
+        query: |
+          MATCH (definition:Definition)
+          WHERE definition.name IN ['first', 'second']
+          RETURN definition.fqn AS target
+        assert:
+          - { row_count: 2 }
+          - { row: { target: first } }
+          - { row: { target: second } }
+
+  - name: roundtrip the snapshot after callback removal
+    snapshot: true
+    tests:
+      - name: "snapshot reload does not resurrect removed callback targets"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name IN ['record_call', 'tuple_call'] AND callee.name IN ['first', 'second']
+          RETURN caller.name AS caller, callee.fqn AS target
+        assert:
+          - { empty: true }

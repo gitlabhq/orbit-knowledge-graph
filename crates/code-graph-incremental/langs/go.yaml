@@ -79,11 +79,11 @@ stages:
     rules:
       # Bindings: x := T{} / x := f() / x := y
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
-        replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$R) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N (__declaration) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__declaration) (__rhs @$R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
@@ -159,6 +159,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(block $$$V)'
+        replace: '(__scope $$$V)'
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'
