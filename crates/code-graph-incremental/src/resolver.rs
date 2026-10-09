@@ -261,6 +261,7 @@ impl Resolver {
                     .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
+            .chain(dirty_fis.iter().copied())
             .chain(
                 discovered
                     .iter()

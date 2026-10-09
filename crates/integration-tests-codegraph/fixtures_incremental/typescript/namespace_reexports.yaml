@@ -42,3 +42,22 @@ steps:
           - { row_count: 2 }
           - { row: { caller: useLeft, body: leftBody } }
           - { row: { caller: useRight, body: rightBody } }
+  - name: redirect a namespace export
+    snapshot: true
+    modify:
+      - path: barrel.ts
+        content: |
+          export * as left from './right';
+          export * as right from './right';
+          export function run() { unrelatedBody(); }
+          function unrelatedBody() {}
+    tests:
+      - name: "unchanged callers lose the previous namespace target"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+          WHERE caller.name IN ['useLeft', 'useRight']
+          RETURN caller.name AS caller, body.name AS body
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: useLeft, body: rightBody } }
+          - { row: { caller: useRight, body: rightBody } }
