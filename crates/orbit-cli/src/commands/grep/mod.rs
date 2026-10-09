@@ -1,4 +1,5 @@
 mod defs;
+mod kind;
 mod local;
 mod rank;
 mod render;
@@ -14,7 +15,8 @@ use orbit_search::{RecallFilter, query_alternatives};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
-/// nothing but the exit status with `-q`.
+/// nothing but the exit status with `-q`; `--kind File` and `--kind Directory` list where
+/// the matches are with their definitions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
     #[default]
@@ -22,6 +24,8 @@ pub(crate) enum Output {
     Files,
     Count,
     Quiet,
+    FileRows,
+    Directories,
 }
 
 /// The rg and grep flags a search honors.
@@ -59,7 +63,7 @@ pub(crate) fn run(
     db: Option<PathBuf>,
     paths: Vec<String>,
     filter: RecallFilter,
-    options: Options,
+    mut options: Options,
 ) -> Result<()> {
     let launcher = crate::commands::setup::spec::launcher();
     let alternatives = match &query {
@@ -95,7 +99,11 @@ pub(crate) fn run(
     };
     let backend = LocalBackend::open(repo, db, &paths)?;
     let paths = backend.paths().to_vec();
-    let kinds = check_kinds(&backend, &filter.kinds)?;
+    let kinds = resolve_kinds(&backend, &filter.kinds)?;
+    if let (Some(shape), Output::Lines) = (kinds.output, options.output) {
+        options.output = shape;
+    }
+    let (kinds, shown) = (kinds.definitions, kinds.shown);
 
     let mut out = std::io::stdout().lock();
     let (Some(query), Some((mut hits, edited))) = (query, scan) else {
@@ -119,8 +127,8 @@ pub(crate) fn run(
     for path in &paths {
         header.push_str(&format!(" {path}"));
     }
-    if !kinds.is_empty() {
-        header.push_str(&format!(" --kind {}", kinds.join(",")));
+    if !shown.is_empty() {
+        header.push_str(&format!(" --kind {}", shown.join(",")));
     }
     header.push_str(&format!(" @ {}", backend.header()));
     write!(
@@ -150,9 +158,9 @@ pub(crate) fn run(
     }
 }
 
-fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<Vec<String>> {
-    if kinds.is_empty() {
-        return Ok(Vec::new());
+fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::Kinds> {
+    if requested.is_empty() {
+        return Ok(kind::Kinds::default());
     }
     let git = backend.git();
     let batches = backend.client().query_arrow_json(
@@ -161,16 +169,23 @@ fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<Vec<String>> 
         &[git.project_id.into(), git.commit_sha.clone().into()],
     )?;
     let known = duckdb_client::string_column(&batches, "kind");
-    let (valid, unknown): (Vec<String>, Vec<String>) = kinds
-        .iter()
-        .cloned()
-        .partition(|kind| known.iter().any(|k| k.eq_ignore_ascii_case(kind)));
-    if !unknown.is_empty() {
+    let kinds = kind::resolve(requested, &known)?;
+    let launcher = crate::commands::setup::spec::launcher();
+    let hosted = kinds.hosted.join(", ");
+    anyhow::ensure!(
+        kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
+        "{hosted} lives in the hosted graph, which `{launcher} grep` does not search yet; \
+         use `{launcher} query`"
+    );
+    if !kinds.hosted.is_empty() {
+        eprintln!("orbit: skipping hosted --kind {hosted}; use `{launcher} query`");
+    }
+    if !kinds.unknown.is_empty() {
         eprintln!(
-            "orbit: ignoring unknown --kind {}; kinds in this repository: {}",
-            unknown.join(", "),
+            "orbit: ignoring unknown --kind {}; kinds here: File, Directory, Definition, {}",
+            kinds.unknown.join(", "),
             known.join(", ")
         );
     }
-    Ok(valid)
+    Ok(kinds)
 }

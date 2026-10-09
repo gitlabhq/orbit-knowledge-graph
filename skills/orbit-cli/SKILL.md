@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.23.1
+version: 0.23.2
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -55,6 +55,8 @@ grouped under their enclosing definition as `Kind name:start-end`, followed by
 `←callers` and `→callees`. Files that define a term come first, then code, tests,
 and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
+`--kind` takes definition kinds such as `Class,Method`. `--kind File` and
+`--kind Directory` list where the matches are, with their definitions.
 
 Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show
