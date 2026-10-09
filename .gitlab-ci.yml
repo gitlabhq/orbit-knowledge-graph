@@ -98,7 +98,7 @@ stages:
 
 # Job Templates
 
-# Cargo downloads, keyed by Cargo.lock. Trust model: scripts/ci/cargo-home-cache.sh.
+# Trust model: scripts/ci/cargo-home-cache.sh.
 .cargo-home-cache:
   paths: &cargo-home-paths
     - .cargo-cache/git/db
@@ -114,11 +114,12 @@ stages:
   push:
     key: *cargo-home-key
     paths: *cargo-home-paths
-    policy: pull-push
+    # pull-push on the default branch only, pull elsewhere; see unit-test.
+    policy: $CARGO_HOME_CACHE_POLICY
 
-# For jobs that resolve no dependencies, and for release and image jobs, which
-# must not consume cached content. Extend it after `.job-template` so its `cache`
-# replaces the template's.
+# For jobs that resolve no dependencies, and for the tag-only release CLI
+# builds, so shipped binaries never use content an MR pipeline can write.
+# Extend it after `.job-template` so its `cache` replaces the template's.
 .no-cargo-home-cache:
   variables:
     SKIP_CARGO_HOME_CACHE: "1"
@@ -745,7 +746,14 @@ unit-test:
   stage: test
   extends:
     - .test-template
-    - .mr-and-main-rules
+  # Same rules as .mr-and-main-rules, plus the cache upload on main only.
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        CARGO_HOME_CACHE_POLICY: pull-push
   cache:
     - !reference [.cargo-home-cache, push]
   tags:
@@ -807,6 +815,7 @@ cli-integration-test:
     - name: docker:dind
       alias: docker
   variables:
+    CARGO_HOME_CACHE_POLICY: pull
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     TESTCONTAINERS_HOST_OVERRIDE: docker

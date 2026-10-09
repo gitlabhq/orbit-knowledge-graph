@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # GitLab only caches paths under $CI_PROJECT_DIR, so symlink the downloadable
-# parts of CARGO_HOME (git/db, registry/cache, registry/index) into
+# parts of CARGO_HOME (git, registry/cache, registry/index) into
 # $CI_PROJECT_DIR/.cargo-cache. CARGO_HOME itself is not moved because it also
-# holds the toolchain and the mold linker config. On a cache miss the image's
-# baked copies seed the directories, so a miss costs nothing extra.
+# holds the rustup proxies and the mold linker config. On a cache miss the
+# image's baked copies seed the directories, so a miss costs nothing extra.
 #
-# Trust: only unit-test writes the cache, from MR and main pipelines, and the
-# test jobs of both read it. Anyone who can open an MR can already run code in
-# those jobs, so the cache grants nothing new. Release and image jobs neither
-# read nor write it. Even so, restored content is not trusted blindly: crate
-# archives are checked against Cargo.lock and symlinks are removed. git/db and
-# registry/index are not verified.
+# Trust: only main pipelines write the cache. MR pipelines only read it, from
+# the -protected key when a Maintainer started the pipeline and the
+# -non_protected key otherwise. Release CLI builds skip it. Cargo does not
+# re-check a cached .crate, so archives that don't match Cargo.lock are
+# deleted, and so is every symlink. git/db and registry/index are not verified.
 #
-# Keep the paths in sync with `.cargo-home-cache` in .gitlab-ci.yml.
+# Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
+# (git/checkouts is rebuilt by cargo).
 set -euo pipefail
 
 # Set by .no-cargo-home-cache for jobs that restore no cache.
@@ -41,7 +41,6 @@ redirect() {
   ln -s "$target" "$link"
 }
 
-# Delete crate archives whose sha256 differs from Cargo.lock; cargo refetches them.
 drop_unverified_crates() {
   local lockfile="$project_dir/Cargo.lock"
   [ -f "$lockfile" ] || return 0
@@ -59,8 +58,9 @@ drop_unverified_crates() {
   rm -f "$expected"
 }
 
-# Cargo follows symlinks, which would bypass the checksum check above. Cargo
-# creates none in these directories.
+# `find -type f` in drop_unverified_crates skips symlinks, so a symlinked
+# .crate or directory would never be hashed while cargo still follows it.
+# Cargo creates none in these directories.
 [ -L "$cache_root" ] && rm -f "$cache_root"
 if [ -d "$cache_root" ]; then
   find "$cache_root" -mindepth 1 ! -type d ! -type f -delete
