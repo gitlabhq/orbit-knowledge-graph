@@ -119,6 +119,12 @@ stages:
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
+        # With the mise shim (cargo nextest), sccache probes `rustc +stable` through
+        # the rustup proxy; the image has no `stable` toolchain, so rustup silently
+        # downloads one (10-17 s per job in CI). The variable must be in cargo's
+        # environment, not only the sccache server's. Jobs that need another
+        # toolchain must install it explicitly.
+        export RUSTUP_AUTO_INSTALL=0
         sccache --start-server || true
       fi
 
