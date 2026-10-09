@@ -745,6 +745,11 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 .and_then(|kind| model.relationship_table(kind))
                 .unwrap_or_else(|| model.default_edge_table());
             for (prop, filters) in input.relationship_filters(i) {
+                if filters.iter().any(|filter| filter.rhs_column.is_some()) {
+                    return Err(QueryError::Validation(
+                        "relationship property comparisons are unsupported".into(),
+                    ));
+                }
                 let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\" \
