@@ -479,6 +479,26 @@ display:
           entity: Definition
           fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__defname $S:__source_path (__name)) (__impl))'
+        tag:
+          owner_module: '@$S|tag("source_root_rel")|regex_replace("\.rs$","")|regex_replace("(^|/)(mod|lib|main)$","")|replace("/","::")'
+          owner_crate: '@$S|tag("crate")'
+      - match: '(__def $N:(__defname (__name)) (__impl))'
+        tag:
+          owner_name: '@$N|descendant_join("__name", "::")'
+          owner_prefix: '@$ROOT|concat("::", "tag:owner_crate", "tag:owner_module")'
+      - match: '(__def (__defname (__name)) (__impl))'
+        tag:
+          fqn: '@$ROOT|concat("::", "tag:owner_prefix", "tag:owner_name")'
+      - match: '(__def $N:(__defname $T:__supertype (__name)))'
+        tag:
+          qualifier: '@$T|prepend("<")|regex_replace("$", ">")'
+      - match: '(__def $N:(__defname (__supertype)))'
+        tag:
+          qualified_name: '@$ROOT|concat("::", "tag:qualifier", "child_sym:__defname")'
+      - match: '(__def (__defname (__supertype)))'
+        tag:
+          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "tag:qualified_name")'
   - name: def_type
     rules:
       - match: '(__def (__function))'

@@ -115,3 +115,34 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { name: 'Deep' } }
+steps:
+  - name: restore canonical names
+    snapshot: true
+    tests:
+      - name: "snapshot preserves collision qualifiers and source locations"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name IN ['call_alpha', 'call_beta']
+          RETURN caller.name AS caller, method.fqn AS fqn, method.start_line AS line
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: call_alpha, fqn: 'Widget::<Alpha>::foo', line: 18 } }
+          - { row: { caller: call_beta, fqn: 'Widget::<Beta>::foo', line: 22 } }
+  - name: remove competing implementation
+    snapshot: true
+    modify:
+      - path: src/lib.rs
+        content: |
+          pub struct Widget;
+          pub trait Alpha { fn foo(&self); }
+          impl Alpha for Widget { fn foo(&self) {} }
+          fn call_alpha(value: &Widget) { <Widget as Alpha>::foo(value); }
+    tests:
+      - name: "uncollided names no longer carry a qualifier"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name = 'call_alpha'
+          RETURN method.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'Widget::foo' } }

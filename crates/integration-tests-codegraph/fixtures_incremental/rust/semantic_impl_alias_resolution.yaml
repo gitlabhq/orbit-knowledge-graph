@@ -111,6 +111,16 @@ steps:
           - { row: { caller: through_alias, body: implementation_body } }
           - { row: { caller: through_type, body: implementation_body } }
           - { row: { caller: remote_alias, body: remote_body } }
+      - name: "snapshot preserves resolved owner names and source files"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name IN ['through_alias', 'through_type', 'remote_alias']
+          RETURN caller.name AS caller, method.fqn AS fqn, method.file_path AS file
+        assert:
+          - { row_count: 3 }
+          - { row: { caller: through_alias, fqn: 'domain::Service::run', file: 'src/lib.rs' } }
+          - { row: { caller: through_type, fqn: 'domain::Service::run', file: 'src/lib.rs' } }
+          - { row: { caller: remote_alias, fqn: 'remote::Remote::run', file: 'src/lib.rs' } }
       - name: "unrelated and shadowed owners still have no call after snapshot loading"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(method:Definition)

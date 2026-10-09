@@ -1,0 +1,60 @@
+name: "Rust impl names follow canonical owners across source files"
+fixtures:
+  - path: src/lib.rs
+    content: |
+      pub mod domain;
+      pub mod first;
+      pub mod second;
+  - path: src/domain.rs
+    content: |
+      pub struct Service;
+      pub trait First { fn run(); }
+      pub trait Second { fn run(); }
+  - path: src/first.rs
+    content: |
+      use crate::domain::{Service as Alias, First};
+      impl First for Alias { fn run() {} }
+      pub fn invoke() { <Alias as First>::run(); }
+  - path: src/second.rs
+    content: |
+      use crate::domain::{Service as Alias, Second};
+      impl Second for Alias { fn run() {} }
+tests:
+  - name: "cross-file collisions qualify names without moving their definitions"
+    query: |
+      MATCH (file:File)-[:DEFINES]->(method:Definition)
+      WHERE method.name = 'run' AND file.path IN ['src/first.rs', 'src/second.rs']
+      RETURN file.path AS file, method.fqn AS fqn, method.start_line AS line
+    assert:
+      - { row_count: 2 }
+      - { row: { file: 'src/first.rs', fqn: 'domain::Service::<First>::run', line: 2 } }
+      - { row: { file: 'src/second.rs', fqn: 'domain::Service::<Second>::run', line: 2 } }
+steps:
+  - name: remove another file's competing impl
+    snapshot: true
+    remove: [src/second.rs]
+    tests:
+      - name: "retained impl loses the obsolete qualifier"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name = 'invoke'
+          RETURN method.fqn AS fqn, method.file_path AS file, method.start_line AS line
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'domain::Service::run', file: 'src/first.rs', line: 2 } }
+  - name: restore another file's competing impl
+    snapshot: true
+    add:
+      - path: src/second.rs
+        content: |
+          use crate::domain::{Service as Alias, Second};
+          impl Second for Alias { fn run() {} }
+    tests:
+      - name: "retained impl regains its qualifier"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name = 'invoke'
+          RETURN method.fqn AS fqn, method.file_path AS file, method.start_line AS line
+        assert:
+          - { row_count: 1 }
+          - { row: { fqn: 'domain::Service::<First>::run', file: 'src/first.rs', line: 2 } }
