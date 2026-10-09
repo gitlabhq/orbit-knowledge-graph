@@ -362,10 +362,6 @@ tests:
       - { row: { name: "handleError", fqn: "OncallSchedulesWrapper::handleError", type: "Method" } }
 
   - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     queries:
       - query: |
           MATCH (file:File)-[e:DEFINES|CALLS]->(callee:Definition)
