@@ -102,9 +102,10 @@ fn enforce_traversal_path_filters(
             .entity_minimum_access_level(entity)
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
-        for (_, tp_filter) in input
+        for tp_filter in input
             .node_filters(node)
             .filter(|(property, _)| *property == TRAVERSAL_PATH_COLUMN)
+            .flat_map(|(_, filters)| filters)
         {
             validate_traversal_path_filter_scope(
                 &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
@@ -116,9 +117,10 @@ fn enforce_traversal_path_filters(
 
     for i in 0..input.relationships.len() {
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
-        for (_, tp_filter) in input
+        for tp_filter in input
             .relationship_filters(i)
             .filter(|(property, _)| *property == TRAVERSAL_PATH_COLUMN)
+            .flat_map(|(_, filters)| filters)
         {
             validate_traversal_path_filter_scope(
                 &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
@@ -280,7 +282,10 @@ pub fn restrict(
     }
 
     for node in &input.nodes {
-        for (property, filter) in input.node_filters(node) {
+        for (property, filter) in input
+            .node_filters(node)
+            .flat_map(|(property, filters)| filters.iter().map(move |filter| (property, filter)))
+        {
             for (alias, property) in std::iter::once((node.id.as_str(), property)).chain(
                 filter
                     .rhs_column
