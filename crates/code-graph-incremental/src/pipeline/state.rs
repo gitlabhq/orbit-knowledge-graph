@@ -104,6 +104,7 @@ const NONE: u32 = u32::MAX;
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SnapshotNode {
+    pub id: u32,
     pub kind: u16,
     pub field: u16,
     pub sym: u32,
@@ -127,17 +128,12 @@ pub struct TreeSnapshot {
 
 impl From<&Tree> for TreeSnapshot {
     fn from(tree: &Tree) -> Self {
-        let ids: Vec<indextree::NodeId> = tree.root.descendants(&tree.arena).collect();
-        let id_to_pos: rustc_hash::FxHashMap<indextree::NodeId, u32> = ids
-            .iter()
-            .enumerate()
-            .map(|(i, &id)| (id, i as u32))
-            .collect();
-        let mut nodes = Vec::with_capacity(ids.len());
-        for &id in &ids {
+        let mut nodes = Vec::with_capacity(tree.len() as usize);
+        for id in tree.root.descendants(&tree.arena) {
             let n = tree.arena[id].get();
-            let parent = id.parent(&tree.arena).map_or(NONE, |p| id_to_pos[&p]);
+            let parent = id.parent(&tree.arena).map_or(NONE, Tree::to_raw);
             nodes.push(SnapshotNode {
+                id: Tree::to_raw(id),
                 kind: n.kind,
                 field: n.field,
                 sym: n.sym,
@@ -170,43 +166,43 @@ impl From<TreeSnapshot> for Tree {
         if snap.nodes.is_empty() {
             return Tree::new(Node::default());
         }
-        let first = &snap.nodes[0];
-        let mut tree = Tree::with_capacity(
-            snap.nodes.len(),
-            Node {
-                kind: first.kind,
-                field: first.field,
-                sym: first.sym,
-                start: first.start,
-                end: first.end,
-                start_row: first.start_row,
-                start_col: first.start_col,
-                end_row: first.end_row,
-                end_col: first.end_col,
-                synth: first.synth,
-                named: first.named,
-            },
-        );
-        let mut id_map = vec![tree.root];
-        for sn in &snap.nodes[1..] {
-            let parent = id_map[sn.parent as usize];
-            let id = tree.append(
-                parent,
-                Node {
-                    kind: sn.kind,
-                    field: sn.field,
-                    sym: sn.sym,
-                    start: sn.start,
-                    end: sn.end,
-                    start_row: sn.start_row,
-                    start_col: sn.start_col,
-                    end_row: sn.end_row,
-                    end_col: sn.end_col,
-                    synth: sn.synth,
-                    named: sn.named,
-                },
-            );
-            id_map.push(id);
+        let slots = snap
+            .nodes
+            .iter()
+            .map(|node| node.id as usize)
+            .max()
+            .unwrap()
+            + 1;
+        let mut tree = Tree::with_capacity(slots, Node::default());
+        for _ in 1..slots {
+            tree.arena.new_node(Node::default());
+        }
+        tree.root = tree.to_id(snap.nodes[0].id);
+        let mut live = vec![false; slots];
+        for sn in &snap.nodes {
+            let id = tree.to_id(sn.id);
+            live[sn.id as usize] = true;
+            *tree.node_mut(id) = Node {
+                kind: sn.kind,
+                field: sn.field,
+                sym: sn.sym,
+                start: sn.start,
+                end: sn.end,
+                start_row: sn.start_row,
+                start_col: sn.start_col,
+                end_row: sn.end_row,
+                end_col: sn.end_col,
+                synth: sn.synth,
+                named: sn.named,
+            };
+            if sn.parent != NONE {
+                tree.to_id(sn.parent).append(id, &mut tree.arena);
+            }
+        }
+        for (id, live) in live.into_iter().enumerate() {
+            if !live {
+                tree.to_id(id as u32).remove(&mut tree.arena);
+            }
         }
         tree.label = snap.label;
         for (node, tags) in snap.tags {
@@ -258,7 +254,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 8;
+pub const SNAPSHOT_VERSION: u32 = 9;
 
 type Error = rkyv::rancor::BoxedError;
 
