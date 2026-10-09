@@ -1,7 +1,7 @@
 # Ontology archives
 
-The server embeds every `v<N>.tar.gz` in this directory and validates that each
-archive loads at build time. The current archive must also match the current
+The server embeds every `v<N>.tar.gz` in this directory and validates in unit tests
+that each archive loads. The current archive must also match the current
 ontology sources. Schema bumps retain previous archives.
 
 The dispatcher can publish a bundled archive when the active schema's catalog

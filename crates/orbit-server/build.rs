@@ -13,6 +13,7 @@ fn main() {
 fn export_current_ontology_archive_path() {
     let directory = std::path::Path::new(env!("CONFIG_DIR")).join("ontology-archives");
     println!("cargo:rerun-if-changed={}", directory.display());
+    // Keep in sync with `OntologyArchive::path`.
     let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
     let resolved = current_path.canonicalize().unwrap_or_else(|_| {
         panic!(
