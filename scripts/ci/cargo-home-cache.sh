@@ -5,11 +5,12 @@
 # holds the rustup proxies and the mold linker config. On a cache miss the
 # image's baked copies seed the directories, so a miss costs nothing extra.
 #
-# Trust: only main pipelines write the cache. MR pipelines only read it, from
-# the -protected key when a Maintainer started the pipeline and the
-# -non_protected key otherwise. Release CLI builds skip it. Cargo does not
-# re-check a cached .crate, so archives that don't match Cargo.lock are
-# deleted, and so is every symlink. git/db and registry/index are not verified.
+# Trust: only main pipelines write the cache, under the -protected key. MR
+# pipelines only read it, and only those a Maintainer started get that key;
+# the rest look up -non_protected, which nothing writes, and fetch cold.
+# Release CLI builds skip it. Cargo does not re-check a cached .crate, so
+# archives that don't match Cargo.lock are deleted, and so is every symlink.
+# git/db and registry/index are not verified.
 #
 # Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
 # (git/checkouts is rebuilt by cargo).

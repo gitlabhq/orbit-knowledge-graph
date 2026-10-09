@@ -114,11 +114,11 @@ stages:
   push:
     key: *cargo-home-key
     paths: *cargo-home-paths
-    # pull-push on the default branch only, pull elsewhere; see unit-test.
+    # So only merged code writes the cache; set in unit-test.
     policy: $CARGO_HOME_CACHE_POLICY
 
 # For jobs that resolve no dependencies, and for the tag-only release CLI
-# builds, so shipped binaries never use content an MR pipeline can write.
+# builds, which fetch fresh because git/db and the index are not verified.
 # Extend it after `.job-template` so its `cache` replaces the template's.
 .no-cargo-home-cache:
   variables:
@@ -131,6 +131,8 @@ stages:
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
     MISE_DISABLE_TOOLS: lefthook
+    # Fail closed: an empty policy would let the runner upload.
+    CARGO_HOME_CACHE_POLICY: pull
   before_script:
     - ./scripts/ci/cargo-home-cache.sh
     - mise install
@@ -756,8 +758,6 @@ unit-test:
         CARGO_HOME_CACHE_POLICY: pull-push
   cache:
     - !reference [.cargo-home-cache, push]
-  variables:
-    CARGO_HOME_CACHE_POLICY: pull
   tags:
     - ${RUNNER_LARGE}
   needs: []
