@@ -299,7 +299,8 @@ fn plan_with<C>(
 where
     C: CompilerCtx,
 {
-    let input = require(ctx.take_input(), "input")?;
+    let mut input = require(ctx.take_input(), "input")?;
+    input.extract_scan_filters();
     let hydration_options = ctx
         .hydration_options()
         .as_ref()

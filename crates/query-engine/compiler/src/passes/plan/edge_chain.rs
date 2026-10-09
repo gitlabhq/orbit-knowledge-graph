@@ -427,11 +427,6 @@ fn elide_hops(
                     PredicateTarget::Node(hop.from_node.clone()),
                 )
                 || super::predicates::references(input, PredicateTarget::Node(hop.to_node.clone()))
-                || input.join_predicates.iter().any(|predicate| {
-                    [&predicate.lhs_node, &predicate.rhs_node]
-                        .into_iter()
-                        .any(|node| node == &hop.from_node || node == &hop.to_node)
-                })
             {
                 return None;
             }
@@ -645,21 +640,12 @@ fn determine_hydration(
             && !matches!(a.expr.function(), AggFunction::Count)
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
-    let is_join_predicate_target = input.join_predicates.iter().any(|predicate| {
-        [
-            (&predicate.lhs_node, &predicate.lhs_prop),
-            (&predicate.rhs_node, &predicate.rhs_prop),
-        ]
-        .into_iter()
-        .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)
-    });
 
     if is_group_by_node
         || super::predicates::references(input, PredicateTarget::Node(alias.to_string()))
         || is_group_by_property
         || is_agg_property_target
         || is_order_by_target
-        || is_join_predicate_target
     {
         return HydrationStrategy::Join;
     }

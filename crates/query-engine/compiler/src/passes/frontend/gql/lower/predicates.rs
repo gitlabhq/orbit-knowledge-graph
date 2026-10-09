@@ -99,18 +99,16 @@ impl Lowering {
         } = self.property_predicate(comparison)?;
         match target {
             PredicateTarget::Node(alias) => {
-                if let Some((rhs_node, rhs_prop)) = &filter.rhs_column
+                if let Some((rhs_node, _)) = &filter.rhs_column
                     && &alias != rhs_node
                 {
                     self.input
-                        .join_predicates
-                        .push(crate::input::JoinPredicate {
-                            lhs_node: alias,
-                            lhs_prop: property,
-                            op: filter.op.unwrap_or(FilterOp::Eq),
-                            rhs_node: rhs_node.clone(),
-                            rhs_prop: rhs_prop.clone(),
-                        });
+                        .predicates
+                        .push(BooleanExpression::Leaf(PropertyPredicate {
+                            target: PredicateTarget::Node(alias),
+                            property,
+                            filter,
+                        }));
                 } else {
                     self.input
                         .nodes
