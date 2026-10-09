@@ -1,0 +1,11 @@
+description: Declared edge fields are queryable regardless of their spelling
+config:
+  ontology_overlay: queryable_edge_fields
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","filters":{"_declared_field":1}}]}
+  gql: |
+    MATCH (a:Definition {id: 12000})-[call:CALLS]->(b:Definition) WHERE call._declared_field = 1 RETURN b
+expect:
+  compile_only: true
+  sql_contains: ["_declared_field"]

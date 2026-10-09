@@ -27,6 +27,15 @@ primary keys, and secondary indexes.
 
 ### Edge table schema
 
+Edge filter eligibility comes from the catalog's logical edge-field declarations.
+Catalog derivation copies these declarations from `settings.edge_tables.<table>.columns`;
+the local backend uses `local_db.edge_columns`.
+Physical storage columns do not grant filter access. Generated version, deletion, and tag columns
+remain unavailable unless explicitly declared as logical fields.
+Validation uses the same catalog lookup for inline maps and WHERE filters.
+Field names do not determine access; there is no underscore-prefix rule.
+Traversal-path filters still require authorized scope.
+
 Each physical edge table has ontology-defined columns and storage settings. For example,
 the default `gl_edge` table uses this key and these ID indexes in the generated DDL:
 
