@@ -120,7 +120,6 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn property_realization(&self, property: PropertyId) -> Option<&PropertyRealization>;
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
-    fn edge_filter_type(&self, table: &str, field: &str) -> Option<ontology::DataType>;
     fn has_text_index(&self, property: PropertyId) -> bool;
     fn table_path_scopable(&self, table: &str) -> bool;
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
@@ -251,10 +250,6 @@ pub trait QueryDataModel {
 
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
         self.query_backend().table_column_type(table, column)
-    }
-
-    fn edge_filter_type(&self, table: &str, field: &str) -> Option<ontology::DataType> {
-        self.query_backend().edge_filter_type(table, field)
     }
 
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {
