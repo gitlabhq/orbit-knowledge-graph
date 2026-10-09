@@ -1,0 +1,10 @@
+description: An undeclared edge field is not queryable even when it exists in storage
+config:
+  ontology_overlay: queryable_edge_fields
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","filters":{"internal_marker":1}}]}
+  gql: |
+    MATCH (a:Definition {id: 12000})-[call:CALLS]->(b:Definition) WHERE call.internal_marker = 1 RETURN b
+expect:
+  compile_error: unknown edge column

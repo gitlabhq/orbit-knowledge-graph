@@ -92,6 +92,7 @@ smallvec = "1.15.1"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 stacker = "0.1.23"
 tempfile = "3.24.0"
+typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
@@ -104,6 +105,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 rayon = "1.11.0"
+lz4_flex = "0.11.6"
 walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }

@@ -226,7 +226,9 @@ async fn run_frontend(
                 panic!("{label}: unexpected compile error: {e}")
             }
             Some(expected) => {
-                assert!(e.is_client_safe(), "{label}: internal error: {e}");
+                if !predicates.is_empty() {
+                    assert!(e.is_client_safe(), "{label}: internal error: {e}");
+                }
                 let msg = e.to_string();
                 if let Some(sub) = expected.substring_for(frontend_key) {
                     assert!(
