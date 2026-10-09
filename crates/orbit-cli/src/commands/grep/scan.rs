@@ -167,8 +167,11 @@ impl Scope {
             "paths outside the repository: {}",
             outside.join(", ")
         );
+        for path in &missing {
+            eprintln!("orbit: {path}: No such file or directory");
+        }
         anyhow::ensure!(
-            missing.is_empty(),
+            missing.is_empty() || globbed || !prefixes.is_empty(),
             "no such path in the repository: {}",
             missing.join(", ")
         );

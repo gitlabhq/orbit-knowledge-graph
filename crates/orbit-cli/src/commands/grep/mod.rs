@@ -95,7 +95,7 @@ pub(crate) fn run(
     };
     let backend = LocalBackend::open(repo, db, &paths)?;
     let paths = backend.paths().to_vec();
-    check_kinds(&backend, &filter.kinds)?;
+    let kinds = check_kinds(&backend, &filter.kinds)?;
 
     let mut out = std::io::stdout().lock();
     let (Some(query), Some((mut hits, edited))) = (query, scan) else {
@@ -108,7 +108,7 @@ pub(crate) fn run(
         backend.git(),
         &mut hits,
         &alternatives,
-        &filter.kinds,
+        &kinds,
         &edited,
     )?;
     let connections = match options.output {
@@ -119,8 +119,8 @@ pub(crate) fn run(
     for path in &paths {
         header.push_str(&format!(" {path}"));
     }
-    if !filter.kinds.is_empty() {
-        header.push_str(&format!(" --kind {}", filter.kinds.join(",")));
+    if !kinds.is_empty() {
+        header.push_str(&format!(" --kind {}", kinds.join(",")));
     }
     header.push_str(&format!(" @ {}", backend.header()));
     write!(
@@ -150,9 +150,9 @@ pub(crate) fn run(
     }
 }
 
-fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<()> {
+fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<Vec<String>> {
     if kinds.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let git = backend.git();
     let batches = backend.client().query_arrow_json(
@@ -161,19 +161,16 @@ fn check_kinds(backend: &LocalBackend, kinds: &[String]) -> Result<()> {
         &[git.project_id.into(), git.commit_sha.clone().into()],
     )?;
     let known = duckdb_client::string_column(&batches, "kind");
-    let unknown: Vec<&String> = kinds
+    let (valid, unknown): (Vec<String>, Vec<String>) = kinds
         .iter()
-        .filter(|kind| !known.iter().any(|k| k.eq_ignore_ascii_case(kind)))
-        .collect();
-    anyhow::ensure!(
-        unknown.is_empty(),
-        "unknown --kind {}; kinds in this repository: {}",
-        unknown
-            .iter()
-            .map(|k| k.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        known.join(", ")
-    );
-    Ok(())
+        .cloned()
+        .partition(|kind| known.iter().any(|k| k.eq_ignore_ascii_case(kind)));
+    if !unknown.is_empty() {
+        eprintln!(
+            "orbit: ignoring unknown --kind {}; kinds in this repository: {}",
+            unknown.join(", "),
+            known.join(", ")
+        );
+    }
+    Ok(valid)
 }
