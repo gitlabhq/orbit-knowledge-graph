@@ -3122,6 +3122,7 @@ dependencies = [
  "serde_json",
  "shared",
  "strum 0.28.0",
+ "toon-format",
  "types",
 ]
 
@@ -4116,6 +4117,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-prost",
+ "toon-format",
  "tower",
  "uuid",
 ]

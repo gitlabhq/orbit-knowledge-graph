@@ -12,8 +12,7 @@ option go_package = "gitlab.com/gitlab-org/orbit/knowledge-graph/clients/orbitpb
 
 // Controls output serialization across all data RPCs.
 // RAW returns structured JSON for programmatic consumers (dashboard, CLI).
-// LLM returns compact text optimized for token budgets: the GQL table for
-// queries, TOON for schema/health.
+// LLM returns compact TOON text optimized for token budgets.
 // GQL returns query results as a text table of graph patterns such as
 // (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 2}). Only ExecuteQuery
 // honors it; other RPCs treat it as RAW.
@@ -27,9 +26,8 @@ enum ResponseFormat {
 // alongside format_version so consumers can route/parse without inspecting
 // the payload body. Mirrors ResponseFormat but in response context.
 enum FormatName {
-  reserved 1;
-  reserved "FORMAT_NAME_GOON";
   FORMAT_NAME_RAW = 0;
+  FORMAT_NAME_TOON = 1;
   FORMAT_NAME_GQL = 2;
 }
 
@@ -127,7 +125,7 @@ enum QueryLanguage {
 // Client-sent initial message to start a query.
 message ExecuteQueryRequest {
   string query = 1;
-  ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM, GQL: graph pattern table
+  ResponseFormat format = 2;   // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
   QueryType query_type = 3;
   QueryLanguage language = 4;
 }

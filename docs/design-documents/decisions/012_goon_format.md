@@ -8,7 +8,7 @@ toc_hide: true
 
 ## Status
 
-Superseded by [ADR 019](019_gql_response_format.md)
+Superseded. `format=llm` query results use [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), with one table per node type. The GOON encoder was removed.
 
 ## Date
 

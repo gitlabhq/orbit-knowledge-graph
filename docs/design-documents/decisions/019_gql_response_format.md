@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Accepted
+Proposed
 
 ## Context
 
@@ -38,12 +38,9 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-
 
 The formatter reads the authorized, hydrated `PipelineOutput` rows. It does not know the `RETURN` expressions, so a returned property prints inside its node. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
 
-`format=llm` returns the same table, so every agent gets it without a client change. This retires GOON: the server no longer emits `FORMAT_NAME_GOON`, and the proto reserves its value.
-
 ## Consequences
 
-- REST and MCP support require a separate GitLab change. Rails must accept `gql` on query endpoints and preserve it in `CommandInterceptor#orbit_command_format`. Commands advertise only `raw` and `llm`, because `llm` returns the same table.
+- REST and MCP support require a separate GitLab change. Rails must accept `gql` on query endpoints and preserve it in `CommandInterceptor#orbit_command_format`. The `query_graph` schema advertises it; other commands stay on `raw` and `llm`.
 - Deploy the GKG release containing this change before enabling GQL responses in GitLab. Older servers return raw JSON for enum value 2. Workhorse must inspect the returned content, not just the requested format, and handle a mismatch as an error or explicit fallback. Otherwise it can return an empty success response.
 - Query analytics need the selected response format, not just another version pin. Add that field in a separate Iglu schema change before measuring adoption through telemetry.
-- Rows repeat full node bodies, so output is larger than GOON's was. The evals harness comparison gates this change.
-- Query analytics stop filling `goon_output_format_version`. The field stays in published Iglu schemas and is null on new events.
+- Rows repeat full node bodies, so output is larger than the `llm` format. Compare the formats in the evals harness before changing the default. `llm` query results use TOON since GOON was removed.

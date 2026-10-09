@@ -29,8 +29,7 @@ const (
 
 // Controls output serialization across all data RPCs.
 // RAW returns structured JSON for programmatic consumers (dashboard, CLI).
-// LLM returns compact text optimized for token budgets: the GQL table for
-// queries, TOON for schema/health.
+// LLM returns compact TOON text optimized for token budgets.
 // GQL returns query results as a text table of graph patterns such as
 // (:User {id: 1})-[:AUTHORED]->(:MergeRequest {id: 2}). Only ExecuteQuery
 // honors it; other RPCs treat it as RAW.
@@ -89,19 +88,22 @@ func (ResponseFormat) EnumDescriptor() ([]byte, []int) {
 type FormatName int32
 
 const (
-	FormatName_FORMAT_NAME_RAW FormatName = 0
-	FormatName_FORMAT_NAME_GQL FormatName = 2
+	FormatName_FORMAT_NAME_RAW  FormatName = 0
+	FormatName_FORMAT_NAME_TOON FormatName = 1
+	FormatName_FORMAT_NAME_GQL  FormatName = 2
 )
 
 // Enum value maps for FormatName.
 var (
 	FormatName_name = map[int32]string{
 		0: "FORMAT_NAME_RAW",
+		1: "FORMAT_NAME_TOON",
 		2: "FORMAT_NAME_GQL",
 	}
 	FormatName_value = map[string]int32{
-		"FORMAT_NAME_RAW": 0,
-		"FORMAT_NAME_GQL": 2,
+		"FORMAT_NAME_RAW":  0,
+		"FORMAT_NAME_TOON": 1,
+		"FORMAT_NAME_GQL":  2,
 	}
 )
 
@@ -559,7 +561,7 @@ func (*ExecuteQueryMessage_Error) isExecuteQueryMessage_Content() {}
 type ExecuteQueryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM, GQL: graph pattern table
+	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=orbit.v1.ResponseFormat" json:"format,omitempty"` // RAW: tabular JSON rows; LLM: TOON text; GQL: graph pattern table
 	QueryType     QueryType              `protobuf:"varint,3,opt,name=query_type,json=queryType,proto3,enum=orbit.v1.QueryType" json:"query_type,omitempty"`
 	Language      QueryLanguage          `protobuf:"varint,4,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -4501,11 +4503,12 @@ const file_orbit_proto_rawDesc = "" +
 	"\x0eResponseFormat\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_RAW\x10\x00\x12\x17\n" +
 	"\x13RESPONSE_FORMAT_LLM\x10\x01\x12\x17\n" +
-	"\x13RESPONSE_FORMAT_GQL\x10\x02*N\n" +
+	"\x13RESPONSE_FORMAT_GQL\x10\x02*L\n" +
 	"\n" +
 	"FormatName\x12\x13\n" +
-	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x13\n" +
-	"\x0fFORMAT_NAME_GQL\x10\x02\"\x04\b\x01\x10\x01*\x10FORMAT_NAME_GOON*6\n" +
+	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
+	"\x10FORMAT_NAME_TOON\x10\x01\x12\x13\n" +
+	"\x0fFORMAT_NAME_GQL\x10\x02*6\n" +
 	"\tQueryType\x12\x13\n" +
 	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
 	"\x10QUERY_TYPE_NAMED\x10\x01*@\n" +

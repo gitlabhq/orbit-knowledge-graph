@@ -54,7 +54,7 @@ query object in a top-level `query` field:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `query` | Yes | The query object documented below. |
-| `response_format` | No | `"llm"` (default when omitted; a compact [GQL table](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/decisions/019_gql_response_format.md) optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+| `response_format` | No | `"llm"` (default when omitted; compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text with one table per node type, optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
 
 Pass this envelope to `orbit query` with `--file`.
 

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::Ordering;
 
 use orbit_utils::strings::{char_count_if_exceeds, truncate_chars};
 use serde_json::{Map, Value};
@@ -17,16 +18,16 @@ fn column_priority(key: &str) -> u8 {
     }
 }
 
+pub(crate) fn column_order(a: &str, b: &str) -> Ordering {
+    column_priority(a).cmp(&column_priority(b)).then(a.cmp(b))
+}
+
 pub(crate) fn ordered_pairs(properties: &Map<String, Value>) -> Vec<(&str, &Value)> {
     let mut pairs: Vec<(&str, &Value)> = properties
         .iter()
         .map(|(key, value)| (key.as_str(), value))
         .collect();
-    pairs.sort_by(|a, b| {
-        column_priority(a.0)
-            .cmp(&column_priority(b.0))
-            .then(a.0.cmp(b.0))
-    });
+    pairs.sort_by(|a, b| column_order(a.0, b.0));
     pairs
 }
 

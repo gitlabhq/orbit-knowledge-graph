@@ -2,6 +2,7 @@ mod gql;
 mod graph;
 mod raw_row;
 mod text;
+mod toon;
 
 use std::sync::LazyLock;
 
@@ -17,6 +18,7 @@ pub use graph::{
     PaginationResponse,
 };
 pub use raw_row::row_to_json;
+pub use toon::{TOON_OUTPUT_FORMAT_VERSION, ToonFormatter};
 
 pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
     orbit_versions::VERSIONS
@@ -31,6 +33,7 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 #[strum(serialize_all = "lowercase")]
 pub enum FormatName {
     Raw,
+    Toon,
     Gql,
 }
 

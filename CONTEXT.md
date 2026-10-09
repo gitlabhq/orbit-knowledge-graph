@@ -144,6 +144,10 @@ _Avoid_: materialized table (the ClickHouse materialized views only feed it), pr
 Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.
 _Avoid_: enrichment, decoration
 
+**TOON (Token-Oriented Object Notation)**:
+A standard compact text encoding, used for every `format=llm` response. Query results list one table per node type, then an edge table. Schema, status, and health responses use it too. It replaced GOON (ADR 012).
+_Avoid_: GOON, LLM format
+
 **GQL Response Format**:
-A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Returned when queries specify `format=llm` or `format=gql` (ADR 019). It replaced GOON (ADR 012).
-_Avoid_: Cypher output, GOON
+A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019).
+_Avoid_: Cypher output

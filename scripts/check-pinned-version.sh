@@ -21,6 +21,7 @@ fi
 COVERS='
 query_dsl          ^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate\.rs))$
 raw_output_format  ^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$
+toon_output_format ^(crates/query-engine/formatters/src/(toon|graph|lib)\.rs)$
 gql_output_format  ^(crates/query-engine/formatters/src/gql/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib|text)\.rs)$
 '
 
