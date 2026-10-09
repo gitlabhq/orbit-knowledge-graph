@@ -6,10 +6,9 @@ fn main() {
 }
 
 /// Points `ONTOLOGY_ARCHIVE_PATH` at the bundled archive for the current
-/// schema version. The remaining validations (prompts, skills, named queries,
-/// migration ledger, archives, ETL SQL) live in `src/build_validations.rs` as
-/// tests so this script does not pull the compiler and ontology crates in as
-/// host build dependencies.
+/// schema version. The former build-time validations now run as unit tests (see
+/// `src/build_validations.rs`) so this script does not pull the compiler and
+/// ontology crates in as host build dependencies.
 fn export_current_ontology_archive_path() {
     let directory = std::path::Path::new(env!("CONFIG_DIR")).join("ontology-archives");
     println!("cargo:rerun-if-changed={}", directory.display());
