@@ -13,6 +13,10 @@ pub(super) struct Term {
 }
 
 impl Term {
+    pub(super) fn is_regex(&self) -> bool {
+        self.regex.is_some()
+    }
+
     pub(super) fn parse(raw: &str) -> Self {
         let pattern = raw.contains([
             '\\', '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '^', '$',

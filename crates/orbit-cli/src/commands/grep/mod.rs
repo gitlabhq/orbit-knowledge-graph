@@ -135,7 +135,15 @@ pub(crate) fn run(
             &alternatives,
             &connections,
             &edited,
-            &options
+            &options,
+            render::lookup(
+                &backend.git().repo_path,
+                &hits,
+                &alternatives,
+                &connections,
+                &options
+            )
+            .as_deref(),
         )?
     )?;
     out.flush()?;
