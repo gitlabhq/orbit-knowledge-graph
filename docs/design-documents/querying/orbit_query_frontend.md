@@ -177,7 +177,7 @@ The compiler still includes graph identity and relationship metadata.
 Aggregates support `count`, `sum`, `avg`, `min`, and `max`.
 Non-aggregate return items become group keys. Property groups and metrics can have aliases.
 Traversal and neighbors projections also accept `AS` on property and node items, but the alias does not rename the output column.
-A traversal `ORDER BY` can name a property alias and resolves to the aliased property. Repeating an alias is rejected, and `ORDER BY` on a node alias is rejected with a hint to order by a property. Neighbors queries still reject `ORDER BY`, and path or dynamic-column results still reject `AS`.
+A traversal `ORDER BY` can name a property alias and resolves to the aliased property. Repeating an alias is rejected, and `ORDER BY` on a node alias is rejected with a hint to order by a property. Neighbors queries still reject `ORDER BY`, and the path variable, the neighbor endpoint, and other dynamic-column results still reject `AS`.
 An aggregated node projection selects the requested properties without requiring `.id`. The shared compiler still groups by node identity and returns its graph ID separately. Requesting `.id` also includes it as a property.
 The same node can appear under distinct aggregation aliases if every occurrence requests the same properties. Conflicting projections are rejected.
 
