@@ -98,16 +98,7 @@ stages:
 
 # Job Templates
 
-# Cargo downloads (crates.io index, crate archives, git dependencies) cached by
-# Cargo.lock. Most jobs only restore it; unit-test uploads it so that dozens of
-# jobs don't each push ~440 MB. A miss means a cold fetch, which is today's
-# behavior. Trust model: MR pipelines targeting main share the protected cache
-# with main and release pipelines, so poisoning reaches MR to main. That stays
-# inside the existing boundary because those MR pipelines already get protected
-# variables. scripts/ci-cargo-home-cache.sh still drops symlinks and any crate
-# archive that doesn't match the Cargo.lock checksum; git/db and registry/index
-# are not content-verified, and git/checkouts is never cached.
-# Keep the paths in sync with that script.
+# Cargo downloads cached by Cargo.lock; see scripts/ci-cargo-home-cache.sh.
 .cargo-home-cache:
   paths: &cargo-home-paths
     - .cargo-cache/git/db
@@ -124,6 +115,13 @@ stages:
     key: *cargo-home-key
     paths: *cargo-home-paths
     policy: pull-push
+
+# For jobs that resolve no dependencies. List it last in `extends` so its
+# `cache` replaces the template's.
+.no-cargo-home-cache:
+  variables:
+    SKIP_CARGO_HOME_CACHE: "1"
+  cache: []
 
 .job-template:
   tags:
@@ -356,8 +354,8 @@ rust-toolchain-sync-check:
     - .job-template
     - .sccache-template
     - .mr-and-main-rules
+    - .no-cargo-home-cache
   needs: []
-  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - mise run toolchain:check
 
@@ -523,7 +521,7 @@ fmt-check:
   extends:
     - .job-template
     - .mr-only-rules
-  cache: []  # resolves no dependencies, skip the cargo download cache
+    - .no-cargo-home-cache
   script:
     - cargo fmt --all -- --check
 
@@ -532,7 +530,7 @@ newline-check:
   extends:
     - .job-template
     - .mr-only-rules
-  cache: []  # resolves no dependencies, skip the cargo download cache
+    - .no-cargo-home-cache
   script:
     - mise run lint:newlines
 
@@ -568,8 +566,8 @@ cargo-audit:
   extends:
     - .job-template
     - .mr-and-main-rules
+    - .no-cargo-home-cache
   needs: []
-  cache: []  # resolves no dependencies, skip the cargo download cache
   script:
     - cargo audit
 

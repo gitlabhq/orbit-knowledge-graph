@@ -6,9 +6,18 @@
 # toolchain binaries, which must not be cached. On a cache miss the baked
 # contents of the image seed the cache directories, so a miss is harmless.
 #
+# Trust model: MR pipelines targeting main share the protected cache with main
+# and release pipelines, so poisoning reaches MR to main. That stays inside the
+# existing boundary because those MR pipelines already get protected variables.
+# Hence the symlink and checksum checks below; git/db and registry/index are
+# not content-verified.
+#
 # Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
 # (git/db, registry/cache, registry/index; git/checkouts is rebuilt by cargo).
 set -euo pipefail
+
+# Set by .no-cargo-home-cache for jobs that restore no cache.
+[ -z "${SKIP_CARGO_HOME_CACHE:-}" ] || exit 0
 
 cargo_home="${CARGO_HOME:-/opt/cargo}"
 project_dir="${CI_PROJECT_DIR:-$PWD}"
