@@ -75,7 +75,6 @@ pub struct DirtyGraph {
 
 pub struct Resolved {
     pub state: State,
-    pub names: Vec<crate::resolver::ResolvedName>,
 }
 
 pub struct Displayed {

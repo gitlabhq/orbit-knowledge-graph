@@ -53,19 +53,12 @@ pub struct ResolvedSourcePath {
 }
 
 pub struct ResolveResult {
-    pub names: Vec<ResolvedName>,
     pub cross_edges: Vec<Edge>,
     /// Files whose cross-file pass overran its budget; their edges are absent.
     pub killed: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
     /// How long each file's cross-file pass took.
     pub file_timings: Vec<(u32, Duration)>,
-}
-
-pub struct ResolvedName {
-    pub location: Loc,
-    pub source: u32,
-    pub segments: Vec<(C, u32)>,
 }
 
 #[derive(Default)]
@@ -502,52 +495,6 @@ impl Resolver {
             owners.sort_unstable();
         }
         ctx.implementations = implementations;
-        let mut names = Vec::new();
-        for (&(fi, node), implementations) in &ctx.implementations {
-            let owner = ctx.corpus.jump(fi, node);
-            let mut path: Vec<_> = std::iter::once(owner)
-                .chain(owner.ancestors())
-                .filter_map(|node| node.child_sym(C::DefName).map(|name| (C::Name, name)))
-                .collect();
-            path.reverse();
-            let mut member_counts = FxHashMap::<u32, usize>::default();
-            for &(fi, node) in implementations {
-                for name in ctx
-                    .corpus
-                    .jump(fi, node)
-                    .children()
-                    .filter(|node| node.is(C::Def))
-                    .filter_map(|node| node.child_sym(C::DefName))
-                {
-                    *member_counts.entry(name).or_default() += 1;
-                }
-            }
-            for &(fi, node) in implementations {
-                let implementation = ctx.corpus.jump(fi, node);
-                let name = implementation.child(C::DefName).unwrap();
-                names.push(ResolvedName {
-                    location: Loc::new(fi as usize, name.index()),
-                    source: owner.fi(),
-                    segments: path.clone(),
-                });
-                for method in implementation.children().filter(|node| node.is(C::Def)) {
-                    let Some(name) = method.child(C::DefName) else {
-                        continue;
-                    };
-                    if member_counts
-                        .get(&name.sym())
-                        .is_some_and(|count| *count > 1)
-                        && let Some(contract) = implementation.child_sym(C::SuperType)
-                    {
-                        names.push(ResolvedName {
-                            location: Loc::new(fi as usize, name.index()),
-                            source: owner.fi(),
-                            segments: vec![(C::SuperType, contract), (C::Name, name.sym())],
-                        });
-                    }
-                }
-            }
-        }
         let (outcomes, file_timings): (Vec<_>, Vec<(u32, Duration)>) = active_fis
             .par_iter()
             .map(|&fi| {
@@ -701,7 +648,6 @@ impl Resolver {
         }
 
         Ok(ResolveResult {
-            names,
             cross_edges,
             killed,
             resolved_source_paths,

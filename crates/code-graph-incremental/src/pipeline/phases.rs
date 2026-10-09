@@ -516,10 +516,7 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
-        Ok(Resolved {
-            state,
-            names: result.names,
-        })
+        Ok(Resolved { state })
     }
 }
 
@@ -536,42 +533,10 @@ impl Phase<Resolved> for Display {
     fn run(
         self,
         context: &mut Context,
-        Resolved { mut state, names }: Resolved,
+        Resolved { mut state }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
-        let mut temporary = Vec::new();
-        for name in names {
-            let source = state.trees[name.source as usize].root();
-            let source_symbol = source.sym();
-            let source_tags = state.trees[name.source as usize]
-                .tags
-                .get(&0)
-                .cloned()
-                .unwrap_or_default();
-            let tree = &mut state.trees[name.location.fi as usize];
-            let parent = tree.to_id(name.location.node);
-            for (kind, sym) in
-                std::iter::once((crate::canonical::Canonical::SourcePath, source_symbol))
-                    .chain(name.segments)
-            {
-                let node = tree.append(
-                    parent,
-                    crate::tree::Node {
-                        kind: kind.into(),
-                        sym,
-                        named: true,
-                        synth: true,
-                        ..Default::default()
-                    },
-                );
-                if kind == crate::canonical::Canonical::SourcePath {
-                    tree.tags
-                        .insert(crate::tree::Tree::to_raw(node), source_tags.clone());
-                }
-                temporary.push((name.location.fi, node));
-            }
-        }
         for (fi, tree) in state.trees.iter_mut().enumerate() {
             let ctx = EdgeCtx {
                 tree_index: fi as u32,
@@ -585,11 +550,6 @@ impl Phase<Resolved> for Display {
                 &ctx,
                 &[],
             );
-        }
-        for (fi, node) in temporary {
-            let tree = &mut state.trees[fi as usize];
-            tree.tags.remove(&crate::tree::Tree::to_raw(node));
-            node.remove_subtree(&mut tree.arena);
         }
         Ok(Displayed { state })
     }

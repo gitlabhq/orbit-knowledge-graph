@@ -41,7 +41,6 @@ pub enum Tf {
     Or(Box<Tf>, Box<Tf>),
     Default(Box<str>),
     TreePath(Box<str>),
-    DescendantJoin(u16, Box<str>),
     SiblingIndex,
     TreeNodeId,
     KindName,
@@ -70,7 +69,6 @@ impl Tf {
                 | Tf::Concat(_, _, _)
                 | Tf::Or(_, _)
                 | Tf::TreePath(_)
-                | Tf::DescendantJoin(_, _)
                 | Tf::SiblingIndex
                 | Tf::TreeNodeId
                 | Tf::KindName

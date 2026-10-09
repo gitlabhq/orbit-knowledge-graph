@@ -111,9 +111,6 @@ impl Tf {
             }
             "default" => Tf::Default(s(0)?),
             "tree_path" => Tf::TreePath(s(0)?),
-            "descendant_join" => {
-                Tf::DescendantJoin(need_ctx(name, &mut ctx)?.intern_kind(arg(0)?), s(1)?)
-            }
             "sibling_index" => Tf::SiblingIndex,
             "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
@@ -312,15 +309,6 @@ impl Tf {
                     .collect();
                 segments.reverse();
                 lang.syms.intern(&segments.join(sep))
-            }
-            Tf::DescendantJoin(kind, separator) => {
-                let names: Vec<_> = id
-                    .descendants(&t.arena)
-                    .skip(1)
-                    .filter(|node| t.node(*node).kind == *kind)
-                    .map(|node| t.text(node, lang))
-                    .collect();
-                lang.syms.intern(&names.join(separator))
             }
             Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
             Tf::TreeNodeId => lang.syms.intern(&Tree::to_raw(id).to_string()),
