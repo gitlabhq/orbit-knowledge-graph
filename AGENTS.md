@@ -23,10 +23,9 @@ Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title and keep it there through review. Editing the title starts no
 pipeline, and the merge ref keeps the old title until a push with a new SHA.
 
-When ready for CI, remove `[skip ci]` from the title. Then, on a clean tree, run
+When ready for CI, remove `[skip ci]` from the title, then run
 `git commit --amend --no-edit --allow-empty` and push with `--force-with-lease`.
-Don't use `glab ci run`: its pipeline is filtered out or skipped. After the push,
-check that a new MR head pipeline exists and is not skipped.
+Check that the new MR head pipeline is not skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
