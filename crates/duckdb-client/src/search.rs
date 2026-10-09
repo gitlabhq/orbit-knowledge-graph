@@ -6,8 +6,7 @@ use ontology::Ontology;
 use serde_json::{Map, Value};
 
 use crate::{DuckDbClient, i64_column, sql_lit, string_column};
-use orbit_search::RecallFilter;
-use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX, ext_regex, search_corpus_exts};
+use orbit_search::corpus::{EXCLUDE_LIKE, EXCLUDE_REGEX};
 
 pub const GLOB_CHARS: [char; 3] = ['*', '?', '['];
 
@@ -153,106 +152,11 @@ impl NodeHydrator {
     }
 }
 
-pub struct DuckDbSearch {
-    client: DuckDbClient,
-    pid: i64,
-    sha: String,
-    node: NodeHydrator,
-    paths: Vec<String>,
-}
-
-impl DuckDbSearch {
-    pub fn scoped(
-        client: DuckDbClient,
-        project_id: i64,
-        commit_sha: &str,
-        paths: &[String],
-    ) -> Result<Self> {
-        Ok(Self {
-            client,
-            pid: project_id,
-            sha: commit_sha.to_string(),
-            node: NodeHydrator::embedded("Definition")?,
-            paths: paths.to_vec(),
-        })
-    }
-
-    pub fn client(&self) -> &DuckDbClient {
-        &self.client
-    }
-
-    pub fn list_corpus(&self, filter: &RecallFilter) -> Result<Vec<NodeValue>> {
-        self.client.execute(
-            &corpus_table_sql(self.pid, &sql_lit(&self.sha), &self.paths, &self.node)?,
-            &[],
-        )?;
-        let batches = query(
-            &self.client,
-            &format!(
-                "SELECT id
-FROM search_corpus
-WHERE TRUE
-{}
-ORDER BY file_path, start_line, end_line DESC, fqn",
-                kind_scope("definition_type", &filter.kinds)
-            ),
-        )?;
-        let ids = i64_column(&batches, "id");
-        self.node.query(
-            &self.client,
-            &[
-                ("project_id", self.pid.into()),
-                ("commit_sha", self.sha.clone().into()),
-            ],
-            Some(&ids),
-        )
-    }
-}
-
 fn id_list(ids: &[i64]) -> String {
     ids.iter()
         .map(i64::to_string)
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn query(client: &DuckDbClient, sql: &str) -> Result<Vec<RecordBatch>> {
-    client.query_arrow(sql).with_context(|| {
-        let preview: String = sql.chars().take(120).collect();
-        let suffix = if sql.chars().count() > 120 { "…" } else { "" };
-        format!("query failed: {preview}{suffix}")
-    })
-}
-
-fn corpus_table_sql(pid: i64, sha: &str, paths: &[String], node: &NodeHydrator) -> Result<String> {
-    let id = node.column("id")?;
-    let fqn = node.column("fqn")?;
-    let kind = node.column("definition_type")?;
-    let file = node.column("file_path")?;
-    let start = node.column("start_line")?;
-    let end = node.column("end_line")?;
-    Ok(format!(
-        "CREATE OR REPLACE TEMP TABLE search_corpus AS
-SELECT d.{id} AS id, d.{name} AS name, d.{fqn} AS fqn, d.{kind} AS definition_type,
-       d.{file} AS file_path, d.{start} AS start_line, d.{end} AS end_line
-FROM {table} d
-WHERE d.{project_id} = {pid} AND d.{commit_sha} = {sha}
-  AND regexp_matches(d.{file}, {source_only})
-  AND NOT regexp_matches(d.{name}, '^[0-9]+$')
-  AND d.{fqn} NOT LIKE '%@%'
-{exclude}{paths}",
-        table = node.table,
-        project_id = node.column("project_id")?,
-        commit_sha = node.column("commit_sha")?,
-        name = node.column("name")?,
-        source_only = sql_lit(&ext_regex(&search_corpus_exts())),
-        exclude = if paths.is_empty() {
-            exclusions(&format!("d.{file}"))
-        } else {
-            String::new()
-        },
-        paths = path_scope(&format!("d.{file}"), paths, false),
-    ))
 }
 
 pub fn kind_scope(col: &str, kinds: &[String]) -> String {
@@ -304,10 +208,6 @@ pub fn path_scope(col: &str, paths: &[String], include_excluded: bool) -> String
         .collect::<Vec<_>>()
         .join(" OR ");
     format!("  AND ({alternatives})\n")
-}
-
-fn exclusions(col: &str) -> String {
-    format!("  AND NOT {}\n", excluded_path_predicate(col))
 }
 
 pub fn excluded_path_predicate(col: &str) -> String {

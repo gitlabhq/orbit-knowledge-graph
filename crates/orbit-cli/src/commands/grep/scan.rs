@@ -133,7 +133,7 @@ pub(super) fn scan(
     Ok(found.into_inner().unwrap())
 }
 
-/// `--path` scopes compiled once for the walk. Paths that exist are literal, even with glob
+/// Path scopes compiled once for the walk. Paths that exist are literal, even with glob
 /// characters such as `app/[slug]`; the rest are globs over files and directories.
 struct Scope {
     globs: Option<globset::GlobSet>,

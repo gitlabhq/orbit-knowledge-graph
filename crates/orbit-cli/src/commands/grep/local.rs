@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use duckdb_client::search::DuckDbSearch;
+use duckdb_client::DuckDbClient;
 
 use crate::workspace;
 
 pub(super) struct LocalBackend {
-    search: DuckDbSearch,
+    client: DuckDbClient,
     git: workspace::GitInfo,
     paths: Vec<String>,
 }
@@ -19,11 +19,7 @@ impl LocalBackend {
     ) -> Result<Self> {
         let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
         let paths = workspace::repo_relative_paths(&git.repo_path, paths);
-        Ok(Self {
-            search: DuckDbSearch::scoped(client, git.project_id, &git.commit_sha, &paths)?,
-            paths,
-            git,
-        })
+        Ok(Self { client, paths, git })
     }
 
     pub(super) fn paths(&self) -> &[String] {
@@ -38,7 +34,7 @@ impl LocalBackend {
         self.git.short_sha()
     }
 
-    pub(super) fn search(&self) -> &DuckDbSearch {
-        &self.search
+    pub(super) fn client(&self) -> &DuckDbClient {
+        &self.client
     }
 }
