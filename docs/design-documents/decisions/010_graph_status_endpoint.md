@@ -25,8 +25,9 @@ Two RPCs expose the services directly, for the Rails status pages.
   code domain carries the project coverage under the path.
 - `GetItemCounts` returns entity counts per domain that the caller can see. The counts
   skip the ClickHouse query cache, because a cached count from a backfill stays stale
-  after the backfill ends. `GetGraphStatus` counts the same way. Rails limits the REST
-  graph status calls of each user to 10 a minute per group or project.
+  after the backfill ends. `GetGraphStatus` counts the same way. Rails rate-limits both
+  callers: the GraphQL `itemCounts` field per user, and the REST graph status endpoint per
+  user and group or project.
 - Rails owns the display text of each domain. The responses send the domain name only.
 - A plan or project that uses all its attempts, or that stops without a retry, is a gap.
   A path or domain is error when all its parts are settled and at least one is a gap.
