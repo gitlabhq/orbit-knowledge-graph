@@ -12,6 +12,13 @@
 # archives that don't match Cargo.lock are deleted, and so is every symlink.
 # git/db and registry/index are not verified.
 #
+# Fallback: a Cargo.lock change misses the lockfile key and restores the rolling
+# cargo-home-main-v1 key, written only by cargo-home-cache-refresh on main. The
+# same -protected/-non_protected split applies.
+#
+# docker-build-* and release-build-* skip this cache: cargo runs inside
+# `docker buildx build`, whose context excludes .cargo-cache.
+#
 # Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
 # (git/checkouts is rebuilt by cargo).
 set -euo pipefail

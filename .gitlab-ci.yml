@@ -109,13 +109,21 @@ stages:
       prefix: cargo-home
       files:
         - Cargo.lock
+    fallback_keys: &cargo-home-fallback-keys
+      # Bump -v1 to reset; git/db and registry/index only ever grow.
+      - &cargo-home-rolling-key cargo-home-main-v1
     paths: *cargo-home-paths
     policy: pull
   push:
     key: *cargo-home-key
+    fallback_keys: *cargo-home-fallback-keys
     paths: *cargo-home-paths
     # So only merged code writes the cache; set in unit-test.
     policy: $CARGO_HOME_CACHE_POLICY
+  refresh:
+    key: *cargo-home-rolling-key
+    paths: *cargo-home-paths
+    policy: pull-push
 
 # For jobs that resolve no dependencies, and for the tag-only release CLI
 # builds, which fetch fresh because git/db and the index are not verified.
@@ -743,6 +751,24 @@ docs_hugo_build:
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
 
 # Test Stage
+
+# Only writer of the rolling fallback key.
+cargo-home-cache-refresh:
+  stage: test
+  extends: .job-template
+  allow_failure: true
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - Cargo.lock
+  cache:
+    - !reference [.cargo-home-cache, refresh]
+  needs: []
+  script:
+    - cargo fetch --locked --target x86_64-unknown-linux-gnu
 
 unit-test:
   stage: test
