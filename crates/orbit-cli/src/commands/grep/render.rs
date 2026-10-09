@@ -93,6 +93,20 @@ fn definition_note(def: &Def, connections: &Connections) -> String {
         .to_string()
 }
 
+fn defined(hits: &[&Hit]) -> String {
+    let mut labels: Vec<String> = Vec::new();
+    for def in hits.iter().filter_map(|h| h.def.as_ref()) {
+        let label = format!("{} {}", def.kind, def.name);
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    match labels.is_empty() {
+        true => String::new(),
+        false => format!(" │ {}", labels.join(", ")),
+    }
+}
+
 pub(super) fn render(
     header: &str,
     hits: &[Hit],
@@ -116,6 +130,24 @@ pub(super) fn render(
         Output::Count => {
             for (file, list) in &rows {
                 out.push_str(&format!("{file}:{}\n", matched(list)));
+            }
+            return Ok(out);
+        }
+        Output::FileRows => {
+            for (file, list) in &rows {
+                out.push_str(&format!("{file}:{}{}\n", matched(list), defined(list)));
+            }
+            return Ok(out);
+        }
+        Output::Directories => {
+            let mut dirs: std::collections::BTreeMap<&str, (usize, usize)> = Default::default();
+            for (file, list) in &rows {
+                let dir = file.rsplit_once('/').map_or(".", |(dir, _)| dir);
+                let entry = dirs.entry(dir).or_default();
+                *entry = (entry.0 + 1, entry.1 + matched(list));
+            }
+            for (dir, (files, lines)) in dirs {
+                out.push_str(&format!("{dir}/ {files} files, {lines} lines\n"));
             }
             return Ok(out);
         }

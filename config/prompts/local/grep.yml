@@ -1,5 +1,5 @@
 name: grep
-version: 2.1.1
+version: 2.1.2
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -8,4 +8,5 @@ description: >-
   `Kind name:start-end ←callers →callees`. Files that define a term come first,
   then code, tests, and config or docs. A definition the query names prints
   first with its source. Pass paths as with rg; rg and grep flags such as
-  -A, -l, -w, and -g work.
+  -A, -l, -w, and -g work. `--kind` takes definition kinds such as
+  `Class,Method`, or `File` and `Directory` to list where matches are.

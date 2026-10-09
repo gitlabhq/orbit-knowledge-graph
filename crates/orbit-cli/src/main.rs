@@ -163,9 +163,10 @@ struct GrepArgs {
     db: Option<PathBuf>,
 }
 
-const KIND_ARG_HELP: &str = "Only definitions of these types, as printed in grep's `[Kind]` \
-                             column. One kind or a comma-separated list such as `Class,Method` \
-                             (quoted `\"Class|Method\"` also works); case-insensitive.";
+const KIND_ARG_HELP: &str = "Ontology node kinds, comma-separated. Definition kinds such as \
+                             `Class,Method` narrow matches; lowercase `function` or `class` \
+                             cover the whole family. `Definition` keeps matches inside any \
+                             definition. `File` and `Directory` list where matches are.";
 
 #[derive(Debug, Clone, PartialEq)]
 struct Kinds(Vec<String>);
