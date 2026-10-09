@@ -329,9 +329,6 @@ fn parse_kinds(value: &str) -> Result<Kinds, String> {
         .filter(|kind| !kind.is_empty())
         .map(str::to_string)
         .collect();
-    if kinds.is_empty() {
-        return Err("expected one kind or a comma-separated list such as `Class,Method`".into());
-    }
     Ok(Kinds(kinds))
 }
 
