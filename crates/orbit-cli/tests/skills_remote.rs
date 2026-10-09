@@ -85,17 +85,48 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
     (base_url, handle)
 }
 
-fn run_orbit(base_url: Option<&str>, cache: &tempfile::TempDir, args: &[&str]) -> Output {
+/// A directory holding a `glab` stub that always fails, so no test reaches the
+/// developer's real glab login through the credential helper.
+#[cfg(unix)]
+fn failing_glab_dir() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        write_glab_stub(dir.path(), "exit 1");
+        dir
+    })
+    .path()
+}
+
+#[cfg(unix)]
+fn write_glab_stub(dir: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let glab = dir.join("glab");
+    std::fs::write(&glab, format!("#!/bin/sh\n{body}\n")).unwrap();
+    let mut permissions = std::fs::metadata(&glab).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&glab, permissions).unwrap();
+}
+
+fn hermetic_orbit(cache: &tempfile::TempDir, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
     command.args(args).env("XDG_CACHE_HOME", cache.path());
+    #[cfg(unix)]
+    command.env("PATH", failing_glab_dir());
     for key in [
         "ORBIT_API_BASE_URL",
         "ORBIT_AUTH_HEADER_NAME",
         "ORBIT_AUTH_HEADER_VALUE",
         "GITLAB_TOKEN",
+        "GITLAB_URL",
     ] {
         command.env_remove(key);
     }
+    command
+}
+
+fn run_orbit(base_url: Option<&str>, cache: &tempfile::TempDir, args: &[&str]) -> Output {
+    let mut command = hermetic_orbit(cache, args);
     if let Some(base_url) = base_url {
         command
             .env("ORBIT_API_BASE_URL", base_url)
@@ -318,63 +349,68 @@ fn remote_listing_uses_collection_and_authentication() {
     );
 }
 
+const NO_CREDENTIAL_WARNING: &str = "warning: no GitLab credential found, using the bundled skill";
+
 #[test]
-fn no_credentials_is_a_silent_local_only_mode() {
+fn no_credentials_warns_and_serves_the_bundled_skill() {
     let cache = tempfile::tempdir().unwrap();
     let output = run_orbit(None, &cache, &["skills", "get", "orbit"]);
     assert!(output.status.success(), "{}", stderr(&output));
-    assert!(output.stderr.is_empty());
+    assert_eq!(stderr(&output).trim(), NO_CREDENTIAL_WARNING);
     assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
 
-    let partial = Command::new(env!("CARGO_BIN_EXE_orbit"))
-        .args(["skills"])
-        .env("XDG_CACHE_HOME", cache.path())
+    let partial = hermetic_orbit(&cache, &["skills"])
         .env("ORBIT_API_BASE_URL", "http://127.0.0.1:1")
-        .env_remove("ORBIT_AUTH_HEADER_NAME")
-        .env_remove("ORBIT_AUTH_HEADER_VALUE")
         .output()
         .unwrap();
     assert!(partial.status.success(), "{}", stderr(&partial));
-    assert!(partial.stderr.is_empty());
+    assert_eq!(stderr(&partial).trim(), NO_CREDENTIAL_WARNING);
+}
+
+#[test]
+fn gitlab_token_and_url_fetch_the_remote_skill_without_orbit_variables() {
+    let cache = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote via token")]);
+    let output = hermetic_orbit(&cache, &["skills", "get", "orbit"])
+        .env("GITLAB_TOKEN", "glpat-env")
+        .env("GITLAB_URL", &url)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!stderr(&output).contains("no GitLab credential"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Remote via token"));
+    let requests = server.join().unwrap();
+    assert_eq!(requests[0].line, "GET /api/v4/orbit/skills/orbit HTTP/1.1");
+    assert_eq!(
+        requests[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer glpat-env")
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn silent_local_mode_never_spawns_the_glab_credential_helper() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn glab_credential_helper_supplies_the_skill_credential() {
     let cache = tempfile::tempdir().unwrap();
     let fake_bin = tempfile::tempdir().unwrap();
-    let marker = fake_bin.path().join("glab-called");
-    let glab = fake_bin.path().join("glab");
-    std::fs::write(
-        &glab,
-        format!(
-            "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
-            marker.display()
+    let (url, server) = mock_server(vec![tree_reply("1.0.0", "Remote via helper")]);
+    write_glab_stub(
+        fake_bin.path(),
+        &format!(
+            "printf '%s' '{{\"type\":\"success\",\"instance_url\":\"{url}\",\"token\":{{\"type\":\"pat\",\"token\":\"glpat-helper\"}}}}'"
         ),
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&glab).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&glab, permissions).unwrap();
-
-    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
-        .args(["skills", "get", "orbit"])
+    );
+    let output = hermetic_orbit(&cache, &["skills", "get", "orbit"])
         .env("PATH", fake_bin.path())
-        .env("XDG_CACHE_HOME", cache.path())
-        .env("ORBIT_TELEMETRY_ENABLED", "true")
-        .env("ORBIT_TELEMETRY_COLLECTOR_URL", "http://127.0.0.1:1")
-        .env_remove("ORBIT_API_BASE_URL")
-        .env_remove("ORBIT_AUTH_HEADER_NAME")
-        .env_remove("ORBIT_AUTH_HEADER_VALUE")
-        .env_remove("GITLAB_TOKEN")
         .output()
         .unwrap();
-
     assert!(output.status.success(), "{}", stderr(&output));
-    assert!(output.stderr.is_empty());
-    assert!(!marker.exists(), "skills invoked glab in silent-local mode");
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Remote via helper"));
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer glpat-helper")
+    );
 }
 
 #[test]
