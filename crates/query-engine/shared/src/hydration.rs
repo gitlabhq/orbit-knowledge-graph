@@ -117,7 +117,7 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// `{alias}_props` arrives as a JSON object of strings, so Bool and DateTime fields are re-typed from the ontology.
+/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
@@ -193,6 +193,8 @@ pub fn parse_hydration_batches(
 fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {
     match data_type {
         Some(DataType::Bool) => cv.coerce::<bool>().map_or(cv, ColumnValue::Bool),
+        Some(DataType::Int) => cv.coerce::<i64>().map_or(cv, ColumnValue::Int64),
+        Some(DataType::Float) => cv.coerce::<f64>().map_or(cv, ColumnValue::Float64),
         Some(DataType::DateTime) => cv
             .as_string()
             .and_then(|s| ColumnValue::parse_datetime(s))

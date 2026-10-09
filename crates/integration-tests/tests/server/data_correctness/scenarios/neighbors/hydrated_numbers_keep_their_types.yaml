@@ -1,0 +1,24 @@
+description: Hydrated integer properties stay integers, matching the inline path
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}],
+      "neighbors": {"direction": "incoming", "rel_types": ["IN_PROJECT"]}
+    }
+  gql: |
+    MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(n) RETURN p, n
+
+expect:
+  node_count: 5
+  nodes:
+    Project:
+      ids: [1000]
+    MergeRequest:
+      ids: [2000, 2001, 2004, 2005]
+      rows:
+        - { id: 2000, iid: 1 }
+        - { id: 2001, iid: 2 }
+  edge_exists:
+    IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
