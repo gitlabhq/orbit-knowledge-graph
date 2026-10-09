@@ -90,6 +90,10 @@ LIMIT 10
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
   become group keys. Alias a metric to sort by it:
   `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
+- Traversals and neighbors accept `AS` on properties but ignore it (no
+  rename). A traversal can `ORDER BY` the alias:
+  `RETURN mr.iid AS number ORDER BY number`. Aliases must be unique, and you
+  cannot order by a node alias; order by one of its properties.
 
 ## Pagination
 
