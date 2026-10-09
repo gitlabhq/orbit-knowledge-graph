@@ -4,6 +4,9 @@
 # Module.fun calls, implicit-module calls, if/case/cond/for.
 
 config:
+  link:
+    inline_modules: true
+    imports_shadow_locals: false
   resolve:
     lookup_from:
       - __source_root
@@ -15,7 +18,7 @@ stages:
         replace: '(__import (__source @$L) (__source_path @$L|replace(".", "/")) $$$M->__name)'
         tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias (keywords (pair value: $T:alias))))'
-        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
+        replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|regex_replace("(^|\.)[^.]+$", "")|replace(".", "/")) (__name @$A|split_last(".") (__alias @$T)))'
         tag: { import_type: Alias }
       - match: '(call target: (identifier "alias") (arguments $A:alias))'
         replace: '(__import (__source @$A|regex_replace("(^|\.)[^.]+$", "")) (__source_path @$A|replace(".", "/")) (__name @$A|split_last(".")))'
@@ -81,6 +84,12 @@ stages:
         replace: '(__call (__callee (__member @$F (__object @$M))) $A)'
       - match: '(call target: $F:identifier $A:arguments $$$B)'
         replace: '(__call (__callee @$F) $A $$$B)'
+
+  - name: lexical-scopes
+    rules:
+      - match: '(do_block $$$B)'
+        replace: '(__scope $$$B)'
+        tag: { hoisted: "true" }
 
   - name: tag-defs
     rules:

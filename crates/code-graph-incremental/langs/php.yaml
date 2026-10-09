@@ -47,6 +47,8 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(global_declaration $$$N:variable_name)'
+        replace: '(global_names $$$N=>global_name)'
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(namespace_definition name: $N:namespace_name body: (compound_statement $$$B))'
@@ -245,6 +247,14 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(global_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "module"))'
+      - match: '(__binding "/^\$/")'
+        append: ['(__declaration "function")']
+      - match: '(__object "/^\$/")'
+        append: ['(__declaration "function")']
+      - match: '(__callee "/^\$/")'
+        append: ['(__declaration "function")']
       - match: '$R:(__ssa_return_type "self")'
         replace: '(__ssa_return_type @$R|ancestor_sym("__class"))'
       - match: '(__ssa_return $V:variable_name)'
@@ -252,10 +262,12 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__source_file)'
+        tag: { scoped: "module" }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

@@ -37,8 +37,8 @@ pub struct GetGraphSchemaArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct IndexArgs {
-    /// Filesystem path to a repository, or a directory containing one or more
-    /// repositories. Each repo found is indexed into the workspace DuckDB.
+    /// Filesystem path to a repository, a folder inside one, or a directory
+    /// containing one or more repositories. Each repo found is indexed into the workspace DuckDB.
     pub path: PathBuf,
     /// Worker threads. 0 (default) auto-detects from CPU cores.
     #[serde(default)]

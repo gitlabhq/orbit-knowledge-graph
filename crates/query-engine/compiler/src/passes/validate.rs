@@ -801,13 +801,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                         filter,
                     )?;
                 }
-                self.check_one_filter(
-                    entity,
-                    prop,
-                    filter,
-                    data_type,
-                    self.model.get().property_allows_like(entity, prop),
-                )?;
+                self.check_one_filter(entity, prop, filter, data_type)?;
             }
         }
 
@@ -836,13 +830,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                         filter,
                     )?;
                 }
-                self.check_one_filter(
-                    &format!("relationship[{i}]"),
-                    prop,
-                    filter,
-                    data_type,
-                    model.property_allows_like(&format!("relationship[{i}]"), prop),
-                )?;
+                self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
             }
         }
 
@@ -898,7 +886,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         prop: &str,
         filter: &InputFilter,
         data_type: DataType,
-        allows_like: bool,
     ) -> Result<()> {
         let op = filter.op.unwrap_or(FilterOp::Eq);
 
@@ -916,7 +903,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
         );
 
-        if is_like_op && !allows_like {
+        if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  string operators (contains/starts_with/ends_with) are not allowed on this field"
@@ -1042,9 +1029,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
                 return Err(QueryError::Validation(
-                    "traversal and aggregation queries require node_ids or filters on \
-                     at least one node to avoid full edge table scans"
-                        .into(),
+                    "add a filter or node ID on at least one node".into(),
                 ));
             }
             _ => {}
@@ -2703,7 +2688,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2735,7 +2720,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
         assert_ok(
             r#"{
@@ -2756,7 +2741,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2782,7 +2767,7 @@ mod tests {
                 "group_by": ["p"],
                 "aggregations": [{"count": "u", "as": "c"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2796,7 +2781,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
         assert_ok(
             r#"{

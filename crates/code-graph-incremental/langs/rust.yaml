@@ -24,10 +24,14 @@ config:
 stages:
   - name: normalize
     rules:
+      - match: '(foreign_mod_item body: (declaration_list $$$ITEMS:function_signature_item))'
+        replace: '(foreign_declarations $$$ITEMS->foreign_function)'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
+      - match: '(_)'
+        replace: '(__binding "_")'
       - match: '(macro_invocation macro: (identifier "/^(panic|unreachable|todo|unimplemented)$/") $$$V)'
         replace: '(__ssa_branch $$$V)'
 
@@ -41,7 +45,7 @@ stages:
 
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
-        replace: '(__ivar @$F)'
+        replace: '(__ivar @$F (__object "self"))'
 
       # Visibility modifier → __visibility (sym carries the text)
       - match: '(visibility_modifier $$$V)'
@@ -51,6 +55,12 @@ stages:
 
   - name: retag-refs
     rules:
+      - match: '(field_initializer field: $N value: $V)'
+        replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$V $V)))'
+      - match: '(shorthand_field_initializer $N)'
+        replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
+      - match: '(field_initializer_list $$$F:__field)'
+        replace: '(__obj $$$F)'
       - match: '(field_expression value: $O:__ivar field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
@@ -58,6 +68,10 @@ stages:
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (parenthesized_expression $F:__member) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
+      - match: '(call_expression function: (parenthesized_expression $F:__ivar) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
@@ -80,10 +94,7 @@ stages:
         replace: '(__call (__callee @$N) $B)'
       # `let f = Service::new;` aliases the associated function
       - match: '(let_declaration pattern: $N value: (scoped_identifier path: $P name: $M:(identifier "/^[a-z]/")))'
-        replace: '(__binding @$N (__rhs (__member @$M (__object @$P))))'
-      # `let s = Service;` constructs a unit struct: type names are CamelCase
-      - match: '(let_declaration pattern: $N value: $V:(identifier "/^[A-Z][a-z]/"))'
-        replace: '(__binding @$N (__rhs (__call (__callee @$V))))'
+        replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P))))'
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
@@ -91,13 +102,14 @@ stages:
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
         replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
-      # <Service as Runner>::construct() is Service::construct()
-      - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T)) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
+      - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
       - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
+      - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
+        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch @$P (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
@@ -188,22 +200,51 @@ stages:
       - match: '(use_group $$$I:__import)'
         replace: '$$$I'
 
+  - name: patterns
+    rules:
+      - match: '(tuple_struct_pattern type: $T !(remaining_field_pattern) $$$P:_*_named)'
+        replace: '(unpack_pattern (__object @$ROOT|tree_node_id|prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
+      - match: '(tuple_pattern !(remaining_field_pattern) $$$P:_*_named)'
+        replace: '(unpack_pattern (__object @$ROOT|tree_node_id|prepend("$binding:")) (unpack_positions $$$P:_*_named->unpack_position))'
+      - match: '(field_pattern name: $N pattern: $P:unpack_pattern)'
+        replace: '(unpack_field (__name @$N) $P)'
+      - match: '(field_pattern name: $N pattern: $P)'
+        replace: '(unpack_field @$P (__name @$N))'
+      - match: '(field_pattern name: $N)'
+        replace: '(unpack_field @$N (__name @$N))'
+      - match: '(struct_pattern $$$P:unpack_field)'
+        replace: '(unpack_pattern (__object @$ROOT|tree_node_id|prepend("$binding:")) $$$P)'
+
   - name: classify
     rules:
+      - match: '(let_declaration pattern: $P:unpack_pattern value: $V)'
+        replace: '(unpack (__binding @$P|child_sym("__object") (__rhs @$V $V)) $P)'
+      - match: '(tuple_expression $$$V:_*_named)'
+        replace: '(__obj $$$V:_*_named->tuple_value)'
       # Preserve subtree when RHS contains canonical structure
       - match: '(let_declaration pattern: $N value: $V:__ssa_branch)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:block)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__call)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
+      - match: '(let_declaration pattern: $N value: $V:__member)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
+      - match: '(let_declaration pattern: $N value: $V:__obj)'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(let_declaration pattern: $N)'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N (__declaration))'
       # Reassignment
+      - match: '(assignment_expression left: $N right: $R:__obj)'
+        replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__ivar right: $R)'
+        replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
+      - match: '(assignment_expression left: $N:__member right: $R)'
+        replace: '(__binding $N (__rhs @$R) $R)'
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(const_item name: $N)'
@@ -247,10 +288,10 @@ stages:
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type? @$R) $$$P)'
         tag: { flavor: self_method }
       - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type? @$R) $$$P)'
 
       # Functions — self variant first, then generic
       - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
@@ -266,6 +307,8 @@ stages:
         replace: '(ordered_field_declaration_list $$$T->tuple_field)'
 
       # Containers (after functions)
+      - match: '(struct_item name: $N !(field_declaration_list) !(ordered_field_declaration_list))'
+        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N)))))'
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_item name: $N body: $B)'
@@ -315,11 +358,32 @@ stages:
 
   - name: tuple-fields
     rules:
+      - match: '(unpack_position $O:__object $$$P)'
+        replace: '(unpack_field (__name @$ROOT|sibling_index) (unpack_pattern $O $$$P))'
+      - match: '(unpack_position $N:identifier)'
+        replace: '(unpack_field @$N (__name @$ROOT|sibling_index))'
+      - match: '(unpack_position)'
+        replace: '(unpack_field @$ROOT (__name @$ROOT|sibling_index))'
       - match: '(tuple_field)'
         replace: '(__def (__defname @$ROOT|sibling_index) (__field_def))'
 
   - name: ssa-cleanup
     rules:
+      - match: '(unpack_field $N:__name $P:unpack_pattern)'
+        replace: '(unpack (__binding @$P|child_sym("__object") (__rhs (__member @$N (__object @$ROOT|ancestor_sym("__object"))))) $P)'
+      - match: '(unpack_field $N:__name)'
+        replace: '(__binding @$ROOT (__declaration) (__rhs (__member @$N (__object @$ROOT|ancestor_sym("__object")))))'
+      - match: '(arguments $$$V:_*_named)'
+        replace: '(__args $$$V:_*_named->tuple_value)'
+
+  - name: positional-fields
+    rules:
+      - match: '(tuple_value $F:__field $$$REST:__field)'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__obj $F $$$REST))))'
+      - match: '(tuple_value $C:__callee $$$REST)'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__call $C $$$REST))))'
+      - match: '(tuple_value)'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
       - match: '(__ssa_arm $V:identifier)'
@@ -330,6 +394,12 @@ stages:
         replace: '(__ssa_arm (__rhs @$V))'
       - match: '(__ssa_arm (else_clause $V:block))'
         replace: '(__ssa_arm $V)'
+
+  - name: lexical-scopes
+    rules:
+      - match: '(block $$$V)'
+        replace: '(__scope $$$V)'
+        tag: { hoisted: "true" }
 
   - name: tag-defs
     rules:

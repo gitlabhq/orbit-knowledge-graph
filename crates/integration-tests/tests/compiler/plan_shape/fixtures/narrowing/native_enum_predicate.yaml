@@ -1,0 +1,19 @@
+name: Native negation normalizes enum values without losing its group
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"columns":["id"]}]}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1}) RETURN mr.id
+predicates:
+  - not:
+      and:
+        - {node: mr, property: state, op: in, value: [1, 3]}
+        - {node: mr, property: draft, op: eq, value: true}
+logical:
+  expect:
+    - (Filter NOT ((mr.state IN ['opened', 'merged']) AND (mr.draft = true)) (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter NOT ((mr.state IN ['opened', 'merged']) AND (mr.draft = true)), ... (_))

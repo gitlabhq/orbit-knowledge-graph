@@ -92,6 +92,20 @@ impl<T> BooleanExpression<T> {
         })
     }
 
+    pub fn leaves_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        let mut pending = vec![self];
+        std::iter::from_fn(move || {
+            while let Some(expression) = pending.pop() {
+                match expression {
+                    Self::Leaf(leaf) => return Some(leaf),
+                    Self::And(children) => pending.extend(children.iter_mut().rev()),
+                    Self::Not(child) => pending.push(child),
+                }
+            }
+            None
+        })
+    }
+
     pub fn depth(&self) -> usize {
         match self {
             Self::Leaf(_) => 0,

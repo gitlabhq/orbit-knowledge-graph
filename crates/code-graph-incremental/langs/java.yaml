@@ -74,7 +74,7 @@ stages:
       - match: '(permits (type_list $$$T:type_identifier))'
         replace: '(java_permits $$$T->__decorator)'
       - match: '(annotation name: $N:identifier arguments: $A)'
-        replace: '(__decorator @$N $A)'
+        replace: '(__decorator @$N (__args $A))'
 
       # x instanceof T [name] → type reference plus a typed pattern binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
@@ -133,7 +133,7 @@ stages:
       - match: '(marker_annotation name: $N:__member)'
         replace: '(__decorator $N)'
       - match: '(annotation name: $N:__member arguments: $A)'
-        replace: '(__decorator $N $A)'
+        replace: '(__decorator $N (__args $A))'
 
 
   - name: retag-expressions
@@ -171,30 +171,30 @@ stages:
   - name: classify
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N (__declaration))'
 
       # Assignments
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
@@ -286,6 +286,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

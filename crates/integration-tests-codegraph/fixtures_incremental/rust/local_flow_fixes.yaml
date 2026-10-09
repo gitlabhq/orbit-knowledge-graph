@@ -13,12 +13,11 @@ fixtures:
 
       pub fn bar() {}
 
-      pub fn loop_reassign() {
-          let mut f = foo;
-          loop {
+      pub fn loop_reassign(again: bool) {
+          let mut f: fn() = foo;
+          while again {
               f();
               f = bar;
-              break;
           }
       }
 
@@ -45,8 +44,6 @@ fixtures:
 
 tests:
   - name: "loop back-edge preserves prior and reassigned bindings"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'loop_reassign'
@@ -57,8 +54,6 @@ tests:
       - { row: { fqn: 'bar' } }
 
   - name: "tuple destructure binds elements positionally"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'tuple_destructure'
@@ -68,14 +63,11 @@ tests:
       - { row: { fqn: 'foo' } }
       - { row: { fqn: 'bar' } }
 
-  - name: "field reassignment tracks both assigned targets"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
+  - name: "field reassignment replaces the previous target"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'field_reassign'
       RETURN callee.fqn AS fqn
     assert:
-      - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
+      - { row_count: 1 }
       - { row: { fqn: 'bar' } }

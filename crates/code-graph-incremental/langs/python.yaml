@@ -2,6 +2,16 @@
 # Stamps all synthetics needed by SSA and resolver.
 
 config:
+  link:
+    builtins: [
+      __import__, abs, aiter, all, anext, any, ascii, bin, bool, breakpoint, bytearray,
+      bytes, callable, chr, classmethod, compile, complex, delattr, dict, dir, divmod,
+      enumerate, eval, exec, filter, float, format, frozenset, getattr, globals,
+      hasattr, hash, help, hex, id, input, int, isinstance, issubclass, iter, len,
+      list, locals, map, max, memoryview, min, next, object, oct, open, ord, pow,
+      print, property, range, repr, reversed, round, set, setattr, slice, sorted,
+      staticmethod, str, sum, super, tuple, type, vars, zip
+    ]
   resolve:
     external: [
       abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
@@ -94,6 +104,10 @@ stages:
 
   - name: classify
     rules:
+      - match: '(global_statement $$$N:identifier)'
+        replace: '(global_names $$$N=>global_name)'
+      - match: '(nonlocal_statement $$$N:identifier)'
+        replace: '(nonlocal_names $$$N=>nonlocal_name)'
       # Defs
       - match: '(assignment left: $N right: $R:lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
@@ -114,11 +128,11 @@ stages:
       - match: '(assignment left: $N:__ivar right: $R)'
         replace: '(__binding $N (__rhs @$R))'
       - match: '(assignment left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs $R))'
       - match: '(assignment left: $N right: $R:__ssa_loop)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs @$R))'
       - match: '(assignment left: $N:__ivar)'
         replace: '(__binding $N)'
       - match: '(assignment left: $N)'
@@ -173,15 +187,21 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(global_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "module"))'
+      - match: '(nonlocal_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "function"))'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 
   - name: tag-defs
     rules:
+      - match: '(__source_file)'
+        tag: { scoped: "module" }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

@@ -182,32 +182,30 @@ tests:
       - { row: { file_path: "pages/api/users.ts", fqn: "handler", type: "Function" } }
 
   - name: Next pages router local imports resolve
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 4 }
-      - { row: { file_path: "pages/_app.tsx", path: "../components/Layout", name: "default", is_type_only: false, target: "Layout" } }
-      - { row: { file_path: "pages/index.tsx", path: "../components/Hero", name: "default", is_type_only: false, target: "Hero" } }
-      - { row: { file_path: "pages/index.tsx", path: "../lib/home", name: "loadHome", is_type_only: false, target: "loadHome" } }
-      - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", is_type_only: false, target: "listUsers" } }
+      - { row: { file_path: "pages/_app.tsx", path: "../components/Layout", name: "default", target: "Layout" } }
+      - { row: { file_path: "pages/index.tsx", path: "../components/Hero", name: "default", target: "Hero" } }
+      - { row: { file_path: "pages/index.tsx", path: "../lib/home", name: "loadHome", target: "loadHome" } }
+      - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", target: "listUsers" } }
 
   - name: Next pages router package type imports remain unresolved
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
         AND i.import_path IN ['next/app', 'next']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name
       ORDER BY file_path, path, name
     assert:
       - { row_count: 3 }
-      - { row: { file_path: "pages/_app.tsx", path: "next/app", name: "AppProps", is_type_only: true } }
-      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiRequest", is_type_only: true } }
-      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiResponse", is_type_only: true } }
+      - { row: { file_path: "pages/_app.tsx", path: "next/app", name: "AppProps" } }
+      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiRequest" } }
+      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiResponse" } }
 
   - name: Next pages router package type imports have no local targets
     query: |

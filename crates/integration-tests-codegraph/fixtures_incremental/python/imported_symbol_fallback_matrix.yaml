@@ -19,6 +19,10 @@ fixtures:
           urllib.parse.urlparse("https://example.com")
           ET.fromstring("<root/>")
 
+      def repeated_package_calls():
+          urllib.parse.urlparse("first")
+          urllib.parse.urlparse("second")
+
       def from_import_call():
           Client()
           helper_run()
@@ -35,6 +39,13 @@ fixtures:
       def builtin_len_call():
           len([1, 2])
 
+      def local_print(value):
+          pass
+
+      def shadowed_builtin_call():
+          print = local_print
+          print("debug")
+
   - path: local_models.py
     content: |
       class LocalClient:
@@ -43,10 +54,6 @@ fixtures:
 
 tests:
   - name: "package, aliased, and dotted package imports target imported symbols"
-    # Known gap: a dotted package import (`import a.b as c`) produces an extra
-    # CALLS row and the alias is not carried. Tracked with the rule-file
-    # follow-ups on !2629.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'package_import_call'
@@ -54,10 +61,19 @@ tests:
       ORDER BY path
     assert:
       - { row_count: 4 }
-      - { row: { caller: "main.package_import_call", path: "httpx", name: null, alias: "external_httpx" } }
-      - { row: { caller: "main.package_import_call", path: "requests", name: null, alias: null } }
-      - { row: { caller: "main.package_import_call", path: "urllib.parse", name: null, alias: null } }
-      - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: null, alias: "ET" } }
+      - { row: { caller: "main.package_import_call", path: "httpx", name: "httpx", alias: "external_httpx" } }
+      - { row: { caller: "main.package_import_call", path: "requests", name: "requests", alias: null } }
+      - { row: { caller: "main.package_import_call", path: "urllib.parse", name: "urllib.parse", alias: null } }
+      - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: "xml.etree.ElementTree", alias: "ET" } }
+
+  - name: "separate dotted package calls retain separate edges"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'repeated_package_calls'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "urllib.parse" } }
 
   - name: "from imports target imported symbols"
     query: |
@@ -106,12 +122,19 @@ tests:
       - { row: { caller: "main.wildcard_import_call", path: "wildcard_sdk", name: "*", import_type: "WildcardImport" } }
 
   - name: "built-ins do not target wildcard imports"
-    # Known gap: python.yaml declares no `link.builtins`, so an unresolved
-    # `print`/`len` falls back to the wildcard import. Tracked on !2629.
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
       RETURN sym.import_path AS path
     assert:
       - { empty: true }
+
+  - name: "Local bindings still override builtin names"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadowed_builtin_call'
+      RETURN callee.name AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { target: local_print } }

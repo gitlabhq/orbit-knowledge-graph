@@ -8,6 +8,7 @@ use futures::TryStreamExt;
 use named_queries::{Language, NamedQueries, NamedQuery};
 use ontology::Ontology;
 use ontology::archive::OntologyArchive;
+use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
 use opentelemetry::KeyValue;
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
@@ -155,6 +156,7 @@ pub struct SchemaSnapshot {
     pub ontology: Arc<Ontology>,
     pub data_model: Arc<query_data_model::ClickHouseDataModel>,
     pub named_queries: Arc<NamedQueries>,
+    pub relationship_patterns: String,
 }
 
 impl SchemaSnapshot {
@@ -173,11 +175,14 @@ impl SchemaSnapshot {
                 false
             }
         });
+        let relationship_patterns =
+            build_relationship_patterns(&ontology, IntrospectionScope::All).join("\n");
         Ok(Self {
             migration_version,
             ontology,
             data_model,
             named_queries: Arc::new(named_queries),
+            relationship_patterns,
         })
     }
 }
