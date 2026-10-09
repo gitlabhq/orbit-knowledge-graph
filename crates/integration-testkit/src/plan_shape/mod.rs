@@ -17,6 +17,7 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 struct Scenario {
     name: String,
+    ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
@@ -321,13 +322,23 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         scenario
             .validate_frontends()
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let overlay = scenario.ontology_overlay.as_ref().map(|name| {
+            let ontology = Arc::new(crate::load_ontology_overlay(name));
+            (
+                ClickHouseDataModel::derive(ontology.clone()).unwrap(),
+                DuckDbDataModel::derive(ontology).unwrap(),
+            )
+        });
+        let (remote, local) = overlay
+            .as_ref()
+            .map_or((&remote, &local), |(remote, local)| (remote, local));
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, &remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, &remote, options, &HashSet::new())
+                "clickhouse" => check(&scenario, remote, backend, path, |input, options| {
+                    plan::plan_clickhouse(input, remote, options, &HashSet::new())
                 }),
-                "duckdb" => check(&scenario, &local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, &local, options, &HashSet::new())
+                "duckdb" => check(&scenario, local, backend, path, |input, options| {
+                    plan::plan_duckdb(input, local, options, &HashSet::new())
                 }),
                 _ => panic!("unknown backend {backend}"),
             }
