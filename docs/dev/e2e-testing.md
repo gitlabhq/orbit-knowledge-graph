@@ -59,7 +59,7 @@ e2e cluster is amd64-only, so it does not wait for `docker-manifest`.
 | `07_namespace_lifecycle.robot` | Disable retains indexed data (30-day grace); re-enable resumes indexing |
 | `08_private_redaction.robot` | Private project/issue redacted from a non-member, visible to admin |
 | `09_api_surface.robot` | Read-only Orbit endpoints: schema, `CALL db.schema()`, schema/format, graph_status, tools, commands |
-| `10_query_shapes.robot` | neighbors, path_finding, and llm (GOON) response format |
+| `10_query_shapes.robot` | neighbors, path_finding, and llm (GQL table) response format |
 | `11_security_graph.robot` | Vulnerability node plus IN_PROJECT/AUTHORED/OCCURRENCE_OF edges |
 | `12_membership_graph.robot` | MEMBER_OF (User→Group) and CREATOR (User→Project) edges |
 | `13_cross_namespace_traversal.robot` | Scoped-query traversal-path pruning must not drop cross-namespace related entities |

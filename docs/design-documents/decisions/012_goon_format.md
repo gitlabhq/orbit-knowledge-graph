@@ -8,7 +8,7 @@ toc_hide: true
 
 ## Status
 
-Accepted
+Superseded by [ADR 019](019_gql_response_format.md)
 
 ## Date
 

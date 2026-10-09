@@ -108,21 +108,14 @@ pub(super) mod params {
     }
 
     pub fn query_parameters(frontend: Frontend) -> Value {
-        let mut query_format = format();
         let query = match frontend {
             Frontend::JsonDsl => json!({"type": "object", "description": "JSON Query DSL object."}),
-            Frontend::Gql => {
-                query_format["enum"] = json!(["llm", "raw", "gql"]);
-                query_format["description"] = json!(
-                    "Output format. 'llm' (default) returns compact text. 'raw' returns structured JSON. 'gql' returns a graph pattern table."
-                );
-                json!({"type": "string", "description": "Read-only GQL query text."})
-            }
+            Frontend::Gql => json!({"type": "string", "description": "Read-only GQL query text."}),
         };
         json!({
             "type": "object",
             "required": ["query"],
-            "properties": {"query": query, "format": query_format},
+            "properties": {"query": query, "format": format()},
             "additionalProperties": false
         })
     }
@@ -536,15 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn only_gql_query_commands_advertise_gql_format() {
+    fn commands_advertise_llm_and_raw_formats_in_every_mode() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {
             for command in CommandRegistry::commands_for(frontend) {
-                let expected = if frontend == Frontend::Gql && command.name == "query_graph" {
-                    json!(["llm", "raw", "gql"])
-                } else {
+                assert_eq!(
+                    command.parameters["properties"]["format"]["enum"],
                     json!(["llm", "raw"])
-                };
-                assert_eq!(command.parameters["properties"]["format"]["enum"], expected);
+                );
             }
         }
     }

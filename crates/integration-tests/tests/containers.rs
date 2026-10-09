@@ -12,7 +12,6 @@ mod server {
     pub mod corpus_smoke;
     pub mod data_correctness;
     pub mod denormalization;
-    pub mod goon_formatter;
     pub mod graph_formatter;
     pub mod grpc_tls;
     pub mod http_tls;

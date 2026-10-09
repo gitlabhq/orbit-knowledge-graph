@@ -1,10 +1,7 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 use orbit_utils::strings::{char_count_if_exceeds, truncate_chars};
 use serde_json::{Map, Value};
-
-use crate::graph::GraphEdge;
 
 const LONG_TEXT_LIMIT: usize = 200;
 const HARD_VALUE_LIMIT: usize = 1000;
@@ -48,38 +45,4 @@ pub(crate) fn truncate<'a>(raw: &'a str, key: &str) -> Cow<'a, str> {
 pub(crate) fn truncated_len(value: &Value, key: &str) -> Option<usize> {
     let Value::String(s) = value else { return None };
     char_count_if_exceeds(s, value_limit(key))
-}
-
-pub(crate) fn dedup_and_sort_edges(edges: &[GraphEdge]) -> Vec<&GraphEdge> {
-    let mut sorted: Vec<&GraphEdge> = edges.iter().collect();
-    sorted.sort_by(|a, b| {
-        a.path_id
-            .unwrap_or(usize::MAX)
-            .cmp(&b.path_id.unwrap_or(usize::MAX))
-            .then(
-                a.step
-                    .unwrap_or(usize::MAX)
-                    .cmp(&b.step.unwrap_or(usize::MAX)),
-            )
-            .then(a.edge_type.cmp(&b.edge_type))
-            .then(a.from.cmp(&b.from))
-            .then(a.from_id.cmp(&b.from_id))
-            .then(a.to.cmp(&b.to))
-            .then(a.to_id.cmp(&b.to_id))
-            .then(a.depth.cmp(&b.depth))
-    });
-    let mut seen = HashSet::new();
-    sorted.retain(|e| {
-        seen.insert((
-            e.edge_type.as_str(),
-            e.from.as_str(),
-            e.from_id,
-            e.to.as_str(),
-            e.to_id,
-            e.path_id,
-            e.step,
-            e.depth,
-        ))
-    });
-    sorted
 }

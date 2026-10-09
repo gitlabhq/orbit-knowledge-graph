@@ -14,7 +14,7 @@ pub struct ProfilerOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_health: Option<serde_json::Value>,
     /// Formatted query response as served to agents (`--emit-response`):
-    /// a GOON string or a raw graph object.
+    /// a GQL table string or a raw graph object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<serde_json::Value>,
 }

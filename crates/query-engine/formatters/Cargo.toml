@@ -22,9 +22,6 @@ strum = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
-insta = { workspace = true }
-proptest = { workspace = true }
-rand = { workspace = true }
 
 [lints]
 workspace = true

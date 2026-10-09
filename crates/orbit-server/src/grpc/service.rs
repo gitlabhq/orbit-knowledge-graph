@@ -47,9 +47,7 @@ use crate::proto::{
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
-use query_engine::formatters::{
-    FormatName, GoonFormatter, GqlFormatter, GraphFormatter, ResultFormatter,
-};
+use query_engine::formatters::{FormatName, GqlFormatter, GraphFormatter, ResultFormatter};
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
     match QueryLanguage::try_from(language) {
@@ -109,15 +107,13 @@ fn schema_query_result(
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
         FormatName::Gql => ProtoFormatName::Gql,
     }
 }
 
 fn query_formatter(format: i32) -> Result<&'static dyn ResultFormatter, Status> {
     match ResponseFormat::try_from(format) {
-        Ok(ResponseFormat::Llm) => Ok(&GoonFormatter),
-        Ok(ResponseFormat::Gql) => Ok(&GqlFormatter),
+        Ok(ResponseFormat::Llm | ResponseFormat::Gql) => Ok(&GqlFormatter),
         Ok(ResponseFormat::Raw) => Ok(&GraphFormatter),
         Err(_) => Err(Status::invalid_argument(format!(
             "Unknown response format: {format}"
@@ -1067,8 +1063,8 @@ mod tests {
             ),
             (
                 ResponseFormat::Llm as i32,
-                FormatName::Goon,
-                ProtoFormatName::Goon,
+                FormatName::Gql,
+                ProtoFormatName::Gql,
             ),
             (
                 ResponseFormat::Gql as i32,

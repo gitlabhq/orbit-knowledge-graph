@@ -25,7 +25,7 @@ pub mod execute_query_message {
 pub struct ExecuteQueryRequest {
     #[prost(string, tag = "1")]
     pub query: ::prost::alloc::string::String,
-    /// RAW: tabular JSON rows; LLM: GOON text; GQL: graph pattern table
+    /// RAW: tabular JSON rows; LLM, GQL: graph pattern table
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
     #[prost(enumeration = "QueryType", tag = "3")]
@@ -694,7 +694,8 @@ pub struct EntityItemCount {
 }
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
-/// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
+/// LLM returns compact text optimized for token budgets: the GQL table for
+/// queries, TOON for schema/health.
 /// GQL returns query results as a text table of graph patterns such as
 /// (:User {id: 1})-\[:AUTHORED\]->(:MergeRequest {id: 2}). Only ExecuteQuery
 /// honors it; other RPCs treat it as RAW.
@@ -734,7 +735,6 @@ impl ResponseFormat {
 #[repr(i32)]
 pub enum FormatName {
     Raw = 0,
-    Goon = 1,
     Gql = 2,
 }
 impl FormatName {
@@ -745,7 +745,6 @@ impl FormatName {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Raw => "FORMAT_NAME_RAW",
-            Self::Goon => "FORMAT_NAME_GOON",
             Self::Gql => "FORMAT_NAME_GQL",
         }
     }
@@ -753,7 +752,6 @@ impl FormatName {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "FORMAT_NAME_RAW" => Some(Self::Raw),
-            "FORMAT_NAME_GOON" => Some(Self::Goon),
             "FORMAT_NAME_GQL" => Some(Self::Gql),
             _ => None,
         }
