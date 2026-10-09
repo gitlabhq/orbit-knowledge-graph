@@ -435,8 +435,15 @@ pinned-version-check:
   needs: []
   script:
     - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    # Prefer the commit a merged results pipeline merged into, then the MR diff
+    # base. Both are in HEAD's history, so the three-dot diff has a merge base.
+    # A branch longer than the clone depth needs its full history to reach it.
+    - |
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      if [ -z "$BASE" ]; then echo "No merge request diff base for this commit, so nothing to compare."; exit 0; fi
+      echo "Comparing against $BASE"
+      git merge-base "$BASE" HEAD >/dev/null 2>&1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
+      bash ./scripts/check-pinned-version.sh "$BASE"
 
 skill-version-bump-check:
   stage: lint
