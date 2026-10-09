@@ -25,11 +25,8 @@ pipeline, and the merge ref keeps the old title until a push with a new SHA.
 
 When ready for CI, remove `[skip ci]` from the title. Then, on a clean tree, run
 `git commit --amend --no-edit --allow-empty` and push with `--force-with-lease`.
-If the lease is rejected, someone else pushed: stop and investigate. If the
-force-push is refused (protected branch), run `git reset --soft origin/<branch>`
-and push an empty commit instead. Don't use `glab ci run`: its pipeline is
-filtered out or skipped. After the push, check that a new MR head pipeline
-exists and is not skipped.
+Don't use `glab ci run`: its pipeline is filtered out or skipped. After the push,
+check that a new MR head pipeline exists and is not skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
