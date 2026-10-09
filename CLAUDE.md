@@ -21,17 +21,23 @@ Use mise for all tasks.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
 Commits title to skip unnecessary merge request pipelines while iterating. Keep
-it in the title through review. When ready for CI, remove it from the title.
-Editing the title or pushing an unchanged SHA starts no pipeline. The merge ref
-keeps the old title until a push with a new SHA regenerates it.
+it in the title through review. Editing the title or pushing an unchanged SHA
+starts no pipeline. The merge ref keeps the old title until a push with a new
+SHA regenerates it.
 
-Do not push `Run CI` or `chore: trigger pipeline` commits. With a clean tree,
-run `git commit --amend --no-edit --allow-empty`, then push with
-`--force-with-lease`. Only if the force-push is refused (protected branch), run
-`git reset --soft origin/<branch>` and push an empty commit. If the lease is
-rejected, someone else pushed: stop and investigate. Do not use `glab ci run`,
-which creates a branch pipeline that MR-only rules can filter out. Afterwards,
-check that an unskipped pipeline exists for the new head SHA.
+When ready for CI, remove `[skip ci]` from the title first. Then, with a clean
+tree, run `git commit --amend --no-edit --allow-empty` and push with
+`--force-with-lease`. If the lease is rejected, someone else pushed: stop and
+investigate.
+
+Never push `Run CI` or `chore: trigger pipeline` commits. The only exception is
+a refused force-push (protected branch). Then run `git reset --soft
+origin/<branch>` and push an empty commit with a real message, such as
+`git commit --allow-empty -m "chore: start merge request pipeline"`.
+
+Do not use `glab ci run`. It creates a branch pipeline that MR-only rules can
+filter out. With `--mr`, it reuses the stale merge ref and can be skipped.
+Afterwards, check that the MR's head pipeline exists and is not skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
