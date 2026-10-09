@@ -3,7 +3,7 @@ query:
   json: |
     {
       "query_type": "traversal",
-      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000]}],
+      "nodes": [{"id": "n", "entity": "Note", "node_ids": [3240810]}],
       "limit": 1000
     }
 expect:
