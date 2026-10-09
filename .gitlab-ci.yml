@@ -756,6 +756,8 @@ unit-test:
         CARGO_HOME_CACHE_POLICY: pull-push
   cache:
     - !reference [.cargo-home-cache, push]
+  variables:
+    CARGO_HOME_CACHE_POLICY: pull
   tags:
     - ${RUNNER_LARGE}
   needs: []
@@ -815,7 +817,6 @@ cli-integration-test:
     - name: docker:dind
       alias: docker
   variables:
-    CARGO_HOME_CACHE_POLICY: pull
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     TESTCONTAINERS_HOST_OVERRIDE: docker
