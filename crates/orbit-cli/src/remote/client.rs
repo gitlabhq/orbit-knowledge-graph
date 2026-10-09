@@ -68,7 +68,7 @@ impl OrbitClient {
     }
 
     pub(crate) fn origin(&self) -> Result<String, RemoteError> {
-        let origin = self.base_url()?.origin().ascii_serialization();
+        let origin = self.parse_base_url()?.origin().ascii_serialization();
         if origin == "null" {
             return Err(RemoteError::new(
                 EXIT_GENERIC,
@@ -78,14 +78,14 @@ impl OrbitClient {
         Ok(origin)
     }
 
-    pub(crate) fn host(&self) -> Result<String, RemoteError> {
-        let url = self.base_url()?;
+    pub(crate) fn get_host(&self) -> Result<String, RemoteError> {
+        let url = self.parse_base_url()?;
         url.host_str()
             .map(str::to_string)
             .ok_or_else(|| RemoteError::new(EXIT_GENERIC, "Orbit API base URL must have a host"))
     }
 
-    fn base_url(&self) -> Result<reqwest::Url, RemoteError> {
+    fn parse_base_url(&self) -> Result<reqwest::Url, RemoteError> {
         reqwest::Url::parse(&self.endpoint.base_url).map_err(|error| {
             RemoteError::new(EXIT_GENERIC, format!("invalid Orbit API base URL: {error}"))
         })

@@ -190,37 +190,39 @@ fn graph_status_sends_full_path_query() {
 
 #[test]
 fn graph_status_without_scope_inspects_the_origin_remote_project() {
-    let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
-    let clone = tempfile::tempdir().expect("tempdir");
-    for args in [
-        ["init", "--quiet"].as_slice(),
-        &[
-            "remote",
-            "add",
-            "origin",
-            "git@127.0.0.1:my-group/my-project.git",
-        ],
+    for remote in [
+        "git@127.0.0.1:my-group/my-project.git",
+        "ssh://git@127.0.0.1:2222/my-group/my-project.git",
+        "https://127.0.0.1/my-group/my-project",
     ] {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(clone.path())
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
+        let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let clone = tempfile::tempdir().expect("tempdir");
+        for args in [
+            ["init", "--quiet"].as_slice(),
+            &["remote", "add", "origin", remote],
+        ] {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(clone.path())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?} failed");
+        }
+
+        let output = run_orbit_in(clone.path(), &base_url, &["graph-status"]);
+        let request = handle.join().expect("join mock");
+
+        assert!(
+            output.status.success(),
+            "{remote}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            request.request_line,
+            "GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project HTTP/1.1",
+            "{remote}"
+        );
     }
-
-    let output = run_orbit_in(clone.path(), &base_url, &["graph-status"]);
-    let request = handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project HTTP/1.1"
-    );
 }
 
 #[test]
@@ -233,15 +235,19 @@ fn graph_status_llm_format_prints_the_formatted_text() {
         &base_url,
         &[
             "graph-status",
-            "--project-id",
-            "2",
+            "--namespace-id",
+            "9970",
             "--response-format",
             "llm",
         ],
     );
-    handle.join().expect("join mock");
+    let request = handle.join().expect("join mock");
 
     assert!(output.status.success());
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/graph_status?namespace_id=9970&response_format=llm HTTP/1.1"
+    );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "projects:\n  indexed: 1\n"

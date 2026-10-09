@@ -35,7 +35,7 @@ impl From<anyhow::Error> for RemoteError {
 
 pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     match status {
-        404 => match missing_resource(body) {
+        404 => match parse_missing_resource(body) {
             Some(resource) => RemoteError::new(
                 EXIT_UNAVAILABLE,
                 format!(
@@ -89,7 +89,7 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     }
 }
 
-fn missing_resource(body: &str) -> Option<String> {
+fn parse_missing_resource(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let message = value.get("message")?.as_str()?;
     let resource = message.strip_prefix("404 ")?.strip_suffix(" Not Found")?;
