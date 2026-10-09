@@ -101,16 +101,6 @@ To use GitLab Orbit in a custom flow:
 To edit the flow in VS Code, see
 [Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/?tab=VS+Code#edit-a-flow).
 
-## Billing
-
-During the beta, queries that GitLab Duo Agent Platform makes against GitLab Orbit on
-your behalf do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, these queries consume GitLab Credits. Credit
-rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.
-
 ## Example prompts
 
 Ask these in any of the surfaces above - the agent picks the right tool.

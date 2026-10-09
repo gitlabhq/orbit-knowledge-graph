@@ -44,16 +44,6 @@ Results are scoped to entities the token owner can access in GitLab.
 To query from a script or CI/CD job without a personal account, use a
 [service account](../security.md#service-accounts).
 
-## Billing
-
-During the beta, API calls do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, each call to `POST /api/v4/orbit/query`
-consumes GitLab Credits from your subscription. The other endpoints stay free.
-Credit rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.
-
 ## Endpoints
 
 | Method | Endpoint | Description |
