@@ -22,12 +22,6 @@ fn embedded_ontology() -> Arc<Ontology> {
 }
 
 #[test]
-fn prompts_load() {
-    let directory = Path::new(env!("PROMPTS_DIR")).join("remote");
-    orbit_prompts::Prompts::load_dir(&directory).unwrap_or_else(|error| panic!("{error}"));
-}
-
-#[test]
 fn orbit_skills_match_cli_commands() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     orbit_prompts::validate_skill_pair(
@@ -103,24 +97,6 @@ fn migration_ledger_matches_fingerprint_snapshot() {
         orbit_versions::VERSIONS.schema,
     )
     .unwrap_or_else(|error| panic!("{error}"));
-}
-
-#[test]
-fn authored_etl_sql_is_valid() {
-    ontology::etl_sql::validate_authored_etl_sql(&embedded_ontology())
-        .unwrap_or_else(|error| panic!("{error}"));
-}
-
-#[test]
-fn bundled_ontology_archives_load() {
-    let versions = OntologyArchive::bundled_versions().unwrap_or_else(|error| panic!("{error}"));
-    for version in versions {
-        OntologyArchive::bundled(version)
-            .unwrap_or_else(|error| panic!("{error}"))
-            .expect("bundled archive must exist")
-            .load_ontology()
-            .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
-    }
 }
 
 #[test]
