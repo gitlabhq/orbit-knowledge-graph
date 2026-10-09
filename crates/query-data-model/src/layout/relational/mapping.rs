@@ -1,4 +1,12 @@
+use super::MaterializedJoin;
+use crate::RelationshipVariantId;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone)]
+pub struct VariantRoute {
+    pub table: String,
+    pub foreign_key: Option<ForeignKey>,
+}
 
 use crate::{EntityId, GraphCatalog, PropertyId, Relationship, RelationshipId};
 
@@ -31,6 +39,8 @@ pub struct TraversalPathLookup {
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
+    pub source_table: String,
+    pub occurrence: usize,
 }
 
 #[derive(Debug)]
@@ -99,6 +109,13 @@ impl DenormalizedCatalog {
 }
 
 pub trait RelationalMapping: Send + Sync {
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute>;
+    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
+        Vec::new()
+    }
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &[]
+    }
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;

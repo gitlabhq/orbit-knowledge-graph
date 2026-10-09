@@ -331,7 +331,14 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
         let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
 
+        let mut endpoints = std::collections::HashSet::new();
         for entity in &entities {
+            if !endpoints.insert((&entity.source_kind, &entity.target_kind)) {
+                return Err(OntologyError::Validation(format!(
+                    "duplicate variant {}({}->{})",
+                    edge_name, entity.source_kind, entity.target_kind
+                )));
+            }
             if !ontology.nodes.contains_key(&entity.source_kind) {
                 return Err(OntologyError::Validation(format!(
                     "edge '{}' references unknown source node '{}'",
@@ -807,6 +814,69 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         ontology.denormalized_joins.push(resolved);
     }
     validate_unique_denormalized_joins(&ontology)?;
+    for copy in schema.settings.reordered_tables {
+        let valid_name = copy
+            .name
+            .strip_prefix("gl_")
+            .and_then(|name| name.bytes().next())
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+            && copy
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+        let occupied = ontology
+            .nodes()
+            .any(|node| node.destination_table == copy.name)
+            || ontology.edge_table_config(&copy.name).is_some()
+            || ontology
+                .auxiliary_tables()
+                .iter()
+                .any(|table| table.name == copy.name)
+            || ontology
+                .denormalized_joins()
+                .iter()
+                .any(|join| join.table == copy.name)
+            || ontology
+                .reordered_tables
+                .iter()
+                .any(|table| table.name == copy.name);
+        let source_key = ontology
+            .nodes()
+            .find(|node| node.destination_table == copy.source)
+            .map(|node| node.sort_key.as_slice())
+            .or_else(|| {
+                ontology
+                    .edge_table_config(&copy.source)
+                    .map(|table| table.sort_key.as_slice())
+            })
+            .map(<[String]>::to_vec)
+            .or_else(|| {
+                ontology
+                    .denormalized_joins()
+                    .iter()
+                    .find(|join| join.table == copy.source)
+                    .map(|join| join.sort_key())
+            });
+        let Some(source_key) = source_key else {
+            return Err(OntologyError::Validation(format!(
+                "reordered table '{}': unknown base or joined source '{}'",
+                copy.name, copy.source
+            )));
+        };
+        let unique: std::collections::BTreeSet<_> = copy.sort_key.iter().collect();
+        if !valid_name
+            || occupied
+            || copy.sort_key.is_empty()
+            || unique.len() != copy.sort_key.len()
+            || unique != source_key.iter().collect()
+        {
+            return Err(OntologyError::Validation(format!(
+                "reordered table '{}': requires a unique gl_ name and a permutation of the source sort key",
+                copy.name
+            )));
+        }
+        ontology.reordered_tables.push(copy);
+    }
     // A denormalized table is bucketed whenever its anchor table is.
     if let Some(partition) = ontology.partition.as_mut() {
         let bucketed: Vec<String> = ontology
@@ -820,6 +890,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             .map(|j| j.table.clone())
             .collect();
         partition.partitioned_tables.extend(bucketed);
+        for copy in &ontology.reordered_tables {
+            if partition.partitioned_tables.contains(&copy.source) {
+                partition.partitioned_tables.insert(copy.name.clone());
+            }
+        }
     }
 
     validate_storage_columns(&ontology)?;
@@ -1320,12 +1395,7 @@ pub(crate) fn resolve_denormalized_join(
             )));
         }
         let variant = ontology
-            .edges
-            .get(hop.relationship)
-            .and_then(|vs| {
-                vs.iter()
-                    .find(|v| v.source_kind == hop.from && v.target_kind == hop.to)
-            })
+            .edge_route(hop.relationship, hop.from, hop.to)
             .ok_or_else(|| {
                 fail(format!(
                     "no {} variant {} -> {}",

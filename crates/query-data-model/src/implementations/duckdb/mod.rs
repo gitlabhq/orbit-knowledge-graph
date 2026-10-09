@@ -8,6 +8,7 @@ use crate::{
     DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
     RelationalMapping, RelationshipId, TraversalPathLookup,
 };
+use crate::{RelationshipVariantId, VariantRoute};
 
 #[derive(Debug, Clone)]
 pub struct DuckDbEntityLayout {
@@ -19,6 +20,7 @@ pub struct DuckDbEntityLayout {
 
 #[derive(Debug)]
 pub struct DuckDbBindings {
+    variants: Vec<VariantRoute>,
     edge_table: String,
     edge_sort_key: Vec<String>,
     edge_column_types: std::collections::BTreeMap<String, ontology::DataType>,
@@ -30,6 +32,9 @@ pub struct DuckDbBindings {
 }
 
 impl RelationalMapping for DuckDbBindings {
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variants.get(variant.index())
+    }
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
