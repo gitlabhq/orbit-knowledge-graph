@@ -207,10 +207,6 @@ rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug
 semver = { version = "1.0", features = ["serde"] }
 secrecy = "0.10.3"
 
-# Formatter test dependencies
-insta = { version = "1.40", features = ["yaml"] }
-proptest = "1.5"
-
 # Health check dependencies
 kube = { version = "4.2", default-features = false, features = ["client", "runtime", "ws", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_32"] }
