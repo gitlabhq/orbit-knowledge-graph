@@ -363,8 +363,7 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions, defs_by_name) =
-            gather_members(trees, config.merge_same_named_types);
+        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
         let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
             .par_iter()
             .map(|tree| {
@@ -422,6 +421,16 @@ impl Resolver {
             }
         }
         let mut ctx = ResolveCtx {
+            references: edges
+                .iter()
+                .filter(|edge| {
+                    edge.kind == EdgeKind::Imports
+                        && edge.call_resolution == CallResolution::Reference
+                        && edge.site.is_none()
+                })
+                .map(|edge| (edge.from(), edge.to()))
+                .collect(),
+            implementations: FxHashMap::default(),
             saved_imports,
             trees,
             run,
@@ -444,11 +453,48 @@ impl Resolver {
             merge_types: config.merge_same_named_types,
             partials: &partials,
             extensions: &extensions,
-            defs_by_name: &defs_by_name,
             declared_members: &declared_members,
             exporters: &exporters,
             imports: &imports,
         };
+        let referenced_imports: FxHashSet<_> = ctx.references.values().copied().collect();
+        let imported_references: Vec<_> = self
+            .reqs
+            .iter()
+            .flat_map(|req| {
+                ctx.corpus
+                    .jump(req.fi, req.node)
+                    .names()
+                    .map(move |name| (req, name))
+            })
+            .filter(|(_, name)| referenced_imports.contains(&(name.fi(), name.index())))
+            .filter_map(|(req, name)| {
+                let target = name_targets(&ctx, req, name)
+                    .into_iter()
+                    .exactly_one()
+                    .ok()?;
+                Some(((name.fi(), name.index()), (target.fi, target.node)))
+            })
+            .collect();
+        ctx.references.extend(imported_references);
+        let mut implementations: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for &source in ctx.references.keys() {
+            let reference = ctx.corpus.jump(source.0, source.1);
+            if reference.is(C::DefName)
+                && let Some(implementation) =
+                    reference.parent().filter(|node| node.has(C::ImplBlock))
+                && let Some(owner) = resolve_reference(&ctx, reference)
+            {
+                implementations
+                    .entry((owner.fi(), owner.index()))
+                    .or_default()
+                    .push((implementation.fi(), implementation.index()));
+            }
+        }
+        for owners in implementations.values_mut() {
+            owners.sort_unstable();
+        }
+        ctx.implementations = implementations;
         let (outcomes, file_timings): (Vec<_>, Vec<(u32, Duration)>) = active_fis
             .par_iter()
             .map(|&fi| {
@@ -611,6 +657,8 @@ impl Resolver {
 }
 
 struct ResolveCtx<'a> {
+    references: FxHashMap<(u32, u32), (u32, u32)>,
+    implementations: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
     saved_imports: FxHashMap<(u32, u32), Vec<u32>>,
     trees: &'a [Tree],
     run: &'a Sentinel,
@@ -633,7 +681,6 @@ struct ResolveCtx<'a> {
     merge_types: bool,
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
-    defs_by_name: &'a [FxHashMap<u32, Vec<u32>>],
     declared_members: &'a [FxHashMap<(u32, u32), u32>],
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
@@ -1222,8 +1269,19 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     chain(ctx, c, &|r| {
-        enclosing_alias(ctx, r).or_else(|| visible_type(ctx, r.fi(), r.sym()))
+        resolve_reference(ctx, r)
+            .or_else(|| enclosing_alias(ctx, r))
+            .or_else(|| visible_type(ctx, r.fi(), r.sym()))
     })
+}
+
+fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {
+    reachable((reference.fi(), reference.index()), |id| {
+        ctx.references.get(&id).copied()
+    })
+    .skip(1)
+    .map(|(fi, node)| ctx.corpus.jump(fi, node))
+    .find(|node| node.is(C::Def))
 }
 
 /// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
@@ -1298,20 +1356,15 @@ fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, u32)> {
 type Members = (
     FxHashMap<(u32, u32, u32), Vec<Loc>>,
     FxHashMap<u32, Vec<Loc>>,
-    Vec<FxHashMap<u32, Vec<u32>>>,
 );
 
-/// Partial-type parts by key, extension members by name, and every def by
-/// name per file.
 fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
-    let (mut parts, mut extensions, mut defs_by_name) = Members::default();
-    defs_by_name.resize_with(trees.len(), Default::default);
+    let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
         for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
             let Some(name) = d.child_sym(C::DefName) else {
                 continue;
             };
-            defs_by_name[fi].entry(name).or_default().push(d.index());
             let nested = d.ancestors().any(|a| a.is(C::Def) && !a.has(C::ImplBlock));
             if nested {
                 continue;
@@ -1328,7 +1381,7 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
             }
         }
     }
-    (parts, extensions, defs_by_name)
+    (parts, extensions)
 }
 
 fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
@@ -1346,15 +1399,21 @@ fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// The other same-named defs in the file when one side is an impl block:
-/// `struct Service` and its `impl Service` / `impl Runner for Service`.
 fn impl_blocks_of<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> impl Iterator<Item = Cursor<'a>> {
-    cls.child_sym(C::DefName)
-        .and_then(|n| ctx.defs_by_name[cls.fi() as usize].get(&n))
-        .into_iter()
-        .flatten()
-        .map(move |&n| cls.jump(cls.fi(), n))
-        .filter(move |d| d.index() != cls.index() && (d.has(C::ImplBlock) || cls.has(C::ImplBlock)))
+    let owner = cls
+        .child(C::DefName)
+        .filter(|_| cls.has(C::ImplBlock))
+        .and_then(|name| resolve_reference(ctx, name))
+        .unwrap_or(cls);
+    std::iter::once(owner)
+        .chain(
+            ctx.implementations
+                .get(&(owner.fi(), owner.index()))
+                .into_iter()
+                .flatten()
+                .map(|&(fi, node)| ctx.corpus.jump(fi, node)),
+        )
+        .filter(move |node| (node.fi(), node.index()) != (cls.fi(), cls.index()))
 }
 
 fn lub<'a>(
@@ -1420,10 +1479,14 @@ fn member_targets<'a>(
     let Some(constraint) = member.child(C::Dispatch) else {
         return method_up(ctx, receiver, member.sym(), member.fi() as usize);
     };
-    let Some(contract) = qualified(ctx, constraint.sym(), &|name| {
-        visible_type(ctx, constraint.fi(), name)
-    })
-    .filter(|owner| owner.is_dispatch_contract()) else {
+    let Some(contract) = resolve_reference(ctx, constraint)
+        .or_else(|| {
+            qualified(ctx, constraint.sym(), &|name| {
+                visible_type(ctx, constraint.fi(), name)
+            })
+        })
+        .filter(|owner| owner.is_dispatch_contract())
+    else {
         return Vec::new();
     };
     let mut implementations = std::iter::once(receiver)

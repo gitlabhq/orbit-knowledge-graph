@@ -308,6 +308,9 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        if c.has(C::ImplBlock) {
+            self.link_reference(c.child(C::DefName).unwrap());
+        }
         self.register_def(c);
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
@@ -400,6 +403,12 @@ impl<'t> Fold<'t> {
                 .child(C::Dispatch)
                 .is_some_and(|dispatch| !dispatch.has(C::Object))
             {
+                for reference in member
+                    .children()
+                    .filter(|node| node.is(C::Object) || node.is(C::Dispatch))
+                {
+                    self.link_reference(reference);
+                }
                 return;
             }
             if let Some(receiver) = member
@@ -482,6 +491,19 @@ impl<'t> Fold<'t> {
             for edge in &mut self.edges[first..] {
                 edge.call_resolution = crate::tree::CallResolution::Reference;
             }
+        }
+    }
+
+    fn link_reference(&mut self, reference: Cursor<'t>) {
+        self.handle_inline_imports(reference);
+        if let [Value::LocalDef(target) | Value::ImportRef(target)] =
+            self.lookup_chain(reference).as_slice()
+            && *target != reference.parent().map_or(reference.index(), Cursor::index)
+        {
+            self.edges.push(Edge {
+                call_resolution: crate::tree::CallResolution::Reference,
+                ..Edge::local(reference.index(), *target, EdgeKind::Imports)
+            });
         }
     }
 

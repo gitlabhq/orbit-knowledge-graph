@@ -258,7 +258,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 12;
+pub const SNAPSHOT_VERSION: u32 = 13;
 
 type Error = rkyv::rancor::BoxedError;
 
