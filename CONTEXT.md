@@ -129,7 +129,7 @@ A compiler-level interface for Orbit's read-only graph language. The `gql` front
 _Avoid_: Describing Orbit Query as the default query language
 
 **Named Query**:
-A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the ontology at `orbit-server` build time so drift fails the build.
+A graph query defined in YAML under `config/named_queries/` and invoked by name. Each definition carries a JSON **Query DSL** spelling and a GQL spelling of the same shape; Rails sets `QUERY_TYPE_NAMED` and a separate `QueryLanguage` value. That language selects both the spelling and the matching compiler frontend. Trusted templates encode client values and bind caller identity separately. Both rendered examples compile against the ontology in `orbit-server` unit tests so drift fails CI.
 _Avoid_: preset query, query template
 
 **Hop**:
