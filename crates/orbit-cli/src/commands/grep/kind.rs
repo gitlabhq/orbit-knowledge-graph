@@ -33,58 +33,67 @@ const DEFINITIONS: &[&str] = &[
     "symbol",
     "symbols",
 ];
-const FAMILIES: &[(&[&str], &[&str])] = &[
-    (
-        &[
-            "fn",
-            "func",
-            "function",
-            "functions",
-            "method",
-            "methods",
-            "callable",
-        ],
-        &[
-            "Function",
-            "AsyncFunction",
-            "AssociatedFunction",
-            "Method",
-            "Constructor",
-        ],
-    ),
-    (
-        &[
-            "type",
-            "types",
-            "class",
-            "classes",
-            "struct",
-            "structs",
-            "interface",
-        ],
-        &[
+const VALUE_KINDS: &[&str] = &["Variable", "Var", "Constant", "Const", "Static", "Local"];
+
+/// Agent spellings for definition families, matched to kinds by `family_of`.
+const FAMILIES: &[&[&str]] = &[
+    &[
+        "fn",
+        "func",
+        "function",
+        "functions",
+        "method",
+        "methods",
+        "callable",
+    ],
+    &[
+        "type",
+        "types",
+        "class",
+        "classes",
+        "struct",
+        "structs",
+        "interface",
+    ],
+    &[
+        "var",
+        "vars",
+        "variable",
+        "variables",
+        "field",
+        "fields",
+        "property",
+    ],
+];
+
+/// The family of a definition kind: the shared repo-map lists first, then the name, so
+/// labels such as `DecoratedClass` or a new language's kinds still land somewhere.
+fn family_of(kind: &str) -> Option<usize> {
+    use crate::commands::repo_map::{CALLABLE_KINDS, MEMBER_EXTRA_KINDS, TYPE_KINDS};
+    let has = |parts: &[&str]| parts.iter().any(|part| kind.contains(part));
+    if CALLABLE_KINDS.contains(&kind) || has(&["Function", "Method", "Constructor"]) {
+        Some(0)
+    } else if TYPE_KINDS.contains(&kind)
+        || has(&[
             "Class",
             "Struct",
             "Interface",
             "Trait",
-            "Enum",
             "Record",
-            "TypeAlias",
-        ],
-    ),
-    (
-        &[
-            "var",
-            "vars",
-            "variable",
-            "variables",
-            "field",
-            "fields",
-            "property",
-        ],
-        &["Variable", "Field", "Property", "Constant", "Const"],
-    ),
-];
+            "Object",
+            "Type",
+        ])
+    {
+        Some(1)
+    } else if VALUE_KINDS.contains(&kind)
+        || MEMBER_EXTRA_KINDS.contains(&kind)
+        || has(&["Variable", "Field", "Property", "Constant"])
+    {
+        Some(2)
+    } else {
+        None
+    }
+}
 
 pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
     let ontology = Ontology::load_embedded()?;
@@ -101,11 +110,11 @@ pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
             .collect();
         let family: Vec<String> = FAMILIES
             .iter()
-            .find(|(aliases, _)| aliases.contains(&lower.as_str()))
-            .map(|(_, members)| {
+            .position(|aliases| aliases.contains(&lower.as_str()))
+            .map(|family| {
                 known
                     .iter()
-                    .filter(|k| members.iter().any(|m| k.eq_ignore_ascii_case(m)))
+                    .filter(|k| family_of(k) == Some(family))
                     .cloned()
                     .collect()
             })
@@ -157,21 +166,38 @@ mod tests {
 
     fn resolved(requested: &[&str]) -> Kinds {
         let known = ["Class", "Method", "Constructor", "Field", "Interface"].map(String::from);
+        let known = [known.as_slice(), &more_kinds()].concat();
         let requested: Vec<String> = requested.iter().map(|k| k.to_string()).collect();
         resolve(&requested, &known).unwrap()
+    }
+
+    fn more_kinds() -> Vec<String> {
+        [
+            "DecoratedFunction",
+            "DecoratedClass",
+            "Type",
+            "Var",
+            "EnumMember",
+            "Module",
+        ]
+        .map(String::from)
+        .to_vec()
     }
 
     #[test]
     fn agent_spellings_map_to_repository_kinds() {
         assert_eq!(
             resolved(&["function"]).definitions,
-            ["Constructor", "Method"]
+            ["Constructor", "DecoratedFunction", "Method"]
         );
         assert_eq!(resolved(&["Method"]).definitions, ["Method"]);
-        assert_eq!(resolved(&["classes"]).definitions, ["Class", "Interface"]);
+        assert_eq!(
+            resolved(&["classes"]).definitions,
+            ["Class", "DecoratedClass", "Interface", "Module", "Type"]
+        );
+        assert_eq!(resolved(&["variable"]).definitions, ["Field", "Var"]);
         assert_eq!(resolved(&["constructors"]).definitions, ["Constructor"]);
-        assert_eq!(resolved(&["type"]).definitions, ["Class", "Interface"]);
-        assert_eq!(resolved(&["def"]).definitions.len(), 5);
+        assert_eq!(resolved(&["def"]).definitions.len(), 11);
         assert!(resolved(&["class", "all"]).definitions.is_empty());
     }
 
