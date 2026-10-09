@@ -9,7 +9,7 @@ const PREFERRED_VARIANTS: &[&str] = &["en", "en-GB", "en-US", "en_US", "en_GB", 
 /// Doc comments and attributes put a definition's name a few lines below its first line.
 const DECLARATION_LINES: usize = 10;
 
-fn is_code(path: &str) -> bool {
+pub(super) fn is_code(path: &str) -> bool {
     path.rsplit_once('.').is_some_and(|(_, ext)| {
         orbit_search::corpus::DEFAULT_SOURCE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
     })

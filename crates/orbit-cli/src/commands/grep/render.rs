@@ -1,4 +1,5 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+use std::path::Path;
 
 use anyhow::Result;
 use grep_matcher::Matcher;
@@ -6,12 +7,15 @@ use grep_matcher::Matcher;
 use super::{Options, Output};
 
 use super::defs::{Connections, Def, connection_label};
-use super::rank::ranked;
+use super::rank::{is_code, is_test, names, ranked};
 use super::scan::Hit;
 use super::term::{Term, matcher};
 
 /// Graph context rides on rg's context-line form (`path-N-`), so every line keeps its path.
 const NOTE: &str = "» ";
+/// A query that names a definition gets that definition's source first, so `head` keeps it.
+const LOOKUP_MAX_DEFINITIONS: usize = 3;
+const LOOKUP_LINES: usize = 40;
 
 fn definition_note(def: &Def, connections: &Connections) -> String {
     let span = match def.end > def.start {
@@ -30,6 +34,7 @@ pub(super) fn render(
     connections: &Connections,
     edited: &BTreeSet<String>,
     options: &Options,
+    lookup: Option<&str>,
 ) -> Result<String> {
     let rows = ranked(hits, alternatives, options.output == Output::Lines);
     let mut out = String::new();
@@ -77,6 +82,10 @@ pub(super) fn render(
         shown.len(),
         rows.len()
     ));
+    if let Some(body) = lookup {
+        out.push_str(body);
+        out.push_str("--\n");
+    }
     let separated = options.before > 0 || options.after > 0;
     let mut previous: Option<(&str, usize)> = None;
     for (file, list) in &rows {
@@ -111,6 +120,59 @@ pub(super) fn render(
     Ok(out)
 }
 
+/// The source of the one definition a single plain query term names, as rg context lines
+/// under its `»` line. None for patterns, OR queries, or names with many definitions.
+pub(super) fn lookup(
+    repo: &Path,
+    hits: &[Hit],
+    alternatives: &[Term],
+    connections: &Connections,
+    options: &Options,
+) -> Option<String> {
+    let [term] = alternatives else {
+        return None;
+    };
+    if term.is_regex() || options.invert || options.output != Output::Lines {
+        return None;
+    }
+    let mut seen = HashSet::new();
+    let named: Vec<&Hit> = hits
+        .iter()
+        .filter(|h| !h.context && names(h, alternatives))
+        .filter(|h| h.def.as_ref().is_some_and(|d| seen.insert(d.id)))
+        .collect();
+    if named.len() > LOOKUP_MAX_DEFINITIONS {
+        return None;
+    }
+    let hit = named
+        .iter()
+        .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
+    let def = hit.def.as_ref()?;
+    let content = std::fs::read_to_string(repo.join(&hit.file)).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    let end = def.end.min(lines.len()).min(def.start + LOOKUP_LINES - 1);
+    let file = &hit.file;
+    let mut out = format!(
+        "{file}-{}-{NOTE}{}\n",
+        def.start,
+        definition_note(def, connections)
+    );
+    for number in def.start..=end {
+        out.push_str(&format!("{file}-{number}-{}\n", lines.get(number - 1)?));
+    }
+    if def.end > end {
+        out.push_str(&format!(
+            "{file}-{}-{NOTE}{} more lines: {} context {file}:{}-{}\n",
+            end + 1,
+            def.end - end,
+            crate::commands::setup::spec::launcher(),
+            end + 1,
+            def.end
+        ));
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +201,7 @@ mod tests {
             &Connections::new(),
             &BTreeSet::new(),
             options,
+            None,
         )
         .unwrap()
     }
@@ -258,6 +321,7 @@ src/a.rs:8:go();
             &Connections::new(),
             &edited,
             &Options::default(),
+            None,
         )
         .unwrap();
         assert!(
@@ -323,5 +387,41 @@ src/a.rs:8:go();
             out,
             "grep: 1 lines in 1 files\npublic/language/{en-GB,+3}/advanced.json:2:\"maintenance-mode\": \"x\"\n"
         );
+    }
+
+    #[test]
+    fn a_single_name_prints_its_definition_first_and_long_ones_are_capped() {
+        let repo = tempfile::tempdir().unwrap();
+        let body: String = (1..=60).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(repo.path().join("a.rs"), body).unwrap();
+        let plain = Options::default();
+        let short = [hit("a.rs", 2, "fn go() {", Some(("go", 2, 4)))];
+        let out = lookup(
+            repo.path(),
+            &short,
+            &[Term::parse("go")],
+            &Connections::new(),
+            &plain,
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "a.rs-2-» Function go:2-4\na.rs-2-line 2\na.rs-3-line 3\na.rs-4-line 4\n"
+        );
+        let long = [hit("a.rs", 1, "fn go() {", Some(("go", 1, 60)))];
+        let out = lookup(
+            repo.path(),
+            &long,
+            &[Term::parse("go")],
+            &Connections::new(),
+            &plain,
+        )
+        .unwrap();
+        assert!(
+            out.ends_with("a.rs-41-» 20 more lines: orbit context a.rs:41-60\n"),
+            "{out}"
+        );
+        let either = [Term::parse("go"), Term::parse("stop")];
+        assert!(lookup(repo.path(), &short, &either, &Connections::new(), &plain).is_none());
     }
 }
