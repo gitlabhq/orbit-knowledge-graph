@@ -179,7 +179,7 @@ stages:
 
       # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
-        replace: '(export_statement $$$SPECS)'
+        replace: '(__module_export $$$SPECS)'
 
 
 

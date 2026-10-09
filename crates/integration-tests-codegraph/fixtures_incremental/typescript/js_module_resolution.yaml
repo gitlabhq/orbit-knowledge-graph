@@ -659,10 +659,6 @@ tests:
       - { row: { name: "track", alias: "secondTrack" } }
 
   - name: Missing members on local namespace imports do not become external calls
-
-    # Known gap: Imported-symbol rows for external namespace imports differ from the old pipeline.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'namespace_missing/main.ts'
