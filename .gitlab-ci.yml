@@ -116,8 +116,8 @@ stages:
     paths: *cargo-home-paths
     policy: pull-push
 
-# For jobs that resolve no dependencies. List it last in `extends` so its
-# `cache` replaces the template's.
+# For jobs that resolve no dependencies. List it after `.job-template` so its
+# `cache` replaces the template's; anything listed later may override it.
 .no-cargo-home-cache:
   variables:
     SKIP_CARGO_HOME_CACHE: "1"
@@ -953,6 +953,7 @@ code-indexing-benchmark-build:
 code-indexing-benchmark-v2-linux:
   extends:
     - .job-template
+    - .no-cargo-home-cache
     - .code-indexing-benchmark-template
   tags:
     - ${RUNNER_LARGE}
@@ -968,6 +969,7 @@ code-indexing-benchmark-v2-linux:
   extends:
     - .job-template
     - .code-indexing-benchmark-rules
+    - .no-cargo-home-cache
   interruptible: true
   script:
     - |
