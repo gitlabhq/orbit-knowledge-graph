@@ -154,8 +154,16 @@ fn is_skill_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+fn skill_client() -> Result<Option<OrbitClient>> {
+    let client = OrbitClient::from_skill_env()?;
+    if client.is_none() {
+        eprintln!("warning: no GitLab credential found; using the embedded local skill");
+    }
+    Ok(client)
+}
+
 async fn list_skills() -> Result<()> {
-    let Some(client) = OrbitClient::from_skill_env()? else {
+    let Some(client) = skill_client()? else {
         return print_local_list();
     };
     match client.list_skills().await {
@@ -211,7 +219,7 @@ fn one_line(value: &str) -> String {
 
 async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
     let local = local_tree();
-    let view = match OrbitClient::from_skill_env()? {
+    let view = match skill_client()? {
         None => local,
         Some(client) => match resolve_remote_tree(&client, name).await? {
             Some(remote) => match compose_tree(remote.files, local.clone()) {
@@ -239,7 +247,13 @@ async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
 }
 
 async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<ValidatedTree>> {
-    let origin = client.origin()?;
+    let origin = match client.origin() {
+        Ok(origin) => origin,
+        Err(error) => {
+            eprintln!("warning: {error}; using the embedded local skill");
+            return Ok(None);
+        }
+    };
     let cached = newest_cached_tree(&origin, name);
     let etag = cached.as_ref().map(|cached| cached.tree.etag.as_str());
     let response = match client.get_skill(name, etag).await {

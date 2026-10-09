@@ -85,18 +85,9 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
     (base_url, handle)
 }
 
-/// A directory holding a `glab` stub that always fails, so no test reaches the
-/// developer's real glab login through the credential helper.
-#[cfg(unix)]
-fn failing_glab_dir() -> &'static std::path::Path {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = tempfile::tempdir().unwrap();
-        write_glab_stub(dir.path(), "exit 1");
-        dir
-    })
-    .path()
-}
+/// A `PATH` with no `glab` on it, so no test reaches the developer's real glab
+/// login through the credential helper.
+const PATH_WITHOUT_GLAB: &str = "/nonexistent-orbit-test-path";
 
 #[cfg(unix)]
 fn write_glab_stub(dir: &std::path::Path, body: &str) {
@@ -111,8 +102,7 @@ fn write_glab_stub(dir: &std::path::Path, body: &str) {
 fn hermetic_orbit(cache: &tempfile::TempDir, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
     command.args(args).env("XDG_CACHE_HOME", cache.path());
-    #[cfg(unix)]
-    command.env("PATH", failing_glab_dir());
+    command.env("PATH", PATH_WITHOUT_GLAB);
     for key in [
         "ORBIT_API_BASE_URL",
         "ORBIT_AUTH_HEADER_NAME",
@@ -349,7 +339,8 @@ fn remote_listing_uses_collection_and_authentication() {
     );
 }
 
-const NO_CREDENTIAL_WARNING: &str = "warning: no GitLab credential found, using the bundled skill";
+const NO_CREDENTIAL_WARNING: &str =
+    "warning: no GitLab credential found; using the embedded local skill";
 
 #[test]
 fn no_credentials_warns_and_serves_the_bundled_skill() {
@@ -411,6 +402,19 @@ fn glab_credential_helper_supplies_the_skill_credential() {
         requests[0].headers.get("authorization").map(String::as_str),
         Some("Bearer glpat-helper")
     );
+}
+
+#[test]
+fn invalid_gitlab_url_warns_and_serves_the_embedded_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills", "get", "orbit"])
+        .env("GITLAB_TOKEN", "glpat-env")
+        .env("GITLAB_URL", "gitlab.example.com")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("using the embedded local skill"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("name: orbit-cli"));
 }
 
 #[test]
