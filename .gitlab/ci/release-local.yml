@@ -17,6 +17,7 @@
   extends:
     - .job-template
     - .sccache-template
+    - .no-cargo-home-cache
     - .local-cli-release-rules
   stage: build
   needs: []
@@ -69,6 +70,7 @@ local-cli-build-windows-amd64:
   extends:
     - .job-template
     - .sccache-template
+    - .no-cargo-home-cache
     - .local-cli-release-rules
   stage: build
   needs: []
