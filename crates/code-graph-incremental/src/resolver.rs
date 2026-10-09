@@ -655,13 +655,22 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
         .children()
         .filter(|node| node.is(C::ModuleExport))
     {
-        if let Some(alias) = export.child_sym(C::DefaultExport)
-            && let Some(target) = tree
+        let bindings = export
+            .names()
+            .map(|name| (name.sym(), name.child_sym(C::Alias).unwrap_or(name.sym())))
+            .chain(
+                export
+                    .child_sym(C::DefaultExport)
+                    .map(|alias| (export.sym(), alias)),
+            );
+        for (name, alias) in bindings {
+            if let Some(target) = tree
                 .root()
                 .children()
-                .find(|node| node.is(C::Def) && node.child_sym(C::DefName) == export.sym_opt())
-        {
-            names.insert(alias, Loc::new(fi, target.index()));
+                .find(|node| node.is(C::Def) && node.child_sym(C::DefName) == Some(name))
+            {
+                names.insert(alias, Loc::new(fi, target.index()));
+            }
         }
     }
     names

@@ -15,6 +15,7 @@ fixtures:
     content: |
       function implementation() {}
       export { implementation as renamed };
+      export { implementation as default };
   - path: main.ts
     content: |
       import * as local from './local';
@@ -22,6 +23,7 @@ fixtures:
       import * as barrel from './barrel';
       import * as renamed from './renamed';
       import * as dynamic from './dynamic';
+      import renamedDefault, { renamed as alias } from './renamed';
       export function missing() { local.missing(); }
       export function known() { local.existing(); }
       export function uncertain() { local.unknown(); }
@@ -29,6 +31,8 @@ fixtures:
       export function reexported() { barrel.missing(); }
       export function localExport() { renamed.renamed(); }
       export function dynamicExport() { dynamic.available(); }
+      export function aliasExport() { alias(); }
+      export function defaultExport() { renamedDefault(); }
 tests:
   - name: "unresolved namespace targets retain fallback until exports are proven complete"
     query: |
@@ -36,12 +40,11 @@ tests:
       WHERE caller.file_path = 'main.ts'
       RETURN caller.name AS caller
     assert:
-      - { row_count: 6 }
+      - { row_count: 5 }
       - { row: { caller: missing } }
       - { row: { caller: uncertain } }
       - { row: { caller: remote } }
       - { row: { caller: reexported } }
-      - { row: { caller: localExport } }
       - { row: { caller: dynamicExport } }
   - name: "existing members still resolve"
     query: |
@@ -49,8 +52,11 @@ tests:
       WHERE caller.file_path = 'main.ts'
       RETURN caller.name AS caller, target.name AS target
     assert:
-      - { row_count: 1 }
+      - { row_count: 4 }
       - { row: { caller: known, target: existing } }
+      - { row: { caller: localExport, target: implementation } }
+      - { row: { caller: aliasExport, target: implementation } }
+      - { row: { caller: defaultExport, target: implementation } }
 steps:
   - name: add missing member after snapshot loading
     snapshot: true
