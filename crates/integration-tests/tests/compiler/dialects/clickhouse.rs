@@ -1458,23 +1458,16 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    for query in [
-        "MATCH (u:User) WHERE u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN [] AND u.id >= 1 AND u.id <= 3 RETURN u",
-        "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u",
-    ] {
-        assert!(
-            compiler::compile(
-                query,
-                compiler::Frontend::Gql,
-                &test_ontology(),
-                &test_ctx()
-            )
-            .is_err(),
-            "{query}"
-        );
-    }
+    let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
+    assert!(
+        compiler::compile(
+            query,
+            compiler::Frontend::Gql,
+            &test_ontology(),
+            &test_ctx()
+        )
+        .is_err()
+    );
 }
 
 #[test]

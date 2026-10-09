@@ -21,6 +21,10 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 
 ## Prerequisites
 
+Query scenarios can set `config.ontology_overlay` to a name under
+`config/seeds/overlays/`. The override changes the query catalog for that scenario.
+Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL.
+
 Integration tests need a Docker-compatible runtime. The project uses Colima, managed
 through `mise.toml`:
 

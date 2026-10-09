@@ -454,6 +454,9 @@ mod tests {
             .description
     }
 
+    // Tripping this budget usually means the ontology gained edges. Either
+    // raise the limits after checking the inlined description is still worth
+    // its tokens, or shorten the pattern format in `build_relationship_patterns`.
     #[test]
     fn inlined_description_stays_under_size_budget() {
         for frontend in [Frontend::JsonDsl, Frontend::Gql] {

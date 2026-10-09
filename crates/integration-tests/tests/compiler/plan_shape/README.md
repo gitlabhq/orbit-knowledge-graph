@@ -4,6 +4,9 @@ Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture checks normalized input, selected requirements, and/or
 the emitted SQL AST. Most fixtures run through both JSON and GQL.
 
+Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
+for one fixture. Other fixtures keep the default ontology.
+
 Both `query.json` and `query.gql` are required. If a frontend cannot express the
 tested plan, declare its reason under `missing_frontends`. The runner rejects
 missing, blank, unknown, or redundant exception entries.

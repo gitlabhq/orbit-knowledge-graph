@@ -195,6 +195,20 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
+fn has_wide_id_range(node: &InputNode) -> bool {
+    node.id_range
+        .as_ref()
+        .is_some_and(|range| range.end.saturating_sub(range.start) > MAX_ID_RANGE_SPAN)
+}
+
+fn wide_id_range_hint(wide: bool) -> String {
+    if wide {
+        format!(" (an id_range counts only with a span of at most {MAX_ID_RANGE_SPAN})")
+    } else {
+        String::new()
+    }
+}
+
 #[derive(Default)]
 pub struct Skip {
     pub selectivity: bool,
@@ -952,18 +966,19 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             QueryType::Neighbors
                 if input.nodes.first().is_none_or(|n| !node_has_selectivity(n)) =>
             {
-                return Err(QueryError::Validation(
-                    "neighbors requires node_ids or filters on the center node \
-                     to avoid scanning all edges"
-                        .into(),
-                ));
+                let hint = wide_id_range_hint(input.nodes.first().is_some_and(has_wide_id_range));
+                return Err(QueryError::Validation(format!(
+                    "neighbors requires filters or node_ids on the center node \
+                     to avoid scanning all edges{hint}"
+                )));
             }
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
-                return Err(QueryError::Validation(
-                    "add a filter or node ID on at least one node".into(),
-                ));
+                let hint = wide_id_range_hint(input.nodes.iter().any(has_wide_id_range));
+                return Err(QueryError::Validation(format!(
+                    "add filters or node_ids to at least one node{hint}"
+                )));
             }
             _ => {}
         }
@@ -1376,10 +1391,10 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
             if op == FilterOp::In
                 && !value
                     .as_array()
-                    .is_some_and(|values| !values.is_empty() && values.len() <= MAX_IN_VALUES)
+                    .is_some_and(|values| values.len() <= MAX_IN_VALUES)
             {
                 return Err(QueryError::Validation(format!(
-                    "IN requires 1-{MAX_IN_VALUES} values"
+                    "IN requires 0-{MAX_IN_VALUES} values"
                 )));
             }
             if matches!(
@@ -1465,6 +1480,46 @@ mod tests {
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
+        );
+    }
+
+    #[test]
+    fn selectivity_error_mentions_id_range_cap_only_for_wide_ranges() {
+        let ontology = test_ontology();
+        let error_for = |json: &str| {
+            let input = parse_input(json).unwrap();
+            validator(&ontology)
+                .check_references(&input)
+                .unwrap_err()
+                .to_string()
+        };
+
+        let plain =
+            error_for(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#);
+        assert!(
+            plain.ends_with("add filters or node_ids to at least one node"),
+            "{plain}"
+        );
+
+        let neighbors = error_for(
+            r#"{"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User"}],
+                "neighbors": {"node": "u", "direction": "both"}}"#,
+        );
+        assert!(
+            neighbors.ends_with("on the center node to avoid scanning all edges"),
+            "{neighbors}"
+        );
+
+        let wide_neighbors = error_for(
+            r#"{"query_type": "neighbors",
+                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}],
+                "neighbors": {"node": "u", "direction": "both"}}"#,
+        );
+        assert!(
+            wide_neighbors.ends_with(
+                "avoid scanning all edges (an id_range counts only with a span of at most 100000)"
+            ),
+            "{wide_neighbors}"
         );
     }
 
@@ -2591,7 +2646,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2623,7 +2678,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
         assert_ok(
             r#"{
@@ -2644,7 +2699,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2670,7 +2725,7 @@ mod tests {
                 "group_by": ["p"],
                 "aggregations": [{"count": "u", "as": "c"}]
             }"#,
-            "filter or node ID on at least one node",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2684,7 +2739,8 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "filter or node ID on at least one node",
+            "add filters or node_ids to at least one node \
+             (an id_range counts only with a span of at most 100000)",
         );
         assert_ok(
             r#"{
