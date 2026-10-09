@@ -6437,7 +6437,7 @@
       },
       "id": 126,
       "panels": [],
-      "title": "Rails KG — request (reference)",
+      "title": "Rails Orbit — request (reference)",
       "type": "row"
     },
     {
@@ -7221,7 +7221,7 @@
       },
       "id": 140,
       "panels": [],
-      "title": "Rails KG — traversal (reference)",
+      "title": "Rails Orbit — traversal (reference)",
       "type": "row"
     },
     {

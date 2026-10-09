@@ -62,7 +62,7 @@ local items = [
     o.target('count(count by (app_id) (siphon_operations_total{%s}))' % o.SIPHON_SEL, 'apps', 'ORBIT_DS'),
     'short', 8),
 
-  o.row('Rails → KG'),
+  o.row('Rails → Orbit'),
   o.stat('gRPC calls / min', 'Rails → Orbit gRPC requests per minute.',
     o.target('sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{%s}[5m]) * 60)' % o.RAILS_SEL, 'calls/min', 'RAILS_DS'),
     'short', 8),

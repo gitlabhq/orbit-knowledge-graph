@@ -1,4 +1,4 @@
-// External-service metrics: HTTP autoinstrumentation, Siphon, NATS, Rails KG.
+// External-service metrics: HTTP autoinstrumentation, Siphon, NATS, Rails Orbit.
 // These are emitted by other services so they can't live in the Rust catalog;
 // kind / labels / description are spelled out here.
 

@@ -8409,7 +8409,7 @@
       },
       "id": 165,
       "panels": [],
-      "title": "Rails KG request path",
+      "title": "Rails Orbit request path",
       "type": "row"
     },
     {
@@ -9193,7 +9193,7 @@
       },
       "id": 179,
       "panels": [],
-      "title": "Rails KG traversal compaction",
+      "title": "Rails Orbit traversal compaction",
       "type": "row"
     },
     {
