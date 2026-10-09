@@ -1376,10 +1376,10 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
             if op == FilterOp::In
                 && !value
                     .as_array()
-                    .is_some_and(|values| !values.is_empty() && values.len() <= MAX_IN_VALUES)
+                    .is_some_and(|values| values.len() <= MAX_IN_VALUES)
             {
                 return Err(QueryError::Validation(format!(
-                    "IN requires 1-{MAX_IN_VALUES} values"
+                    "IN requires 0-{MAX_IN_VALUES} values"
                 )));
             }
             if matches!(

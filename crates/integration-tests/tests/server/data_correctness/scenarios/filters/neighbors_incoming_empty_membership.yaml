@@ -1,0 +1,10 @@
+description: Empty center membership excludes incoming neighbors
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})<-[:AUTHORED]-(n) WHERE mr.state IN [] RETURN n
+expect:
+  node_count: 0
+  nodes:
+    MergeRequest: {ids: []}
+  edges: {AUTHORED: []}
+  skip_requirements: [filter:state]
