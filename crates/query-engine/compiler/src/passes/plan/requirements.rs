@@ -156,3 +156,34 @@ pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
         })
         .collect()
 }
+
+pub(super) fn edge_outputs(hop: &super::Hop, alias: &str) -> Vec<Projection> {
+    use crate::constants::*;
+    let prefix = if hop.max_hops > 1 {
+        format!("hop_{alias}")
+    } else {
+        alias.into()
+    };
+    let mut outputs: Vec<_> = [
+        (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
+        (SOURCE_ID_COLUMN, EDGE_SRC_SUFFIX),
+        (SOURCE_KIND_COLUMN, EDGE_SRC_TYPE_SUFFIX),
+        (TARGET_ID_COLUMN, EDGE_DST_SUFFIX),
+        (TARGET_KIND_COLUMN, EDGE_DST_TYPE_SUFFIX),
+    ]
+    .into_iter()
+    .map(|(column, suffix)| {
+        Projection::new(
+            OutputValue::Column(Column::new(alias, column)),
+            format!("{prefix}_{suffix}"),
+        )
+    })
+    .collect();
+    if hop.max_hops > 1 {
+        outputs.push(Projection::new(
+            OutputValue::Column(Column::new(alias, PATH_NODES_COLUMN)),
+            format!("{prefix}_{PATH_NODES_COLUMN}"),
+        ));
+    }
+    outputs
+}

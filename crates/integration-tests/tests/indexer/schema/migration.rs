@@ -57,19 +57,60 @@ fn campaign() -> indexer::campaign::CampaignState {
 }
 
 #[test]
-fn reordered_table_declarations_do_not_change_deployed_schema() {
+fn reordered_table_declarations_add_a_table_and_feeding_view() {
     let base = ontology::Ontology::load_embedded().unwrap();
     let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
     let base_schema = test_schema(&base);
     let overlay_schema = test_schema(&overlay);
-    assert_eq!(base_schema.tables.len(), overlay_schema.tables.len());
-    assert_eq!(base_schema.views.len(), overlay_schema.views.len());
+    assert_eq!(base_schema.tables.len() + 1, overlay_schema.tables.len());
+    assert_eq!(base_schema.views.len() + 1, overlay_schema.views.len());
     assert!(
-        !overlay_schema
+        overlay_schema
             .tables
             .iter()
             .any(|table| table.name == "gl_code_edge_by_target")
     );
+}
+
+#[tokio::test]
+async fn reordered_table_initializes_from_cloned_source_and_receives_later_inserts() {
+    let ctx = TestContext::new(&[]).await;
+    let original = ontology::Ontology::load_embedded().unwrap();
+    let client = ctx.create_client();
+    let credentials = dictionary_credentials(&ctx.config);
+    orbit_migrations::execute::create_all_versioned_tables(
+        &client,
+        &GraphSchema::from_ontology(&original).unwrap(),
+        &credentials,
+        "v1_",
+    )
+    .await
+    .unwrap();
+    ctx.execute("INSERT INTO v1_gl_code_edge (traversal_path, relationship_kind, project_id, branch, source_id, target_id, source_kind, target_kind) VALUES ('1/100/1000/', 'CALLS', 1000, 'main', 1, 2, 'Definition', 'Definition')").await;
+    let incoming = integration_testkit::load_ontology_overlay("reordered_edges");
+    let schema = GraphSchema::from_ontology(&incoming).unwrap();
+    for _ in 0..2 {
+        orbit_migrations::execute::create_tables_with_selective_cloning(
+            &client,
+            &incoming,
+            &schema,
+            &credentials,
+            &MigrationScope::None,
+            1,
+            2,
+        )
+        .await
+        .unwrap();
+    }
+    ctx.execute("INSERT INTO v2_gl_code_edge (traversal_path, relationship_kind, project_id, branch, source_id, target_id, source_kind, target_kind) VALUES ('1/100/1000/', 'CALLS', 1000, 'main', 3, 2, 'Definition', 'Definition')").await;
+    for table in ["v2_gl_code_edge", "v2_gl_code_edge_by_target"] {
+        let rows = ctx
+            .query(&format!(
+                "SELECT source_id FROM {table} FINAL ORDER BY source_id"
+            ))
+            .await;
+        assert_eq!(i64::extract_column(&rows, 0).unwrap(), [1, 3]);
+    }
 }
 
 #[tokio::test]

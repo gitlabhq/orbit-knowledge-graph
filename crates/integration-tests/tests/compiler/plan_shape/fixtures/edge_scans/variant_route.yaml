@@ -1,0 +1,17 @@
+name: Typed edge scans select the endpoint variant while local storage stays unified
+ontology_overlay: variant_routes
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000],"columns":["id"]},{"id":"callee","entity":"Definition","columns":["id"]}],"relationships":[{"type":"CALLS","from":"file","to":"callee"}]}
+  gql: |
+    MATCH (file:File {id: 11000})-[:CALLS]->(callee:Definition) RETURN file.id, callee.id
+logical:
+  expect: ["(EdgeScan CALLS file->callee AS e0)"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Scan Table(gl_edge) AS e0)"]
+      reject: ["(Scan Table(gl_code_edge) ...)"]
+  duckdb:
+    planned:
+      expect: ["(Scan Table(gl_edge) AS e0)"]

@@ -29,7 +29,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Project f.path AS f_path (Filter ... (Deduplicate Final (Scan Table(gl_file) AS f))))
+        - (Project f.path AS f_path (Filter ... (Scan Table(gl_file) AS f)))
       reject:
         - (Project f.id AS f_id, ... (_))
     emitted:

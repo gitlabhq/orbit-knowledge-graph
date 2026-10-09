@@ -25,6 +25,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON callee.id = e0.target_id (_) (Bind callee (_)))
-        - (Join ON caller.id = e0.source_id (_) (Bind caller (_)))
+        - (Join ON callee.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS callee)))
+        - (Join ON caller.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS caller)))
         - (Scan Table(gl_edge) AS e0)

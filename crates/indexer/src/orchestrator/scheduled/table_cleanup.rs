@@ -117,7 +117,7 @@ fn list_graph_tables(
         query_data_model::implementations::clickhouse::layout::ClickHouse,
     >::derive(ontology)?;
     Ok(storage
-        .graph_tables()
+        .tables()
         .iter()
         .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
         .collect())

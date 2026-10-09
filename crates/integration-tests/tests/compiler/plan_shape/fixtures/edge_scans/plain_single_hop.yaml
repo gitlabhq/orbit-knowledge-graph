@@ -18,4 +18,6 @@ physical:
       reject: ["(Deduplicate ... (_))", "(Scan Table(gl_definition) ...)"]
   duckdb:
     planned:
-      expect: ["(Join ON b.id = e0.target_id (_) (Bind b (_)))", "(Join ON a.id = e0.source_id (_) (Bind a (_)))"]
+      expect: ["(Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))", "(Join ON a.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS a)))"]
+      ctes: {absent: true}
+      reject: ["(Deduplicate ... (_))", "(SemiJoin ... (_) (_))"]

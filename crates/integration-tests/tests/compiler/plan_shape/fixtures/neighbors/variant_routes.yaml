@@ -1,0 +1,16 @@
+name: Incoming neighbors include all tables containing compatible variants
+ontology_overlay: variant_routes
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001]}],"neighbors":{"direction":"incoming","rel_types":["CALLS"]}}
+  gql: |
+    MATCH (callee:Definition {id: 12001})<-[:CALLS]-(caller) RETURN callee, caller
+logical:
+  expect: ["(Input neighbors (...))"]
+physical:
+  clickhouse:
+    emitted:
+      expect:
+        - (Union ALL AS e (_) (_))
+        - (Scan Table(gl_code_edge) AS _e)
+        - (Scan Table(gl_edge) AS _e)

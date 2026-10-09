@@ -38,13 +38,11 @@ impl TableLayout {
             columns: table
                 .columns
                 .iter()
-                .filter(|column| ontology::denormalized::copies(&column.name))
                 .map(|column| column.name.trim_matches('`').to_string())
                 .collect(),
             column_types: table
                 .column_types
                 .iter()
-                .filter(|(name, _)| ontology::denormalized::copies(name))
                 .map(|(name, data_type)| (name.clone(), *data_type))
                 .collect(),
             sort_key: table.sort_key.clone(),
@@ -67,7 +65,7 @@ pub struct EntityLayout {
 pub struct ClickHouseBindings {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
-    relationships: Vec<Option<String>>,
+    relationships: Vec<Vec<String>>,
     variant_routes: Vec<Option<VariantRoute>>,
     materialized_joins: Vec<MaterializedJoin>,
     reordered_layouts: Vec<ReorderedCopy>,
@@ -92,7 +90,10 @@ impl ClickHouseBindings {
     }
 
     pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
-        self.relationships.get(id.index())?.as_deref()
+        match self.relationships.get(id.index())?.as_slice() {
+            [table] => Some(table),
+            _ => None,
+        }
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
@@ -115,7 +116,7 @@ impl ClickHouseBindings {
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
             .iter()
-            .filter_map(Option::as_deref)
+            .flatten()
             .collect::<BTreeSet<_>>()
             .into_iter()
             .filter_map(|name| self.tables.get(name))
@@ -213,8 +214,9 @@ impl RelationalMapping for ClickHouseBindings {
         }
         relationships
             .iter()
-            .filter_map(|relationship| self.relationship_table(*relationship))
-            .map(String::from)
+            .filter_map(|relationship| self.relationships.get(relationship.index()))
+            .flatten()
+            .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()

@@ -52,9 +52,10 @@ physical:
                   (Filter e0p.source_id = 1, ... (Scan Table(gl_code_edge) AS e0p))))))
   duckdb:
     planned:
+      ctes: {absent: true}
+      reject: ["(SemiJoin ... (_) (_))", "(Deduplicate ... (_))"]
       expect:
-        - (Join ON d.id = e2.target_id (_) (Bind d (_)))
-        - (SemiJoin e2.source_id IN subquery (_) (_))
+        - (Join ON d.id = e2.target_id (_) (Filter ... (Scan Table(gl_definition) AS d)))
         - (Join ON e0.target_id = e1.source_id (_) (_))
         - (Join ON a.id = e0.source_id (_) (_))
         - (Join ON b.id = e0.target_id (_) (_))

@@ -104,7 +104,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             );
         }
 
-        let mut relationships = vec![None; graph.relationships().count()];
+        let mut relationships = vec![Vec::new(); graph.relationships().count()];
         let mut variant_routes = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {
             for edge in storage
@@ -153,11 +153,11 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 });
             }
             relationships[relationship.id.index()] = storage
-                .edge_routes()
-                .iter()
-                .find(|route| route.relationship == relationship.name)
-                .map(|route| route.table.clone())
-                .or_else(|| Some(storage.metadata.default_edge_table.clone()));
+                .relationship_tables(&relationship.name)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect();
         }
 
         let mut denormalized = HashMap::new();
@@ -229,13 +229,12 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                     })
                 })
                 .collect();
-            let mut layout = TableLayout::from_storage(
+            let layout = TableLayout::from_storage(
                 storage.require_table(&join.table)?,
                 None,
                 path_columns,
                 true,
             );
-            layout.column_types.clear();
             tables.insert(join.table.clone(), layout);
         }
 
