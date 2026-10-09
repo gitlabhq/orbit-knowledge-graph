@@ -44,8 +44,7 @@ fixtures:
 
 tests:
   - name: "macro-expanded function call resolves to local function"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+    supported: false
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_macro_function' AND callee.name = 'helper'
@@ -55,8 +54,7 @@ tests:
       - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
 
   - name: "macro-expanded method call resolves to impl method"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+    supported: false
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_macro_method' AND callee.name = 'run'

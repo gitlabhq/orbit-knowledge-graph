@@ -53,6 +53,8 @@ pub struct TestCase {
     pub severity: Severity,
     #[serde(default)]
     pub skip: bool,
+    #[serde(default = "supported")]
+    pub supported: bool,
     #[serde(default)]
     pub debug: bool,
     #[serde(default)]
@@ -64,6 +66,14 @@ pub struct TestCase {
 }
 
 impl TestCase {
+    pub fn disabled_reason(&self) -> Option<&'static str> {
+        if !self.supported {
+            Some("UNSUPPORTED")
+        } else {
+            self.skip.then_some("SKIP")
+        }
+    }
+
     pub fn all_queries(&self) -> Vec<QueryBlock> {
         let mut blocks = Vec::new();
         if let Some(q) = &self.query {
@@ -75,6 +85,10 @@ impl TestCase {
         blocks.extend(self.queries.iter().cloned());
         blocks
     }
+}
+
+fn supported() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

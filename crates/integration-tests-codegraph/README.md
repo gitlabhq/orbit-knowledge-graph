@@ -4,8 +4,8 @@ YAML-driven integration tests for the v2 code-graph pipeline. Each fixture defin
 
 ## Running
 
-```bash
-cargo nextest run -p integration-tests-codegraph
+```shell
+mise exec -- cargo nextest run -p integration-tests-codegraph
 ```
 
 ## Fixture structure
@@ -28,6 +28,7 @@ tests:
   - name: Test name
     severity: error            # "error" (default) or "warning"
     skip: false                # skip this test
+    supported: true            # false for a capability the engine does not implement
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'run'
@@ -114,7 +115,7 @@ Inverts any assertion. The check must fail for the assertion to pass.
 
 ## Fixture directories
 
-```
+```plaintext
 fixtures/
   containment.yaml          # definition nesting (class > method > inner class)
   structural.yaml           # file/directory structure, edge kinds, imports
@@ -136,7 +137,11 @@ fixtures_incremental/       # the same suite format, run by code-graph-increment
 Two test targets generate one test per YAML file: `suites` runs `fixtures/`
 through `code-graph`, `incremental_suites` runs `fixtures_incremental/`
 through `code-graph-incremental`. A suite mixing languages declares
-`pipeline:`. A known gap is a `skip: true` with a comment naming the reason.
+`pipeline:`. Use `skip: true` for a known defect. Use `supported: false` for
+an unimplemented capability, such as macro expansion. Support defaults to true.
+The flag applies to a whole test entry, including all its query blocks, and also
+works in incremental steps. Unsupported entries take precedence over skips.
+The runner reports executed, skipped, and unsupported checks separately.
 
 ## Adding a test
 

@@ -65,8 +65,7 @@ tests:
       - { row: { src: "src/api.rs", tgt: "src/util.rs" } }
 
   - name: "execute -> Worker::new resolves across files and macro expansion"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+    supported: false
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
@@ -94,8 +93,7 @@ tests:
       - { row: { src: "src/worker.rs", tgt: "src/util.rs" } }
 
   - name: "execute -> make_worker macro resolves"
-    # Known gap: Macro expansion is not modelled.
-    skip: true
+    supported: false
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'make_worker'

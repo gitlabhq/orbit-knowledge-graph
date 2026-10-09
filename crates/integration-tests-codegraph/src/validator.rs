@@ -27,8 +27,8 @@ pub fn run_suite(
 ) -> Vec<Failure> {
     let mut failures = undeclared_edges(client, ontology);
     for test in &suite.tests {
-        if test.skip {
-            eprintln!("  [SKIP] \"{}\"", test.name);
+        if let Some(reason) = test.disabled_reason() {
+            eprintln!("  [{reason}] \"{}\"", test.name);
             continue;
         }
         failures.extend(run_test(test, client, ontology));
@@ -598,12 +598,11 @@ fn fail(test: &str, severity: Severity, message: String) -> Failure {
 /// Parses a suite; `None` when every test is skipped and there is nothing to run.
 pub fn load_suite(yaml: &str) -> Option<TestSuite> {
     let suite: TestSuite = orbit_utils::yaml::from_str(yaml).expect("Failed to parse YAML suite");
-    if suite.tests.iter().all(|t| t.skip) && suite.steps.is_empty() {
-        eprintln!(
-            "[PASS] Suite: {} ({} tests, all skipped)",
-            suite.name,
-            suite.tests.len()
-        );
+    if suite.tests.iter().all(|t| t.disabled_reason().is_some()) && suite.steps.is_empty() {
+        for test in &suite.tests {
+            eprintln!("  [{}] \"{}\"", test.disabled_reason().unwrap(), test.name);
+        }
+        eprintln!("[SKIP] Suite: {} (no enabled tests)", suite.name);
         return None;
     }
     Some(suite)
@@ -665,7 +664,21 @@ pub fn write_fixtures(fixtures: &[FixtureFile], root: &std::path::Path) -> Vec<(
 /// Prints the outcome; panics when any failure is an error.
 pub fn report(suite: &TestSuite, failures: &[Failure]) {
     if failures.is_empty() {
-        eprintln!("[PASS] Suite: {} ({} tests)", suite.name, suite.tests.len());
+        let tests: Vec<_> = suite
+            .tests
+            .iter()
+            .chain(suite.steps.iter().flat_map(|step| &step.tests))
+            .collect();
+        let unsupported = tests.iter().filter(|test| !test.supported).count();
+        let skipped = tests
+            .iter()
+            .filter(|test| test.supported && test.skip)
+            .count();
+        eprintln!(
+            "[PASS] Suite: {} ({} executed, {skipped} skipped, {unsupported} unsupported)",
+            suite.name,
+            tests.len() - skipped - unsupported
+        );
         return;
     }
     let mut msg = format!(
