@@ -10,7 +10,7 @@ use shared::{PaginationMeta, PipelineOutput};
 use types::{NodeRef, QueryResultRow};
 
 use crate::column_value_to_json;
-use crate::graph::{GraphFormatter, is_reserved_node_key};
+use crate::graph::{GraphFormatter, group_node_cell, is_reserved_node_key};
 use crate::text::{ordered_pairs, truncate, truncated_len};
 
 pub fn encode(output: &PipelineOutput) -> String {
@@ -83,8 +83,10 @@ fn aggregation_table(output: &PipelineOutput) -> Table {
             columns
                 .iter()
                 .map(|column| match row.get(column) {
-                    Some(Value::Object(cell)) if cell.contains_key("type") => group_node(cell),
-                    Some(value) => literal(value, column),
+                    Some(value) => group_node_cell(value).map_or_else(
+                        || literal(value, column),
+                        |(label, id, properties)| node_literal(label, id, properties),
+                    ),
                     None => null(),
                 })
                 .collect()
@@ -154,20 +156,6 @@ fn dynamic_node(node: &NodeRef) -> String {
         node.id,
         &json_properties(&node.properties),
     )
-}
-
-fn group_node(cell: &Map<String, Value>) -> String {
-    let label = cell.get("type").and_then(Value::as_str).unwrap_or_default();
-    let id = cell
-        .get("id")
-        .and_then(Value::as_str)
-        .and_then(|id| id.parse().ok());
-    let empty = Map::new();
-    let properties = cell
-        .get("properties")
-        .and_then(Value::as_object)
-        .unwrap_or(&empty);
-    id.map_or_else(null, |id| node_literal(label, id, properties))
 }
 
 fn node_literal(label: &str, id: i64, properties: &Map<String, Value>) -> String {

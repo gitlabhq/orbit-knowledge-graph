@@ -1,19 +1,11 @@
-use std::sync::Arc;
-
-use crate::common::compile_model;
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext,
-    derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, test_security_context,
 };
 use integration_testkit::{run_subtests_shared, t};
-use orbit_server::pipeline::HydrationStage;
-use orbit_server::redaction::QueryResult;
-use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{
     FormatName, GraphFormatter, ResultFormatter, TOON_OUTPUT_FORMAT_VERSION, ToonFormatter,
 };
-use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
-use query_engine::shared::{PipelineOutput, RedactionOutput};
+use query_engine::shared::PipelineOutput;
 use serde_json::{Value, json};
 
 async fn seed(ctx: &TestContext) {
@@ -63,70 +55,8 @@ async fn seed(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-async fn run_pipeline(
-    ctx: &TestContext,
-    json: &str,
-    svc: &MockRedactionService,
-    security_ctx: SecurityContext,
-) -> PipelineOutput {
-    let ontology = load_ontology();
-    let data_model = derive_clickhouse_data_model(&ontology);
-    let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(
-        compile_model(
-            json,
-            query_engine::compiler::Frontend::JsonDsl,
-            &data_model,
-            &security_ctx,
-        )
-        .unwrap(),
-    );
-
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
-    let redacted_count = run_redaction(&mut result, svc);
-
-    let mut server_extensions = TypeMap::default();
-    server_extensions.insert(client);
-    server_extensions.insert(data_model);
-    let mut pipeline_ctx = QueryPipelineContext {
-        frontend: query_engine::compiler::Frontend::JsonDsl,
-        query_json: String::new(),
-        compiled: Some(Arc::clone(&compiled)),
-        ontology: Arc::clone(&ontology),
-        security_context: Some(security_ctx),
-        server_extensions,
-        phases: TypeMap::default(),
-    };
-    pipeline_ctx.phases.insert(RedactionOutput {
-        query_result: result,
-        redacted_count,
-    });
-    let mut obs = NoOpObserver;
-
-    let hydration_output = HydrationStage
-        .execute(&mut pipeline_ctx, &mut obs)
-        .await
-        .expect("pipeline should succeed");
-
-    let mut query_result = hydration_output.query_result;
-    let pagination = Some(query_engine::shared::paginate(
-        &mut query_result,
-        &compiled.input,
-        &compiled.pagination,
-    ));
-
-    PipelineOutput {
-        row_count: query_result.authorized_count(),
-        redacted_count: hydration_output.redacted_count,
-        query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![compiled.base.sql.clone()],
-        compiled: Arc::clone(&compiled),
-        query_result,
-        result_context: hydration_output.result_context,
-        execution_log: vec![],
-        pagination,
-    }
+async fn run_pipeline(ctx: &TestContext, json: &str) -> PipelineOutput {
+    super::graph_formatter::pipeline_output(ctx, json, &allow_all(), test_security_context()).await
 }
 
 fn allow_all() -> MockRedactionService {
@@ -138,13 +68,26 @@ fn allow_all() -> MockRedactionService {
     svc
 }
 
+fn toon_text(output: &PipelineOutput) -> String {
+    match ToonFormatter.format(output) {
+        Value::String(text) => text,
+        other => panic!("ToonFormatter must return Value::String, got {other:?}"),
+    }
+}
+
+fn decode(text: &str) -> Value {
+    let value: Value = toon_format::decode_strict(text)
+        .unwrap_or_else(|error| panic!("invalid TOON ({error}): {text}"));
+    let canonical = toon_format::encode_default(&value).unwrap() + "\n";
+    assert_eq!(
+        text, canonical,
+        "output must match the crate's canonical encoding"
+    );
+    value
+}
+
 fn toon(output: &PipelineOutput) -> Value {
-    let formatted = ToonFormatter.format(output);
-    let text = formatted
-        .as_str()
-        .expect("ToonFormatter must return Value::String");
-    toon_format::decode_strict(text)
-        .unwrap_or_else(|error| panic!("invalid TOON ({error}): {text}"))
+    decode(&toon_text(output))
 }
 
 fn ids(table: &Value) -> Vec<i64> {
@@ -162,10 +105,11 @@ const MEMBERS: &str = r#"{"query_type": "traversal",
         {"id": "g", "entity": "Group", "node_ids": [100]}
     ],
     "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+    "order_by": "u.id",
     "limit": 10}"#;
 
 async fn format_stamped_returns_toon_name_and_version(ctx: &TestContext) {
-    let output = run_pipeline(ctx, MEMBERS, &allow_all(), test_security_context()).await;
+    let output = run_pipeline(ctx, MEMBERS).await;
     let (formatted, version, name) = ToonFormatter.format_stamped(&output);
     assert_eq!(name, FormatName::Toon);
     assert_eq!(version, TOON_OUTPUT_FORMAT_VERSION.to_string());
@@ -173,16 +117,15 @@ async fn format_stamped_returns_toon_name_and_version(ctx: &TestContext) {
 }
 
 async fn traversal_groups_nodes_by_type_into_tables(ctx: &TestContext) {
-    let output = run_pipeline(ctx, MEMBERS, &allow_all(), test_security_context()).await;
-    let text = ToonFormatter.format(&output);
-    let text = text.as_str().unwrap();
+    let text = toon_text(&run_pipeline(ctx, MEMBERS).await);
     assert!(text.contains("  User[3]{id,name,username}:\n"), "{text}");
+    assert!(text.ends_with("truncated: false\n"), "{text:?}");
     assert!(
         text.contains("edges[3]{from,from_id,type,to,to_id}:\n"),
         "{text}"
     );
 
-    let value = toon(&output);
+    let value = decode(&text);
     assert_eq!(value["query_type"], "traversal");
     assert_eq!(ids(&value["nodes"]["User"]), [1, 2, 3]);
     assert_eq!(ids(&value["nodes"]["Group"]), [100]);
@@ -194,7 +137,7 @@ async fn traversal_groups_nodes_by_type_into_tables(ctx: &TestContext) {
 }
 
 async fn toon_and_raw_agree_on_node_and_edge_counts(ctx: &TestContext) {
-    let output = run_pipeline(ctx, MEMBERS, &allow_all(), test_security_context()).await;
+    let output = run_pipeline(ctx, MEMBERS).await;
     let raw = GraphFormatter.format(&output);
     let value = toon(&output);
     let toon_nodes: usize = value["nodes"]
@@ -215,35 +158,22 @@ async fn pagination_cursor_pages_forward(ctx: &TestContext) {
         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
         "order_by": "u.id",
         "cursor": {"page_size": 2}}"#;
-    let page1 = toon(&run_pipeline(ctx, json, &allow_all(), test_security_context()).await);
+    let page1 = toon(&run_pipeline(ctx, json).await);
     assert_eq!(page1["pagination"]["has_more"], true);
     assert_eq!(page1["pagination"]["truncated"], true);
     let after = page1["pagination"]["next_cursor"].as_str().unwrap();
 
     let mut next: Value = serde_json::from_str(json).unwrap();
     next["cursor"]["after"] = json!(after);
-    let page2 = toon(
-        &run_pipeline(
-            ctx,
-            &next.to_string(),
-            &allow_all(),
-            test_security_context(),
-        )
-        .await,
-    );
+    let page2 = toon(&run_pipeline(ctx, &next.to_string()).await);
     assert_eq!(page2["nodes"]["User"][0]["username"], "unicode");
     assert_eq!(page2["pagination"]["has_more"], false);
 }
 
 async fn empty_result_omits_nodes_and_edges(ctx: &TestContext) {
-    let output = run_pipeline(
-        ctx,
-        r#"{"query_type": "traversal",
+    let output = run_pipeline(ctx, r#"{"query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
-            "limit": 10}"#,
-        &allow_all(),
-        test_security_context(),
-    )
+            "limit": 10}"#)
     .await;
     let value = toon(&output);
     assert_eq!(value["query_type"], "traversal");
@@ -260,22 +190,16 @@ async fn strings_and_booleans_round_trip(ctx: &TestContext) {
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]}],
                 "limit": 1}"#,
-            &allow_all(),
-            test_security_context(),
         )
         .await,
     );
     assert_eq!(users["nodes"]["User"][0]["name"], r#"Bob "the Builder""#);
 
     let notes = toon(
-        &run_pipeline(
-            ctx,
-            r#"{"query_type": "traversal",
+        &run_pipeline(ctx, r#"{"query_type": "traversal",
                 "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000, 3001], "columns": ["note", "internal", "confidential"]}],
-                "limit": 10}"#,
-            &allow_all(),
-            test_security_context(),
-        )
+                "order_by": "n.id",
+                "limit": 10}"#)
         .await,
     );
     let notes = &notes["nodes"]["Note"];
@@ -287,14 +211,9 @@ async fn strings_and_booleans_round_trip(ctx: &TestContext) {
 
 async fn path_edges_carry_path_and_step(ctx: &TestContext) {
     let value = toon(
-        &run_pipeline(
-            ctx,
-            r#"{"query_type": "path_finding",
+        &run_pipeline(ctx, r#"{"query_type": "path_finding",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group", "node_ids": [100]}],
-                "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}}"#,
-            &allow_all(),
-            test_security_context(),
-        )
+                "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}}"#)
         .await,
     );
     assert_eq!(value["query_type"], "path_finding");
@@ -317,8 +236,6 @@ async fn aggregation_lifts_group_nodes_and_references_them_by_id(ctx: &TestConte
                 "group_by": ["g"],
                 "aggregations": [{"count": "u", "as": "user_count"}],
                 "limit": 10}"#,
-            &allow_all(),
-            test_security_context(),
         )
         .await,
     );
@@ -332,17 +249,12 @@ async fn aggregation_lifts_group_nodes_and_references_them_by_id(ctx: &TestConte
 
 async fn aggregation_without_node_groups_emits_scalar_rows(ctx: &TestContext) {
     let by_state = toon(
-        &run_pipeline(
-            ctx,
-            r#"{"query_type": "aggregation",
+        &run_pipeline(ctx, r#"{"query_type": "aggregation",
                 "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}],
                 "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
                 "group_by": ["u.state"],
                 "aggregations": [{"count": "u", "as": "user_count"}],
-                "limit": 10}"#,
-            &allow_all(),
-            test_security_context(),
-        )
+                "limit": 10}"#)
         .await,
     );
     assert!(by_state.get("nodes").is_none(), "{by_state}");
@@ -352,16 +264,11 @@ async fn aggregation_without_node_groups_emits_scalar_rows(ctx: &TestContext) {
     );
 
     let total = toon(
-        &run_pipeline(
-            ctx,
-            r#"{"query_type": "aggregation",
+        &run_pipeline(ctx, r#"{"query_type": "aggregation",
                 "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}],
                 "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
                 "aggregations": [{"count": "u", "as": "total"}],
-                "limit": 1}"#,
-            &allow_all(),
-            test_security_context(),
-        )
+                "limit": 1}"#)
         .await,
     );
     assert!(total.get("group_columns").is_none(), "{total}");

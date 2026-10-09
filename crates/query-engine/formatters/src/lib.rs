@@ -39,7 +39,6 @@ pub enum FormatName {
 
 pub trait ResultFormatter: Send + Sync {
     fn format_name(&self) -> FormatName;
-    /// `None` for stubs that have not yet defined their own version.
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 
