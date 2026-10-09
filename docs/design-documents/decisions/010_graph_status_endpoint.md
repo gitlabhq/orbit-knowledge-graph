@@ -24,8 +24,9 @@ Two RPCs expose the services directly, for the Rails status pages.
   syncing, ready or error. A project path reports the SDLC phases of its root, and the source
   code domain carries the project coverage under the path.
 - `GetItemCounts` returns entity counts per domain that the caller can see. The counts
-  stay in the ClickHouse query cache for five minutes. `GetGraphStatus` counts use the same
-  cache.
+  skip the ClickHouse query cache, because a cached count from a backfill stays stale
+  after the backfill ends. `GetGraphStatus` counts the same way. Rails limits the REST
+  graph status calls of each user to 10 a minute per group or project.
 - Rails owns the display text of each domain. The responses send the domain name only.
 - A plan or project that uses all its attempts, or that stops without a retry, is a gap.
   A path or domain is error when all its parts are settled and at least one is a gap.
@@ -45,8 +46,8 @@ Both take many scopes in one call.
   plans) and, for code entities, the project coverage. The scope folds its domains.
 - `item_counts` counts each entity only under the requested scopes where the caller holds
   the entity's required role.
-- The checkpoint and coverage reads skip the ClickHouse query cache, so a phase change is
-  visible on the next call. Item counts keep the cache.
+- The checkpoint, coverage and item count reads skip the ClickHouse query cache. A phase
+  change or a new row is visible on the next call.
 - `indexing.state` comes from the scope phase, `sdlc_indexing` from the plans, and
   `code_indexing` from project coverage: ready → `indexed`, syncing → `backfilling`, not
   started → `not_indexed`. `IndexingStatus` fields 2 to 7 are no longer set.

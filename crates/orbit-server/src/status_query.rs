@@ -5,20 +5,13 @@ use serde::Serialize;
 use tonic::Status;
 use tracing::debug;
 
-#[derive(Clone, Copy)]
-pub(crate) enum QueryCache {
-    Use { ttl_secs: u32 },
-    Skip,
-}
-
 pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
     label: &str,
-    cache: QueryCache,
     bind_params: impl FnOnce(ArrowQuery) -> ArrowQuery,
 ) -> Result<Vec<RecordBatch>, Status> {
-    let sql = append_query_settings(sql, cache)
+    let sql = append_query_settings(sql)
         .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
     debug!(sql, label, "Status query");
@@ -57,18 +50,11 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
     Status::internal(error.to_string())
 }
 
-fn append_query_settings(sql: &str, cache: QueryCache) -> Result<String, String> {
-    let defaults = orbit_server_config::query::default_config();
-    let config = match cache {
-        QueryCache::Use { ttl_secs } => QueryConfig {
-            use_query_cache: Some(true),
-            query_cache_ttl: Some(ttl_secs),
-            ..defaults
-        },
-        QueryCache::Skip => QueryConfig {
-            use_query_cache: Some(false),
-            ..defaults
-        },
+// Status pages poll while a namespace indexes, so a cached result would hide new progress.
+fn append_query_settings(sql: &str) -> Result<String, String> {
+    let config = QueryConfig {
+        use_query_cache: Some(false),
+        ..orbit_server_config::query::default_config()
     };
     let settings = config.to_clickhouse_settings()?;
     if settings.is_empty() {
