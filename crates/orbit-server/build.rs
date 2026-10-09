@@ -1,150 +1,29 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    validate_prompts();
-    validate_skills();
-    validate_named_queries();
-    validate_migration_ledger();
-    validate_ontology_archives();
-    validate_authored_etl_sql();
+    export_current_ontology_archive_path();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
 
-fn validate_ontology_archives() {
-    let config_directory = std::path::Path::new(env!("CONFIG_DIR"));
-    let directory = config_directory.join("ontology-archives");
+/// Points `ONTOLOGY_ARCHIVE_PATH` at the bundled archive for the current
+/// schema version. The remaining validations (prompts, skills, named queries,
+/// migration ledger, archives, ETL SQL) live in `src/build_validations.rs` as
+/// tests so this script does not pull the compiler and ontology crates in as
+/// host build dependencies.
+fn export_current_ontology_archive_path() {
+    let directory = std::path::Path::new(env!("CONFIG_DIR")).join("ontology-archives");
     println!("cargo:rerun-if-changed={}", directory.display());
-    let current_version = orbit_versions::VERSIONS.schema;
-    let current_path = ontology::archive::OntologyArchive::path(config_directory, current_version);
-    let versions = ontology::archive::OntologyArchive::bundled_versions()
-        .unwrap_or_else(|error| panic!("{error}"));
-    assert!(
-        versions.contains(&current_version),
-        "{} is missing; run `mise schema:snapshot` to seed the current archive.",
-        current_path.display()
-    );
-
-    for version in versions {
-        let archive = ontology::archive::OntologyArchive::bundled(version)
-            .unwrap_or_else(|error| panic!("{error}"))
-            .expect("bundled archive must exist");
-        archive
-            .load_ontology()
-            .unwrap_or_else(|error| panic!("bundled archive v{version}: {error}"));
-        if version == current_version {
-            assert!(
-                archive.matches_sources(&ontology::migrations::embedded_sources()),
-                "ontology archive is stale; run `mise schema:bump`"
-            );
-        }
-    }
-    println!(
-        "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
-        current_path.canonicalize().unwrap().display()
-    );
-}
-
-fn validate_prompts() {
-    let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("remote");
-    println!("cargo:rerun-if-changed={}", dir.display());
-    orbit_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
-}
-
-fn validate_skills() {
-    let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let remote = repository.join("skills/orbit");
-    let local = repository.join("skills/orbit-cli");
-    let commands = repository.join("crates/orbit-cli/src/main.rs");
-    println!("cargo:rerun-if-changed={}", remote.display());
-    println!("cargo:rerun-if-changed={}", local.display());
-    println!("cargo:rerun-if-changed={}", commands.display());
-    orbit_prompts::validate_skill_pair(remote, local, commands)
-        .unwrap_or_else(|error| panic!("Orbit skill validation failed: {error}"));
-}
-
-/// Fails the build on ontology/DDL drift from the fingerprint snapshot or a
-/// malformed ledger. Mirrors `cargo xtask migration-ledger check`.
-fn validate_migration_ledger() {
-    let config_dir = std::path::PathBuf::from(env!("CONFIG_DIR"));
-    let ledger_path = config_dir.join(ontology::migrations::LEDGER_FILE);
-    let fingerprint_path = config_dir.join(ontology::migrations::FINGERPRINT_FILE);
-    println!("cargo:rerun-if-changed={}", ledger_path.display());
-    println!("cargo:rerun-if-changed={}", fingerprint_path.display());
-    println!("cargo:rerun-if-changed={}/ontology", config_dir.display());
-
-    let ontology = std::sync::Arc::new(
-        ontology::Ontology::load_embedded()
-            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
-    );
-
-    let current = ontology::migrations::Fingerprints {
-        sources: ontology::migrations::source_fingerprints(),
-        ddl: orbit_migrations::fingerprint::ddl_fingerprints(&ontology),
-        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(&ontology),
-    };
-
-    let committed_text = std::fs::read_to_string(&fingerprint_path).unwrap_or_else(|e| {
+    let current_path = directory.join(format!("v{}.tar.gz", orbit_versions::VERSIONS.schema));
+    let resolved = current_path.canonicalize().unwrap_or_else(|_| {
         panic!(
-            "reading {}: {e}. Run `mise schema:bump` to create the fingerprint snapshot.",
-            fingerprint_path.display()
+            "{} is missing; run `mise schema:snapshot` to seed the current archive.",
+            current_path.display()
         )
     });
-    let committed = ontology::migrations::Fingerprints::parse(&committed_text)
-        .unwrap_or_else(|e| panic!("{e}"));
-
-    let version = orbit_versions::VERSIONS.schema;
-
-    let ledger_text = std::fs::read_to_string(&ledger_path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", ledger_path.display()));
-    let ledger = ontology::migrations::MigrationLedger::parse(&ledger_text)
-        .unwrap_or_else(|e| panic!("{e}"));
-
-    ontology::migrations::verify_snapshot(&ontology, &current, &committed, &ledger, version)
-        .unwrap_or_else(|e| panic!("{e}"));
-}
-
-fn validate_authored_etl_sql() {
-    let ontology = std::sync::Arc::new(
-        ontology::Ontology::load_embedded()
-            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
+    println!(
+        "cargo:rustc-env=ONTOLOGY_ARCHIVE_PATH={}",
+        resolved.display()
     );
-    ontology::etl_sql::validate_authored_etl_sql(&ontology).unwrap_or_else(|e| panic!("{e}"));
-}
-
-fn validate_named_queries() {
-    let dir = std::path::PathBuf::from(
-        std::env::var("NAMED_QUERIES_DIR")
-            .expect("NAMED_QUERIES_DIR must be set via .cargo/config.toml [env]"),
-    );
-    println!("cargo:rerun-if-changed={}", dir.display());
-
-    let ontology = std::sync::Arc::new(
-        ontology::Ontology::load_embedded()
-            .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}")),
-    );
-
-    let ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
-        .expect("static security context must be valid");
-
-    let queries = named_queries::NamedQueries::load_from_dir(&dir)
-        .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
-
-    for query in queries.iter() {
-        for (language, frontend) in [
-            (named_queries::Language::Json, compiler::Frontend::JsonDsl),
-            (named_queries::Language::Gql, compiler::Frontend::Gql),
-        ] {
-            let rendered = query
-                .render_example_language(language)
-                .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
-            if let Err(e) = compiler::compile(&rendered, frontend, &ontology, &ctx) {
-                panic!(
-                    "named query `{}` ({language:?}) failed to compile: {e}",
-                    query.name
-                );
-            }
-        }
-    }
 }
 
 #[cfg(feature = "regenerate-protos")]
