@@ -15,7 +15,73 @@ use super::term::{Term, matcher};
 const NOTE: &str = "» ";
 /// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
-const LOOKUP_LINES: usize = 40;
+const LOOKUP_LINES: usize = 80;
+/// Rows print each file once: the first few matching lines of a definition in full, the rest as
+/// line numbers.
+const SEP: &str = " │ ";
+const FULL_LINES: usize = 3;
+const LINE_CHARS: usize = 160;
+const EDITED_MARK: &str = " (edited since index)";
+
+fn located(lines: &[&Hit], max_columns: Option<usize>) -> String {
+    let mut parts: Vec<String> = lines
+        .iter()
+        .take(FULL_LINES)
+        .map(|h| match max_columns {
+            Some(max) if h.text.len() > max => format!(":{} [Omitted long line]", h.line),
+            None if h.text.chars().count() > LINE_CHARS => format!(
+                ":{} {}…",
+                h.line,
+                h.text.chars().take(LINE_CHARS).collect::<String>()
+            ),
+            _ => format!(":{} {}", h.line, h.text),
+        })
+        .collect();
+    let rest: Vec<usize> = lines.iter().skip(FULL_LINES).map(|h| h.line).collect();
+    if !rest.is_empty() {
+        parts.push(runs(&rest));
+    }
+    parts.join(SEP)
+}
+
+fn runs(lines: &[usize]) -> String {
+    let mut parts = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let mut end = index;
+        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
+            end += 1;
+        }
+        parts.push(match end > index {
+            true => format!(":{}-{}", lines[index], lines[end]),
+            false => format!(":{}", lines[index]),
+        });
+        index = end + 1;
+    }
+    parts.join(" ")
+}
+
+fn code_row(hits: &[&Hit], connections: &Connections, max_columns: Option<usize>) -> String {
+    let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
+    for hit in hits {
+        match groups.last_mut() {
+            Some((def, list)) if *def == hit.def.as_ref() => list.push(hit),
+            _ => groups.push((hit.def.as_ref(), vec![hit])),
+        }
+    }
+    groups
+        .iter()
+        .map(|(def, list)| {
+            let label = def.map(|d| format!("{} ", definition_note(d, connections)));
+            format!(
+                "{}{}",
+                label.unwrap_or_default(),
+                located(list, max_columns)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(SEP)
+}
 
 fn definition_note(def: &Def, connections: &Connections) -> String {
     let span = match def.end > def.start {
@@ -84,7 +150,22 @@ pub(super) fn render(
     ));
     if let Some(body) = lookup {
         out.push_str(body);
-        out.push_str("--\n");
+        out.push('\n');
+    }
+    if options.before == 0 && options.after == 0 {
+        for (file, list) in &rows {
+            let mark = if edited.contains(file) {
+                EDITED_MARK
+            } else {
+                ""
+            };
+            let row = match is_code(file) {
+                true => code_row(list, connections, options.max_columns),
+                false => located(list, options.max_columns),
+            };
+            out.push_str(&format!("  {file}{mark}{SEP}{row}\n"));
+        }
+        return Ok(out);
     }
     let separated = options.before > 0 || options.after > 0;
     let mut previous: Option<(&str, usize)> = None;
@@ -122,6 +203,8 @@ pub(super) fn render(
 
 /// The source of the one definition a single plain query term names, as rg context lines
 /// under its `»` line. None for patterns, OR queries, or names with many definitions.
+/// The source of a definition a plain query term names (at most a few such definitions), printed
+/// before the rows so `head` keeps it. None with `-A`/`-B`/`-C`, `-v`, or `-l`/`-c`/`-q`.
 pub(super) fn lookup(
     repo: &Path,
     hits: &[Hit],
@@ -129,48 +212,61 @@ pub(super) fn lookup(
     connections: &Connections,
     options: &Options,
 ) -> Option<String> {
-    let [term] = alternatives else {
-        return None;
-    };
-    if term.is_regex() || options.invert || options.output != Output::Lines {
+    if options.invert || options.output != Output::Lines || options.before > 0 || options.after > 0
+    {
         return None;
     }
-    let mut seen = HashSet::new();
-    let named: Vec<&Hit> = hits
-        .iter()
-        .filter(|h| !h.context && names(h, alternatives))
-        .filter(|h| h.def.as_ref().is_some_and(|d| seen.insert(d.id)))
-        .collect();
-    if named.len() > LOOKUP_MAX_DEFINITIONS {
-        return None;
-    }
-    let hit = named
-        .iter()
-        .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
-    let def = hit.def.as_ref()?;
-    let content = std::fs::read_to_string(repo.join(&hit.file)).ok()?;
-    let lines: Vec<&str> = content.lines().collect();
-    let end = def.end.min(lines.len()).min(def.start + LOOKUP_LINES - 1);
-    let file = &hit.file;
-    let mut out = format!(
-        "{file}-{}-{NOTE}{}\n",
-        def.start,
-        definition_note(def, connections)
-    );
-    for number in def.start..=end {
-        out.push_str(&format!("{file}-{number}-{}\n", lines.get(number - 1)?));
-    }
-    if def.end > end {
-        out.push_str(&format!(
-            "{file}-{}-{NOTE}{} more lines: {} context {file}:{}-{}\n",
-            end + 1,
-            def.end - end,
-            crate::commands::setup::spec::launcher(),
-            end + 1,
-            def.end
-        ));
-    }
-    Some(out)
+    alternatives.iter().find_map(|term| {
+        if term.is_regex() {
+            return None;
+        }
+        let only = std::slice::from_ref(term);
+        let mut seen = HashSet::new();
+        let named: Vec<&Hit> = hits
+            .iter()
+            .filter(|h| !h.context && names(h, only))
+            .filter(|h| h.def.as_ref().is_some_and(|d| seen.insert(d.id)))
+            .collect();
+        if named.len() > LOOKUP_MAX_DEFINITIONS {
+            return None;
+        }
+        let hit = named
+            .iter()
+            .min_by_key(|h| (!is_code(&h.file), is_test(&h.file)))?;
+        let def = hit.def.as_ref()?;
+        let content = std::fs::read_to_string(repo.join(&hit.file)).ok()?;
+        let lines: Vec<&str> = content.lines().collect();
+        let end = def.end.min(lines.len()).min(def.start + LOOKUP_LINES - 1);
+        let others = match named.len() {
+            1 => String::new(),
+            n => format!(" (1 of {n}; the others are in the rows below)"),
+        };
+        let mut out = format!(
+            "{} {} — {}:{}-{}{others} {}",
+            def.kind,
+            def.name,
+            hit.file,
+            def.start,
+            def.end,
+            connection_label(def, connections)
+        )
+        .trim_end()
+        .to_string();
+        out.push('\n');
+        for number in def.start..=end {
+            out.push_str(&format!("  {number}|{}\n", lines.get(number - 1)?));
+        }
+        if def.end > end {
+            out.push_str(&format!(
+                "  rest: {} context {}:{}-{}\n",
+                crate::commands::setup::spec::launcher(),
+                hit.file,
+                end + 1,
+                def.end
+            ));
+        }
+        Some(out)
+    })
 }
 
 #[cfg(test)]
@@ -207,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn lines_print_like_rg_with_definitions_noted_and_defining_files_first() {
+    fn rows_list_each_file_once_with_definitions_and_defining_files_first() {
         let terms = vec![Term::parse("maintenanceMode"), Term::parse("nosuchxyz")];
         let mut hits = vec![
             hit(
@@ -248,15 +344,10 @@ mod tests {
         assert_eq!(
             out,
             "grep: 6 lines in 4 files (maintenanceMode 6, nosuchxyz 0)
-src/middleware/maintenance.js-9-» Function default:9-41
-src/middleware/maintenance.js:10:middleware.maintenanceMode = helpers.try(
-src/middleware/maintenance.js:11:    if (!meta.config.maintenanceMode) {
-src/routes/feeds.js-25-» Function default:25-38
-src/routes/feeds.js:26:app.get('/x', middleware.maintenanceMode, y);
-src/routes/feeds.js:27:app.get('/x', middleware.maintenanceMode, y);
-test/controllers.js-1201-» Function describe:1201-1230
-test/controllers.js:1203:meta.config.maintenanceMode = 1;
-install/data/defaults.json:130:\"maintenanceMode\": 0,
+  src/middleware/maintenance.js │ Function default:9-41 :10 middleware.maintenanceMode = helpers.try( │ :11     if (!meta.config.maintenanceMode) {
+  src/routes/feeds.js │ Function default:25-38 :26 app.get('/x', middleware.maintenanceMode, y); │ :27 app.get('/x', middleware.maintenanceMode, y);
+  test/controllers.js │ Function describe:1201-1230 :1203 meta.config.maintenanceMode = 1;
+  install/data/defaults.json │ :130 \"maintenanceMode\": 0,
 "
         );
         let files = Options {
@@ -325,19 +416,17 @@ src/a.rs:8:go();
         )
         .unwrap();
         assert!(
-            out.contains(
-                "src/a.rs-3-» edited since index; definitions not shown\nsrc/a.rs:3:fn go() {}\n"
-            ),
+            out.contains("  src/a.rs (edited since index) │ :3 fn go() {}\n"),
             "{out}"
         );
         assert!(
-            out.contains("src/b.rs-1-» Function run:1-9\nsrc/b.rs:4:go();\n"),
+            out.contains("  src/b.rs │ Function run:1-9 :4 go();\n"),
             "{out}"
         );
     }
 
     #[test]
-    fn alternatives_are_counted_and_long_lines_print_whole_unless_capped() {
+    fn alternatives_are_counted_and_long_lines_are_cut_or_omitted() {
         let long = format!("{} go()", "x".repeat(500));
         let hits = vec![
             hit("src/a.rs", 3, "fn go() { stop() }", None),
@@ -349,13 +438,16 @@ src/a.rs:8:go();
             out.starts_with("grep: 2 lines in 1 files (go 2, stop 1, nope 0)\n"),
             "{out}"
         );
-        assert!(out.contains(&format!("src/a.rs:4:{long}\n")), "{out}");
+        assert!(
+            out.contains(&format!(":4 {}…\n", "x".repeat(LINE_CHARS))),
+            "{out}"
+        );
         let capped = Options {
             max_columns: Some(100),
             ..Options::default()
         };
         let out = show(&hits, &terms, &capped);
-        assert!(out.contains("src/a.rs:4:[Omitted long line]\n"), "{out}");
+        assert!(out.contains(":4 [Omitted long line]\n"), "{out}");
         assert!(
             show(&hits, &terms[..1], &Options::default()).starts_with("grep: 2 lines in 1 files\n")
         );
@@ -385,14 +477,14 @@ src/a.rs:8:go();
         );
         assert_eq!(
             out,
-            "grep: 1 lines in 1 files\npublic/language/{en-GB,+3}/advanced.json:2:\"maintenance-mode\": \"x\"\n"
+            "grep: 1 lines in 1 files\n  public/language/{en-GB,+3}/advanced.json │ :2 \"maintenance-mode\": \"x\"\n"
         );
     }
 
     #[test]
-    fn a_single_name_prints_its_definition_first_and_long_ones_are_capped() {
+    fn a_named_definition_prints_first_and_long_ones_are_capped() {
         let repo = tempfile::tempdir().unwrap();
-        let body: String = (1..=60).map(|n| format!("line {n}\n")).collect();
+        let body: String = (1..=100).map(|n| format!("line {n}\n")).collect();
         std::fs::write(repo.path().join("a.rs"), body).unwrap();
         let plain = Options::default();
         let short = [hit("a.rs", 2, "fn go() {", Some(("go", 2, 4)))];
@@ -406,9 +498,9 @@ src/a.rs:8:go();
         .unwrap();
         assert_eq!(
             out,
-            "a.rs-2-» Function go:2-4\na.rs-2-line 2\na.rs-3-line 3\na.rs-4-line 4\n"
+            "Function go — a.rs:2-4\n  2|line 2\n  3|line 3\n  4|line 4\n"
         );
-        let long = [hit("a.rs", 1, "fn go() {", Some(("go", 1, 60)))];
+        let long = [hit("a.rs", 1, "fn go() {", Some(("go", 1, 100)))];
         let out = lookup(
             repo.path(),
             &long,
@@ -418,10 +510,12 @@ src/a.rs:8:go();
         )
         .unwrap();
         assert!(
-            out.ends_with("a.rs-41-» 20 more lines: orbit context a.rs:41-60\n"),
+            out.ends_with("  rest: orbit context a.rs:81-100\n"),
             "{out}"
         );
-        let either = [Term::parse("go"), Term::parse("stop")];
-        assert!(lookup(repo.path(), &short, &either, &Connections::new(), &plain).is_none());
+        let either = [Term::parse("stop"), Term::parse("go")];
+        assert!(lookup(repo.path(), &short, &either, &Connections::new(), &plain).is_some());
+        let pattern = [Term::parse(r"go\(")];
+        assert!(lookup(repo.path(), &short, &pattern, &Connections::new(), &plain).is_none());
     }
 }
