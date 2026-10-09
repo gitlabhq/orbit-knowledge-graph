@@ -1,0 +1,5 @@
+settings:
+  reordered_tables:
+    - name: gl_code_edge_by_target
+      source: gl_code_edge
+      sort_key: [traversal_path, target_id, relationship_kind, project_id, branch, source_id, source_kind, target_kind]

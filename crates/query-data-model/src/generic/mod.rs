@@ -1,9 +1,11 @@
+mod access;
 mod catalog;
 mod ids;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub use access::{MaterializedJoin, MaterializedNode, MaterializedRelationship};
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
 pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
@@ -38,6 +40,14 @@ pub struct TraversalPathLookup {
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
+    pub source_table: String,
+    pub occurrence: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct VariantRoute {
+    pub table: String,
+    pub foreign_key: Option<ForeignKey>,
 }
 
 #[derive(Debug)]
@@ -125,6 +135,7 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute>;
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String>;
     fn foreign_key(
         &self,
@@ -135,6 +146,12 @@ pub trait QueryBackendCatalog: Send + Sync + Sized + 'static {
     ) -> Option<ForeignKey>;
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>>;
     fn table_sort_key(&self, table: &str) -> Option<&[String]>;
+    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
+        Vec::new()
+    }
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &[]
+    }
     fn denormalized(&self) -> &DenormalizedCatalog;
     fn traversal_path_lookup(
         &self,

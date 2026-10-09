@@ -56,6 +56,8 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub denormalized_joins: Vec<DenormalizedJoinYaml>,
     #[serde(default)]
+    pub reordered_tables: Vec<crate::denormalized::ReorderedTable>,
+    #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]
     pub partition: Option<PartitionYaml>,

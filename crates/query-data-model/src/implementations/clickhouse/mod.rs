@@ -8,6 +8,8 @@ use crate::{
     DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn,
     PropertyId, PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
+use crate::{MaterializedJoin, RelationshipVariantId, VariantRoute};
+use storage::ReorderedCopy;
 
 #[derive(Debug, Clone)]
 pub struct TableLayout {
@@ -62,14 +64,33 @@ pub struct ClickHouseCatalog {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
     relationships: Vec<Option<String>>,
-    variants: Vec<Option<ForeignKey>>,
+    variant_routes: Vec<Option<VariantRoute>>,
     property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
+    materialized_joins: Vec<MaterializedJoin>,
+    reordered_layouts: Vec<ReorderedCopy>,
+    source_dependencies: HashMap<String, BTreeSet<String>>,
     denormalized: DenormalizedCatalog,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
 
 impl ClickHouseCatalog {
+    pub fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &self.materialized_joins
+    }
+
+    pub fn reordered_layouts(&self) -> &[ReorderedCopy] {
+        &self.reordered_layouts
+    }
+
+    pub fn source_dependencies(&self) -> &HashMap<String, BTreeSet<String>> {
+        &self.source_dependencies
+    }
+
+    pub fn variant_route(&self, id: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variant_routes.get(id.index())?.as_ref()
+    }
+
     pub fn entity(&self, id: EntityId) -> Option<&EntityLayout> {
         self.entities.get(id.index())?.as_ref()
     }
@@ -181,6 +202,22 @@ impl QueryBackendCatalog for ClickHouseCatalog {
         ClickHouseCatalog::relationship_table(self, relationship)
     }
 
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+        ClickHouseCatalog::variant_route(self, variant)
+    }
+
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.reordered_layouts
+            .iter()
+            .filter(|copy| copy.source == table)
+            .map(|copy| copy.table.as_str())
+            .collect()
+    }
+
+    fn materialized_joins(&self) -> &[MaterializedJoin] {
+        &self.materialized_joins
+    }
+
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
         if relationships.is_empty() {
             return self.edge_tables().map(|table| table.name.clone()).collect();
@@ -203,7 +240,7 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     ) -> Option<ForeignKey> {
         let mut foreign_keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            *self.variants.get(variant.index())?
+            self.variant_route(variant)?.foreign_key
         });
         let first = foreign_keys.next()??;
         foreign_keys

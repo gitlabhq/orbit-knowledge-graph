@@ -7,6 +7,14 @@ use crate::constants::{
 
 const TABLE_PREFIX: &str = "gl_denorm_";
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReorderedTable {
+    pub name: String,
+    pub source: String,
+    pub sort_key: Vec<String>,
+}
+
 #[must_use]
 pub fn table_name(name: &str) -> String {
     format!("{TABLE_PREFIX}{name}")

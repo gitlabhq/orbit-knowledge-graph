@@ -156,6 +156,7 @@ pub struct Ontology {
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
     /// Declared pre-joined table chains; see [`denormalized`].
     pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
+    pub(crate) reordered_tables: Vec<denormalized::ReorderedTable>,
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
@@ -220,6 +221,7 @@ impl Ontology {
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
             denormalized_joins: Vec::new(),
+            reordered_tables: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             refreshable_materialized_views: Vec::new(),
@@ -658,6 +660,11 @@ impl Ontology {
             }
         }
 
+        for copy in &mut self.reordered_tables {
+            copy.name = format!("{prefix}{}", copy.name);
+            copy.source = format!("{prefix}{}", copy.source);
+        }
+
         for aux in self.auxiliary_tables.iter_mut().filter(|aux| aux.versioned) {
             aux.name = format!("{prefix}{}", aux.name);
         }
@@ -896,22 +903,50 @@ impl Ontology {
         self.denormalized_properties
             .retain(|dp| allowed.contains(dp.edge_column.as_str()));
         self.denormalized_joins.clear();
+        self.reordered_tables.clear();
     }
 
-    /// Returns the destination table for a given relationship kind.
-    ///
-    /// Uses the first variant's `destination_table`. This is correct because
-    /// `EdgeYaml::to_entities()` assigns the same table to all variants of a
-    /// relationship kind — per-variant table routing is not supported.
-    ///
-    /// Falls back to the default edge table if the relationship kind is
-    /// unknown (e.g. wildcard queries).
+    pub fn edge_route(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Option<&EdgeEntity> {
+        self.edges
+            .get(relationship_kind)?
+            .iter()
+            .find(|edge| edge.source_kind == source_kind && edge.target_kind == target_kind)
+    }
+
+    pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
+        if self.edges.get(relationship_kind).is_some_and(Vec::is_empty) {
+            return BTreeSet::from([self.default_edge_table.as_str()]);
+        }
+        self.edges
+            .get(relationship_kind)
+            .into_iter()
+            .flatten()
+            .map(|edge| edge.destination_table.as_str())
+            .collect()
+    }
+
+    pub fn validate_single_table_edge_routes(&self) -> Result<(), OntologyError> {
+        for kind in self.edge_names() {
+            if self.edge_tables_for_relationship(kind).len() > 1 {
+                return Err(OntologyError::Validation(format!(
+                    "relationship '{kind}' has split table routes; this producer requires one table per relationship kind"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
         self.edges
             .get(relationship_kind)
             .and_then(|variants| variants.first())
-            .map(|e| e.destination_table.as_str())
+            .map(|edge| edge.destination_table.as_str())
             .unwrap_or(&self.default_edge_table)
     }
 
@@ -1014,6 +1049,10 @@ impl Ontology {
     #[must_use]
     pub fn denormalized_joins(&self) -> &[denormalized::DenormalizedJoin] {
         &self.denormalized_joins
+    }
+
+    pub fn reordered_tables(&self) -> &[denormalized::ReorderedTable] {
+        &self.reordered_tables
     }
 
     /// The join whose table is `table`, with or without a schema-version prefix.
@@ -1424,6 +1463,9 @@ impl Ontology {
     /// `sort_key` for edge tables, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
+        if let Some(copy) = self.reordered_tables.iter().find(|copy| copy.name == table) {
+            return Some(&copy.sort_key);
+        }
         if let Some(config) = self.edge_table_configs.get(table) {
             return Some(&config.sort_key);
         }

@@ -152,9 +152,32 @@ pub struct JoinSource {
 }
 
 #[derive(Debug, Clone)]
+pub struct JoinNode {
+    pub entity: String,
+    pub source_occurrence: usize,
+    pub identity_column: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinRelationship {
+    pub kind: String,
+    pub source_slot: usize,
+    pub target_slot: usize,
+    pub edge_occurrence: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
 pub struct MaterializedJoin {
     pub table: String,
     pub sources: Vec<JoinSource>,
+    pub nodes: Vec<JoinNode>,
+    pub relationships: Vec<JoinRelationship>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReorderedCopy {
+    pub table: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +198,8 @@ pub struct StorageCatalog {
     graph_tables: Vec<GraphTable>,
     tables: Vec<Table>,
     joins: Vec<MaterializedJoin>,
+    copies: Vec<ReorderedCopy>,
+    dependencies: BTreeMap<String, BTreeSet<String>>,
     writers: BTreeMap<String, BTreeSet<String>>,
     edge_routes: Vec<EdgeRoute>,
     relationship_tables: BTreeMap<String, BTreeSet<String>>,
@@ -206,15 +231,22 @@ impl StorageCatalog {
             .iter()
             .filter(|table| table.versioned)
             .map(|table| &table.table)
-            .chain(&self.tables)
+            .chain(self.deployed_tables())
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
         self.auxiliary_tables
             .iter()
             .map(|table| table.table.name.as_str())
-            .chain(self.tables.iter().map(|table| table.name.as_str()))
+            .chain(self.deployed_tables().map(|table| table.name.as_str()))
     }
+
+    fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
+        self.tables
+            .iter()
+            .filter(|table| !self.copies.iter().any(|copy| copy.table == table.name))
+    }
+
     pub fn tables(&self) -> &[Table] {
         &self.tables
     }
@@ -225,6 +257,14 @@ impl StorageCatalog {
 
     pub fn joins(&self) -> &[MaterializedJoin] {
         &self.joins
+    }
+
+    pub fn copies(&self) -> &[ReorderedCopy] {
+        &self.copies
+    }
+
+    pub fn dependencies(&self) -> &BTreeMap<String, BTreeSet<String>> {
+        &self.dependencies
     }
 
     pub fn writers(&self, table: &str) -> Option<&BTreeSet<String>> {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::{ClickHouseCatalog, EntityLayout, TableLayout, storage::StorageCatalog};
+use crate::VariantRoute;
 use crate::implementations::derive_property_backend_facts;
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
@@ -76,6 +77,8 @@ pub(super) fn derive(
                     .then(|| PathColumn {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                         entity: Some(entity_id),
+                        source_table: node.destination_table.clone(),
+                        occurrence: 0,
                     })
                     .into_iter()
                     .collect(),
@@ -96,6 +99,8 @@ pub(super) fn derive(
                 vec![PathColumn {
                     name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                     entity: None,
+                    source_table: table_name.to_string(),
+                    occurrence: 0,
                 }],
                 false,
             ),
@@ -103,7 +108,7 @@ pub(super) fn derive(
     }
 
     let mut relationships = vec![None; graph.relationships().count()];
-    let mut variants = vec![None; graph.variants().count()];
+    let mut variant_routes = vec![None; graph.variants().count()];
     for relationship in graph.relationships() {
         for edge in storage
             .edge_routes()
@@ -147,12 +152,16 @@ pub(super) fn derive(
                         .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
                 })
             });
-            variants[variant_id.index()] = foreign_key;
+            variant_routes[variant_id.index()] = Some(VariantRoute {
+                table: edge.table.clone(),
+                foreign_key,
+            });
         }
-        relationships[relationship.id.index()] = storage
-            .relationship_tables(&relationship.name)
-            .and_then(|tables| tables.first())
-            .cloned();
+        relationships[relationship.id.index()] = Some(
+            ontology
+                .edge_table_for_relationship(&relationship.name)
+                .to_string(),
+        );
     }
 
     let mut denormalized = HashMap::new();
@@ -214,9 +223,12 @@ pub(super) fn derive(
         let path_columns = join
             .sources
             .iter()
-            .filter_map(|source| {
+            .enumerate()
+            .filter_map(|(index, source)| {
                 Some(PathColumn {
                     name: source.path_column.clone()?,
+                    source_table: source.table.clone(),
+                    occurrence: index,
                     entity: entities.iter().enumerate().find_map(|(entity, layout)| {
                         (layout.as_ref()?.table == source.table).then_some(EntityId(entity))
                     }),
@@ -233,14 +245,44 @@ pub(super) fn derive(
         tables.insert(join.table.clone(), layout);
     }
 
+    let materialized_joins = storage
+        .joins()
+        .iter()
+        .map(|join| materialized::derive(join, graph))
+        .collect::<Result<Vec<_>, _>>()?;
+    for copy in storage.copies() {
+        let source = tables.get(&copy.source).expect("derived copy source");
+        let physical = storage.table(&copy.table).expect("derived copy storage");
+        let table = TableLayout::from_storage(
+            physical,
+            source.entity,
+            source.path_columns.clone(),
+            source.path_scopable
+                && physical
+                    .sort_key
+                    .first()
+                    .is_some_and(|column| column == ontology::TRAVERSAL_PATH_COLUMN),
+        );
+        tables.insert(table.name.clone(), table);
+    }
+    let source_dependencies = storage
+        .dependencies()
+        .iter()
+        .map(|(table, sources)| (table.clone(), sources.clone()))
+        .collect();
+
     Ok(ClickHouseCatalog {
         default_edge_table: ontology.edge_table().to_string(),
         entities,
         relationships,
-        variants,
+        variant_routes,
         property_facts,
         tables,
+        materialized_joins,
+        reordered_layouts: storage.copies().to_vec(),
+        source_dependencies,
         denormalized: DenormalizedCatalog::new(denormalized),
         traversal_path_lookups,
     })
 }
+mod materialized;

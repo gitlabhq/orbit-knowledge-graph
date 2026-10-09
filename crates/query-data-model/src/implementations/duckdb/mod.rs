@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use super::PropertyBackendFacts;
 use crate::{
     DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
-    QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    QueryBackendCatalog, RelationshipId, RelationshipVariantId, TraversalPathLookup, VariantRoute,
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ pub struct DuckDbCatalog {
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationships: Vec<String>,
+    variants: Vec<VariantRoute>,
     denormalized: DenormalizedCatalog,
 }
 
@@ -86,6 +87,10 @@ impl QueryBackendCatalog for DuckDbCatalog {
 
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
         DuckDbCatalog::relationship_table(self, relationship)
+    }
+
+    fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
+        self.variants.get(variant.index())
     }
 
     fn edge_tables(&self, _relationships: &[RelationshipId]) -> Vec<String> {

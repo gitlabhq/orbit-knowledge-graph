@@ -1,0 +1,15 @@
+description: Calls with variant storage routes
+table: gl_code_edge
+variants:
+  - from_node: {type: Definition, id: id}
+    to_node: {type: Definition, id: id}
+    scope: same_namespace
+  - from_node: {type: File, id: id}
+    to_node: {type: Definition, id: id}
+    table: gl_edge
+    scope: same_namespace
+  - from_node: {type: Definition, id: id}
+    to_node: {type: ImportedSymbol, id: id}
+  - from_node: {type: File, id: id}
+    to_node: {type: ImportedSymbol, id: id}
+    table: gl_edge

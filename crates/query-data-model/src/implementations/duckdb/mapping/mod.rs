@@ -1,6 +1,6 @@
 use super::{DuckDbCatalog, DuckDbEntityLayout, storage::StorageCatalog};
 use crate::implementations::derive_property_backend_facts;
-use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, PropertyRealization};
+use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, PropertyRealization, VariantRoute};
 
 pub(super) fn derive(
     ontology: &ontology::Ontology,
@@ -63,11 +63,19 @@ pub(super) fn derive(
         .relationships()
         .map(|_| storage.edge.name.clone())
         .collect();
+    let variants = graph
+        .variants()
+        .map(|_| VariantRoute {
+            table: storage.edge.name.clone(),
+            foreign_key: None,
+        })
+        .collect();
     Ok(DuckDbCatalog {
         storage,
         entities,
         property_facts,
         relationships,
+        variants,
         denormalized: DenormalizedCatalog::default(),
     })
 }

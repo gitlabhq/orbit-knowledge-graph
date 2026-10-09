@@ -34,6 +34,21 @@ Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
 The DuckDB catalog records local node and edge layouts for its query mapping.
 Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
 
+### Layout metadata
+
+The catalog records variant routes, reordered copies, and bindings for declared joined tables.
+Variant routes pair a relationship and its endpoint types with a table and optional foreign key.
+Shared materialized bindings use graph IDs and source occurrences to identify node properties and relationship endpoints.
+Path columns retain their source table and occurrence.
+
+`settings.reordered_tables` declares a named copy and a permutation of its source sort key.
+The source must be an existing node, edge, or joined table. Names must be unique.
+The storage catalog derives each copy's columns and keys and records its source dependency.
+Query catalogs expose equivalent layouts without selecting one.
+
+These declarations are catalog metadata. Reordered copies are excluded from the deployed table inventory used by DDL and migration.
+The compiler still uses its existing relationship routing and plans. Creating copies and selecting new access paths require the implementation follow-up.
+
 ### Edge table schema
 
 Each physical edge table has ontology-defined columns and storage settings. For example,
