@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# Point the cacheable parts of CARGO_HOME at directories inside the project
-# dir, because GitLab CI can only cache paths under $CI_PROJECT_DIR.
+# GitLab only caches paths under $CI_PROJECT_DIR, so symlink the downloadable
+# parts of CARGO_HOME (git/db, registry/cache, registry/index) into
+# $CI_PROJECT_DIR/.cargo-cache. CARGO_HOME itself is not moved because it also
+# holds the toolchain and the mold linker config. On a cache miss the image's
+# baked copies seed the directories, so a miss costs nothing extra.
 #
-# CARGO_HOME itself stays put: it also holds the mold linker config and the
-# toolchain binaries, which must not be cached. On a cache miss the baked
-# contents of the image seed the cache directories, so a miss is harmless.
+# Trust: only unit-test writes the cache, from MR and main pipelines, and the
+# test jobs of both read it. Anyone who can open an MR can already run code in
+# those jobs, so the cache grants nothing new. Release and image jobs neither
+# read nor write it. Even so, restored content is not trusted blindly: crate
+# archives are checked against Cargo.lock and symlinks are removed. git/db and
+# registry/index are not verified.
 #
-# Trust model: MR pipelines targeting main share the protected cache with main
-# and release pipelines, so poisoning reaches MR to main. That stays inside the
-# existing boundary because those MR pipelines already get protected variables.
-# Hence the symlink and checksum checks below; git/db and registry/index are
-# not content-verified.
-#
-# Keep the cached paths in sync with `.cargo-home-cache` in .gitlab-ci.yml
-# (git/db, registry/cache, registry/index; git/checkouts is rebuilt by cargo).
+# Keep the paths in sync with `.cargo-home-cache` in .gitlab-ci.yml.
 set -euo pipefail
 
 # Set by .no-cargo-home-cache for jobs that restore no cache.
@@ -42,9 +41,7 @@ redirect() {
   ln -s "$target" "$link"
 }
 
-# The cache is shared between MR pipelines and cargo trusts what it finds, so
-# keep only crate archives whose sha256 matches Cargo.lock. Anything else is
-# deleted and cargo downloads it again.
+# Delete crate archives whose sha256 differs from Cargo.lock; cargo refetches them.
 drop_unverified_crates() {
   local lockfile="$project_dir/Cargo.lock"
   [ -f "$lockfile" ] || return 0
@@ -62,8 +59,8 @@ drop_unverified_crates() {
   rm -f "$expected"
 }
 
-# Cargo follows symlinks, so a symlink restored from the cache could point
-# crates at files the checksum check never sees. Cargo creates none here.
+# Cargo follows symlinks, which would bypass the checksum check above. Cargo
+# creates none in these directories.
 [ -L "$cache_root" ] && rm -f "$cache_root"
 if [ -d "$cache_root" ]; then
   find "$cache_root" -mindepth 1 ! -type d ! -type f -delete

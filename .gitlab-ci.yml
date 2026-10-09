@@ -98,7 +98,7 @@ stages:
 
 # Job Templates
 
-# Cargo downloads cached by Cargo.lock; see scripts/ci-cargo-home-cache.sh.
+# Cargo downloads, keyed by Cargo.lock. Trust model: scripts/ci/cargo-home-cache.sh.
 .cargo-home-cache:
   paths: &cargo-home-paths
     - .cargo-cache/git/db
@@ -116,8 +116,9 @@ stages:
     paths: *cargo-home-paths
     policy: pull-push
 
-# For jobs that resolve no dependencies. List it after `.job-template` so its
-# `cache` replaces the template's; anything listed later may override it.
+# For jobs that resolve no dependencies, and for release and image jobs, which
+# must not consume cached content. Extend it after `.job-template` so its `cache`
+# replaces the template's.
 .no-cargo-home-cache:
   variables:
     SKIP_CARGO_HOME_CACHE: "1"
@@ -130,7 +131,7 @@ stages:
   variables:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
-    - ./scripts/ci-cargo-home-cache.sh
+    - ./scripts/ci/cargo-home-cache.sh
     - mise install
   cache:
     - !reference [.cargo-home-cache, pull]
@@ -143,7 +144,7 @@ stages:
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
-    - ./scripts/ci-cargo-home-cache.sh
+    - ./scripts/ci/cargo-home-cache.sh
     - mise install
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
