@@ -242,10 +242,6 @@ tests:
       - { row: { fqn: "revalidate", type: "Variable" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
-
-    # Known gap: Next.js route conventions are not fully resolved.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
@@ -258,16 +254,23 @@ tests:
       RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.import_type AS import_type, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
-      - { row_count: 9 }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "src/components/index.ts::Banner" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "src/components/index.ts::Nav" } }
+      - { row_count: 8 }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "Banner" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "Nav" } }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "Dashboard" } }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "getMarketing" } }
-      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: null, import_type: "NamespaceImport", target: "src/components/index.ts" } }
       - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "Banner" } }
       - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "getItem" } }
       - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "updateItem" } }
       - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
+  - name: Next namespace imports retain their binding alongside component calls
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/app/shop/[[...filters]]/page.tsx'
+      RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { path: components, name: '*', type: NamespaceImport } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |

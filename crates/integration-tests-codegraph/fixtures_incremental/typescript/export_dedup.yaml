@@ -14,20 +14,22 @@ fixtures:
   - path: lib/barrel.ts
     content: |
       export { Widget, WidgetImpl } from './widget';
+  - path: consumer.ts
+    content: |
+      import { Widget, WidgetImpl } from './lib/barrel';
+      export function create(): Widget { return new WidgetImpl(); }
 
 tests:
-  - name: Re-export barrels still synthesize ModuleExport proxies for cross-file wiring
-    skip: true
+  - name: Re-export barrels connect consumers to original definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'lib/barrel.ts'
-        AND d.definition_type = 'ModuleExport'
-      RETURN d.name AS name
+      MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE symbol.file_path = 'consumer.ts'
+      RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:
       - { row_count: 2 }
-      - { row: { name: "Widget" } }
-      - { row: { name: "WidgetImpl" } }
+      - { row: { name: "Widget", file: "lib/widget.ts" } }
+      - { row: { name: "WidgetImpl", file: "lib/widget.ts" } }
 
   - name: Each exported local symbol is a single definition row
     query: |
@@ -58,5 +60,4 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { empty: true }
-
 
