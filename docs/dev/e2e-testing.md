@@ -43,6 +43,8 @@ E2E_SHA=abc1234 e2e/scripts/test.sh
 ```
 
 In CI the `e2e` job runs automatically on `main` and manually on MRs.
+On `main` it deploys the `-amd64` dev image from `docker-build-amd64` because the
+e2e cluster is amd64-only, so it does not wait for `docker-manifest`.
 
 ## Test suites
 
