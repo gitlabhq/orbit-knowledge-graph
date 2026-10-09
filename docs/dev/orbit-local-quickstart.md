@@ -53,10 +53,11 @@ tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
 omitted. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
-When the glab-provided Orbit API and authentication environment is absent or
-incomplete, the command serves the embedded local tree. It makes no network or
-credential-helper call. This makes the local guidance available in offline
-development builds:
+The command finds credentials like the other remote commands: the Orbit API
+variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
+`glab auth credential-helper`. Without a credential, it prints a warning on
+stderr and serves the embedded local tree. The local guidance therefore stays
+available in offline development builds:
 
 ```shell
 ./target/release/orbit skills

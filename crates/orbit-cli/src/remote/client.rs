@@ -45,9 +45,13 @@ impl OrbitClient {
         Self::new(endpoint)
     }
 
-    /// Missing or partial glab tuples must not invoke the credential helper.
+    /// Resolves credentials like `from_env`, but a missing credential is not an
+    /// error: it warns on stderr and returns `None` so callers serve the bundled skill.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        let Some(endpoint) = resolve_skill_endpoint(|key| std::env::var(key).ok()) else {
+        let Some(endpoint) =
+            resolve_skill_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)
+        else {
+            eprintln!("warning: no GitLab credential found, using the bundled skill");
             return Ok(None);
         };
         Self::new(endpoint).map(Some)
@@ -217,20 +221,11 @@ struct CredentialHelperToken {
     token: String,
 }
 
-fn resolve_skill_endpoint(get_env: impl Fn(&str) -> Option<String>) -> Option<ResolvedEndpoint> {
-    let non_empty = |key: &str| get_env(key).filter(|value| !value.is_empty());
-    match (
-        non_empty("ORBIT_API_BASE_URL"),
-        non_empty("ORBIT_AUTH_HEADER_NAME"),
-        non_empty("ORBIT_AUTH_HEADER_VALUE"),
-    ) {
-        (Some(base_url), Some(header_name), Some(header_value)) => Some(ResolvedEndpoint {
-            base_url,
-            header_name,
-            header_value,
-        }),
-        _ => None,
-    }
+fn resolve_skill_endpoint(
+    get_env: impl Fn(&str) -> Option<String>,
+    credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
+) -> Option<ResolvedEndpoint> {
+    resolve_endpoint(get_env, credential_helper).ok()
 }
 
 fn resolve_endpoint(
@@ -380,22 +375,50 @@ mod tests {
         assert_eq!(endpoint.header_value, "glpat-xyz");
     }
 
+    fn helper_endpoint() -> ResolvedEndpoint {
+        ResolvedEndpoint {
+            base_url: "https://helper.test".to_string(),
+            header_name: "Authorization".to_string(),
+            header_value: "Bearer helper".to_string(),
+        }
+    }
+
     #[test]
-    fn skill_endpoint_uses_only_a_complete_orbit_tuple() {
-        let endpoint = resolve_skill_endpoint(env_from(&[
-            ("ORBIT_API_BASE_URL", "https://example.test"),
-            ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
-            ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
-            ("GITLAB_TOKEN", "ignored"),
-        ]))
+    fn skill_endpoint_prefers_orbit_tuple_then_token_then_helper() {
+        let endpoint = resolve_skill_endpoint(
+            env_from(&[
+                ("ORBIT_API_BASE_URL", "https://example.test"),
+                ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
+                ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
+                ("GITLAB_TOKEN", "ignored"),
+            ]),
+            || panic!("helper must not run"),
+        )
         .unwrap();
         assert_eq!(endpoint.base_url, "https://example.test");
 
-        assert!(
-            resolve_skill_endpoint(env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]))
-                .is_none()
-        );
-        assert!(resolve_skill_endpoint(env_from(&[("GITLAB_TOKEN", "ignored")])).is_none());
+        let endpoint = resolve_skill_endpoint(
+            env_from(&[
+                ("GITLAB_TOKEN", "glpat-abc"),
+                ("GITLAB_URL", "https://gl.test"),
+            ]),
+            || panic!("helper must not run"),
+        )
+        .unwrap();
+        assert_eq!(endpoint.base_url, "https://gl.test");
+        assert_eq!(endpoint.header_value, "Bearer glpat-abc");
+
+        let endpoint = resolve_skill_endpoint(
+            env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]),
+            || Some(helper_endpoint()),
+        )
+        .unwrap();
+        assert_eq!(endpoint.base_url, "https://helper.test");
+    }
+
+    #[test]
+    fn skill_endpoint_is_none_without_any_credential() {
+        assert!(resolve_skill_endpoint(env_from(&[]), || None).is_none());
     }
 
     #[test]
