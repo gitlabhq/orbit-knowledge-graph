@@ -77,3 +77,4 @@ e2e/report.html
 *.tfvars
 !bench/infra/.terraform.lock.hcl
 image-digests/
+.cargo-cache/
