@@ -1,9 +1,0 @@
-name: Native node comparisons reject administrator-only right-hand properties
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}
-  gql: |
-    MATCH (u:User {id: 1}) RETURN u
-predicates:
-  - not: {node: u, property: private_profile, op: eq, rhs_column: [u, is_admin]}
-restriction_error: administrator

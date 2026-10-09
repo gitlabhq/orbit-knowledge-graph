@@ -179,7 +179,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         run_frontend(
             &ctx,
             (frontend, frontend_key),
-            query_str,
+            (query_str, &scenario.expect.predicates),
             &security,
             &redaction,
             &scenario.expect,
@@ -192,7 +192,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 async fn run_frontend(
     ctx: &TestContext,
     (frontend, frontend_key): (Frontend, &str),
-    query: &str,
+    (query, predicates): (&str, &[crate::predicates::PredicateSetup]),
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -201,7 +201,7 @@ async fn run_frontend(
     let label = &format!("{name} [{frontend_key}]");
     let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile_model(query, frontend, &data_model, security) {
+    let compiled = match compile_scenario(query, frontend, predicates, &data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -218,6 +218,7 @@ async fn run_frontend(
                 panic!("{label}: unexpected compile error: {e}")
             }
             Some(expected) => {
+                assert!(e.is_client_safe(), "{label}: internal error: {e}");
                 let msg = e.to_string();
                 if let Some(sub) = expected.substring_for(frontend_key) {
                     assert!(
@@ -273,7 +274,7 @@ async fn run_frontend(
         run_pages(
             ctx,
             frontend,
-            query,
+            (query, predicates),
             &data_model,
             security,
             redaction,
@@ -311,6 +312,39 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+fn compile_scenario(
+    query: &str,
+    frontend: Frontend,
+    predicates: &[crate::predicates::PredicateSetup],
+    model: &Arc<query_data_model::ClickHouseDataModel>,
+    security: &SecurityContext,
+) -> query_engine::compiler::Result<CompiledQueryContext> {
+    use query_engine::compiler::{
+        config::{self, CompilerCtx},
+        passes::frontend as parser,
+    };
+    if predicates.is_empty() {
+        return compile_model(query, frontend, model, security);
+    }
+    let (mut input, query_hash) = match frontend {
+        Frontend::JsonDsl => parser::json_dsl::parse(query, model.ontology())?,
+        Frontend::Gql => parser::gql::parse_with_hash(query)?,
+    };
+    input.predicates.extend(
+        predicates
+            .iter()
+            .map(crate::predicates::PredicateSetup::expression),
+    );
+    let mut context = config::ClickhouseGqlCtx::new(security.clone(), model.clone());
+    context.set_input(input);
+    context.set_pagination(query_engine::compiler::passes::codegen::PaginationContext {
+        query_hash,
+        ..Default::default()
+    });
+    config::run_clickhouse_gql(&mut context)?;
+    Ok(context.take_output().expect("compiler output"))
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
@@ -396,7 +430,7 @@ fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {
 async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
-    base_query: &str,
+    (base_query, predicates): (&str, &[crate::predicates::PredicateSetup]),
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security: &SecurityContext,
     redaction: &MockRedactionService,
@@ -416,7 +450,7 @@ async fn run_pages(
         let page_label = format!("{label} page {}", i + 1);
 
         let compiled = Arc::new(
-            compile_model(&query_str, frontend, data_model, security)
+            compile_scenario(&query_str, frontend, predicates, data_model, security)
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 

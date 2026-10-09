@@ -1,0 +1,10 @@
+description: Native negation cannot inspect an administrator-only property
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}
+  gql: |
+    MATCH (u:User {id: 1}) RETURN u
+expect:
+  predicates:
+    - not: {node: u, property: is_admin, op: eq, value: true}
+  compile_error: administrator
