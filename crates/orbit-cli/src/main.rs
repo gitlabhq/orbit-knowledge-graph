@@ -433,8 +433,10 @@ enum Commands {
     /// Show the Orbit MCP tool manifest.
     Tools,
     /// Show indexing progress for a namespace or project.
+    ///
+    /// Without a scope flag, inspects the project behind this clone's `origin` remote.
     #[command(name = "graph-status")]
-    #[command(group(clap::ArgGroup::new("graph_status_scope").required(true).args(["full_path", "namespace_id", "project_id"])))]
+    #[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
     GraphStatus {
         /// Full path of a project or group, such as `gitlab-org/gitlab`.
         #[arg(long)]
@@ -450,7 +452,7 @@ enum Commands {
 
         #[arg(
             long,
-            help = "Server response format. Defaults to raw (structured JSON).",
+            help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
             value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
                 .map(|value| match value.as_str() {
                     "raw" => remote::ResponseFormat::Raw,

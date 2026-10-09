@@ -44,6 +44,19 @@ pub(crate) fn error(message: impl Display) {
     let _ = cliclack::log::error(message);
 }
 
+pub(crate) fn align_columns<'a>(rows: impl Iterator<Item = (&'a str, String)>) -> String {
+    let rows: Vec<(&str, String)> = rows.collect();
+    let width = rows
+        .iter()
+        .map(|(name, _)| name.chars().count())
+        .max()
+        .unwrap_or_default();
+    rows.iter()
+        .map(|(name, detail)| format!("{name:<width$}   {detail}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn format_with_thousands(count: usize) -> String {
     let digits = count.to_string();
     let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
@@ -100,6 +113,24 @@ pub(crate) fn restore_control_echo() {
 impl Drop for ControlEchoOff {
     fn drop(&mut self) {
         restore_control_echo();
+    }
+}
+
+pub(crate) struct Spinner(cliclack::ProgressBar);
+
+pub(crate) fn spinner(message: impl Display) -> Spinner {
+    let spinner = cliclack::spinner();
+    spinner.start(message);
+    Spinner(spinner)
+}
+
+impl Spinner {
+    pub(crate) fn clear(&self) {
+        self.0.clear();
+    }
+
+    pub(crate) fn fail(&self, message: impl Display) {
+        self.0.error(message);
     }
 }
 
