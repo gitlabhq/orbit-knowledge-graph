@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -238,7 +238,7 @@ pub struct GenerationConfig {
 
     /// Root entities (no parent, generated first) with absolute counts per organization.
     #[serde(default)]
-    pub roots: HashMap<String, usize>,
+    pub roots: BTreeMap<String, usize>,
 
     #[serde(default)]
     pub relationships: RelationshipConfig,
@@ -257,7 +257,7 @@ pub struct GenerationConfig {
     #[serde(default)]
     pub parallel: bool,
 
-    /// If not set, uses thread-local random source.
+    /// Same seed gives byte-identical output; if unset, output is random.
     #[serde(default)]
     pub seed: Option<u64>,
 
@@ -296,7 +296,7 @@ impl Default for GenerationConfig {
             output_dir: default_output_dir(),
             skip_if_present: false,
             organizations: default_organizations(),
-            roots: HashMap::new(),
+            roots: BTreeMap::new(),
             relationships: RelationshipConfig::default(),
             namespace_entity: default_namespace_entity(),
             associations: AssociationConfig::default(),
@@ -399,7 +399,7 @@ pub struct EdgeVariantConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelationshipConfig {
     #[serde(flatten)]
-    pub edges: HashMap<String, HashMap<String, EdgeRatio>>,
+    pub edges: BTreeMap<String, BTreeMap<String, EdgeRatio>>,
 }
 
 impl RelationshipConfig {
@@ -494,7 +494,7 @@ impl AssociationEdgeValue {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssociationConfig {
     #[serde(flatten)]
-    pub edges: HashMap<String, HashMap<String, AssociationEdgeValue>>,
+    pub edges: BTreeMap<String, BTreeMap<String, AssociationEdgeValue>>,
 }
 
 impl AssociationConfig {
