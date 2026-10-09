@@ -1,7 +1,7 @@
-// Orbit — GKG webserver.
+// Orbit — Webserver.
 //
 // Layout is story-shaped, not catalog-shaped. The narrative is the
-// path of a single query: a Rails request lands on the GKG webserver
+// path of a single query: a Rails request lands on the Orbit webserver
 // over gRPC, runs the query pipeline (authorize → compile → execute
 // → hydrate), the server returns rows, and Rails redacts before
 // handing the response to the user. Each row of the dashboard is a
@@ -68,13 +68,13 @@ local health = [
   o.row('Health'),
   o.gaugeStat(
     'Rails: gRPC p95 (5m)',
-    'p95 of the user-facing Rails-side gRPC call to GKG over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.',
+    'p95 of the user-facing Rails-side gRPC call to Orbit over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
     RDS, 's', 6,
   ),
   o.gaugeStat(
     'Pipeline: p95 (5m)',
-    'p95 of overall pipeline duration on the GKG webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
+    'p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [pipelineDuration.prom_name, SEL],
     DS, 's', 6,
   ),
@@ -112,7 +112,7 @@ local volume = [
   {
     prom: railsGrpcDur + '_count',
     title: 'gRPC calls (Rails)',
-    desc: 'Rails-side gRPC calls into GKG in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.',
+    desc: 'Rails-side gRPC calls into Orbit in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.',
     ds_var: RDS,
     selector: RAIL,
   },
@@ -139,7 +139,7 @@ local latency = [
   // Rails gRPC, by method — what users actually feel.
   o.timeseries(
     'Rails: gRPC duration p95 by method (5m)',
-    'p95 of the Rails-side gRPC call to GKG, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.',
+    'p95 of the Rails-side gRPC call to Orbit, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.',
     [o.target(
       'histogram_quantile(0.95, sum by (method, le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
       '{{method}}',
@@ -151,7 +151,7 @@ local latency = [
   o.histogramPercentiles(
     pipelineDuration,
     'Server: pipeline duration (p50/p95/p99)',
-    'GKG-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.',
+    'Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.',
     DS, SEL, w=12,
   ),
   // Per-stage stacked p95: tells the budget at a glance.
@@ -182,7 +182,7 @@ local latency = [
   // Rails redaction — the last leg of the user-facing latency.
   o.timeseries(
     'Rails: redaction duration p50/p95/p99 (5m)',
-    'p50/p95/p99 of redaction time on the Rails side, after GKG returns. Adds onto the server pipeline duration to make the total the user sees.',
+    'p50/p95/p99 of redaction time on the Rails side, after Orbit returns. Adds onto the server pipeline duration to make the total the user sees.',
     [
       o.target('histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactDur, RAIL], 'p50', RDS, 'A'),
       o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsRedactDur, RAIL], 'p95', RDS, 'B'),
@@ -235,7 +235,7 @@ local latency = [
   // happens on Rails before the gRPC call even fires.
   o.timeseries(
     'Rails: JWT build and auth-context p95 (5m)',
-    'Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not GKG.',
+    'Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not Orbit.',
     [
       o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsJwtDur, RAIL], 'jwt p95', RDS, 'A'),
       o.target('histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsAuthCtxDur, RAIL], 'auth_ctx p95', RDS, 'B'),
@@ -289,7 +289,7 @@ local reliability = [
   ),
   o.gaugeStat(
     'Server: in-flight gRPC requests',
-    'Current count of active gRPC requests on the GKG webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.',
+    'Current count of active gRPC requests on the Orbit webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.',
     'sum(rpc_server_active_requests{%s})' % SEL,
     DS, 'short', 12,
   ),
@@ -514,10 +514,10 @@ local annotations = [
 ];
 
 o.dashboard(
-  'orbit-gkg-webserver',
-  'Orbit — GKG webserver',
-  ['gkg', 'webserver'],
-  'GKG webserver dashboard. Top rows tell the latency story: a Rails request lands on GKG over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).',
+  'orbit-webserver',
+  'Orbit — Webserver',
+  ['webserver'],
+  'Orbit webserver dashboard. Top rows tell the latency story: a Rails request lands on Orbit over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).',
   items,
   annotations,
 )

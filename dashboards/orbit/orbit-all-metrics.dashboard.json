@@ -8417,7 +8417,7 @@
         "type": "prometheus",
         "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -8486,7 +8486,7 @@
         "type": "prometheus",
         "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -8537,7 +8537,7 @@
         "type": "prometheus",
         "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC error count.",
+      "description": "Rails → Orbit gRPC error count.",
       "fieldConfig": {
         "defaults": {
           "custom": {

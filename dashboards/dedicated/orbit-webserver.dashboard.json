@@ -17,7 +17,7 @@
       }
     ]
   },
-  "description": "GKG webserver dashboard. Top rows tell the latency story: a Rails request lands on GKG over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
+  "description": "Orbit webserver dashboard. Top rows tell the latency story: a Rails request lands on Orbit over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -53,7 +53,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of the user-facing Rails-side gRPC call to GKG over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.",
+      "description": "p95 of the user-facing Rails-side gRPC call to Orbit over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -106,7 +106,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of overall pipeline duration on the GKG webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
+      "description": "p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -478,7 +478,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails-side gRPC calls into GKG in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.",
+      "description": "Rails-side gRPC calls into Orbit in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -791,7 +791,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of the Rails-side gRPC call to GKG, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.",
+      "description": "p95 of the Rails-side gRPC call to Orbit, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -842,7 +842,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "GKG-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
+      "description": "Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1127,7 +1127,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p50/p95/p99 of redaction time on the Rails side, after GKG returns. Adds onto the server pipeline duration to make the total the user sees.",
+      "description": "p50/p95/p99 of redaction time on the Rails side, after Orbit returns. Adds onto the server pipeline duration to make the total the user sees.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1445,7 +1445,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not GKG.",
+      "description": "Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not Orbit.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1758,7 +1758,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Current count of active gRPC requests on the GKG webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.",
+      "description": "Current count of active gRPC requests on the Orbit webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -6445,7 +6445,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -6514,7 +6514,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -6565,7 +6565,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails → GKG gRPC error count.",
+      "description": "Rails → Orbit gRPC error count.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -7572,7 +7572,6 @@
   "tags": [
     "orbit",
     "protected",
-    "gkg",
     "webserver"
   ],
   "templating": {
@@ -7592,7 +7591,7 @@
     "to": "now"
   },
   "timezone": "utc",
-  "title": "Orbit — GKG webserver",
-  "uid": "orbit-gkg-webserver",
+  "title": "Orbit — Webserver",
+  "uid": "orbit-webserver",
   "version": 1
 }
