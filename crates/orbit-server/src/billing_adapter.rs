@@ -1,5 +1,5 @@
-//! The single permitted orbit-server↔orbit-billing seam (ADR 013:
-//! `docs/design-documents/decisions/013_billing_sox_scope.md`).
+//! The single permitted orbit-server↔orbit-billing seam (ADR 020:
+//! `docs/design-documents/decisions/020_billing_sox_scope.md`).
 //!
 //! Billing logic lives in `crates/orbit-billing/`. The only data that crosses
 //! the boundary is `BillingInputs` and `QuotaCheckInputs`, defined there.

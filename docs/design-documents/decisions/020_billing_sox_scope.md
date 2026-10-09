@@ -1,14 +1,14 @@
 ---
-title: "GKG ADR 013: SOX Scoping for Billing Event Emission"
+title: "GKG ADR 020: SOX Scoping for Billing Event Emission"
 creation-date: "2026-05-15"
-last-updated: "2026-06-19"
-authors: [ "snachnolkar" ]
+last-updated: "2026-10-09"
+authors: [ "@snachnolkar" ]
 toc_hide: true
 ---
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -16,7 +16,7 @@ Proposed
 
 ## Context
 
-[MR !937](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937) added Snowplow billing event emission to GKG's `ExecuteQuery` path. Every successful query now emits an `orbit_workflow_completion` event conforming to the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` schema, which flows through the Data Insights Platform to CustomersDot for usage-based billing. GKG also issues quota pre-checks against CustomersDot for MCP and REST queries (`crates/gkg-billing/src/quota/`).
+[MR !937](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937) added Snowplow billing event emission to GKG's `ExecuteQuery` path. Every successful query now emits an `orbit_workflow_completion` event conforming to the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` schema, which flows through the Data Insights Platform to CustomersDot for usage-based billing. GKG also issues quota pre-checks against CustomersDot for MCP and REST queries (`crates/orbit-billing/src/quota/`).
 
 Because GKG now emits its own billable usage events, the work falls under SOX IT General Controls (ITGC). The compliance team's guidance is that two scoping approaches are possible:
 
@@ -25,20 +25,20 @@ Because GKG now emits its own billable usage events, the work falls under SOX IT
 
 ### Current state (post-MR !937 cleanup)
 
-The MR's original folder layout (`crates/gkg-server/src/billing/`) has since been refactored into an isolated crate. As of this ADR:
+The MR's original folder layout (`crates/gkg-server/src/billing/`) has since been refactored into an isolated crate. The crate and its host server were later renamed from `gkg-billing` / `gkg-server` to `orbit-billing` / `orbit-server`. As of this ADR:
 
-- All billing-specific code lives in `crates/gkg-billing/`.
-- The only data crossing into the billing crate is `BillingInputs` and `QuotaCheckInputs`, both constructed exclusively in `crates/gkg-server/src/billing_adapter.rs` from `auth::Claims`.
+- All billing-specific code lives in `crates/orbit-billing/`.
+- The only data crossing into the billing crate is `BillingInputs` and `QuotaCheckInputs`, both constructed exclusively in `crates/orbit-server/src/billing_adapter.rs` from `auth::Claims`.
 
-This makes a *crate-level* (folder-level) limited scope feasible: the crate is small, its inputs flow through one declared seam, and the remaining hook points that can influence billing correctness are enumerable.
+This makes a *crate-level* (folder-level) limited scope feasible. The crate is small, its inputs flow through one declared seam, and the remaining hook points that can influence billing correctness are enumerable.
 
 ## Decision
 
 **Adopt crate-level SOX scope with explicitly enumerated extended hook points.** The auditable SOX surface for GKG billing comprises:
 
-1. The entire `crates/gkg-billing/` crate.
-2. The `billing_adapter.rs` seam in `gkg-server`.
-3. A short list of files outside `gkg-billing` whose behavior can impact billing (the "extended hook points" below).
+1. The entire `crates/orbit-billing/` crate.
+2. The `billing_adapter.rs` seam in `orbit-server`.
+3. A short list of files outside `orbit-billing` whose behavior can impact billing (the "extended hook points" below).
 
 Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
 
@@ -46,12 +46,12 @@ Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
 
 ### Primary scope
 
-- `crates/gkg-billing/**` — `BillingObserver`, `BillingTracker`, `BillingInputs`, `QuotaCheckInputs`, `QuotaService`, constants, metrics, the `quota/` submodule, and all tests within the crate.
-- `crates/gkg-server/src/billing_adapter.rs` — the single declared seam between `auth::Claims` and the billing crate's input structs.
+- `crates/orbit-billing/**`: `BillingObserver`, `BillingTracker`, `BillingInputs`, `QuotaCheckInputs`, `QuotaService`, constants, metrics, the `quota/` submodule, and all tests within the crate.
+- `crates/orbit-server/src/billing_adapter.rs`: the single declared seam between `auth::Claims` and the billing crate's input structs.
 
 ### Extended hook points
 
-These components live outside `gkg-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are enforced via `.gitlab/CODEOWNERS`; update both this table and CODEOWNERS when the hook-point surface changes.
+These components live outside `orbit-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are enforced via `.gitlab/CODEOWNERS`; update both this table and CODEOWNERS when the hook-point surface changes.
 
 | Hook point | Why in scope |
 |---|---|
@@ -67,30 +67,30 @@ These components live outside `gkg-billing` but can change billing correctness w
 
 ### Out of scope (intentionally)
 
-The rest of the repository — ontology, query compiler, code graph, indexer, gitaly bindings, formatters other than billing-relevant output, integration testkit, fuzz harness, xtask — is not SOX-scoped. The crate-level seam is what makes this defensible: nothing outside the listed paths can reach the billing crate's emission path except through `crates/gkg-server/src/billing_adapter.rs`.
+The rest of the repository is not SOX-scoped: ontology, query compiler, code graph, indexer, gitaly bindings, non-billing formatters, integration testkit, fuzz harness, xtask. The crate-level seam makes this defensible. Nothing outside the listed paths can reach the billing crate's emission path except through `crates/orbit-server/src/billing_adapter.rs`.
 
 ## Implementation
 
 ### CODEOWNERS
 
-A new `.gitlab/CODEOWNERS` file is added with two kinds of rules:
+`.gitlab/CODEOWNERS` carries two kinds of rules:
 
-1. **Default rule** — assigns the GKG maintainers group as default owners of the entire repository.
-2. **SOX-scoped rules** — required reviewer entries for the primary scope and each extended hook point.
+1. **Default rule**: assigns the GKG maintainers group as default owners of the entire repository.
+2. **SOX-scoped rules**: required reviewer entries for the primary scope and each extended hook point.
 
 The `CODEOWNERS` file itself is listed as a SOX-scoped path so changes to the reviewer set require the same controlled-merge approval.
 
 ### Adapter header comment
 
-`crates/gkg-server/src/billing_adapter.rs` already declares itself "the single permitted gkg-server -> gkg-billing seam" under SOX boundary policy. The header comment is updated to reference this ADR by number so the in-code declaration and the ADR stay linked so that AI agents refer to it and comply when making changes.
+`crates/orbit-server/src/billing_adapter.rs` declares itself "the single permitted orbit-server -> orbit-billing seam" under SOX boundary policy. The header comment references this ADR by number. That keeps the in-code declaration and the ADR linked, so AI agents can find and follow it when making changes.
 
 ### Cross-references in agent-facing docs
 
-`AGENTS.md` and `CLAUDE.md` are extended with a row in the "Where to find things" table pointing at this ADR, so agents and contributors touching the in-scope paths are nudged toward the policy before changing billing emission or quota check related code.
+`AGENTS.md` and `CLAUDE.md` point at this ADR under "Where to find things". This nudges agents and contributors touching the in-scope paths toward the policy before they change billing emission or quota-check code.
 
 ### Architecture test
 
-To make the boundary self-enforcing, [MR !1372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1372) added `crates/integration-tests/tests/billing_boundary.rs` — an integration test that walks the workspace `Cargo.toml` graph and fails if any crate outside the permitted list (`gkg-server`) declares a dependency on `gkg-billing`. A failing run in CI is control evidence that the billing crate's dependency surface has not silently expanded.
+To make the boundary self-enforcing, [MR !1372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1372) added `crates/integration-tests/tests/billing_boundary.rs`. It walks the workspace `Cargo.toml` graph and fails if any crate outside the permitted list (`orbit-server`) declares a dependency on `orbit-billing`. A failing run in CI is control evidence that the billing crate's dependency surface has not silently expanded.
 
 ## Why not the alternatives
 
@@ -106,9 +106,9 @@ What improves:
 
 What gets harder:
 
-- The hook-point list is a maintenance liability. Any future code change that introduces a *new* path through which billing correctness can be silently affected has to be added to the list, both in this ADR and in CODEOWNERS. Reviewers of in-scope code need to recognize when a refactor expands the hook-point surface.
+- The hook-point list is a maintenance liability. A future code change can introduce a *new* path through which billing correctness is silently affected. That new path has to be added to the list, in this ADR and in CODEOWNERS. Reviewers of in-scope code need to recognize when a refactor expands the hook-point surface.
 - Cross-crate refactors that touch the pipeline observer trait now require SOX-reviewer approval, even if the refactor's intent is unrelated to billing.
-- The proposed architecture test adds a CI step. Cost is small but non-zero.
+- The architecture test adds a CI step. Cost is small but non-zero.
 
 ## References
 

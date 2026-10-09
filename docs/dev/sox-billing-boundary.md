@@ -16,7 +16,7 @@ billing-emission code path are in scope for SOX (Sarbanes-Oxley) controls.
 The events the system emits must accurately reflect billable activity. The
 surface that produces them must be auditable.
 
-See ADR 013 (`docs/design-documents/decisions/013_billing_sox_scope.md`)
+See ADR 020 (`docs/design-documents/decisions/020_billing_sox_scope.md`)
 for the formal scope definition and audit context.
 
 ## Architecture in one paragraph

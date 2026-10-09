@@ -1,5 +1,5 @@
-# SOX scope for billing emission: see ADR 013
-# (docs/design-documents/decisions/013_billing_sox_scope.md).
+# SOX scope for billing emission: see ADR 020
+# (docs/design-documents/decisions/020_billing_sox_scope.md).
 
 [SOX Billing] @gitlab-org/orbit/team
 /crates/orbit-billing/
