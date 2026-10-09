@@ -962,9 +962,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
                 return Err(QueryError::Validation(
-                    "traversal and aggregation queries require node_ids or filters on \
-                     at least one node to avoid full edge table scans"
-                        .into(),
+                    "add a filter or node ID on at least one node".into(),
                 ));
             }
             _ => {}
@@ -2593,7 +2591,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2625,7 +2623,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
         assert_ok(
             r#"{
@@ -2646,7 +2644,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2672,7 +2670,7 @@ mod tests {
                 "group_by": ["p"],
                 "aggregations": [{"count": "u", "as": "c"}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
 
         assert_ok(
@@ -2686,7 +2684,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "full edge table scans",
+            "filter or node ID on at least one node",
         );
         assert_ok(
             r#"{

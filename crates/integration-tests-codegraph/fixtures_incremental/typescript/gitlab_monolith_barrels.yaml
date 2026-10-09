@@ -73,8 +73,6 @@ fixtures:
 
 tests:
   - name: EE barrel named import resolves local EE export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
@@ -86,8 +84,6 @@ tests:
       - { row: { import_type: "NamedImport", target: "verificationStatuses" } }
 
   - name: EE barrel star reexport import resolves to CE export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
@@ -99,10 +95,6 @@ tests:
       - { row: { import_type: "NamedImport", target: "VERIFIED_CONFIG" } }
 
   - name: Namespace import over EE barrel resolves to local EE function
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
@@ -113,10 +105,6 @@ tests:
       - { row: { caller: "useNamespace", callee: "describeCombined" } }
 
   - name: EE barrel local call resolves through to CE definition
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'ee/app/assets/javascripts/commit/constants.ts'

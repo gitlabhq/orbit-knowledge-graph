@@ -65,6 +65,35 @@ pub fn build_node_schema_response(
     }
 }
 
+/// One `(Source)-[:TYPE]->(Target|Target)` line per source node and edge type.
+#[must_use]
+pub fn build_relationship_patterns(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
+    let local_names: Vec<&str> = match scope {
+        IntrospectionScope::Local => ontology.local_entity_names(),
+        IntrospectionScope::All => Vec::new(),
+    };
+
+    let mut targets: BTreeMap<(&str, &str), Vec<&str>> = BTreeMap::new();
+    for edge_name in ontology.edge_names() {
+        let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
+        for edge in filter_variants(variants, scope, &local_names) {
+            targets
+                .entry((edge.source_kind.as_str(), edge_name))
+                .or_default()
+                .push(edge.target_kind.as_str());
+        }
+    }
+
+    targets
+        .into_iter()
+        .map(|((source, edge_name), mut kinds)| {
+            kinds.sort_unstable();
+            kinds.dedup();
+            format!("({source})-[:{edge_name}]->({})", kinds.join("|"))
+        })
+        .collect()
+}
+
 fn build_domains(
     ontology: &Ontology,
     scope: IntrospectionScope,
@@ -376,6 +405,26 @@ mod tests {
             "File should have incoming CONTAINS: {:?}",
             file.1
         );
+    }
+
+    #[test]
+    fn relationship_patterns_group_targets_per_source_and_edge() {
+        let ont = load();
+        let patterns = build_relationship_patterns(&ont, IntrospectionScope::All);
+        let authored = patterns
+            .iter()
+            .find(|line| line.starts_with("(User)-[:AUTHORED]->("))
+            .expect("User AUTHORED pattern");
+        assert!(authored.contains("MergeRequest") && authored.contains('|'));
+        let mut sorted = patterns.clone();
+        sorted.sort();
+        assert_eq!(patterns, sorted);
+        for line in &patterns {
+            assert!(
+                line.starts_with('(') && line.contains(")-[:") && line.ends_with(')'),
+                "malformed pattern {line}"
+            );
+        }
     }
 
     #[test]

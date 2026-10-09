@@ -94,7 +94,11 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                 .get(*slot as usize)
                 .map(|f| f.as_slice())
                 .unwrap_or(&[]);
-            let mut scratch: Vec<Cap> = vec![SmallVec::new(); caps.len()];
+            let mut scratch: Vec<Cap> = if guard.is_some() {
+                vec![SmallVec::new(); caps.len()]
+            } else {
+                Vec::new()
+            };
             for &e in elems {
                 let en = *t.node(e);
                 if !filter.is_empty() && !filter.contains(&en.kind) {
@@ -251,13 +255,18 @@ fn apply_rewrites_inner(
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
     let mut caps: Vec<Cap> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
-    let root_kinds: Vec<u16> = rules
-        .iter()
-        .map(|r| match &r.pat {
-            Pat::Node { kind, .. } => *kind,
-            _ => 0,
-        })
-        .collect();
+    let mut by_kind = rustc_hash::FxHashMap::<u16, Vec<usize>>::default();
+    let mut generic = Vec::new();
+    for (index, rule) in rules.iter().enumerate() {
+        match rule.pat {
+            Pat::Node { kind, .. } if kind != 0 => by_kind.entry(kind).or_default().push(index),
+            _ => generic.push(index),
+        }
+    }
+    for candidates in by_kind.values_mut() {
+        candidates.extend(&generic);
+        candidates.sort_unstable();
+    }
 
     let candidates = if preorder {
         t.preorder()
@@ -272,12 +281,10 @@ fn apply_rewrites_inner(
         }
 
         let target_kind = t.node(target).kind;
-        for (ri, r) in rules.iter().enumerate() {
-            if root_kinds[ri] != 0 && root_kinds[ri] != target_kind {
-                continue;
-            }
+        for &index in by_kind.get(&target_kind).unwrap_or(&generic) {
+            let r = &rules[index];
             for c in &mut caps[..r.nslots] {
-                *c = SmallVec::new();
+                c.clear();
             }
             if !matches(t, lang, target, &r.pat, &mut caps) {
                 continue;

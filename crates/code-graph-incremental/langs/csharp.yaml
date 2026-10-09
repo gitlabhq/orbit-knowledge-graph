@@ -129,25 +129,25 @@ stages:
     rules:
       # Locals
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__ssa_branch))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__call))'
-        replace: '(cs_local (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__ssa_branch))'
-        replace: '(cs_local (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V))'
-        replace: '(cs_local (__binding @$N (__ssa_typed @$T) (__rhs @$V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier))'
-        replace: '(cs_local (__binding @$N (__ssa_typed @$T)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier $V:__call))'
-        replace: '(cs_local (__binding @$N (__rhs $V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier $V))'
-        replace: '(cs_local (__binding @$N (__rhs @$V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__rhs @$V)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier))'
-        replace: '(cs_local (__binding @$N))'
+        replace: '(cs_local (__binding @$N (__declaration)))'
 
       # Assignments
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
@@ -226,6 +226,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

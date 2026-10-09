@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::routing::head;
+use axum::routing::get;
 use orbit_server_config::{AppConfig, QuotaAuthMode};
 use tokio::net::TcpListener;
 
@@ -17,7 +17,7 @@ async fn customers_dot_denying_every_request() -> (String, Recorded) {
     let recorder = recorded.clone();
     let app = Router::new().route(
         "/api/v1/consumers/resolve",
-        head(move |headers: HeaderMap, uri: Uri| {
+        get(move |headers: HeaderMap, uri: Uri| {
             let recorder = recorder.clone();
             async move {
                 let query = uri.query().unwrap_or_default().to_string();

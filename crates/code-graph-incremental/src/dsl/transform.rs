@@ -112,6 +112,7 @@ impl Tf {
             "default" => Tf::Default(s(0)?),
             "tree_path" => Tf::TreePath(s(0)?),
             "sibling_index" => Tf::SiblingIndex,
+            "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
@@ -278,19 +279,8 @@ impl Tf {
             Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
                 let raw = Tree::to_raw(id);
-                let found = edge_ctx.is_some_and(|ctx| {
-                    ctx.edges.iter().any(|e| {
-                        e.kind == *kind
-                            && match dir {
-                                EdgeDir::Incoming => {
-                                    e.to_tree == ctx.tree_index && e.to_node == raw
-                                }
-                                EdgeDir::Outgoing => {
-                                    e.from_tree == ctx.tree_index && e.from_node == raw
-                                }
-                            }
-                    })
-                });
+                let found =
+                    edge_ctx.is_some_and(|ctx| ctx.edges.has(*kind, *dir, ctx.tree_index, raw));
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
@@ -321,6 +311,7 @@ impl Tf {
                 lang.syms.intern(&segments.join(sep))
             }
             Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
+            Tf::TreeNodeId => lang.syms.intern(&Tree::to_raw(id).to_string()),
             Tf::SiblingIndex => {
                 let index = id
                     .preceding_siblings(&t.arena)

@@ -21,6 +21,8 @@ pub fn orbit_cmd() -> Command {
     let mut cmd = Command::new(&bin);
     cmd.env("DYLD_LIBRARY_PATH", &lib);
     cmd.env("LD_LIBRARY_PATH", &lib);
+    // Keep a scratch folder from resolving to a checkout that encloses TMPDIR.
+    cmd.env("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
     cmd
 }
 
