@@ -1496,7 +1496,9 @@ e2e:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   needs:
-    - job: docker-manifest
+    # The e2e cluster is amd64-only, so the per-arch image is enough. Waiting
+    # for docker-manifest would add the arm64 build and signing to the path.
+    - job: docker-build-amd64
       optional: true
     - job: e2e-robot-image
       optional: true
