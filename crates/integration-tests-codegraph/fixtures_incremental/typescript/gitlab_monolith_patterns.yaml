@@ -232,17 +232,14 @@ tests:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
 
-  - name: CommonJS alias modules emit module and local definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: CommonJS files define the exported function once
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/legacy_adapter.js'
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path = 'app/assets/javascripts/feature_flags/store/legacy_adapter.js'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 1 }
       - { row: { fqn: "legacyAdapter" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
 
   - name: explicit default reexports target the original definition
     query: |
