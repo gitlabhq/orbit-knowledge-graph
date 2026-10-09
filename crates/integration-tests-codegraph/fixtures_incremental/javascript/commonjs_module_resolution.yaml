@@ -227,7 +227,8 @@ fixtures:
         const { track } = require('inner-sdk');
         const alias = track;
         const secondAlias = alias;
-        function nested() { secondAlias(); }
+        function nested() { alias(); }
+        function nestedChain() { secondAlias(); }
         track();
         nested();
       }
@@ -263,9 +264,10 @@ tests:
       WHERE caller.file_path = 'external/scoped.js'
       RETURN caller.name AS caller, sym.import_path AS path, sym.start_line AS import_line
     assert:
-      - { row_count: 3 }
+      - { row_count: 4 }
       - { row: { caller: "inner", path: "inner-sdk", import_line: 3 } }
       - { row: { caller: "nested", path: "inner-sdk", import_line: 3 } }
+      - { row: { caller: "nestedChain", path: "inner-sdk", import_line: 3 } }
       - { row: { caller: "other", path: "outer-sdk", import_line: 1 } }
 
   - name: Destructured require targets the exported function
@@ -438,7 +440,7 @@ tests:
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
 
-  - name: Module-level external CommonJS calls target imported symbols from the file
+  - name: Module-level CommonJS imports remain attached to their file
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level.js'
@@ -505,9 +507,10 @@ steps:
           WHERE caller.file_path = 'external/scoped.js'
           RETURN caller.name AS caller, sym.import_path AS path
         assert:
-          - { row_count: 3 }
+          - { row_count: 4 }
           - { row: { caller: "inner", path: "inner-sdk" } }
           - { row: { caller: "nested", path: "inner-sdk" } }
+          - { row: { caller: "nestedChain", path: "inner-sdk" } }
           - { row: { caller: "other", path: "outer-sdk" } }
   - name: change captured import source
     snapshot: true

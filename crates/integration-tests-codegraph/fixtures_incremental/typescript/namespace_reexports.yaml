@@ -20,6 +20,15 @@ fixtures:
       export function useLeft() { left.run(); }
       export function useRight() { right.run(); }
 tests:
+  - name: "namespace callers have exactly their selected direct targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+      WHERE caller.file_path = 'main.ts'
+      RETURN caller.name AS caller, method.name AS name, method.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: useLeft, name: run, file: 'left.ts' } }
+      - { row: { caller: useRight, name: run, file: 'right.ts' } }
   - name: "same-named members resolve only in their own namespace"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
@@ -33,6 +42,15 @@ steps:
   - name: restore namespace identities
     snapshot: true
     tests:
+      - name: "snapshot retains exactly the direct namespace targets"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.file_path = 'main.ts'
+          RETURN caller.name AS caller, method.name AS name, method.file_path AS file
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: useLeft, name: run, file: 'left.ts' } }
+          - { row: { caller: useRight, name: run, file: 'right.ts' } }
       - name: "snapshot loading preserves separate namespace targets"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
@@ -52,6 +70,15 @@ steps:
           export function run() { unrelatedBody(); }
           function unrelatedBody() {}
     tests:
+      - name: "redirect replaces all direct namespace targets"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.file_path = 'main.ts'
+          RETURN caller.name AS caller, method.name AS name, method.file_path AS file
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: useLeft, name: run, file: 'right.ts' } }
+          - { row: { caller: useRight, name: run, file: 'right.ts' } }
       - name: "unchanged callers lose the previous namespace target"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)

@@ -34,21 +34,21 @@ tests:
   - name: "relative and config-relative paths reach the repository target"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE callee.name = 'target'
-      RETURN caller.name AS caller, callee.file_path AS file
+      WHERE caller.name IN ['direct', 'aliased', 'hidden']
+      RETURN caller.name AS caller, callee.file_path AS file, callee.name AS name
     assert:
       - { row_count: 3 }
-      - { row: { caller: direct, file: 'lib/target.ts' } }
-      - { row: { caller: aliased, file: 'lib/target.ts' } }
-      - { row: { caller: hidden, file: 'lib/target.ts' } }
+      - { row: { caller: direct, file: 'lib/target.ts', name: target } }
+      - { row: { caller: aliased, file: 'lib/target.ts', name: target } }
+      - { row: { caller: hidden, file: 'lib/target.ts', name: target } }
   - name: "type-only imports use the same parent-path rules"
     query: |
       MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(target:Definition)
       WHERE symbol.identifier_name = 'Client'
-      RETURN target.file_path AS file
+      RETURN target.file_path AS file, target.name AS name, target.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { file: 'lib/target.ts' } }
+      - { row: { file: 'lib/target.ts', name: Client, type: Class } }
   - name: "excess parents never wrap back into the repository"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

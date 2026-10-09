@@ -34,29 +34,35 @@ fixtures:
       export function aliasExport() { alias(); }
       export function defaultExport() { renamedDefault(); }
 tests:
-  - name: "unresolved namespace targets retain fallback until exports are proven complete"
+  - name: "external and unknown-valued targets retain fallback"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
-      WHERE caller.file_path = 'main.ts'
+      WHERE caller.file_path = 'main.ts' AND caller.name <> 'missing'
       RETURN caller.name AS caller
     assert:
-      - { row_count: 5 }
-      - { row: { caller: missing } }
+      - { row_count: 4 }
       - { row: { caller: uncertain } }
       - { row: { caller: remote } }
       - { row: { caller: reexported } }
       - { row: { caller: dynamicExport } }
+  - name: "known missing exports do not become external calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.file_path = 'main.ts' AND caller.name = 'missing'
+      RETURN symbol.import_path
+    assert:
+      - { empty: true }
   - name: "existing members still resolve"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
       WHERE caller.file_path = 'main.ts'
-      RETURN caller.name AS caller, target.name AS target
+      RETURN caller.name AS caller, target.name AS target, target.file_path AS file
     assert:
       - { row_count: 4 }
-      - { row: { caller: known, target: existing } }
-      - { row: { caller: localExport, target: implementation } }
-      - { row: { caller: aliasExport, target: implementation } }
-      - { row: { caller: defaultExport, target: implementation } }
+      - { row: { caller: known, target: existing, file: 'local.ts' } }
+      - { row: { caller: localExport, target: implementation, file: 'renamed.ts' } }
+      - { row: { caller: aliasExport, target: implementation, file: 'renamed.ts' } }
+      - { row: { caller: defaultExport, target: implementation, file: 'renamed.ts' } }
 steps:
   - name: add missing member after snapshot loading
     snapshot: true

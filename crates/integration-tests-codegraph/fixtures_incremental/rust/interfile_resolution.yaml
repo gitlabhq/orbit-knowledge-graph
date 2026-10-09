@@ -55,6 +55,14 @@ fixtures:
       }
 
 tests:
+  - name: "explicit constructor calls resolve without macro expansion"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'execute' AND callee.name = 'new'
+      RETURN callee.file_path AS file, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { file: 'src/worker.rs', type: Function } }
   - name: "execute -> helper resolves through use"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -67,7 +75,7 @@ tests:
   - name: "execute -> Worker::new resolves across files and macro expansion"
     supported: false
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
@@ -95,7 +103,7 @@ tests:
   - name: "execute -> make_worker macro resolves"
     supported: false
     query: |
-      MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'make_worker'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:

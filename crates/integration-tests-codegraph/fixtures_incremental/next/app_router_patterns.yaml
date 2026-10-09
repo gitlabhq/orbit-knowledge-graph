@@ -127,8 +127,8 @@ tests:
 
   - name: Next app router route exports are ordinary definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',

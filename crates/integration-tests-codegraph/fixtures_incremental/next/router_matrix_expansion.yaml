@@ -186,6 +186,19 @@ fixtures:
       }
 
 tests:
+  - name: Special route files own their page components
+    query: |
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN ['src/app/loading.tsx', 'src/app/error.tsx', 'src/app/not-found.tsx', 'src/app/template.tsx', 'src/app/default.tsx', 'src/app/@modal/(.)login/page.tsx']
+      RETURN file.path AS file, d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 6 }
+      - { row: { file: 'src/app/loading.tsx', name: Loading, type: Function } }
+      - { row: { file: 'src/app/error.tsx', name: ErrorBoundary, type: Function } }
+      - { row: { file: 'src/app/not-found.tsx', name: NotFound, type: Function } }
+      - { row: { file: 'src/app/template.tsx', name: Template, type: Function } }
+      - { row: { file: 'src/app/default.tsx', name: SlotDefault, type: Function } }
+      - { row: { file: 'src/app/@modal/(.)login/page.tsx', name: LoginModal, type: Function } }
   - name: Next app router special path shapes are preserved in the file catalog
     query: |
       MATCH (file:File)
@@ -216,7 +229,7 @@ tests:
 
   - name: Route convention exports are indexed as their real definitions
     query: |
-      MATCH (d:Definition)
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
       WHERE d.fqn IN [
         'MarketingCatchAll',
         'ShopOptionalCatchAll',
@@ -267,10 +280,18 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/app/shop/[[...filters]]/page.tsx'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type
+      RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
-      - { row: { path: components, name: '*', type: NamespaceImport } }
+      - { row: { path: components, name: '*', type: NamespaceImport, alias: Components } }
+  - name: Optional catch-all namespace access calls exactly the original component
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'ShopOptionalCatchAll'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Nav, file: 'src/components/Nav.tsx' } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |

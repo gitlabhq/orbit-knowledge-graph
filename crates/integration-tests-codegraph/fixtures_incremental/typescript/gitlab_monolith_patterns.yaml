@@ -259,13 +259,13 @@ tests:
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamedImport'
-      RETURN i.identifier_name AS name, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target, d.file_path AS file
     assert:
       - { row_count: 4 }
-      - { row: { name: "ProjectsApp", target: "renderProjects" } }
-      - { row: { name: "buildTab", target: "buildTab" } }
-      - { row: { name: "normalizeSearch", target: "normalizeSearch" } }
-      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB" } }
+      - { row: { name: "ProjectsApp", target: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
+      - { row: { name: "buildTab", target: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
+      - { row: { name: "normalizeSearch", target: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
+      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
 
   - name: namespace imports over alias barrels retain their binding
     query: |
@@ -281,13 +281,13 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'runProjectsNamespace'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS file
       ORDER BY callee
     assert:
       - { row_count: 3 }
-      - { row: { caller: "runProjectsNamespace", callee: "buildTab" } }
-      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch" } }
-      - { row: { caller: "runProjectsNamespace", callee: "renderProjects" } }
+      - { row: { caller: "runProjectsNamespace", callee: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
+      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
+      - { row: { caller: "runProjectsNamespace", callee: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
 
   - name: imported constants from monolith barrels stay inert
     query: |

@@ -181,6 +181,8 @@ tests:
       - { row_count: 3 }
       - { row: { caller: "scoped_macro_user", path: "local_macros::report" } }
       - { row: { caller: "other_scoped_macro_user", path: "other_macros::report" } }
+      - { where: { caller: scoped_macro_user, path: 'local_macros::report' }, row_count: 2 }
+      - { where: { caller: other_scoped_macro_user, path: 'other_macros::report' }, row_count: 1 }
   - name: "module aliases resolve callable paths"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)

@@ -27,6 +27,14 @@ fixtures:
         copy();
       }
 tests:
+  - name: "numeric and object calls never become local definition calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.file_path = 'main.js'
+      RETURN caller.name AS caller, target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: run, name: helper, file: 'util.js' } }
   - name: "an object containing an imported callback is not itself a call to the import"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
@@ -62,6 +70,13 @@ steps:
         assert:
           - { row_count: 1 }
           - { row: { path: "external-sdk" } }
+      - name: "snapshot does not turn object values into imported calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
+          RETURN sym.import_path
+        assert:
+          - { empty: true }
   - name: numeric export becomes callable
     snapshot: true
     modify:
@@ -87,6 +102,14 @@ steps:
           exports.value = getRuntimeValue();
           exports.helper = function helper() {};
     tests:
+      - name: "unknown export loses its previous concrete call"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS name, target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { name: helper, file: 'util.js' } }
       - name: "fallback returns for the unknown value only"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
@@ -104,6 +127,14 @@ steps:
           exports.value = 200;
           exports.helper = function helper() {};
     tests:
+      - name: "numeric export leaves only the helper definition call"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS name, target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { name: helper, file: 'util.js' } }
       - name: "numeric calls are rejected again without losing external calls"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)

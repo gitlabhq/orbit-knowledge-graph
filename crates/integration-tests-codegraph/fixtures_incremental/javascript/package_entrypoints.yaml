@@ -43,12 +43,12 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
       WHERE caller.name = 'caller'
-      RETURN target.file_path AS file
+      RETURN target.file_path AS file, target.name AS name
     assert:
       - { row_count: 3 }
-      - { row: { file: 'node_modules/widget/lib/start.js' } }
-      - { row: { file: 'node_modules/widget/extra.js' } }
-      - { row: { file: 'node_modules/@scope/widget/start.js' } }
+      - { row: { file: 'node_modules/widget/lib/start.js', name: run } }
+      - { row: { file: 'node_modules/widget/extra.js', name: extra } }
+      - { row: { file: 'node_modules/@scope/widget/start.js', name: scoped } }
 steps:
   - name: change package main after snapshot loading
     snapshot: true
@@ -60,12 +60,14 @@ steps:
       - name: "unchanged consumers follow the edited entrypoint"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-          WHERE caller.name IN ['caller', 'throughBarrel'] AND target.name = 'run'
-          RETURN caller.name AS caller, target.file_path AS file
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
         assert:
-          - { row_count: 2 }
-          - { row: { caller: caller, file: 'node_modules/widget/index.js' } }
-          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js' } }
+          - { row_count: 4 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+          - { row: { caller: caller, file: 'node_modules/@scope/widget/start.js', name: scoped } }
   - name: remove scoped package metadata
     snapshot: true
     remove: [node_modules/@scope/widget/package.json]
@@ -73,10 +75,13 @@ steps:
       - name: "removing a manifest removes its resolved calls"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-          WHERE caller.name = 'caller' AND target.name = 'scoped'
-          RETURN target.file_path
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
         assert:
-          - { empty: true }
+          - { row_count: 3 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
   - name: remove explicit entrypoint
     snapshot: true
     modify:
@@ -87,11 +92,13 @@ steps:
       - name: "default index lookup survives removal of main"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-          WHERE caller.name = 'caller' AND target.name = 'run'
-          RETURN target.file_path AS file
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
         assert:
-          - { row_count: 1 }
-          - { row: { file: 'node_modules/widget/index.js' } }
+          - { row_count: 3 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
   - name: restore previously unresolved package
     snapshot: true
     modify:
@@ -102,8 +109,11 @@ steps:
       - name: "restoring metadata resolves the unchanged consumer again"
         query: |
           MATCH (caller:Definition)-[:CALLS]->(target:Definition)
-          WHERE caller.name = 'caller' AND target.name = 'scoped'
-          RETURN target.file_path AS file
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
         assert:
-          - { row_count: 1 }
-          - { row: { file: 'node_modules/@scope/widget/start.js' } }
+          - { row_count: 4 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+          - { row: { caller: caller, file: 'node_modules/@scope/widget/start.js', name: scoped } }

@@ -22,8 +22,22 @@ fixtures:
       @Retention(RetentionPolicy.RUNTIME)
       @Target({ElementType.METHOD, ElementType.TYPE})
       public @interface Traceable {}
+  - path: com/example/app/ExplicitTarget.java
+    content: |
+      package com.example.app;
+      import java.lang.annotation.Target;
+      @Target({})
+      public @interface ExplicitTarget {}
 
 tests:
+  - name: "explicit Target annotation resolves to its declared import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.ExplicitTarget'
+      RETURN sym.import_path AS path, sym.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'java.lang.annotation', name: Target } }
 
   - name: "Main.main -> ArrayList (imported symbol)"
     

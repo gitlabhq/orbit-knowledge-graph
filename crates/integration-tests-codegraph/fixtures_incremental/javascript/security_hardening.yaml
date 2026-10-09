@@ -100,6 +100,13 @@ fixtures:
       </script>
 
 tests:
+  - name: Resolved package calls have no imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'src/package_consumer.js'
+      RETURN sym.import_path
+    assert:
+      - { empty: true }
   - name: Local alias resolves inside repo
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

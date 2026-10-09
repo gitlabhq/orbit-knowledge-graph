@@ -187,10 +187,11 @@ tests:
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
+        AND i.import_type <> 'NamespaceImport'
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
       ORDER BY import_type, name, target
     assert:
-      - { row_count: 11 }
+      - { row_count: 7 }
       - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "Card" } }
       - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "Button" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "Card" } }
@@ -198,10 +199,23 @@ tests:
       - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "Button" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
-      - { row: { import_type: "NamespaceImport", path: "./components", name: "*", alias: "Reexported", target: "Button" } }
-      - { row: { import_type: "NamespaceImport", path: "./components", name: "*", alias: "Reexported", target: "Card" } }
-      - { row: { import_type: "NamespaceImport", path: "./components", name: "*", alias: "Reexported", target: "CardFooter" } }
-      - { row: { import_type: "NamespaceImport", path: "./components", name: "*", alias: "Reexported", target: "StatusIcon" } }
+  - name: Namespace imports resolve only the definitions accessed through their binding
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Home.tsx' AND i.import_type = 'NamespaceImport'
+      RETURN i.identifier_alias AS alias, d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: Reexported, name: IconButton, file: 'src/components/button.tsx' } }
+      - { row: { alias: CardModule, name: Card, file: 'src/components/card.tsx' } }
+  - name: Namespace default access calls exactly the original component
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'NamespaceDefaultHost'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Card, file: 'src/components/card.tsx' } }
   - name: React namespace imports retain their source and alias
     query: |
       MATCH (i:ImportedSymbol)

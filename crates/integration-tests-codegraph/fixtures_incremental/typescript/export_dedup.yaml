@@ -24,12 +24,20 @@ tests:
     query: |
       MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE symbol.file_path = 'consumer.ts'
-      RETURN d.name AS name, d.file_path AS file
+      RETURN symbol.identifier_name AS imported, d.name AS name, d.file_path AS file, d.definition_type AS type
       ORDER BY name
     assert:
       - { row_count: 2 }
-      - { row: { name: "Widget", file: "lib/widget.ts" } }
-      - { row: { name: "WidgetImpl", file: "lib/widget.ts" } }
+      - { row: { imported: Widget, name: "Widget", file: "lib/widget.ts", type: Interface } }
+      - { row: { imported: WidgetImpl, name: "WidgetImpl", file: "lib/widget.ts", type: Class } }
+  - name: Barrel consumer calls only the concrete constructor
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.file_path = 'consumer.ts'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: WidgetImpl, file: 'lib/widget.ts' } }
 
   - name: Each exported local symbol is a single definition row
     query: |
@@ -60,4 +68,3 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { empty: true }
-

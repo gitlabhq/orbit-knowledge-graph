@@ -45,6 +45,33 @@ fixtures:
       pub struct Remote;
 
 tests:
+  - name: "trait impl method names use the underlying type rather than the import alias"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs' AND d.name = 'run'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: 'Runner::run' } }
+      - { row: { fqn: 'domain::Service::run' } }
+      - { row: { fqn: 'remote::Remote::run' } }
+  - name: "alias-based impl method names are not emitted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Alias::run', 'RemoteAlias::run']
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+  - name: "qualified calls have exactly one implementation target each"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+      WHERE caller.name IN ['through_alias', 'through_type', 'remote_alias']
+      RETURN caller.name AS caller, method.file_path AS file, method.start_line AS line
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: through_alias, file: 'src/lib.rs', line: 12 } }
+      - { row: { caller: through_type, file: 'src/lib.rs', line: 12 } }
+      - { row: { caller: remote_alias, file: 'src/lib.rs', line: 28 } }
   - name: "qualified calls through aliases select the underlying implementation"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
@@ -84,3 +111,10 @@ steps:
           - { row: { caller: through_alias, body: implementation_body } }
           - { row: { caller: through_type, body: implementation_body } }
           - { row: { caller: remote_alias, body: remote_body } }
+      - name: "unrelated and shadowed owners still have no call after snapshot loading"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+          WHERE caller.name IN ['unrelated_type', 'shadowed_alias']
+          RETURN method.name
+        assert:
+          - { empty: true }

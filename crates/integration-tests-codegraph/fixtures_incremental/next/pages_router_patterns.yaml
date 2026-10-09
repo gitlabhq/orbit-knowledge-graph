@@ -167,8 +167,8 @@ tests:
 
   - name: Next pages router default pages and data functions are definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
         AND d.fqn IN ['App', 'IndexPage', 'getStaticProps', 'handler']
       RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
       ORDER BY file_path, fqn
@@ -265,8 +265,8 @@ tests:
 
   - name: Next pages router dynamic page and data functions are definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN [
         'pages/_document.tsx',
         'pages/_error.tsx',
         'pages/404.tsx',
