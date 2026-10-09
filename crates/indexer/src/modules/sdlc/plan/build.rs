@@ -26,6 +26,8 @@ impl Sizing<'_> {
 
 #[derive(Debug, thiserror::Error)]
 pub(in crate::modules::sdlc) enum PlanError {
+    #[error(transparent)]
+    UnsupportedEdgeRoutes(#[from] ontology::OntologyError),
     #[error(
         "duplicate plan name '{0}': plan names are handler names and checkpoint keys and must be unique"
     )]
@@ -51,6 +53,7 @@ pub(in crate::modules::sdlc) fn build_plans(
     ontology: &Ontology,
     sizing: Sizing<'_>,
 ) -> Result<Plans, PlanError> {
+    ontology.validate_single_table_edge_routes()?;
     let mut plans = PlanSet::default();
 
     for node in ontology.nodes() {

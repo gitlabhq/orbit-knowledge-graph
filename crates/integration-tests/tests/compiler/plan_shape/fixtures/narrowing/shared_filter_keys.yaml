@@ -36,6 +36,7 @@ physical:
   duckdb:
     planned:
       ctes:
-        exact_order: [_filter_a, _filter_b]
+        absent: true
       expect:
-        - (Filter e1.source_id IN _filter_b.id, ... (_))
+        - (Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))
+      reject: ["(SemiJoin ... (_) (_))"]

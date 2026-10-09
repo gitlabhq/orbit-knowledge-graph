@@ -12,17 +12,40 @@ use crate::{MaterializedJoin, RelationshipVariantId, VariantRoute};
 use storage::ReorderedCopy;
 
 #[derive(Debug, Clone)]
+pub struct PhysicalColumn {
+    pub storage_type: String,
+    pub default: Option<String>,
+    pub codecs: Vec<String>,
+}
+
+impl From<&storage::Column> for PhysicalColumn {
+    fn from(column: &storage::Column) -> Self {
+        Self {
+            storage_type: column.storage_type.clone(),
+            default: column.default.clone(),
+            codecs: column.codecs.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TableLayout {
     pub name: String,
     pub columns: HashSet<String>,
     pub column_types: HashMap<String, ontology::DataType>,
+    pub physical_columns: HashMap<String, PhysicalColumn>,
     pub sort_key: Vec<String>,
+    pub primary_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
     pub path_scopable: bool,
 }
 
 impl TableLayout {
+    pub fn replacement_identity(&self) -> &[String] {
+        &self.sort_key
+    }
+
     fn from_storage(
         table: &storage::Table,
         entity: Option<EntityId>,
@@ -34,16 +57,28 @@ impl TableLayout {
             columns: table
                 .columns
                 .iter()
-                .filter(|column| ontology::denormalized::copies(&column.name))
                 .map(|column| column.name.trim_matches('`').to_string())
                 .collect(),
             column_types: table
                 .column_types
                 .iter()
-                .filter(|(name, _)| ontology::denormalized::copies(name))
                 .map(|(name, data_type)| (name.clone(), *data_type))
                 .collect(),
             sort_key: table.sort_key.clone(),
+            physical_columns: table
+                .columns
+                .iter()
+                .map(|column| {
+                    (
+                        column.name.trim_matches('`').to_string(),
+                        PhysicalColumn::from(column),
+                    )
+                })
+                .collect(),
+            primary_key: table
+                .primary_key
+                .clone()
+                .unwrap_or_else(|| table.sort_key.clone()),
             entity,
             path_columns,
             path_scopable,
@@ -63,7 +98,7 @@ pub struct EntityLayout {
 pub struct ClickHouseCatalog {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
-    relationships: Vec<Option<String>>,
+    relationships: Vec<Vec<String>>,
     variant_routes: Vec<Option<VariantRoute>>,
     property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
@@ -96,7 +131,10 @@ impl ClickHouseCatalog {
     }
 
     pub fn relationship_table(&self, id: RelationshipId) -> Option<&str> {
-        self.relationships.get(id.index())?.as_deref()
+        match self.relationships.get(id.index())?.as_slice() {
+            [table] => Some(table),
+            _ => None,
+        }
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
@@ -119,7 +157,7 @@ impl ClickHouseCatalog {
     pub fn edge_tables(&self) -> impl Iterator<Item = &TableLayout> {
         self.relationships
             .iter()
-            .filter_map(Option::as_deref)
+            .flatten()
             .collect::<BTreeSet<_>>()
             .into_iter()
             .filter_map(|name| self.tables.get(name))
@@ -224,8 +262,9 @@ impl QueryBackendCatalog for ClickHouseCatalog {
         }
         relationships
             .iter()
-            .filter_map(|relationship| self.relationship_table(*relationship))
-            .map(String::from)
+            .filter_map(|relationship| self.relationships.get(relationship.index()))
+            .flatten()
+            .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()

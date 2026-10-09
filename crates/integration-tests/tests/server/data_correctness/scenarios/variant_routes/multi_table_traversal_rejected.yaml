@@ -1,0 +1,10 @@
+description: Variable-depth traversal rejects multiple edge tables rather than losing a variant
+config:
+  ontology_overlay: variant_routes
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"file","to":"callee","hops":[1,2]}]}
+  gql: |
+    MATCH (file:File {id: 11000})-[:CALLS*1..2]->(callee:Definition) RETURN file, callee
+expect:
+  compile_error: multiple edge tables

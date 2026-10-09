@@ -107,7 +107,7 @@ pub(super) fn derive(
         );
     }
 
-    let mut relationships = vec![None; graph.relationships().count()];
+    let mut relationships = vec![Vec::new(); graph.relationships().count()];
     let mut variant_routes = vec![None; graph.variants().count()];
     for relationship in graph.relationships() {
         for edge in storage
@@ -157,11 +157,12 @@ pub(super) fn derive(
                 foreign_key,
             });
         }
-        relationships[relationship.id.index()] = Some(
-            ontology
-                .edge_table_for_relationship(&relationship.name)
-                .to_string(),
-        );
+        relationships[relationship.id.index()] = storage
+            .relationship_tables(&relationship.name)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect();
     }
 
     let mut denormalized = HashMap::new();
@@ -235,13 +236,12 @@ pub(super) fn derive(
                 })
             })
             .collect();
-        let mut layout = TableLayout::from_storage(
+        let layout = TableLayout::from_storage(
             storage.table(&join.table).expect("derived join storage"),
             None,
             path_columns,
             true,
         );
-        layout.column_types.clear();
         tables.insert(join.table.clone(), layout);
     }
 

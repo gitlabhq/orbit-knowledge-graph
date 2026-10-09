@@ -6,7 +6,7 @@ fn yaml_plan_shapes() {
 }
 
 #[test]
-fn reordered_layout_metadata_does_not_change_plans_or_schema() {
+fn reordered_layout_metadata_drives_plans_and_schema() {
     use query_data_model::{ClickHouseDataModel, QueryBackendCatalog};
     use std::sync::Arc;
 
@@ -37,14 +37,15 @@ fn reordered_layout_metadata_does_not_change_plans_or_schema() {
             .base
             .render()
     };
-    assert_eq!(compile(&base), compile(&overlay));
+    assert_ne!(compile(&base), compile(&overlay));
+    assert!(compile(&overlay).contains(layouts[0]));
 
     let base_schema = orbit_migrations::schema::GraphSchema::from_ontology(&base);
     let overlay_schema = orbit_migrations::schema::GraphSchema::from_ontology(&overlay);
-    assert_eq!(base_schema.tables.len(), overlay_schema.tables.len());
-    assert_eq!(base_schema.views.len(), overlay_schema.views.len());
+    assert_eq!(base_schema.tables.len() + 1, overlay_schema.tables.len());
+    assert_eq!(base_schema.views.len() + 1, overlay_schema.views.len());
     assert!(
-        !overlay_schema
+        overlay_schema
             .tables
             .iter()
             .any(|table| table.name == layouts[0])

@@ -757,16 +757,22 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
 
         for (i, rel) in input.relationships.iter().enumerate() {
             let model = self.model.get();
-            let edge_table = rel
-                .types
-                .first()
-                .and_then(|kind| model.relationship_table(kind))
-                .unwrap_or_else(|| model.default_edge_table());
+            let edge_tables = model.relationship_tables(&rel.types);
             for (prop, filters) in &rel.filters {
-                let Some(data_type) = self.model.get().table_column_type(edge_table, prop) else {
+                if prop.starts_with('_') {
                     return Err(QueryError::Validation(format!(
-                        "relationship[{i}] filter on unknown edge column \"{prop}\" \
-                         (table \"{edge_table}\" does not have this column)"
+                        "relationship[{i}] filter on private edge column \"{prop}\""
+                    )));
+                }
+                let mut types = edge_tables
+                    .iter()
+                    .map(|table| model.table_column_type(table, prop));
+                let data_type = types.next().flatten();
+                let Some(data_type) =
+                    data_type.filter(|first| types.all(|data_type| data_type == Some(*first)))
+                else {
+                    return Err(QueryError::Validation(format!(
+                        "relationship[{i}] filter on unknown edge column \"{prop}\" or incompatible column types across tables {edge_tables:?}"
                     )));
                 };
                 for filter in filters {

@@ -43,6 +43,6 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Join ON c.id = e1.target_id (_) (Bind c (_)))
+        - (Join ON c.id = e1.target_id (_) (Filter ... (Scan Table(gl_definition) AS c)))
       reject:
         - (CTE _narrow_c (_))

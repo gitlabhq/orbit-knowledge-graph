@@ -80,3 +80,16 @@ impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
             })
     }
 }
+
+impl<'a, M: QueryDataModel + ?Sized> PlanningContext<'a, M> {
+    pub(super) fn new(input: &'a Input, model: &'a M) -> Self {
+        Self {
+            input,
+            model,
+            hops: Vec::new(),
+            nodes: HashMap::new(),
+            denormalized: HashMap::new(),
+            node_edge_mappings: HashMap::new(),
+        }
+    }
+}

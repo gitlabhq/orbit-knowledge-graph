@@ -18,6 +18,15 @@ pub fn build_views(storage: &StorageCatalog) -> Vec<View> {
     for join in storage.joins() {
         views.extend(denormalized_feeding_views(join, storage));
     }
+    views.extend(storage.copies().iter().map(|copy| View {
+        name: format!("{}__on_insert", copy.table),
+        to_table: Some(copy.table.clone()),
+        select_query: format!("SELECT * FROM {{{}}}", copy.source),
+        engine: None,
+        order_by: vec![],
+        populate: false,
+        versioned: true,
+    }));
 
     views
 }

@@ -1,0 +1,23 @@
+description: Incoming typed traversal reads the File CALLS variant from its override table
+config:
+  ontology_overlay: variant_routes
+  extra_seed:
+    gl_file:
+      - {id: 11000, path: "crates/compiler/src/lib.rs", project_id: 1000, branch: main, traversal_path: "1/100/1000/"}
+    gl_edge:
+      - {source_id: 11000, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _deleted: false}
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["name"]},{"id":"file","entity":"File","columns":["path"]}],"relationships":[{"type":"CALLS","from":"callee","to":"file","direction":"incoming"}],"limit":10}
+  gql: |
+    MATCH (callee:Definition {id: 12001})<-[:CALLS]-(file:File) RETURN callee.name, file.path LIMIT 10
+expect:
+  node_count: 2
+  nodes:
+    File:
+      ids: [11000]
+    Definition:
+      ids: [12001]
+  edges:
+    CALLS: [[11000, 12001]]
+  referential_integrity: true

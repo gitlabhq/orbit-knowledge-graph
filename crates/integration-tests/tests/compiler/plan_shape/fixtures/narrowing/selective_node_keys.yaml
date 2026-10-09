@@ -30,6 +30,7 @@ physical:
         - (CTE _filter_a (Deduplicate LimitBy 1 BY a.traversal_path, a.project_id, a.branch, a.id (_)))
   duckdb:
     planned:
+      ctes: {absent: true}
       expect:
-        - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_definition) AS a)))))
-        - (Filter e0.source_id IN _filter_a.id, ... (_))
+        - (Join ON a.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS a)))
+      reject: ["(Deduplicate ... (_))", "(SemiJoin ... (_) (_))"]

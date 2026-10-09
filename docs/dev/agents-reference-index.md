@@ -22,7 +22,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
-| Edge-table routing | Edge YAML `table:` selects a table declared by `settings.edge_tables` in `config/ontology/schema.yaml`; the default is `gl_edge` |
+| Edge-table routing | Variant `table:` overrides edge YAML `table:`, then `settings.default_edge_table`; destinations must exist in `settings.edge_tables`. Split producer routing is not yet enabled. |
 | Ontology derived entity definitions | `config/ontology/derived/` |
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
@@ -43,8 +43,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
+| Reordered copies | `settings.reordered_tables` in ontology settings; resolved by `crates/query-data-model/src/implementations/clickhouse/storage/derive.rs`, rendered by migration DDL, and selected by ClickHouse edge-chain planning |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot); `build_unversioned_definitions` in `crates/orbit-migrations/src/schema/translate.rs` builds all kinds |
-| Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (declarations), `crates/query-data-model/src/implementations/clickhouse/storage/derive.rs` (tables and source bindings), `crates/orbit-migrations/src/schema/translate.rs` (DDL rendering); design in `docs/design-documents/querying/graph_engine.md` |
+| Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (declaration), `crates/query-data-model/src/implementations/clickhouse/storage/derive.rs` (ClickHouse tables, bindings, and dependencies), `crates/orbit-migrations/src/schema/translate.rs` (DDL rendering); design in `docs/design-documents/querying/graph_engine.md` |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `goon_output_format`, `gql_output_format` semvers enforced by `scripts/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
 | Vendored dependency system | `docs/dev/runbooks/vendored_dependencies.md` (lifecycle, YAML contract, script contract, validation layers); generic runner in `scripts/vendored/run.sh` |

@@ -1,0 +1,17 @@
+name: A pinned target chooses the target-leading edge copy
+ontology_overlay: reordered_edges
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["id"]},{"id":"callee","entity":"Definition","node_ids":[12001],"columns":["id"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}]}
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition {id: 12001}) RETURN caller.id, callee.id
+logical:
+  expect: ["(EdgeScan CALLS caller->callee AS e0)"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Scan Table(gl_code_edge_by_target) AS e0)"]
+      reject: ["(Scan Table(gl_code_edge) ...)"]
+  duckdb:
+    planned:
+      expect: ["(Scan Table(gl_edge) AS e0)"]

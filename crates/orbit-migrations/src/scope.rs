@@ -96,7 +96,11 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         names.insert(derived.name.clone());
     }
     for kind in ontology.edge_names() {
-        if !is_code_domain_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        if ontology
+            .edge_tables_for_relationship(kind)
+            .iter()
+            .any(|table| !is_code_domain_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -112,7 +116,11 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         }
     }
     for kind in ontology.edge_names() {
-        if is_code_domain_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        if ontology
+            .edge_tables_for_relationship(kind)
+            .iter()
+            .any(|table| is_code_domain_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -130,6 +138,16 @@ pub fn widen_scope_for_shared_table_writers(
     let invalidated = invalidated_entities(ontology, requested_scope);
 
     let storage = StorageCatalog::derive(ontology).expect("validated storage catalog");
+    if storage.joins().iter().any(|join| {
+        join.sources.iter().any(|source| {
+            storage
+                .writers(&source.table)
+                .is_some_and(|writers| !writers.is_disjoint(&invalidated))
+        })
+    }) {
+        return MigrationScope::Full;
+    }
+
     for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
             continue;
@@ -159,14 +177,31 @@ pub fn classify_tables_for_scope(
     let invalidated = invalidated_entities(ontology, scope);
     let storage = StorageCatalog::derive(ontology).expect("validated storage catalog");
 
-    storage
+    let mut actions: BTreeMap<_, _> = storage
         .versioned_tables()
         .map(|table| table.name.clone())
         .map(|table| {
             let action = migration_action_for_table(&storage, &table, scope, &invalidated);
             (table, action)
         })
-        .collect()
+        .collect();
+    let dependencies = storage.dependencies();
+    loop {
+        let mut changed = false;
+        for (table, sources) in dependencies {
+            if sources
+                .iter()
+                .any(|source| actions.get(source) == Some(&TableMigrationAction::RebuildEmpty))
+                && actions.get(table) != Some(&TableMigrationAction::RebuildEmpty)
+            {
+                actions.insert(table.clone(), TableMigrationAction::RebuildEmpty);
+                changed = true;
+            }
+        }
+        if !changed {
+            return actions;
+        }
+    }
 }
 
 pub fn find_invalidated_pipelines(

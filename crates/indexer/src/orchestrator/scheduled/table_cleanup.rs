@@ -115,7 +115,7 @@ fn list_graph_tables(ontology: &ontology::Ontology) -> Vec<String> {
         query_data_model::implementations::clickhouse::storage::StorageCatalog::derive(ontology)
             .expect("validated storage catalog");
     storage
-        .graph_tables()
+        .tables()
         .iter()
         .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
         .collect()

@@ -18,6 +18,7 @@ pub struct CodeTableNames {
 
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        ontology.validate_single_table_edge_routes()?;
         let code_node_types: HashSet<&str> = ontology
             .nodes()
             .filter(|node| node.domain == CODE_DOMAIN)

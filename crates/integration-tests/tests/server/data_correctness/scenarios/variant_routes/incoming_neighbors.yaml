@@ -1,0 +1,23 @@
+description: Incoming neighbors return callers from both canonical variant tables
+config:
+  ontology_overlay: variant_routes
+  extra_seed:
+    gl_file:
+      - {id: 11000, path: "crates/compiler/src/lib.rs", project_id: 1000, branch: main, traversal_path: "1/100/1000/"}
+    gl_edge:
+      - {source_id: 11000, source_kind: File, target_id: 12001, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _deleted: false}
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"callee","entity":"Definition","node_ids":[12001]}],"neighbors":{"direction":"incoming","rel_types":["CALLS"]},"limit":10}
+  gql: |
+    MATCH (callee:Definition {id: 12001})<-[:CALLS]-(caller) RETURN callee, caller LIMIT 10
+expect:
+  node_count: 3
+  nodes:
+    File:
+      ids: [11000]
+    Definition:
+      ids: [12000, 12001]
+  edges:
+    CALLS: [[11000, 12001], [12000, 12001]]
+  referential_integrity: true

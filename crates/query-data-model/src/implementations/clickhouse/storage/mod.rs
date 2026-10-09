@@ -231,22 +231,15 @@ impl StorageCatalog {
             .iter()
             .filter(|table| table.versioned)
             .map(|table| &table.table)
-            .chain(self.deployed_tables())
+            .chain(&self.tables)
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
         self.auxiliary_tables
             .iter()
             .map(|table| table.table.name.as_str())
-            .chain(self.deployed_tables().map(|table| table.name.as_str()))
+            .chain(self.tables.iter().map(|table| table.name.as_str()))
     }
-
-    fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
-        self.tables
-            .iter()
-            .filter(|table| !self.copies.iter().any(|copy| copy.table == table.name))
-    }
-
     pub fn tables(&self) -> &[Table] {
         &self.tables
     }

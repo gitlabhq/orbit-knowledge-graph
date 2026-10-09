@@ -55,7 +55,7 @@ where
         let tables_for = |source: bool| -> Vec<String> {
             let mut tables: Vec<String> = relationships
                 .iter()
-                .filter_map(|relationship| model.relationship_route(relationship))
+                .flat_map(|relationship| model.relationship_routes(relationship))
                 .filter(|route| match source {
                     true => route.has_source(center_entity_id),
                     false => route.has_target(center_entity_id),

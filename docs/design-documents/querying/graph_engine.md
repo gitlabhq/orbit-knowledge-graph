@@ -14,9 +14,10 @@ primary keys, and secondary indexes.
 - Each node type has a dedicated `ReplacingMergeTree` table. Namespaced node tables
   usually lead their sort key with `traversal_path`; individual ontology declarations
   can add entity-specific columns such as project, branch, or local identifiers.
-- Relationship types share physical edge tables. `settings.edge_tables` declares those
-  tables, `settings.default_edge_table` selects `gl_edge` as the default, and an edge YAML
-  can use `table:` to route a relationship elsewhere. The current routes include
+- Relationship variants resolve to physical edge tables. `settings.edge_tables` declares those
+  tables and `settings.default_edge_table` selects `gl_edge` as the default.
+  A variant's `table:` overrides the edge YAML's `table:`, which overrides the default.
+  The current routes include
   dedicated tables for code, CI/CD, security, and merge request diff relationships.
 - `traversal_path` is the slash-delimited namespace hierarchy for a namespaced row. The
   query engine applies `startsWith` predicates to namespaced node and edge scans, using
@@ -25,29 +26,58 @@ primary keys, and secondary indexes.
   these columns into the physical sort and primary keys where required. See
   [Code Indexing](../indexing/code_indexing.md).
 
-### Storage catalogs
+The query catalog resolves a route by relationship kind and both endpoint types.
+Each route carries its canonical table and optional FK mapping.
+Relationship-wide reads collect the distinct tables from their variants.
+DuckDB maps these variants to its single local edge table.
 
-Each backend owns its storage catalog under `query-data-model/src/implementations/`.
-The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
-It also resolves the source bindings for declared joined tables and records which entities write each table.
-Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
-The DuckDB catalog records local node and edge layouts for its query mapping.
-Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
+Typed single-hop queries use the exact route, including incoming traversals.
+Neighbors and path finding can read multiple route tables.
+Traversal and aggregation reject hops that require multiple tables until those plans support union scans.
+The SDLC and code producers reject split routes at startup until their batch routing supports them.
+The shipped ontology keeps its existing destinations.
 
-### Layout metadata
+Catalog derivation copies physical column declarations, logical types, primary keys, and sort keys
+from the ontology into catalog-owned metadata. Consumers read the catalog as their source of truth.
+The ClickHouse storage catalog in `query-data-model::implementations::clickhouse::storage` resolves node, edge, joined, and reordered tables.
+It owns their columns, indexes, engine facts, keys, settings, source bindings, and dependencies.
+It also owns auxiliary tables, dictionaries, and declared view definitions used by schema management.
+The ClickHouse query catalog derives its typed property and entity views from that storage catalog.
+DDL generation renders the same definitions. Migration and cleanup consume its table and dependency inventory.
+The shared backend interface exposes equivalent layouts and logical materialized-join bindings.
+Each backend has one directory under `query-data-model/src/implementations/`.
+Its `storage/` module derives physical facts, `mapping/` connects those facts to shared query identities, and `mod.rs` exposes the catalog.
+ClickHouse supplies its supported layouts; DuckDB exposes its canonical local tables and no materialized joins.
+Codecs, MergeTree settings, and MV source definitions stay within the ClickHouse implementation.
+Only ClickHouse planning applies the leading-key layout heuristic.
+The pipelines select separate, typed ClickHouse and DuckDB planning phases.
+DuckDB traversal planning builds canonical scans and required joins without narrowing CTEs, cascades, or latest-row deduplication.
+ClickHouse planning owns those optimizations. Shared expressions, output bindings, and bounded-hop construction preserve the graph result contract.
+The sort key is also the replacement identity.
+Copied path columns retain their source table and occurrence in the materialized chain.
+These facts describe storage; they do not enable materialized-join substitution.
 
-The catalog records variant routes, reordered copies, and bindings for declared joined tables.
-Variant routes pair a relationship and its endpoint types with a table and optional foreign key.
-Shared materialized bindings use graph IDs and source occurrences to identify node properties and relationship endpoints.
-Path columns retain their source table and occurrence.
+### Reordered copies
 
-`settings.reordered_tables` declares a named copy and a permutation of its source sort key.
-The source must be an existing node, edge, or joined table. Names must be unique.
-The storage catalog derives each copy's columns and keys and records its source dependency.
-Query catalogs expose equivalent layouts without selecting one.
+`settings.reordered_tables` declares an MV-fed copy with a different sort order:
 
-These declarations are catalog metadata. Reordered copies are excluded from the deployed table inventory used by DDL and migration.
-The compiler still uses its existing relationship routing and plans. Creating copies and selecting new access paths require the implementation follow-up.
+```yaml
+reordered_tables:
+  - name: gl_code_edge_by_target
+    source: gl_code_edge
+    sort_key: [traversal_path, target_id, relationship_kind, project_id, branch, source_id, source_kind, target_kind]
+```
+
+The sort key must be a permutation of the source key. This preserves replacement identity.
+The source must be a node, edge, or denormalized table. Copies cannot depend on other copies.
+Catalog derivation inherits columns, indexes, and engine settings from the source.
+The feeding view forwards every inserted row, including tombstones.
+
+The catalog owns each copy's layout and source dependency.
+Copies are alternatives to canonical tables and never enter wildcard route unions.
+Edge-chain planning selects a copy when its leading keys match more pinned endpoint and kind values than the canonical layout.
+Ties keep the canonical table. Local DuckDB reads keep their existing layout.
+The shipped ontology does not enable a copy; `reordered_edges` is a test overlay.
 
 ### Edge table schema
 
@@ -235,6 +265,16 @@ Filter placement rules for node `FINAL` scans:
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
 ### Denormalized joins
+
+The query catalog copies each declared join into slot-based bindings.
+Each node slot has an entity ID, source occurrence, identity column, and property-to-column map.
+Each relationship binding records its variant, endpoint slots, and stored edge columns, when present.
+Repeated entities retain distinct slots. FK-backed hops identify their endpoints through the node slots.
+The catalog also owns the source-table dependency set.
+These bindings prepare query substitution; the planner does not yet replace hops with materialized-join scans.
+
+Security injection and the final check use every catalog path column for a combined table.
+Injection applies each source entity's role requirement to its own column.
 
 A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table. The compiler can then answer the matching hops with a single scan. It is declared as a chain of edge variants. Each variant is realized either through its edge table, or, with `via: fk`, directly node to node on the variant's FK column:
 

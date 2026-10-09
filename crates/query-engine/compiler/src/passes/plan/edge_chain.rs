@@ -183,24 +183,37 @@ pub enum HydrationStrategy {
     Skip,
 }
 
-pub(super) fn plan<M>(
-    mut context: PlanningContext<'_, M>,
-    use_fk_elision: bool,
+pub(super) fn plan(
+    mut context: PlanningContext<'_, query_data_model::ClickHouseDataModel>,
     table_scans: &HashSet<String>,
-) -> Result<QueryPlan>
-where
-    M: QueryDataModel + ?Sized,
-{
+) -> Result<QueryPlan> {
     let input = context.input;
     let model = context.model;
-    let hops = build_hops(input, model);
+    let mut hops = build_hops(input, model)?;
+    for hop in &mut hops {
+        let mut equality_columns = vec![
+            RELATIONSHIP_KIND_COLUMN,
+            SOURCE_KIND_COLUMN,
+            TARGET_KIND_COLUMN,
+        ];
+        for (alias, column) in [
+            (&hop.from_node, hop.direction.edge_columns().0),
+            (&hop.to_node, hop.direction.edge_columns().1),
+        ] {
+            if input
+                .nodes
+                .iter()
+                .any(|node| &node.id == alias && !node.node_ids.is_empty())
+            {
+                equality_columns.push(column);
+            }
+        }
+        hop.edge_table =
+            super::clickhouse::select_read_layout(model, &hop.edge_table, &equality_columns);
+    }
     let mut nodes = build_node_plans(input, model);
 
-    let (mut hops, elided_fks) = if use_fk_elision {
-        elide_hops(hops, &mut nodes, input, model)
-    } else {
-        (hops, Vec::new())
-    };
+    let (mut hops, elided_fks) = elide_hops(hops, &mut nodes, input, model);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
@@ -208,17 +221,13 @@ where
     let denormalized = super::denormalized_facts(input, model);
 
     for node_plan in nodes.values_mut() {
-        if use_fk_elision {
-            node_plan.hydration = determine_hydration(
-                node_plan,
-                input,
-                &hops,
-                &denormalized,
-                table_scans.contains(&node_plan.alias),
-            );
-        } else {
-            node_plan.hydration = HydrationStrategy::Join;
-        }
+        node_plan.hydration = determine_hydration(
+            node_plan,
+            input,
+            &hops,
+            &denormalized,
+            table_scans.contains(&node_plan.alias),
+        );
     }
 
     resolve_join_columns(&mut hops);
@@ -232,10 +241,6 @@ where
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
-    } else if !use_fk_elision {
-        for np in nodes.values_mut() {
-            np.emit_select = true;
-        }
     }
 
     context.hops = hops;
@@ -243,9 +248,9 @@ where
     context.denormalized = denormalized;
     let execution = if context.hops.is_empty() {
         context.single_node()?
-    } else if use_fk_elision && let Some(center) = detect_fk_star(&context.hops) {
+    } else if let Some(center) = detect_fk_star(&context.hops) {
         super::fk::star(&context, &center)?
-    } else if use_fk_elision && detect_fk_chain(&context.hops, &context.nodes) {
+    } else if detect_fk_chain(&context.hops, &context.nodes) {
         super::fk::chain(&context)?
     } else {
         super::flat::plan(&context)?
@@ -276,7 +281,7 @@ where
     })
 }
 
-fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>
+pub(super) fn build_hops<M>(input: &Input, model: &M) -> Result<Vec<Hop>>
 where
     M: QueryDataModel + ?Sized,
 {
@@ -290,7 +295,6 @@ where
         .iter()
         .enumerate()
         .map(|(input_index, rel)| {
-            let edge_table = model.relationship_table_for_query(&rel.types).to_string();
             let from_entity = input
                 .nodes
                 .iter()
@@ -301,6 +305,30 @@ where
                 .iter()
                 .find(|node| node.id == rel.to)
                 .and_then(|node| node.entity.as_deref());
+            let mut tables = match from_entity.zip(to_entity) {
+                Some((from, to)) if rel.hops.max == 1 => {
+                    let mut tables = Vec::new();
+                    if rel.direction != Direction::Incoming {
+                        tables.extend(model.relationship_tables_between(&rel.types, from, to));
+                    }
+                    if rel.direction != Direction::Outgoing {
+                        tables.extend(model.relationship_tables_between(&rel.types, to, from));
+                    }
+                    tables
+                }
+                _ => model.relationship_tables(&rel.types),
+            };
+            if tables.is_empty() {
+                tables = model.relationship_tables(&rel.types);
+            }
+            tables.sort();
+            tables.dedup();
+            let [edge_table] = tables.as_slice() else {
+                return Err(crate::error::QueryError::Validation(format!(
+                    "relationship[{input_index}] requires multiple edge tables; traversal and aggregation do not support split table scans"
+                )));
+            };
+            let edge_table = edge_table.clone();
             let fk = from_entity
                 .zip(to_entity)
                 .and_then(|(from, to)| match rel.direction {
@@ -346,7 +374,7 @@ where
                 super::helpers::FilterOwner::Table(&edge_table),
                 model,
             );
-            Hop {
+            Ok(Hop {
                 input_index,
                 rel_types: rel.types.clone(),
                 relationships: rel
@@ -365,12 +393,12 @@ where
                 filters,
                 join_prev: None,
                 cascade_anchor: false,
-            }
+            })
         })
         .collect()
 }
 
-fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
+pub(super) fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
 where
     M: QueryDataModel + ?Sized,
 {

@@ -943,11 +943,18 @@ impl Ontology {
 
     #[must_use]
     pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
-        self.edges
+        let mut tables = self
+            .edges
             .get(relationship_kind)
-            .and_then(|variants| variants.first())
-            .map(|edge| edge.destination_table.as_str())
-            .unwrap_or(&self.default_edge_table)
+            .into_iter()
+            .flatten()
+            .map(|edge| edge.destination_table.as_str());
+        let table = tables.next().unwrap_or(&self.default_edge_table);
+        assert!(
+            tables.all(|candidate| candidate == table),
+            "ambiguous table route for '{relationship_kind}'"
+        );
+        table
     }
 
     #[must_use]

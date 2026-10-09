@@ -10,13 +10,21 @@ table-prefix-aware migration orchestrator.
 
 The ontology declares storage. `query-data-model::implementations::clickhouse::storage::StorageCatalog` resolves ClickHouse graph-table definitions and source bindings during derivation.
 The query catalog and DDL renderer consume those resolved definitions.
-Migration uses the catalog's writer map to classify graph-table rebuilds.
+Migration uses the catalog's writer and dependency maps to classify graph-table rebuilds.
 These backend-specific types contain owned data and require no compiler dependency or SQL parser.
-Shared graph contracts contain no ClickHouse codecs, engine settings, or MV definitions.
+Shared graph and access-path contracts contain no ClickHouse codecs, engine settings, or MV definitions.
 Auxiliary tables, dictionaries, and declared materialized views also derive into the ClickHouse storage catalog.
 The catalog preserves table lifetimes, engine arguments, TTLs, dictionary settings, and view SQL or templates.
 Schema rendering, auxiliary fingerprints, and refreshable-view creation consume those catalog definitions.
 Graph cleanup uses only graph tables; the versioned schema inventory also includes versioned auxiliary tables.
+
+Reordered copies inherit source DDL and use a versioned feeding MV.
+Their sort keys permute the source replacement key without adding or removing columns.
+Selective migration rebuilds a derived target when one of its sources is rebuilt.
+A new or rebuilt copy is filled from its target-version source after the feeding views exist.
+Initialization reads `FINAL`; retries can repeat inserts because the copy keeps the source replacement identity and version.
+Migrations affecting materialized-join sources use a full rebuild until selective join initialization is supported.
+Table cleanup includes joined tables and reordered copies.
 
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables

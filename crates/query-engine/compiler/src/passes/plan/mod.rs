@@ -1,5 +1,7 @@
 pub mod aggregation;
+mod clickhouse;
 mod context;
+mod duckdb;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;
@@ -12,11 +14,13 @@ pub mod pathfinding;
 pub mod physical;
 pub mod requirements;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
+pub use clickhouse::plan as plan_clickhouse;
+pub use duckdb::plan as plan_duckdb;
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::QueryDataModel;
@@ -141,7 +145,7 @@ impl EdgeTableConfig {
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            if let Some(route) = model.relationship_route(rt) {
+            for route in model.relationship_routes(rt) {
                 source_kinds.extend(
                     route
                         .source_entities()
@@ -176,54 +180,4 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .iter()
         .find(|n| n.id == alias)
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
-}
-
-pub fn plan_clickhouse(
-    input: &Input,
-    model: &query_data_model::ClickHouseDataModel,
-    hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
-}
-
-pub fn plan_duckdb(
-    input: &Input,
-    model: &query_data_model::DuckDbDataModel,
-    hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
-}
-
-fn plan<M>(
-    input: &Input,
-    model: &M,
-    hydration_options: HydrationCompileOptions,
-    use_fk_elision: bool,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan>
-where
-    M: QueryDataModel + ?Sized,
-{
-    let context = context::PlanningContext {
-        input,
-        model,
-        nodes: HashMap::new(),
-        hops: Vec::new(),
-        denormalized: HashMap::new(),
-        node_edge_mappings: HashMap::new(),
-    };
-    match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => {
-            edge_chain::plan(context, use_fk_elision, table_scans)
-        }
-        QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
-        QueryType::PathFinding => {
-            pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)
-        }
-        QueryType::Hydration => {
-            hydration::plan_hydration(context, hydration_options).map(QueryPlan::Hydration)
-        }
-    }
 }

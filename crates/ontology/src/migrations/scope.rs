@@ -119,13 +119,14 @@ pub fn derive_scope(
             }
         } else if path.starts_with("edges/") {
             match edge_kind_for_path(ontology, path) {
-                Some(kind)
-                    if is_code_table(ontology, ontology.edge_table_for_relationship(&kind)) =>
-                {
-                    code_changed = true;
-                }
                 Some(kind) => {
-                    sdlc_entities.insert(kind);
+                    let tables = ontology.edge_tables_for_relationship(&kind);
+                    if tables.iter().any(|table| is_code_table(ontology, table)) {
+                        code_changed = true;
+                    }
+                    if tables.iter().any(|table| !is_code_table(ontology, table)) {
+                        sdlc_entities.insert(kind);
+                    }
                 }
                 None => return Some(MigrationScope::Full),
             }
@@ -174,7 +175,11 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         names.insert(derived.name.clone());
     }
     for kind in ontology.edge_names() {
-        if !is_code_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        if ontology
+            .edge_tables_for_relationship(kind)
+            .iter()
+            .any(|table| !is_code_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -190,7 +195,11 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         }
     }
     for kind in ontology.edge_names() {
-        if is_code_table(ontology, ontology.edge_table_for_relationship(kind)) {
+        if ontology
+            .edge_tables_for_relationship(kind)
+            .iter()
+            .any(|table| is_code_table(ontology, table))
+        {
             names.insert(kind.to_string());
         }
     }
@@ -250,7 +259,10 @@ fn table_owned_by_scope(
         {
             return true;
         }
-        if ontology.has_edge(entity) && ontology.edge_table_for_relationship(entity) == table {
+        if ontology
+            .edge_tables_for_relationship(entity)
+            .contains(table)
+        {
             return true;
         }
     }
