@@ -55,14 +55,6 @@ fixtures:
       }
 
 tests:
-  - name: "explicit constructor calls resolve without macro expansion"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-      WHERE caller.name = 'execute' AND callee.name = 'new'
-      RETURN callee.file_path AS file, callee.definition_type AS type
-    assert:
-      - { row_count: 1 }
-      - { row: { file: 'src/worker.rs', type: Function } }
   - name: "execute -> helper resolves through use"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -72,14 +64,13 @@ tests:
       - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/util.rs" } }
 
-  - name: "execute -> Worker::new resolves across files and macro expansion"
-    supported: false
+  - name: "only the explicit constructor call resolves; the macro adds no constructor edge"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Function" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
@@ -100,12 +91,10 @@ tests:
       - { row_count: 1 }
       - { row: { src: "src/worker.rs", tgt: "src/util.rs" } }
 
-  - name: "execute -> make_worker macro resolves"
-    supported: false
+  - name: "macro invocations do not emit calls to macro definitions"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'make_worker'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
-      - { row_count: 1 }
-      - { row: { src: "src/api.rs", tgt: "src/macros.rs", type: "Macro" } }
+      - { empty: true }

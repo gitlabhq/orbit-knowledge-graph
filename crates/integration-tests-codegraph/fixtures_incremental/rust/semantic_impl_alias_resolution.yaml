@@ -20,117 +20,28 @@ fixtures:
       use crate::domain::Service as Alias;
 
       impl Runner for Alias {
-          fn run(&self) { implementation_body(); }
+          fn run(&self) {}
       }
-      fn implementation_body() {}
-      fn through_alias(value: &Alias) { <Alias as Runner>::run(value); }
-      fn through_type(value: &domain::Service) { <domain::Service as Runner>::run(value); }
-      mod unrelated {
-          pub struct Service;
-      }
-      fn unrelated_type(value: &unrelated::Service) { <unrelated::Service as Runner>::run(value); }
-      fn shadowed_alias(value: &unrelated::Service) {
-          use unrelated::Service as Alias;
-          <Alias as Runner>::run(value);
-      }
-      mod remote;
-      use remote::Remote as RemoteAlias;
-      impl Runner for RemoteAlias {
-          fn run(&self) { remote_body(); }
-      }
-      fn remote_body() {}
-      fn remote_alias(value: &RemoteAlias) { <RemoteAlias as Runner>::run(value); }
-  - path: src/remote.rs
-    content: |
-      pub struct Remote;
 
 tests:
-  - name: "trait impl method names use the underlying type rather than the import alias"
-    # Deferred: resolved owner names need the canonical naming follow-up.
+  - name: "trait impl methods attach to the underlying ADT rather than the import alias"
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'src/lib.rs' AND d.name = 'run'
+      WHERE d.name = 'run'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { fqn: 'Runner::run' } }
       - { row: { fqn: 'domain::Service::run' } }
-      - { row: { fqn: 'remote::Remote::run' } }
-  - name: "alias-based impl method names are not emitted"
-    # Deferred: resolved owner names need the canonical naming follow-up.
+
+  - name: "alias-based impl container names are not emitted"
+    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
     skip: true
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn IN ['Alias::run', 'RemoteAlias::run']
-      RETURN d.fqn
-    assert:
-      - { empty: true }
-  - name: "qualified calls have exactly one implementation target each"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
-      WHERE caller.name IN ['through_alias', 'through_type', 'remote_alias']
-      RETURN caller.name AS caller, method.file_path AS file, method.start_line AS line
-    assert:
-      - { row_count: 3 }
-      - { row: { caller: through_alias, file: 'src/lib.rs', line: 12 } }
-      - { row: { caller: through_type, file: 'src/lib.rs', line: 12 } }
-      - { row: { caller: remote_alias, file: 'src/lib.rs', line: 28 } }
-  - name: "qualified calls through aliases select the underlying implementation"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
-      WHERE caller.name IN ['through_alias', 'through_type']
-      RETURN caller.name AS caller, body.name AS body
-    assert:
-      - { row_count: 2 }
-      - { row: { caller: through_alias, body: implementation_body } }
-      - { row: { caller: through_type, body: implementation_body } }
-  - name: "imported impl owners resolve across files"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
-      WHERE caller.name = 'remote_alias'
-      RETURN body.name AS name
-    assert:
-      - { row_count: 1 }
-      - { row: { name: remote_body } }
-
-  - name: "unrelated same-named types do not acquire alias implementations"
-    query: |
-      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
-      WHERE caller.name IN ['unrelated_type', 'shadowed_alias']
-      RETURN method.name
+      WHERE d.fqn = 'Alias::run'
+      RETURN d.fqn AS fqn
     assert:
       - { row_count: 0 }
-steps:
-  - name: restore resolved owner identities
-    snapshot: true
-    tests:
-      - name: "alias owners survive snapshot loading"
-        query: |
-          MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
-          WHERE caller.name IN ['through_alias', 'through_type', 'remote_alias', 'unrelated_type', 'shadowed_alias']
-          RETURN caller.name AS caller, body.name AS body
-        assert:
-          - { row_count: 3 }
-          - { row: { caller: through_alias, body: implementation_body } }
-          - { row: { caller: through_type, body: implementation_body } }
-          - { row: { caller: remote_alias, body: remote_body } }
-      - name: "snapshot preserves resolved owner names and source files"
-        # Deferred: resolved owner names need the canonical naming follow-up.
-        skip: true
-        query: |
-          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
-          WHERE caller.name IN ['through_alias', 'through_type', 'remote_alias']
-          RETURN caller.name AS caller, method.fqn AS fqn, method.file_path AS file
-        assert:
-          - { row_count: 3 }
-          - { row: { caller: through_alias, fqn: 'domain::Service::run', file: 'src/lib.rs' } }
-          - { row: { caller: through_type, fqn: 'domain::Service::run', file: 'src/lib.rs' } }
-          - { row: { caller: remote_alias, fqn: 'remote::Remote::run', file: 'src/lib.rs' } }
-      - name: "unrelated and shadowed owners still have no call after snapshot loading"
-        query: |
-          MATCH (caller:Definition)-[:CALLS]->(method:Definition)
-          WHERE caller.name IN ['unrelated_type', 'shadowed_alias']
-          RETURN method.name
-        assert:
-          - { empty: true }

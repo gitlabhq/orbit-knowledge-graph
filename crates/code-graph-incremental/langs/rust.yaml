@@ -34,8 +34,6 @@ stages:
         replace: '(__binding "_")'
       - match: '(macro_invocation macro: (identifier "/^(panic|unreachable|todo|unimplemented)$/") $$$V)'
         replace: '(__ssa_branch $$$V)'
-      - match: '(macro_invocation macro: $F)'
-        replace: '(call_expression function: $F arguments: (arguments))'
 
       # size_of::<T>() / Type::method::<T>(): the turbofish is not part of the name
       - match: '(generic_function function: $F)'

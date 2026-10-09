@@ -137,17 +137,6 @@ fixtures:
           macros::ready!();
       }
 
-      pub fn scoped_macro_user() {
-          use local_macros::report;
-          report!(do_work());
-          report!();
-      }
-
-      pub fn other_scoped_macro_user() {
-          use other_macros::report;
-          report!();
-      }
-
       pub fn fn_pointer_from_assoc() {
           let constructor: fn() -> Service = Service::new;
           let _service = constructor();
@@ -172,17 +161,14 @@ fixtures:
       }
 
 tests:
-  - name: "macro references retain scope and call sites without interpreting token bodies"
+  - name: "imported macro invocations do not become external function calls"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
-      WHERE caller.name IN ['scoped_macro_user', 'other_scoped_macro_user']
+      WHERE caller.name IN ['external_imported_calls', 'qualified_external_imported_calls']
+        AND sym.import_path IN ['tracing::info', 'serde_json::json', 'external_macros']
       RETURN caller.name AS caller, sym.import_path AS path
     assert:
-      - { row_count: 3 }
-      - { row: { caller: "scoped_macro_user", path: "local_macros::report" } }
-      - { row: { caller: "other_scoped_macro_user", path: "other_macros::report" } }
-      - { where: { caller: scoped_macro_user, path: 'local_macros::report' }, row_count: 2 }
-      - { where: { caller: other_scoped_macro_user, path: 'other_macros::report' }, row_count: 1 }
+      - { empty: true }
   - name: "module aliases resolve callable paths"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -215,11 +201,9 @@ tests:
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name, alias
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { caller: "external_imported_calls", path: "external_actions::do_work", name: "do_work", alias: null } }
       - { row: { caller: "external_imported_calls", path: "external_actions::renamed", name: "renamed", alias: "renamed_work" } }
-      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json", alias: null } }
-      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
 
   - name: "local callable shadowing does not target imported symbols"
     query: |
@@ -259,10 +243,9 @@ tests:
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
-      - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
     query: |
