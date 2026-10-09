@@ -26,12 +26,16 @@ fixtures:
       }
 
       impl Alpha for Widget {
-          fn foo(&self) {}
+          fn foo(&self) { alpha_body(); }
       }
 
       impl Beta for Widget {
-          fn foo(&self) {}
+          fn foo(&self) { beta_body(); }
       }
+      fn alpha_body() {}
+      fn beta_body() {}
+      fn call_alpha(value: &Widget) { <Widget as Alpha>::foo(value); }
+      fn call_beta(value: &Widget) { <Widget as Beta>::foo(value); }
 
       pub mod outer {
           pub mod middle {
@@ -57,21 +61,28 @@ tests:
       - { row_count: 1 }
       - { row: { type: 'Use' } }
 
-  - name: "colliding trait-impl methods are disambiguated with trait name"
-    # Known gap: Trait dispatch and cross-file trait resolution are incomplete in rust.yaml.
-    skip: true
+  - name: "same-named trait implementations retain distinct definition identities"
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
         AND d.definition_type IN ['Method', 'Function']
-      RETURN d.fqn AS fqn
+      RETURN d.fqn AS fqn, d.start_line AS line
     assert:
       - { row_count: 4 }
       - { row: { fqn: 'Alpha::foo' } }
       - { row: { fqn: 'Beta::foo' } }
-      - { row: { fqn: 'Widget::<Alpha>::foo' } }
-      - { row: { fqn: 'Widget::<Beta>::foo' } }
+      - { row: { fqn: 'Widget::foo', line: 18 } }
+      - { row: { fqn: 'Widget::foo', line: 22 } }
+  - name: "qualified calls select distinct implementation bodies despite equal method names"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+      WHERE caller.name IN ['call_alpha', 'call_beta']
+      RETURN caller.name AS caller, body.name AS body
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: call_alpha, body: alpha_body } }
+      - { row: { caller: call_beta, body: beta_body } }
 
   - name: "deeply nested module items are retained despite excess super segments"
     query: |
