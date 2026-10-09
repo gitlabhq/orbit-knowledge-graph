@@ -1,0 +1,9 @@
+settings:
+  edge_tables:
+    gl_code_edge:
+      columns:
+        - {name: _declared_field, type: int64}
+      storage:
+        columns:
+          - {name: _declared_field, type: Int64}
+          - {name: internal_marker, type: Int64}

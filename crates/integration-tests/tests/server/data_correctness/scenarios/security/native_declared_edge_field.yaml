@@ -1,0 +1,13 @@
+description: Grouped predicates use catalog declarations rather than underscore spelling
+config:
+  ontology_overlay: queryable_edge_fields
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+  gql: |
+    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) RETURN b
+expect:
+  predicates:
+    - not: {relationship: 0, property: _declared_field, op: eq, value: 1}
+  compile_only: true
+  sql_contains: [_declared_field]

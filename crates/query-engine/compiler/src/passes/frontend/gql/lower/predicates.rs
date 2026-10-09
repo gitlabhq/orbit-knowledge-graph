@@ -39,6 +39,11 @@ impl Lowering {
             let lhs_prop = property.property.value;
             let rhs_node = rhs.node.value;
             let rhs_prop = rhs.property.value;
+            for alias in [&lhs_node, &rhs_node] {
+                if !self.input.nodes.iter().any(|node| &node.id == alias) {
+                    return Err(invalid(span, &format!("undefined variable {alias}")));
+                }
+            }
             self.input
                 .predicates
                 .push(crate::input::BooleanExpression::Leaf(

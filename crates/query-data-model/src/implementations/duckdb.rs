@@ -72,6 +72,12 @@ impl QueryBackendCatalog for DuckDbCatalog {
         false
     }
 
+    fn edge_filter_type(&self, table: &str, field: &str) -> Option<ontology::DataType> {
+        (table == self.edge_table())
+            .then(|| self.edge_column_type(field))
+            .flatten()
+    }
+
     fn table_path_scopable(&self, _table: &str) -> bool {
         false
     }

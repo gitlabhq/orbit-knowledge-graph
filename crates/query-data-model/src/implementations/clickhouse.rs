@@ -34,6 +34,7 @@ pub struct ClickHouseCatalog {
     variants: Vec<Option<ForeignKey>>,
     property_facts: Vec<PropertyBackendFacts>,
     tables: HashMap<String, TableLayout>,
+    edge_filter_fields: HashMap<String, HashMap<String, ontology::DataType>>,
     denormalized: DenormalizedCatalog,
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
@@ -125,6 +126,10 @@ impl QueryBackendCatalog for ClickHouseCatalog {
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType> {
         self.table(table)
             .and_then(|layout| layout.column_types.get(column).copied())
+    }
+
+    fn edge_filter_type(&self, table: &str, field: &str) -> Option<ontology::DataType> {
+        self.edge_filter_fields.get(table)?.get(field).copied()
     }
 
     fn has_text_index(&self, property: PropertyId) -> bool {
@@ -294,6 +299,7 @@ impl ClickHouseCatalog {
             );
         }
 
+        let mut edge_filter_fields = HashMap::new();
         for table_name in ontology.edge_tables() {
             let config = ontology.edge_table_config(table_name).ok_or_else(|| {
                 DataModelError::UnknownReference {
@@ -308,11 +314,12 @@ impl ClickHouseCatalog {
                 .chain(config.storage.denormalized_columns.iter())
                 .map(|column| column.name.trim_matches('`').to_string())
                 .collect();
-            let column_types = config
+            let column_types: HashMap<_, _> = config
                 .columns
                 .iter()
                 .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
                 .collect();
+            edge_filter_fields.insert(table_name.to_string(), column_types.clone());
             tables.insert(
                 table_name.to_string(),
                 TableLayout {
@@ -482,6 +489,7 @@ impl ClickHouseCatalog {
             variants,
             property_facts,
             tables,
+            edge_filter_fields,
             denormalized: DenormalizedCatalog::new(denormalized),
             traversal_path_lookups,
         })
