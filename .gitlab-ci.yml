@@ -171,6 +171,23 @@ stages:
       interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Jobs that pull alpine through the group dependency proxy. The proxy needs the
+# job user to hold at least Guest on the top-level group, which bot accounts
+# (project members only) lack, so it answers 404. The runner pulls the job image
+# before any script runs, so the choice is made at pipeline creation: bot users
+# get the public image, everyone else the proxy.
+.alpine-image-mr-only:
+  variables:
+    ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: ${ALPINE_IMAGE}
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)/
+      interruptible: true
+      variables:
+        ALPINE_IMAGE: alpine:latest
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+
 .canonical-only-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
@@ -433,11 +450,10 @@ iglu-schema-check:
 
 system-note-actions-check:
   stage: lint
-  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   # Verifies config/vendored/system_note_metadata.actions matches Rails
   # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
@@ -447,11 +463,10 @@ system-note-actions-check:
 
 duckdb-fts-sources-sync-check:
   stage: lint
-  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   script:
     - apk add --no-cache bash git gzip tar yq
