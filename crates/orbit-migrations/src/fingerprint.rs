@@ -44,9 +44,12 @@ pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, St
 
     let prefix = "v1_";
     for view in &schema.refreshable_views {
-        if let Ok(rendered_select) =
-            translate::render_refreshable_view_select(&view.select_query, ontology, 1, prefix)
-        {
+        if let Ok(rendered_select) = translate::render_refreshable_view_select(
+            &view.select_query,
+            &schema.storage,
+            1,
+            prefix,
+        ) {
             let view_name = if view.versioned {
                 format!("{prefix}{}", view.name)
             } else {

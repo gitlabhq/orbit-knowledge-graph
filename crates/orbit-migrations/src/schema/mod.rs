@@ -8,6 +8,7 @@ pub use translate::render_refreshable_view_select;
 
 #[derive(Debug)]
 pub struct GraphSchema {
+    pub storage: query_data_model::implementations::clickhouse::storage::StorageCatalog,
     pub tables: Vec<Table>,
     pub views: Vec<View>,
     pub dictionaries: Vec<Dictionary>,
@@ -158,8 +159,13 @@ impl GraphSchema {
     /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
     /// self-managed cluster; a `Replicated` database replicates DDL only.
     pub fn from_ontology_replicated(ontology: &Ontology, replicated: bool) -> Self {
-        let mut tables = translate::build_all_tables(ontology);
-        let mut views = translate::build_views(ontology, &tables);
+        let storage =
+            query_data_model::implementations::clickhouse::storage::StorageCatalog::derive(
+                ontology,
+            )
+            .expect("validated ontology storage");
+        let mut tables = translate::build_all_tables(&storage);
+        let mut views = translate::build_views(&storage);
         if replicated {
             for table in &mut tables {
                 table.engine = table.engine.clone().replicated();
@@ -168,18 +174,19 @@ impl GraphSchema {
                 view.engine = view.engine.take().map(Engine::replicated);
             }
         }
-        let all_table_names = translate::collect_all_table_names(ontology);
+        let all_table_names = storage.table_names().map(String::from).collect::<Vec<_>>();
 
         Self {
             views,
-            dictionaries: translate::build_dictionaries(ontology),
-            refreshable_views: translate::build_refreshable_views(ontology),
+            dictionaries: translate::build_dictionaries(&storage),
+            refreshable_views: translate::build_refreshable_views(&storage),
             unversioned_definitions: translate::build_unversioned_definitions(
-                ontology,
+                &storage,
                 &all_table_names,
                 replicated,
             ),
             tables,
+            storage,
         }
     }
 

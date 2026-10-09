@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ontology::pipelines::PipelineDescriptor;
 use ontology::{EtlScope, Ontology};
+use query_data_model::implementations::clickhouse::storage::StorageCatalog;
 use serde::{Deserialize, Serialize};
 
 pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -128,12 +129,15 @@ pub fn widen_scope_for_shared_table_writers(
 
     let invalidated = invalidated_entities(ontology, requested_scope);
 
-    for table in versioned_table_names(ontology) {
+    let storage = StorageCatalog::derive(ontology).expect("validated storage catalog");
+    for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
             continue;
         }
 
-        let writers = entities_writing_to_table(ontology, &table);
+        let Some(writers) = storage.writers(table) else {
+            continue;
+        };
         let scope_writes_to_table = writers.iter().any(|writer| invalidated.contains(writer));
         let has_writer_outside_scope = writers.iter().any(|writer| !invalidated.contains(writer));
 
@@ -153,11 +157,13 @@ pub fn classify_tables_for_scope(
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
+    let storage = StorageCatalog::derive(ontology).expect("validated storage catalog");
 
-    versioned_table_names(ontology)
-        .into_iter()
+    storage
+        .versioned_tables()
+        .map(|table| table.name.clone())
         .map(|table| {
-            let action = migration_action_for_table(ontology, &table, scope, &invalidated);
+            let action = migration_action_for_table(&storage, &table, scope, &invalidated);
             (table, action)
         })
         .collect()
@@ -223,29 +229,8 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
     }
 }
 
-fn versioned_table_names(ontology: &Ontology) -> Vec<String> {
-    let mut names = Vec::new();
-
-    for auxiliary_table in ontology.auxiliary_tables() {
-        if auxiliary_table.versioned {
-            names.push(auxiliary_table.name.clone());
-        }
-    }
-    for node in ontology.nodes() {
-        names.push(node.destination_table.clone());
-    }
-    for table_name in ontology.edge_tables() {
-        names.push(table_name.to_string());
-    }
-    for join in ontology.denormalized_joins() {
-        names.push(join.table.clone());
-    }
-
-    names
-}
-
 fn migration_action_for_table(
-    ontology: &Ontology,
+    storage: &StorageCatalog,
     table: &str,
     scope: &MigrationScope,
     invalidated: &BTreeSet<String>,
@@ -258,41 +243,13 @@ fn migration_action_for_table(
         };
     }
 
-    let writers = entities_writing_to_table(ontology, table);
-    if !writers.is_empty() && writers.iter().all(|writer| invalidated.contains(writer)) {
+    if storage.writers(table).is_some_and(|writers| {
+        !writers.is_empty() && writers.iter().all(|writer| invalidated.contains(writer))
+    }) {
         TableMigrationAction::RebuildEmpty
     } else {
         TableMigrationAction::CloneFromActive
     }
-}
-
-fn entities_writing_to_table(ontology: &Ontology, table: &str) -> BTreeSet<String> {
-    let mut writers = BTreeSet::new();
-
-    for node in ontology.nodes() {
-        if node.destination_table == table || emits_edge_to_table(ontology, &node.name, table) {
-            writers.insert(node.name.clone());
-        }
-    }
-    for derived in ontology.derived_entities() {
-        if emits_edge_to_table(ontology, &derived.name, table) {
-            writers.insert(derived.name.clone());
-        }
-    }
-    for kind in ontology.edge_names() {
-        if ontology.edge_table_for_relationship(kind) == table {
-            writers.insert(kind.to_string());
-        }
-    }
-
-    writers
-}
-
-fn emits_edge_to_table(ontology: &Ontology, entity: &str, table: &str) -> bool {
-    ontology
-        .relationship_kinds_emitted_by(entity)
-        .iter()
-        .any(|kind| ontology.edge_table_for_relationship(kind) == table)
 }
 
 fn is_code_domain_table(ontology: &Ontology, table: &str) -> bool {

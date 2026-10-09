@@ -140,14 +140,17 @@ pub async fn replace_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    for view in ontology.refreshable_materialized_views() {
+    let storage =
+        query_data_model::implementations::clickhouse::storage::StorageCatalog::derive(ontology)
+            .expect("validated storage catalog");
+    for view in storage.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
         } else {
             view.name.clone()
         };
         let rendered_select =
-            schema::render_refreshable_view_select(&view.select_query, ontology, version, &prefix)
+            schema::render_refreshable_view_select(&view.select_query, &storage, version, &prefix)
                 .map_err(|error| MigrationError::Ddl {
                     entity_name: view_name.clone(),
                     reason: error.to_string(),
@@ -179,8 +182,11 @@ pub async fn drop_versioned_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    for view in ontology
-        .refreshable_materialized_views()
+    let storage =
+        query_data_model::implementations::clickhouse::storage::StorageCatalog::derive(ontology)
+            .expect("validated storage catalog");
+    for view in storage
+        .refreshable_views()
         .iter()
         .filter(|view| view.versioned)
     {

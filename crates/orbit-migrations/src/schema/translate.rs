@@ -1,102 +1,51 @@
-use std::collections::BTreeMap;
-
-use ontology::constants::{DELETED_COLUMN, TEXT_INDEX_TYPE, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
-use ontology::{
-    AuxiliaryColumn, AuxiliaryTable, DataType, Ontology, StorageColumn, StorageIndex,
-    StorageProjection,
-};
+use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
 use super::{
     Column, Dictionary, Engine, Index, Projection, RefreshableView, Table, UnversionedDefinition,
     View,
 };
+use query_data_model::implementations::clickhouse::storage::{
+    self, MaterializedJoin, StorageCatalog,
+};
 
-pub fn build_all_tables(ontology: &Ontology) -> Vec<Table> {
-    let mut tables = Vec::new();
-
-    for auxiliary_table in ontology
-        .auxiliary_tables()
-        .iter()
-        .filter(|table| table.versioned)
-    {
-        tables.push(table_from_auxiliary(auxiliary_table));
-    }
-    for node in ontology.nodes() {
-        tables.push(table_from_node(node));
-    }
-    for edge_table_name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(edge_table_name) {
-            tables.push(table_from_edge(edge_table_name, config));
-        }
-    }
-
-    let denormalized: Vec<Table> = ontology
-        .denormalized_joins()
-        .iter()
-        .map(|join| denormalized_table_from_join(join, &tables))
-        .collect();
-    tables.extend(denormalized);
-
-    tables
+pub fn build_all_tables(storage: &StorageCatalog) -> Vec<Table> {
+    storage.versioned_tables().map(table_from_catalog).collect()
 }
 
-pub fn build_views(ontology: &Ontology, tables: &[Table]) -> Vec<View> {
-    let mut views: Vec<View> = ontology
-        .materialized_views()
-        .iter()
-        .map(view_from_ontology)
-        .collect();
+pub fn build_views(storage: &StorageCatalog) -> Vec<View> {
+    let mut views: Vec<View> = storage.views().iter().map(view_from_catalog).collect();
 
-    for join in ontology.denormalized_joins() {
-        views.extend(denormalized_feeding_views(join, tables));
+    for join in storage.joins() {
+        views.extend(denormalized_feeding_views(join, storage));
     }
 
     views
 }
 
-pub fn build_dictionaries(ontology: &Ontology) -> Vec<Dictionary> {
-    ontology
-        .auxiliary_dictionaries()
+pub fn build_dictionaries(storage: &StorageCatalog) -> Vec<Dictionary> {
+    storage
+        .dictionaries()
         .iter()
-        .map(|dictionary_definition| {
-            let key_column = Column {
-                name: dictionary_definition.key.clone(),
-                column_type: clickhouse_type_for_data_type(
-                    dictionary_definition
-                        .key_type
-                        .as_ref()
-                        .unwrap_or(&DataType::Int),
-                    false,
-                ),
-                default: None,
-                codec: None,
-            };
-
-            let mut attributes: Vec<Column> = vec![key_column];
-            attributes.extend(
-                dictionary_definition
-                    .attributes
-                    .iter()
-                    .map(column_from_auxiliary),
-            );
-
-            Dictionary {
-                name: dictionary_definition.name.clone(),
-                source_table: dictionary_definition.source_table.clone(),
-                key: dictionary_definition.key.clone(),
-                attributes,
-                layout_kind: dictionary_definition.layout.kind.clone(),
-                layout_size_in_cells: dictionary_definition.layout.size_in_cells,
-                lifetime_min: dictionary_definition.lifetime.min,
-                lifetime_max: dictionary_definition.lifetime.max,
-            }
+        .map(|dictionary_definition| Dictionary {
+            name: dictionary_definition.name.clone(),
+            source_table: dictionary_definition.source_table.clone(),
+            key: dictionary_definition.key.clone(),
+            attributes: dictionary_definition
+                .attributes
+                .iter()
+                .map(column_from_catalog)
+                .collect(),
+            layout_kind: dictionary_definition.layout.clone(),
+            layout_size_in_cells: dictionary_definition.size_in_cells,
+            lifetime_min: dictionary_definition.lifetime_min,
+            lifetime_max: dictionary_definition.lifetime_max,
         })
         .collect()
 }
 
-pub fn build_refreshable_views(ontology: &Ontology) -> Vec<RefreshableView> {
-    ontology
-        .refreshable_materialized_views()
+pub fn build_refreshable_views(storage: &StorageCatalog) -> Vec<RefreshableView> {
+    storage
+        .refreshable_views()
         .iter()
         .map(|view| RefreshableView {
             name: view.name.clone(),
@@ -109,18 +58,18 @@ pub fn build_refreshable_views(ontology: &Ontology) -> Vec<RefreshableView> {
 }
 
 pub fn build_unversioned_definitions(
-    ontology: &Ontology,
+    storage: &StorageCatalog,
     all_table_names: &[String],
     replicated: bool,
 ) -> Vec<UnversionedDefinition> {
     let mut definitions = Vec::new();
 
-    for auxiliary_table in ontology
+    for auxiliary_table in storage
         .auxiliary_tables()
         .iter()
         .filter(|table| !table.versioned)
     {
-        let mut table = table_from_auxiliary(auxiliary_table);
+        let mut table = table_from_catalog(&auxiliary_table.table);
         if replicated {
             table.engine = table.engine.replicated();
         }
@@ -131,13 +80,13 @@ pub fn build_unversioned_definitions(
         });
     }
 
-    for definition in ontology
-        .materialized_views()
+    for definition in storage
+        .views()
         .iter()
         .filter(|definition| !definition.versioned)
     {
         let mut view =
-            view_from_ontology(definition).with_schema_version_prefix("", all_table_names);
+            view_from_catalog(definition).with_schema_version_prefix("", all_table_names);
         if replicated {
             view.engine = view.engine.map(Engine::replicated);
         }
@@ -151,275 +100,89 @@ pub fn build_unversioned_definitions(
     definitions
 }
 
-pub fn collect_all_table_names(ontology: &Ontology) -> Vec<String> {
-    let mut names = Vec::new();
-    for auxiliary_table in ontology.auxiliary_tables() {
-        names.push(auxiliary_table.name.clone());
-    }
-    for node in ontology.nodes() {
-        names.push(node.destination_table.clone());
-    }
-    for table_name in ontology.edge_tables() {
-        names.push(table_name.to_string());
-    }
-    for join in ontology.denormalized_joins() {
-        names.push(join.table.clone());
-    }
-    names
-}
-
-fn table_from_node(node: &ontology::NodeEntity) -> Table {
-    let mut columns: Vec<Column> = node
-        .storage
-        .columns
-        .iter()
-        .map(column_from_storage)
-        .collect();
-    columns.extend(system_columns(None));
-
-    let engine = if node.storage.version_only_engine {
-        Engine::replacing_merge_tree_version_only()
-    } else {
-        Engine::replacing_merge_tree()
-    };
-
-    let projections: Vec<Projection> = node
-        .storage
-        .projections
-        .iter()
-        .map(projection_from_storage)
-        .collect();
-    let has_projections = !projections.is_empty();
-
+fn table_from_catalog(table: &storage::Table) -> Table {
     Table {
-        name: node.destination_table.clone(),
-        columns,
-        indexes: node
-            .storage
+        name: table.name.clone(),
+        columns: table.columns.iter().map(column_from_catalog).collect(),
+        indexes: table
             .indexes
             .iter()
-            .flat_map(index_from_storage)
+            .map(|index| Index {
+                name: index.name.clone(),
+                column: index.column.clone(),
+                lowercase: index.lowercase,
+                index_type: index.index_type.clone(),
+                granularity: index.granularity,
+            })
             .collect(),
-        projections,
-        engine,
-        partition_by: vec![],
-        order_by: node.sort_key.clone(),
-        primary_key: node.storage.primary_key.clone(),
-        settings: table_settings(Some(1024), has_projections, &node.storage.settings),
-        ttl: None,
-    }
-}
-
-fn table_from_edge(name: &str, config: &ontology::EdgeTableConfig) -> Table {
-    let mut columns: Vec<Column> = config
-        .storage
-        .columns
-        .iter()
-        .map(column_from_storage)
-        .collect();
-    columns.extend(
-        config
-            .storage
-            .denormalized_columns
+        projections: table
+            .projections
             .iter()
-            .map(column_from_storage),
-    );
-    columns.extend(system_columns(None));
-
-    let mut indexes: Vec<Index> = config
-        .storage
-        .indexes
-        .iter()
-        .flat_map(index_from_storage)
-        .collect();
-    indexes.extend(
-        config
-            .storage
-            .denormalized_indexes
-            .iter()
-            .flat_map(index_from_storage),
-    );
-
-    let projections: Vec<Projection> = config
-        .storage
-        .projections
-        .iter()
-        .map(projection_from_storage)
-        .collect();
-    let has_projections = !projections.is_empty();
-
-    Table {
-        name: name.into(),
-        columns,
-        indexes,
-        projections,
-        engine: Engine::replacing_merge_tree(),
-        partition_by: vec![],
-        order_by: config.sort_key.clone(),
-        primary_key: config.storage.primary_key.clone(),
-        settings: table_settings(
-            Some(config.storage.index_granularity.unwrap_or(1024)),
-            has_projections,
-            &config.storage.settings,
-        ),
-        ttl: None,
-    }
-}
-
-fn table_from_auxiliary(auxiliary_table: &AuxiliaryTable) -> Table {
-    let mut columns: Vec<Column> = auxiliary_table
-        .columns
-        .iter()
-        .map(column_from_auxiliary)
-        .collect();
-    if auxiliary_table.include_system_columns {
-        columns.extend(system_columns(auxiliary_table.version_type.as_deref()));
-    }
-
-    let engine = if let Some(engine_name) = &auxiliary_table.engine {
-        Engine {
-            name: engine_name.clone(),
-            args: vec![],
-        }
-    } else if auxiliary_table.version_only_engine {
-        Engine::replacing_merge_tree_version_only()
-    } else {
-        Engine::replacing_merge_tree()
-    };
-
-    let projections: Vec<Projection> = auxiliary_table
-        .projections
-        .iter()
-        .map(projection_from_storage)
-        .collect();
-    let has_projections = !projections.is_empty();
-
-    Table {
-        name: auxiliary_table.name.clone(),
-        columns,
-        indexes: vec![],
-        projections,
-        engine,
-        partition_by: vec![],
-        order_by: auxiliary_table.order_by.clone(),
-        primary_key: None,
-        settings: table_settings(None, has_projections, &BTreeMap::new()),
-        ttl: auxiliary_table.ttl.clone(),
-    }
-}
-
-fn denormalized_table_from_join(
-    join: &ontology::denormalized::DenormalizedJoin,
-    source_tables: &[Table],
-) -> Table {
-    use ontology::denormalized::{copies, prefix};
-
-    let find_source = |table_index: usize| -> &Table {
-        let name = join.tables[table_index].table.as_str();
-        source_tables
-            .iter()
-            .find(|table| table.name == name)
-            .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
-    };
-
-    let anchor = join.anchor_table();
-    let mut columns: Vec<Column> = find_source(anchor)
-        .columns
-        .iter()
-        .filter(|column| column.name == TRAVERSAL_PATH_COLUMN)
-        .cloned()
-        .collect();
-
-    let mut indexes = Vec::new();
-    let mut explicit_settings: BTreeMap<String, String> = BTreeMap::new();
-
-    for table_index in 0..join.tables.len() {
-        let source = find_source(table_index);
-        let is_anchor = table_index == anchor;
-
-        columns.extend(
-            source
-                .columns
-                .iter()
-                .filter(|column| {
-                    copies(&column.name) && !(is_anchor && column.name == TRAVERSAL_PATH_COLUMN)
-                })
-                .map(|column| Column {
-                    name: join.column_for(table_index, &column.name),
-                    ..column.clone()
-                }),
-        );
-
-        indexes.extend(
-            source
-                .indexes
-                .iter()
-                .filter(|index| copies(&index.column))
-                .map(|index| Index {
-                    name: match index.name.strip_prefix("idx_") {
-                        Some(rest) => format!("idx_{}{rest}", prefix(table_index)),
-                        None => format!("{}{}", prefix(table_index), index.name),
+            .map(|projection| {
+                use storage::Projection as Stored;
+                match projection {
+                    Stored::Reorder { name, order_by } => Projection::Reorder {
+                        name: name.clone(),
+                        order_by: order_by.clone(),
                     },
-                    column: join.column_for(table_index, &index.column),
-                    ..index.clone()
-                }),
-        );
-
-        explicit_settings.extend(
-            source
-                .settings
-                .iter()
-                .filter(|(key, _)| {
-                    !matches!(
-                        key.as_str(),
-                        "index_granularity" | "deduplicate_merge_projection_mode"
-                    )
-                })
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
-    }
-
-    columns.extend(system_columns(None));
-
-    Table {
-        name: join.table.clone(),
-        columns,
-        indexes,
-        projections: vec![],
-        engine: Engine::replacing_merge_tree(),
+                    Stored::Lightweight { name, order_by } => Projection::Lightweight {
+                        name: name.clone(),
+                        order_by: order_by.clone(),
+                    },
+                    Stored::Aggregate {
+                        name,
+                        select,
+                        group_by,
+                    } => Projection::Aggregate {
+                        name: name.clone(),
+                        select: select.clone(),
+                        group_by: group_by.clone(),
+                    },
+                }
+            })
+            .collect(),
+        engine: engine_from_catalog(&table.engine),
         partition_by: vec![],
-        order_by: join.sort_key(),
-        primary_key: None,
-        settings: table_settings(Some(1024), false, &explicit_settings),
-        ttl: None,
+        order_by: table.sort_key.clone(),
+        primary_key: table.primary_key.clone(),
+        settings: table.settings.clone(),
+        ttl: table.ttl.clone(),
     }
 }
 
-fn view_from_ontology(definition: &ontology::MaterializedViewDefinition) -> View {
+fn column_from_catalog(column: &storage::Column) -> Column {
+    Column {
+        name: column.name.clone(),
+        column_type: column.storage_type.clone(),
+        default: column.default.clone(),
+        codec: (!column.codecs.is_empty()).then(|| column.codecs.clone()),
+    }
+}
+
+fn engine_from_catalog(engine: &storage::Engine) -> Engine {
+    Engine {
+        name: engine.name.clone(),
+        args: engine.arguments.clone(),
+    }
+}
+
+fn view_from_catalog(definition: &storage::MaterializedView) -> View {
     View {
         name: definition.name.clone(),
         to_table: definition.to_table.clone(),
         select_query: definition.select_query.clone(),
-        engine: definition.engine.as_ref().map(|engine_name| Engine {
-            name: engine_name.clone(),
-            args: definition.engine_args.clone(),
-        }),
+        engine: definition.engine.as_ref().map(engine_from_catalog),
         order_by: definition.order_by.clone(),
         populate: definition.populate,
         versioned: definition.versioned,
     }
 }
 
-fn denormalized_feeding_views(
-    join: &ontology::denormalized::DenormalizedJoin,
-    source_tables: &[Table],
-) -> Vec<View> {
-    use ontology::denormalized::alias;
-
-    let projection = denormalized_select_projection(join, source_tables);
-    (0..join.tables.len())
+fn denormalized_feeding_views(join: &MaterializedJoin, storage: &StorageCatalog) -> Vec<View> {
+    let projection = denormalized_select_projection(join, storage);
+    (0..join.sources.len())
         .map(|trigger| View {
-            name: format!("{}__on_{}", join.table, alias(trigger)),
+            name: format!("{}__on_t{trigger}", join.table),
             to_table: Some(join.table.clone()),
             select_query: format!(
                 "SELECT {projection} {}",
@@ -433,48 +196,23 @@ fn denormalized_feeding_views(
         .collect()
 }
 
-fn denormalized_select_projection(
-    join: &ontology::denormalized::DenormalizedJoin,
-    source_tables: &[Table],
-) -> String {
-    use ontology::denormalized::{alias, copies};
-
-    let find_source = |table_index: usize| -> &Table {
-        let name = join.tables[table_index].table.as_str();
-        source_tables
-            .iter()
-            .find(|table| table.name == name)
-            .unwrap_or_else(|| panic!("denormalized join source '{name}' not generated"))
-    };
-
-    let all_aliases = || (0..join.tables.len()).map(alias);
-    let anchor = join.anchor_table();
-
-    let mut selected_columns = vec![format!(
-        "{}.{TRAVERSAL_PATH_COLUMN} AS {TRAVERSAL_PATH_COLUMN}",
-        alias(anchor)
-    )];
-
-    for table_index in 0..join.tables.len() {
-        let source = find_source(table_index);
-        let is_anchor = table_index == anchor;
-        selected_columns.extend(
-            source
-                .columns
-                .iter()
-                .filter(|column| {
-                    copies(&column.name) && !(is_anchor && column.name == TRAVERSAL_PATH_COLUMN)
-                })
-                .map(|column| {
-                    format!(
-                        "{}.{} AS {}",
-                        alias(table_index),
-                        column.name,
-                        join.column_for(table_index, &column.name)
-                    )
-                }),
-        );
-    }
+fn denormalized_select_projection(join: &MaterializedJoin, storage: &StorageCatalog) -> String {
+    let all_aliases = || (0..join.sources.len()).map(|index| format!("t{index}"));
+    let mut selected_columns: Vec<_> = storage
+        .table(&join.table)
+        .expect("catalog join table")
+        .columns
+        .iter()
+        .filter_map(|column| {
+            join.sources.iter().enumerate().find_map(|(index, source)| {
+                source
+                    .columns
+                    .iter()
+                    .find(|(_, destination)| *destination == &column.name)
+                    .map(|(name, _)| format!("t{index}.{name} AS {}", column.name))
+            })
+        })
+        .collect();
 
     selected_columns.push(format!(
         "greatest({}) AS {VERSION_COLUMN}",
@@ -494,42 +232,39 @@ fn denormalized_select_projection(
     selected_columns.join(", ")
 }
 
-fn denormalized_from_clause(
-    join: &ontology::denormalized::DenormalizedJoin,
-    trigger: usize,
-) -> String {
-    use ontology::denormalized::alias;
+fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
+    let alias = |index| format!("t{index}");
 
     let table_reference = |table_index: usize, with_final: bool| {
         format!(
             "{{{}}} AS {}{}",
-            join.tables[table_index].table,
+            join.sources[table_index].table,
             alias(table_index),
             if with_final { " FINAL" } else { "" }
         )
     };
     let row_filters = |table_index: usize| {
-        join.tables[table_index]
-            .filter
+        join.sources[table_index]
+            .filters
             .iter()
             .map(move |(column, value)| format!("{}.{column} = '{value}'", alias(table_index)))
     };
     let join_condition = |table_index: usize| {
-        let hop = join.tables[table_index]
+        let hop = join.sources[table_index]
             .join
             .as_ref()
             .expect("table 0 is never joined onto");
         format!(
             "{}.{} = {}.{}",
             alias(table_index - 1),
-            hop.prev_column,
+            hop.0,
             alias(table_index),
-            hop.this_column
+            hop.1
         )
     };
 
     let mut sql = format!("FROM {}", table_reference(trigger, false));
-    let table_count = join.tables.len();
+    let table_count = join.sources.len();
     let outward_joins = (trigger + 1..table_count)
         .map(|table_index| (table_index, join_condition(table_index)))
         .chain(
@@ -557,169 +292,9 @@ fn denormalized_from_clause(
     sql
 }
 
-fn column_from_storage(storage_column: &StorageColumn) -> Column {
-    Column {
-        name: storage_column.name.clone(),
-        column_type: storage_column.ch_type.clone(),
-        default: storage_column.default.clone(),
-        codec: storage_column.codec.clone(),
-    }
-}
-
-fn column_from_auxiliary(auxiliary_column: &AuxiliaryColumn) -> Column {
-    Column {
-        name: auxiliary_column.name.clone(),
-        column_type: clickhouse_type_for_data_type(
-            &auxiliary_column.data_type,
-            auxiliary_column.nullable,
-        ),
-        default: auxiliary_column.default.clone(),
-        codec: auxiliary_column.codec.clone(),
-    }
-}
-
-fn system_columns(version_type: Option<&str>) -> Vec<Column> {
-    let version = match version_type {
-        Some("uint64") => Column {
-            name: VERSION_COLUMN.into(),
-            column_type: "UInt64".into(),
-            default: None,
-            codec: None,
-        },
-        _ => Column {
-            name: VERSION_COLUMN.into(),
-            column_type: "DateTime64(6, 'UTC')".into(),
-            default: Some("now64(6)".into()),
-            codec: Some(vec!["Delta(8)".into(), "ZSTD(1)".into()]),
-        },
-    };
-
-    vec![
-        version,
-        Column {
-            name: DELETED_COLUMN.into(),
-            column_type: "Bool".into(),
-            default: Some("false".into()),
-            codec: None,
-        },
-    ]
-}
-
-fn index_from_storage(storage_index: &StorageIndex) -> Vec<Index> {
-    let index = Index {
-        name: storage_index.name.clone(),
-        column: storage_index.column.clone(),
-        lowercase: false,
-        index_type: storage_index.index_type.clone(),
-        granularity: storage_index.granularity,
-    };
-    if storage_index.index_type != TEXT_INDEX_TYPE {
-        return vec![index];
-    }
-    vec![
-        Index {
-            lowercase: true,
-            index_type: "text(tokenizer = splitByNonAlpha)".into(),
-            ..index.clone()
-        },
-        Index {
-            name: format!("{}_ngram", index.name),
-            lowercase: true,
-            index_type: "ngrambf_v1(3, 512, 2, 0)".into(),
-            ..index
-        },
-    ]
-}
-
-fn projection_from_storage(storage_projection: &StorageProjection) -> Projection {
-    match storage_projection {
-        StorageProjection::Reorder { name, order_by } => Projection::Reorder {
-            name: name.clone(),
-            order_by: order_by.clone(),
-        },
-        StorageProjection::Lightweight { name, order_by } => Projection::Lightweight {
-            name: name.clone(),
-            order_by: order_by.clone(),
-        },
-        StorageProjection::Aggregate {
-            name,
-            select,
-            group_by,
-        } => Projection::Aggregate {
-            name: name.clone(),
-            select: select.clone(),
-            group_by: group_by.clone(),
-        },
-    }
-}
-
-fn clickhouse_type_for_data_type(data_type: &DataType, nullable: bool) -> String {
-    let base = match data_type {
-        DataType::String | DataType::Uuid => "String",
-        DataType::Int => "Int64",
-        DataType::Bool => "Bool",
-        DataType::DateTime => "DateTime64(6, 'UTC')",
-        DataType::Date => "Date32",
-        _ => "String",
-    };
-    if nullable {
-        format!("Nullable({base})")
-    } else {
-        base.to_string()
-    }
-}
-
-fn table_settings(
-    index_granularity: Option<u32>,
-    has_projections: bool,
-    explicit: &BTreeMap<String, String>,
-) -> Vec<(String, String)> {
-    let mut settings: Vec<(String, String)> = Vec::new();
-
-    if let Some(granularity) = index_granularity {
-        upsert_setting(&mut settings, "index_granularity", granularity.to_string());
-    }
-    if has_projections {
-        upsert_setting(
-            &mut settings,
-            "deduplicate_merge_projection_mode",
-            "'rebuild'",
-        );
-    }
-    upsert_setting(
-        &mut settings,
-        "allow_experimental_replacing_merge_with_cleanup",
-        "1",
-    );
-    upsert_setting(&mut settings, "enable_block_number_column", "1");
-    upsert_setting(&mut settings, "enable_block_offset_column", "1");
-    for (key, value) in explicit {
-        upsert_setting(&mut settings, key, value);
-    }
-
-    settings
-}
-
-fn upsert_setting(
-    settings: &mut Vec<(String, String)>,
-    key: impl Into<String>,
-    value: impl Into<String>,
-) {
-    let key = key.into();
-    let value = value.into();
-    if let Some(existing) = settings
-        .iter_mut()
-        .find(|(existing_key, _)| *existing_key == key)
-    {
-        existing.1 = value;
-    } else {
-        settings.push((key, value));
-    }
-}
-
 pub fn render_refreshable_view_select(
     template: &str,
-    ontology: &Ontology,
+    storage: &StorageCatalog,
     version: u32,
     version_prefix: &str,
 ) -> Result<String, ontology::sql_template::Error> {
@@ -728,7 +303,7 @@ pub fn render_refreshable_view_select(
         ontology::sql_template::context! {
             schema => ontology::sql_template::context! { version => version },
             graph => ontology::sql_template::context! {
-                tables => refreshable_view_table_contexts(ontology, version_prefix)
+                tables => refreshable_view_table_contexts(storage, version_prefix)
             },
         },
     )
@@ -743,29 +318,19 @@ struct RefreshableViewTableContext {
 }
 
 fn refreshable_view_table_contexts(
-    ontology: &Ontology,
+    storage: &StorageCatalog,
     version_prefix: &str,
 ) -> Vec<RefreshableViewTableContext> {
-    let mut tables: Vec<RefreshableViewTableContext> = ontology
-        .nodes()
-        .map(|node| RefreshableViewTableContext {
-            logical_name: node.destination_table.clone(),
-            physical_name: format!("{version_prefix}{}", node.destination_table),
-            global: node.global,
-            has_traversal_path: node.has_traversal_path,
+    let mut tables: Vec<RefreshableViewTableContext> = storage
+        .graph_tables()
+        .iter()
+        .map(|table| RefreshableViewTableContext {
+            logical_name: table.name.clone(),
+            physical_name: format!("{version_prefix}{}", table.name),
+            global: table.global,
+            has_traversal_path: table.has_traversal_path,
         })
         .collect();
-
-    tables.extend(ontology.edge_tables().into_iter().map(|edge_table| {
-        RefreshableViewTableContext {
-            logical_name: edge_table.to_string(),
-            physical_name: format!("{version_prefix}{edge_table}"),
-            global: false,
-            has_traversal_path: ontology
-                .edge_table_config(edge_table)
-                .is_some_and(ontology::EdgeTableConfig::has_traversal_path),
-        }
-    }));
 
     tables.sort_by(|left, right| left.logical_name.cmp(&right.logical_name));
     tables

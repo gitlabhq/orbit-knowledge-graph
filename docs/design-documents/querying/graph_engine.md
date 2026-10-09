@@ -25,6 +25,15 @@ primary keys, and secondary indexes.
   these columns into the physical sort and primary keys where required. See
   [Code Indexing](../indexing/code_indexing.md).
 
+### Storage catalogs
+
+Each backend owns its storage catalog under `query-data-model/src/implementations/`.
+The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
+It also resolves the source bindings for declared joined tables and records which entities write each table.
+Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
+The DuckDB catalog records local node and edge layouts for its query mapping.
+Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
+
 ### Edge table schema
 
 Each physical edge table has ontology-defined columns and storage settings. For example,

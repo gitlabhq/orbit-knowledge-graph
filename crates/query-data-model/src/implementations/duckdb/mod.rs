@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+mod mapping;
+pub mod storage;
 
-use super::{PropertyBackendFacts, derive_property_backend_facts};
+use std::collections::HashSet;
+
+use super::PropertyBackendFacts;
 use crate::{
     DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
     QueryBackendCatalog, RelationshipId, TraversalPathLookup,
@@ -16,10 +19,7 @@ pub struct DuckDbEntityLayout {
 
 #[derive(Debug)]
 pub struct DuckDbCatalog {
-    edge_table: String,
-    edge_columns: HashSet<String>,
-    edge_column_types: HashMap<String, ontology::DataType>,
-    edge_sort_key: Vec<String>,
+    storage: storage::StorageCatalog,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationships: Vec<String>,
@@ -28,7 +28,7 @@ pub struct DuckDbCatalog {
 
 impl QueryBackendCatalog for DuckDbCatalog {
     fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        Self::from_ontology(ontology, graph)
+        mapping::derive(ontology, graph)
     }
 
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
@@ -108,7 +108,7 @@ impl QueryBackendCatalog for DuckDbCatalog {
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         if table == self.edge_table() {
-            return Some(&self.edge_sort_key);
+            return Some(&self.storage.edge.sort_key);
         }
         self.entities
             .iter()
@@ -140,102 +140,14 @@ impl DuckDbCatalog {
     }
 
     pub fn edge_table(&self) -> &str {
-        &self.edge_table
+        &self.storage.edge.name
     }
 
     pub fn edge_columns(&self) -> &HashSet<String> {
-        &self.edge_columns
+        &self.storage.edge.columns
     }
 
     pub fn edge_column_type(&self, column: &str) -> Option<ontology::DataType> {
-        self.edge_column_types.get(column).copied()
-    }
-}
-
-impl DuckDbCatalog {
-    fn from_ontology(
-        ontology: &ontology::Ontology,
-        graph: &GraphCatalog,
-    ) -> Result<Self, DataModelError> {
-        let edge_table = ontology
-            .local_edge_table_name()
-            .unwrap_or_else(|| ontology.edge_table())
-            .to_string();
-        let edge_columns = ontology
-            .local_edge_columns()
-            .iter()
-            .map(|column| column.name.clone())
-            .collect();
-        let edge_column_types = ontology
-            .local_edge_columns()
-            .iter()
-            .map(|column| (column.name.clone(), column.data_type))
-            .collect();
-        let edge_sort_key = ontology
-            .sort_key_for_table(&edge_table)
-            .unwrap_or_else(|| ontology.edge_sort_key())
-            .to_vec();
-        let mut entities = std::iter::repeat_with(|| None)
-            .take(graph.entities().count())
-            .collect::<Vec<_>>();
-        let mut property_facts = derive_property_backend_facts(ontology, graph)?;
-        let local_entities = ontology.local_entity_names();
-        let entity_names: Vec<_> = if local_entities.is_empty() {
-            ontology.node_names().collect()
-        } else {
-            local_entities
-        };
-        for entity_name in entity_names {
-            let entity_id =
-                graph
-                    .entity_id(entity_name)
-                    .ok_or_else(|| DataModelError::UnknownReference {
-                        kind: "local entity",
-                        name: entity_name.to_string(),
-                    })?;
-            let node =
-                ontology
-                    .get_node(entity_name)
-                    .ok_or_else(|| DataModelError::UnknownReference {
-                        kind: "entity",
-                        name: entity_name.to_string(),
-                    })?;
-            let local_fields = ontology
-                .local_entity_fields(entity_name)
-                .unwrap_or_else(|| node.fields.iter().collect());
-            let has_traversal_path = local_fields
-                .iter()
-                .any(|field| field.name == ontology::constants::TRAVERSAL_PATH_COLUMN);
-            for field in local_fields {
-                let Some(property) = graph.property_id(entity_id, &field.name) else {
-                    continue;
-                };
-                property_facts[property.index()].realization = Some(match &field.source {
-                    ontology::FieldSource::DatabaseColumn(column) => PropertyRealization::Stored {
-                        column: column.clone(),
-                    },
-                    ontology::FieldSource::Virtual(source) => {
-                        PropertyRealization::Virtual(source.clone())
-                    }
-                });
-            }
-            entities[entity_id.index()] = Some(DuckDbEntityLayout {
-                table: node.destination_table.clone(),
-                default_properties: graph.entity(entity_id).properties.clone(),
-                sort_key: node.sort_key.clone(),
-                has_traversal_path,
-            });
-        }
-        let relationships = graph.relationships().map(|_| edge_table.clone()).collect();
-        Ok(DuckDbCatalog {
-            edge_table,
-            edge_columns,
-            edge_column_types,
-            edge_sort_key,
-            entities,
-            property_facts,
-            relationships,
-            denormalized: DenormalizedCatalog::default(),
-        })
+        self.storage.edge.column_types.get(column).copied()
     }
 }

@@ -1,6 +1,6 @@
 mod authz;
-mod clickhouse;
-mod duckdb;
+pub mod clickhouse;
+pub mod duckdb;
 
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 

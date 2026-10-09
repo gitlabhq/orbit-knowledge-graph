@@ -8,6 +8,16 @@ table-prefix-aware migration orchestrator.
 
 ## Schema Definition
 
+The ontology declares storage. `query-data-model::implementations::clickhouse::storage::StorageCatalog` resolves ClickHouse graph-table definitions and source bindings during derivation.
+The query catalog and DDL renderer consume those resolved definitions.
+Migration uses the catalog's writer map to classify graph-table rebuilds.
+These backend-specific types contain owned data and require no compiler dependency or SQL parser.
+Shared graph contracts contain no ClickHouse codecs, engine settings, or MV definitions.
+Auxiliary tables, dictionaries, and declared materialized views also derive into the ClickHouse storage catalog.
+The catalog preserves table lifetimes, engine arguments, TTLs, dictionary settings, and view SQL or templates.
+Schema rendering, auxiliary fingerprints, and refreshable-view creation consume those catalog definitions.
+Graph cleanup uses only graph tables; the versioned schema inventory also includes versioned auxiliary tables.
+
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology

@@ -1,3 +1,5 @@
+pub mod storage;
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::{PropertyBackendFacts, derive_property_backend_facts};
@@ -16,6 +18,35 @@ pub struct TableLayout {
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
     pub path_scopable: bool,
+}
+
+impl TableLayout {
+    fn from_storage(
+        table: &storage::Table,
+        entity: Option<EntityId>,
+        path_columns: Vec<PathColumn>,
+        path_scopable: bool,
+    ) -> Self {
+        Self {
+            name: table.name.clone(),
+            columns: table
+                .columns
+                .iter()
+                .filter(|column| ontology::denormalized::copies(&column.name))
+                .map(|column| column.name.trim_matches('`').to_string())
+                .collect(),
+            column_types: table
+                .column_types
+                .iter()
+                .filter(|(name, _)| ontology::denormalized::copies(name))
+                .map(|(name, data_type)| (name.clone(), *data_type))
+                .collect(),
+            sort_key: table.sort_key.clone(),
+            entity,
+            path_columns,
+            path_scopable,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +237,7 @@ impl ClickHouseCatalog {
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
     ) -> Result<Self, DataModelError> {
+        let storage = storage::StorageCatalog::derive(ontology)?;
         let mut entities = std::iter::repeat_with(|| None)
             .take(graph.entities().count())
             .collect::<Vec<_>>();
@@ -260,97 +292,62 @@ impl ClickHouseCatalog {
             });
             tables.insert(
                 node.destination_table.clone(),
-                TableLayout {
-                    name: node.destination_table.clone(),
-                    columns: node
-                        .storage
-                        .columns
-                        .iter()
-                        .map(|column| column.name.trim_matches('`').to_string())
-                        .collect(),
-                    column_types: node
-                        .fields
-                        .iter()
-                        .filter_map(|field| {
-                            field
-                                .column_name()
-                                .map(|_| (field.name.clone(), field.data_type))
-                        })
-                        .collect(),
-                    sort_key: node.sort_key.clone(),
-                    entity: Some(entity_id),
-                    path_columns: (!node.global)
+                TableLayout::from_storage(
+                    storage
+                        .table(&node.destination_table)
+                        .expect("derived node storage"),
+                    Some(entity_id),
+                    (!node.global)
                         .then(|| PathColumn {
                             name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                             entity: Some(entity_id),
                         })
                         .into_iter()
                         .collect(),
-                    path_scopable: node.has_traversal_path
+                    node.has_traversal_path
                         && !node.global
                         && node.sort_key.first().map(String::as_str)
                             == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
-                },
+                ),
             );
         }
 
         for table_name in ontology.edge_tables() {
-            let config = ontology.edge_table_config(table_name).ok_or_else(|| {
-                DataModelError::UnknownReference {
-                    kind: "edge table",
-                    name: table_name.to_string(),
-                }
-            })?;
-            let columns = config
-                .storage
-                .columns
-                .iter()
-                .chain(config.storage.denormalized_columns.iter())
-                .map(|column| column.name.trim_matches('`').to_string())
-                .collect();
-            let column_types = config
-                .columns
-                .iter()
-                .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
-                .collect();
             tables.insert(
                 table_name.to_string(),
-                TableLayout {
-                    name: table_name.to_string(),
-                    columns,
-                    column_types,
-                    sort_key: config.sort_key.clone(),
-                    entity: None,
-                    path_columns: vec![PathColumn {
+                TableLayout::from_storage(
+                    storage.table(table_name).expect("derived edge storage"),
+                    None,
+                    vec![PathColumn {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                         entity: None,
                     }],
-                    path_scopable: false,
-                },
+                    false,
+                ),
             );
         }
 
         let mut relationships = vec![None; graph.relationships().count()];
         let mut variants = vec![None; graph.variants().count()];
         for relationship in graph.relationships() {
-            let ontology_variants = ontology.get_edge(&relationship.name).unwrap_or_default();
-            let table = ontology
-                .edge_table_for_relationship(&relationship.name)
-                .to_string();
-            for edge in ontology_variants {
-                if edge.source_kind.is_empty() || edge.target_kind.is_empty() {
+            for edge in storage
+                .edge_routes()
+                .iter()
+                .filter(|edge| edge.relationship == relationship.name)
+            {
+                if edge.source.is_empty() || edge.target.is_empty() {
                     continue;
                 }
-                let source = graph.entity_id(&edge.source_kind).ok_or_else(|| {
+                let source = graph.entity_id(&edge.source).ok_or_else(|| {
                     DataModelError::UnknownReference {
                         kind: "source entity",
-                        name: edge.source_kind.clone(),
+                        name: edge.source.clone(),
                     }
                 })?;
-                let target = graph.entity_id(&edge.target_kind).ok_or_else(|| {
+                let target = graph.entity_id(&edge.target).ok_or_else(|| {
                     DataModelError::UnknownReference {
                         kind: "target entity",
-                        name: edge.target_kind.clone(),
+                        name: edge.target.clone(),
                     }
                 })?;
                 let variant_id = graph
@@ -358,10 +355,10 @@ impl ClickHouseCatalog {
                     .ok_or_else(|| {
                         DataModelError::Invalid(format!(
                             "missing variant {}({}->{})",
-                            relationship.name, edge.source_kind, edge.target_kind
+                            relationship.name, edge.source, edge.target
                         ))
                     })?;
-                let foreign_key = edge.fk_column.as_deref().and_then(|column| {
+                let foreign_key = edge.foreign_key.as_deref().and_then(|column| {
                     let (holder, property, referenced) = match graph.property_id(source, column) {
                         Some(property) => (Endpoint::Source, property, target),
                         None => (Endpoint::Target, graph.property_id(target, column)?, source),
@@ -375,7 +372,10 @@ impl ClickHouseCatalog {
                 });
                 variants[variant_id.index()] = foreign_key;
             }
-            relationships[relationship.id.index()] = Some(table);
+            relationships[relationship.id.index()] = storage
+                .relationship_tables(&relationship.name)
+                .and_then(|tables| tables.first())
+                .cloned();
         }
 
         let mut denormalized = HashMap::new();
@@ -434,45 +434,27 @@ impl ClickHouseCatalog {
             );
         }
 
-        for join in ontology.denormalized_joins() {
+        for join in storage.joins() {
             let path_columns = join
-                .traversal_path_columns()
-                .map(|(index, name)| PathColumn {
-                    name,
-                    entity: entities.iter().enumerate().find_map(|(entity, layout)| {
-                        (layout.as_ref()?.table == join.tables[index].table)
-                            .then_some(EntityId(entity))
-                    }),
-                })
-                .collect();
-            let columns = join
-                .tables
+                .sources
                 .iter()
-                .enumerate()
-                .flat_map(|(index, table)| {
-                    tables
-                        .get(&table.table)
-                        .into_iter()
-                        .flat_map(move |layout| {
-                            layout
-                                .columns
-                                .iter()
-                                .map(move |column| join.column_for(index, column))
-                        })
+                .filter_map(|source| {
+                    Some(PathColumn {
+                        name: source.path_column.clone()?,
+                        entity: entities.iter().enumerate().find_map(|(entity, layout)| {
+                            (layout.as_ref()?.table == source.table).then_some(EntityId(entity))
+                        }),
+                    })
                 })
                 .collect();
-            tables.insert(
-                join.table.clone(),
-                TableLayout {
-                    name: join.table.clone(),
-                    columns,
-                    column_types: HashMap::new(),
-                    sort_key: join.sort_key(),
-                    entity: None,
-                    path_columns,
-                    path_scopable: true,
-                },
+            let mut layout = TableLayout::from_storage(
+                storage.table(&join.table).expect("derived join storage"),
+                None,
+                path_columns,
+                true,
             );
+            layout.column_types.clear();
+            tables.insert(join.table.clone(), layout);
         }
 
         Ok(ClickHouseCatalog {
