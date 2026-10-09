@@ -987,7 +987,7 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
         } else {
             target_files
         };
-        let members = target_files
+        let members: Vec<_> = target_files
             .iter()
             .filter_map(|&t| match t == tfi {
                 true => exports.get(&m.sym()),
@@ -997,6 +997,13 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
             .filter(|tgt| tgt.has_tag(ctx.tags.callable))
             .collect();
+        if name.sym() == ctx.wildcard_sym && name.has(C::Alias) {
+            edges.extend(
+                members
+                    .iter()
+                    .map(|target| name.edge_to(*target, EdgeKind::Imports)),
+            );
+        }
         edges.extend(call_edges(caller, members, edge.site));
     }
 
@@ -1050,6 +1057,9 @@ fn wildcard_uses<'a>(
     name: Cursor<'a>,
     referrers: &FxHashSet<u32>,
 ) -> Vec<Edge> {
+    if name.has(C::Alias) {
+        return Vec::new();
+    }
     let fi = req.fi as usize;
     let exports = req.exports(ctx.trees, ctx.visible);
     let provided = |sym: u32| {

@@ -19,7 +19,33 @@ fixtures:
       import { left, right } from './barrel';
       export function useLeft() { left.run(); }
       export function useRight() { right.run(); }
+  - path: namespace.ts
+    content: |
+      import * as left from './left';
+      import * as right from './right';
+      import { run } from './barrel';
+      export function namespaces() { left.run(); right.run(); run(); }
+      export function shadowed() {
+          const left = { run() {} };
+          left.run();
+      }
 tests:
+  - name: "namespace import edges follow their own call sites"
+    query: |
+      MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+      WHERE symbol.file_path = 'namespace.ts' AND symbol.import_type = 'NamespaceImport'
+      RETURN symbol.identifier_alias AS alias, target.file_path AS file, target.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: left, file: 'left.ts', name: run } }
+      - { row: { alias: right, file: 'right.ts', name: run } }
+  - name: "a shadowed namespace binding has no cross-file calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'shadowed' AND target.file_path <> 'namespace.ts'
+      RETURN target.name
+    assert:
+      - { empty: true }
   - name: "namespace callers have exactly their selected direct targets"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(method:Definition)
