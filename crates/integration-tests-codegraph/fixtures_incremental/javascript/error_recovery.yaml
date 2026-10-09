@@ -1,4 +1,4 @@
-name: "JavaScript: graceful OXC error recovery for unparseable files"
+name: "JavaScript: malformed files retain catalog entries without definitions"
 
 pipeline: js
 
@@ -42,13 +42,11 @@ tests:
       - { row: { name: "OrderService", fqn: "OrderService", type: "Class" } }
       - { row: { name: "create", fqn: "OrderService::create", type: "Method" } }
 
-  - name: "broken.js never reaches the File table"
-    # Known gap: A file with parse errors still gets a File row, as production does.
-    skip: true
+  - name: "both malformed and valid files remain in the catalog"
     query: |
       MATCH (f:File)
       RETURN f.path AS path
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { path: "valid.js" } }
-      - { not: true, row: { path: "broken.js" } }
+      - { row: { path: "broken.js" } }

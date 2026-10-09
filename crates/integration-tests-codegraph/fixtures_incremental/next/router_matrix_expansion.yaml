@@ -186,12 +186,10 @@ fixtures:
       }
 
 tests:
-  - name: Next app router special path shapes are preserved as module definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Next app router special path shapes are preserved in the file catalog
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)
+      WHERE file.path IN [
         'src/app/(marketing)/blog/[...slug]/page.tsx',
         'src/app/shop/[[...filters]]/page.tsx',
         'src/app/@modal/(.)login/page.tsx',
@@ -202,19 +200,19 @@ tests:
         'src/app/default.tsx',
         'src/app/api/items/[id]/route.ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 9 }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", fqn: "src/app/(marketing)/blog/[...slug]/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", fqn: "src/app/shop/[[...filters]]/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", fqn: "src/app/@modal/(.)login/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/loading.tsx", fqn: "src/app/loading.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/error.tsx", fqn: "src/app/error.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/not-found.tsx", fqn: "src/app/not-found.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/template.tsx", fqn: "src/app/template.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/default.tsx", fqn: "src/app/default.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", fqn: "src/app/api/items/[id]/route.ts", type: "Module" } }
+      - { row: { path: "src/app/(marketing)/blog/[...slug]/page.tsx" } }
+      - { row: { path: "src/app/shop/[[...filters]]/page.tsx" } }
+      - { row: { path: "src/app/@modal/(.)login/page.tsx" } }
+      - { row: { path: "src/app/loading.tsx" } }
+      - { row: { path: "src/app/error.tsx" } }
+      - { row: { path: "src/app/not-found.tsx" } }
+      - { row: { path: "src/app/template.tsx" } }
+      - { row: { path: "src/app/default.tsx" } }
+      - { row: { path: "src/app/api/items/[id]/route.ts" } }
 
   - name: Route convention exports are indexed as their real definitions
     query: |

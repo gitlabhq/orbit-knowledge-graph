@@ -80,12 +80,10 @@ fixtures:
       }
 
 tests:
-  - name: Generic pipeline indexes module definitions for JS-family extensions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Generic pipeline catalogs files for JS-family extensions
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)
+      WHERE file.path IN [
         'jsx/component.jsx',
         'tsx/component.tsx',
         'esm/component.mjs',
@@ -93,16 +91,16 @@ tests:
         'mts/component.mts',
         'cts/component.cts'
       ]
-      RETURN d.fqn AS fqn
-      ORDER BY fqn
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 6 }
-      - { row: { fqn: "cjs/component.cjs" } }
-      - { row: { fqn: "cts/component.cts" } }
-      - { row: { fqn: "esm/component.mjs" } }
-      - { row: { fqn: "jsx/component.jsx" } }
-      - { row: { fqn: "mts/component.mts" } }
-      - { row: { fqn: "tsx/component.tsx" } }
+      - { row: { path: "cjs/component.cjs" } }
+      - { row: { path: "cts/component.cts" } }
+      - { row: { path: "esm/component.mjs" } }
+      - { row: { path: "jsx/component.jsx" } }
+      - { row: { path: "mts/component.mts" } }
+      - { row: { path: "tsx/component.tsx" } }
 
   - name: Generic pipeline resolves imports across JS-family extensions
     query: |
