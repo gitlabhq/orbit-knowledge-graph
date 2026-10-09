@@ -35,13 +35,24 @@ impl From<anyhow::Error> for RemoteError {
 
 pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     match status {
-        404 => RemoteError::new(
-            EXIT_UNAVAILABLE,
-            "Orbit endpoint not available\n\n\
-             The `/api/v4/orbit/*` endpoints returned 404. The most likely cause is\n\
-             that the `knowledge_graph` feature flag is disabled for your user on this\n\
-             instance. Contact an instance administrator to enable it.",
-        ),
+        404 => match missing_resource(body) {
+            Some(resource) => RemoteError::new(
+                EXIT_UNAVAILABLE,
+                format!(
+                    "{resource} not found\n\n\
+                     The Orbit API found no {resource_lower} with this path or ID, or you\n\
+                     are not a member of it.",
+                    resource_lower = resource.to_lowercase()
+                ),
+            ),
+            None => RemoteError::new(
+                EXIT_UNAVAILABLE,
+                "Orbit endpoint not available\n\n\
+                 The `/api/v4/orbit/*` endpoints returned 404. The most likely cause is\n\
+                 that the `knowledge_graph` feature flag is disabled for your user on this\n\
+                 instance. Contact an instance administrator to enable it.",
+            ),
+        },
         401 => RemoteError::new(
             EXIT_UNAUTHENTICATED,
             "not authenticated\n\n\
@@ -78,6 +89,13 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     }
 }
 
+fn missing_resource(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let message = value.get("message")?.as_str()?;
+    let resource = message.strip_prefix("404 ")?.strip_suffix(" Not Found")?;
+    Some(resource.to_string())
+}
+
 fn body_suffix(body: &str) -> String {
     if body.is_empty() {
         String::new()
@@ -98,6 +116,19 @@ mod tests {
         assert_eq!(map_http_error(429, "").exit_code, EXIT_RATE_LIMITED);
         assert_eq!(map_http_error(503, "").exit_code, EXIT_GENERIC);
         assert_eq!(map_http_error(500, "").exit_code, EXIT_GENERIC);
+    }
+
+    #[test]
+    fn not_found_names_the_missing_resource() {
+        let err = map_http_error(404, r#"{"message":"404 Namespace Not Found"}"#);
+        assert_eq!(err.exit_code, EXIT_UNAVAILABLE);
+        assert!(err.message.starts_with("Namespace not found"));
+    }
+
+    #[test]
+    fn bare_not_found_points_at_the_feature_flag() {
+        let err = map_http_error(404, r#"{"message":"404 Not Found"}"#);
+        assert!(err.message.contains("`knowledge_graph` feature flag"));
     }
 
     #[test]
