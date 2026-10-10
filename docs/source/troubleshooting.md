@@ -77,7 +77,7 @@ You can also install the `@gitlab/orbit` npm package. It always uses the musl bu
 You might get an error like this one.
 
 ```plaintext
-no local graph found at ~/.gitlab/orbit/graph.duckdb. Index a repository first (`glab orbit index` inside it, or the `index` MCP tool).
+Error: no local graph found at /Users/you/.gitlab/orbit/graph.duckdb. Index a repository first (`orbit index` inside it, or the `index` MCP tool).
 ```
 
 This issue occurs when you did not index the repository yet,
@@ -140,7 +140,7 @@ Then run your command again.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -159,21 +159,6 @@ To resolve this issue, do one of these:
 - Sign in with `glab auth login`.
 - Set `GITLAB_TOKEN`. For an instance other than GitLab.com, also set `GITLAB_URL`.
 - Run the command through `glab orbit`. It passes your `glab` credential to the binary.
-
-### Error: `origin is on <host>, but Orbit uses <host>`
-
-`glab orbit graph-status` might exit with code 1 and this message, or with the message `no scope to inspect`.
-
-This issue occurs when you do not give a scope and the CLI cannot use the `origin` remote of the checkout.
-The remote is on a different GitLab instance, or the checkout has no GitLab `origin`.
-
-To resolve this issue, give the scope:
-
-```shell
-glab orbit graph-status --full-path <group_or_project_path>
-```
-
-You can also use `--namespace-id` or `--project-id`.
 
 ### Error: `compile_error` for a JSON query
 
@@ -259,7 +244,7 @@ Wait for indexing to finish, then send the query again.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -308,7 +293,7 @@ To resolve this issue, give the account the Security Manager role in the group.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}

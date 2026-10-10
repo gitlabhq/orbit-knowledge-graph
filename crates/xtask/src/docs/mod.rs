@@ -76,8 +76,6 @@ fn regenerate_regions(ontology: &Ontology, check: bool) -> Result<Vec<&'static s
             continue;
         }
         if check {
-            eprintln!("stale: {path}");
-            print_diff(&current, &updated);
             stale.push(path);
         } else {
             fs::write(path, &updated).with_context(|| format!("writing {path}"))?;
@@ -115,20 +113,6 @@ fn replace_marked_region(doc: &str, name: &str, body: &str) -> Result<String> {
     out.push('\n');
     out.push_str(&doc[end..]);
     Ok(out)
-}
-
-fn print_diff(before: &str, after: &str) {
-    let before_lines: Vec<&str> = before.lines().collect();
-    let after_lines: Vec<&str> = after.lines().collect();
-    let shown = before_lines.len().max(after_lines.len()).min(80);
-    for i in 0..shown {
-        let b = before_lines.get(i).copied().unwrap_or("");
-        let a = after_lines.get(i).copied().unwrap_or("");
-        if b != a {
-            eprintln!("- {b}");
-            eprintln!("+ {a}");
-        }
-    }
 }
 
 #[cfg(test)]

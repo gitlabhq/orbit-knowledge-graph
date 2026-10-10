@@ -39,7 +39,7 @@ Local commands such as `grep`, `context`, `sql`, and `repo-map` read the local g
 Server commands such as `query`, `ontology`, and `graph-status` send a request to GitLab.
 
 ```mermaid
-flowchart LR
+flowchart TB
   accTitle: The two GitLab Orbit graph stores
   accDescr: orbit index reads your repository into the local graph in DuckDB. The CLI and the local MCP server give the local graph to your agent. The indexer reads GitLab data and code into the server graph in ClickHouse. GitLab authorizes each server query. The CLI, the MCP endpoint, and the REST API give the server graph to your agent. GitLab Duo Agent Platform also queries the server graph.
   repo[Your repository] --> index[orbit index]
@@ -68,7 +68,7 @@ flowchart LR
 | Network connection to query | Not required | Required |
 | GitLab account | Not required | Required |
 | Authorization | None | GitLab permissions of your account. See [roles](security.md#roles). |
-| Query language | Read-only SQL | JSON query DSL |
+| Query language | Read-only SQL | JSON query DSL, or GQL when the per-user `orbit_gql_queries` feature flag is on |
 | Access | CLI, local MCP server | CLI, MCP endpoint, REST API, GitLab Duo Agent Platform, GitLab UI |
 
 Both graphs parse code with the same parser and the same [supported languages](schema.md#supported-languages).
@@ -78,7 +78,7 @@ For more information, see [Connect AI agents](agents/_index.md).
 
 | Skill guidance | Local graph | Server graph |
 |----------------|-------------|--------------|
-| Query language | Read-only SQL | JSON query DSL |
+| Query language | Read-only SQL | JSON query DSL, or GQL when the per-user `orbit_gql_queries` feature flag is on |
 | Query recipes to paste | {{< no >}} | {{< yes >}} |
 | Repository map helper | {{< yes >}} | {{< yes >}} |
 | Reporting and coverage guidance | {{< no >}} | {{< yes >}} |
@@ -127,7 +127,7 @@ The CLI still uses the network to install and update the binary, fetch the GitLa
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -214,7 +214,7 @@ When GitLab Orbit is generally available, only graph queries consume GitLab Cred
 | Access method | Consumes GitLab Credits after GA | Stays free |
 |---------------|----------------------------------|------------|
 | CLI | `query` | `status`, `ontology`, `dsl`, `tools`, `graph-status` |
-| REST API | `POST /api/v4/orbit/query` | All other endpoints |
+| REST API | `POST /api/v4/orbit/query`, `POST /api/v4/orbit/query/:name`, `POST /api/v4/orbit/agent/commands/query_graph` | All other endpoints |
 | MCP endpoint | `invoke_command` calls that run `query_graph` | `list_commands`, `get_graph_schema`, `get_query_dsl`, `get_response_format` |
 | GitLab Duo Agent Platform | Queries that the agent makes for you | None |
 

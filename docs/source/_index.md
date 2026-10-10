@@ -53,7 +53,7 @@ glab orbit setup
 
 Setup finds the AI agents on your machine.
 It gives each agent instructions, hooks, and the `orbit-cli` skill.
-Then it indexes the repository:
+Then it indexes the repository. The output is similar to:
 
 ```plaintext
 ◇  Configured ───────────────────────────────╮

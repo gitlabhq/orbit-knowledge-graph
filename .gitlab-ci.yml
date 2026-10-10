@@ -708,6 +708,7 @@ docs_hugo_build:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
         - docs/source/**/*
+        - docs-locale/**/*
         - scripts/docs/**/*
         - .gitlab-ci.yml
       interruptible: true

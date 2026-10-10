@@ -66,10 +66,10 @@ pub fn schema_edges(ontology: &Ontology) -> Result<String> {
     let edges: Vec<&str> = ontology.edge_names().collect();
     require_floor("relationships", edges.len(), MIN_EDGES)?;
 
-    let mut out = table_header(&["Relationship", "Description", "From", "To"]);
+    let mut out = table_header(&["Relationship", "Description", "Connects"]);
     for edge in edges {
         out.push_str(&format!(
-            "| `{edge}` | {} | {} | {} |\n",
+            "| `{edge}` | {} | {} → {} |\n",
             table_cell(ontology.get_edge_description(edge).unwrap_or_default()),
             code_list(ontology.get_edge_source_types(edge)),
             code_list(ontology.get_edge_all_target_types(edge)),
@@ -173,8 +173,8 @@ mod tests {
             backticked_first_column(&table).len(),
             ontology.edge_names().count()
         );
-        assert!(table.starts_with("| Relationship | Description | From | To |\n"));
-        assert!(table.contains("| `AUTHORED` | Authorship relationship between users and entities | `User` | `MergeRequest`, `Note`, `Vulnerability`, `WorkItem` |"));
+        assert!(table.starts_with("| Relationship | Description | Connects |\n"));
+        assert!(table.contains("| `AUTHORED` | Authorship relationship between users and entities | `User` → `MergeRequest`, `Note`, `Vulnerability`, `WorkItem` |"));
     }
 
     #[test]

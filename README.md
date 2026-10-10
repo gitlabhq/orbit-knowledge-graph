@@ -17,7 +17,7 @@
 
 </div>
 
-Orbit indexes your GitLab SDLC and source code into one property graph, then lets you query it from the GitLab UI, a CLI, MCP, or REST. The graph can live on your machine — a single binary that builds a code-only graph from any repository, offline — or in the hosted service that spans a top-level GitLab.com group across SDLC and code. Same ontology, same query surface.
+Orbit indexes your GitLab SDLC and source code into one property graph, then lets you query it from the GitLab UI, a CLI, MCP, or REST. The graph can live on your machine, where a single binary builds a code-only graph from any repository, offline. It can also live in the hosted service, which spans a top-level GitLab.com group across SDLC and code. Same ontology, same query surface.
 
 > Beta. The Query DSL and ontology may change. An Owner of a top-level group must turn on Orbit for the group before the hosted graph indexes it.
 
@@ -49,11 +49,10 @@ orbit sql 'SELECT count(*) FROM gl_definition'
 ### Query the hosted graph
 
 ```shell
-# Replace your-group/ with your top-level group path.
 glab orbit ontology
 ```
 
-Put the request body in `/tmp/orbit-query.json`:
+Put the request body in `/tmp/orbit-query.json`. Replace `your-group/` with your top-level group path:
 
 ```json orbit-query
 {

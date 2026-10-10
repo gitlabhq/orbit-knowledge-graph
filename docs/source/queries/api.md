@@ -9,7 +9,7 @@ title: GitLab Orbit REST API
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -241,8 +241,7 @@ An example response, with most components removed:
       {
         "name": "orbit-webserver",
         "status": "healthy",
-        "replicas": {"ready": 3, "desired": 3},
-        "metrics": {"kind": "Deployment", "namespace": "gkg"}
+        "replicas": {"ready": 3, "desired": 3}
       }
     ]
   }
