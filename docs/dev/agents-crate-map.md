@@ -18,7 +18,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/types` | Type-safe result schema for redaction processing |
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
-| `query-engine/formatters` | Result formatters (graph, raw row, goon) |
+| `query-engine/formatters` | Result formatters (graph, raw row, toon, gql) |
 | `orbit-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema/version.rs`), migration orchestrator (`schema/migration.rs`), migration completion detection and dead-version GC (`orchestrator/scheduled/migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
@@ -40,8 +40,8 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-search` | Store-agnostic definition search: recall stays behind the `GrepSource` trait (`recall(term) → (id, sim)`; DuckDB FTS (BM25) locally, orbit-next remotely later), sim-based scoring with term coverage, exact-name and degree boosts, length normalisation, and weak-match signaling (`rank`), ontology-derived relational-verb vocab (`vocab`), and the grep orchestration (`grep`). Shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), CLI test harness (`cli` module) for CLI integration tests |
-| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness via YAML scenarios, graph formatting) + cli (concurrency, worktrees); depends on orbit-server, compiler, integration-testkit |
-| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, Orbit DuckDB compiler) |
-| `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
+| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
+| `integration-tests` | Test binaries: `local` (compiler, plan shape), `containers` (indexer, server, data correctness, corpus smoke), `cli`, and `billing_boundary`. See [Testing](../design-documents/testing.md) |
+| `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
+| `fuzz` | Bolero fuzz targets for the JSON and GQL query frontends, code parsers, and indexer messages |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |

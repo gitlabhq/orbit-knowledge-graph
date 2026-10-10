@@ -56,14 +56,6 @@ impl StreamingEdgeWriter {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn extend(&mut self, edges: impl IntoIterator<Item = EdgeRecord>) -> Result<()> {
-        for edge in edges {
-            self.push(edge)?;
-        }
-        Ok(())
-    }
-
     pub fn flush(&mut self) -> Result<()> {
         if self.buffer.is_empty() {
             return Ok(());

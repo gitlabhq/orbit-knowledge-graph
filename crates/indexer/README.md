@@ -38,7 +38,7 @@ Indexes software development lifecycle entities from Siphon CDC events: projects
 
 ### Code
 
-Indexes git repositories via the Rails internal API. Fetches archives on code indexing tasks, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse.
+Indexes Git repositories via the Rails internal API. Fetches archives on code indexing tasks, runs the code-graph to extract call graphs, definitions, and references, then writes results to ClickHouse.
 
 ## Engine internals
 
@@ -198,14 +198,16 @@ When a handler returns an error, the engine nacks the message so the broker can 
 
 ## Testing
 
-The `testkit` module has mocks for everything:
+Unit tests run with `cargo nextest run -p indexer --lib`. Integration tests are in
+`crates/integration-tests/tests/indexer/`. Run them with `mise test:integration:indexer`,
+`mise test:integration:indexer:code`, or `mise test:integration:indexer:sdlc:scenario <filter>`.
+See [Testing](../../docs/design-documents/testing.md#indexer-scenarios).
+
+The `testkit` module (feature `testkit`) includes `MockNatsServices`, `MockHandler`,
+`MockLockService`, `TestEngineBuilder`, `TestEnvelopeFactory`, and `test_meter`:
 
 ```rust
-use indexer::testkit::{
-    MockDestination,
-    TestEngineBuilder,
-    TestEnvelopeFactory,
-};
+use indexer::testkit::TestEngineBuilder;
 
 #[tokio::test]
 async fn test_user_handler() {
