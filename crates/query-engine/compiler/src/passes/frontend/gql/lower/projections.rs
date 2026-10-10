@@ -7,7 +7,7 @@ use crate::input::{
 };
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};
-use super::super::invalid;
+use super::super::errors::invalid;
 use super::Lowering;
 
 impl Lowering {

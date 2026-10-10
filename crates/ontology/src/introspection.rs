@@ -16,6 +16,21 @@ pub enum IntrospectionScope {
     Local,
 }
 
+impl IntrospectionScope {
+    #[must_use]
+    pub fn includes(self, ontology: &Ontology, name: &str) -> bool {
+        ontology.get_node(name).is_some()
+            && (self == Self::All || ontology.local_entity_names().contains(&name))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("unknown node(s): {}. Valid nodes: {}", .unknown.join(", "), .valid.join(", "))]
+pub struct UnknownNodes {
+    pub unknown: Vec<String>,
+    pub valid: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
     pub domains: Vec<SchemaDomain>,
@@ -41,16 +56,28 @@ pub enum SchemaNode {
 }
 
 /// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
-#[must_use]
 pub fn build_schema_response(
     ontology: &Ontology,
     scope: IntrospectionScope,
     expand_nodes: &[String],
-) -> SchemaResponse {
-    SchemaResponse {
+) -> Result<SchemaResponse, UnknownNodes> {
+    let unknown: Vec<String> = expand_nodes
+        .iter()
+        .filter(|name| *name != "*" && !scope.includes(ontology, name))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        let valid = ontology
+            .node_names()
+            .filter(|name| scope.includes(ontology, name))
+            .map(str::to_owned)
+            .collect();
+        return Err(UnknownNodes { unknown, valid });
+    }
+    Ok(SchemaResponse {
         domains: build_domains(ontology, scope, expand_nodes, None),
         edges: build_edge_names(ontology, scope, None),
-    }
+    })
 }
 
 #[must_use]
@@ -274,7 +301,7 @@ mod tests {
     #[test]
     fn local_scope_has_only_local_entities() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]).unwrap();
 
         let all_node_names: Vec<String> = response
             .domains
@@ -306,7 +333,7 @@ mod tests {
     #[test]
     fn local_scope_edges_are_present() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]).unwrap();
 
         assert!(
             !response.edges.is_empty(),
@@ -321,7 +348,8 @@ mod tests {
     fn local_expand_definition_includes_traversal_path() {
         let ont = load();
         let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()]);
+            build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()])
+                .unwrap();
 
         let props = response
             .domains
@@ -342,7 +370,7 @@ mod tests {
     #[test]
     fn all_scope_contains_server_entities() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::All, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::All, &[]).unwrap();
         let names: Vec<String> = response
             .domains
             .iter()
@@ -358,9 +386,38 @@ mod tests {
     }
 
     #[test]
+    fn expand_nodes_rejects_names_outside_the_scope() {
+        let ont = load();
+        let non_local = ont
+            .node_names()
+            .find(|name| !IntrospectionScope::Local.includes(&ont, name))
+            .expect("some node is not local")
+            .to_string();
+
+        let error = build_schema_response(
+            &ont,
+            IntrospectionScope::All,
+            &["User".to_string(), "FakeNode".to_string()],
+        )
+        .unwrap_err();
+        assert_eq!(error.unknown, ["FakeNode"]);
+        assert!(error.valid.contains(&non_local));
+
+        let error = build_schema_response(
+            &ont,
+            IntrospectionScope::Local,
+            std::slice::from_ref(&non_local),
+        )
+        .unwrap_err();
+        assert_eq!(error.unknown, [non_local.as_str()]);
+        assert!(!error.valid.contains(&non_local));
+    }
+
+    #[test]
     fn wildcard_expands_every_node() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &["*".to_string()]);
+        let response =
+            build_schema_response(&ont, IntrospectionScope::Local, &["*".to_string()]).unwrap();
         for domain in &response.domains {
             for node in &domain.nodes {
                 assert!(
@@ -375,7 +432,7 @@ mod tests {
     fn expanded_nodes_list_relationships() {
         let ont = load();
         let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]).unwrap();
 
         let file = response
             .domains
@@ -431,7 +488,7 @@ mod tests {
     fn property_format_is_name_colon_type() {
         let ont = load();
         let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]).unwrap();
         let props = response
             .domains
             .iter()
