@@ -30,7 +30,7 @@ Each answer shows only the data that your GitLab role lets you see.
 
 ## Quickstart
 
-Install the [GitLab CLI](https://docs.gitlab.com/cli/) (`glab`) 1.119 or later.
+Install the [GitLab CLI](https://docs.gitlab.com/cli/) (`glab`) 1.120 or later.
 Then, in a Git repository, run:
 
 ```shell
