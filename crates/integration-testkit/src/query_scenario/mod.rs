@@ -11,7 +11,7 @@ use format::ExpectedIndex;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{PipelineOutput, RedactionOutput};
@@ -285,7 +285,9 @@ async fn run_frontend(
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
+    let output = execute_output(ctx, frontend, &compiled, data_model, security, redaction).await;
+    assert_gql_columns(&output, &expect.gql_columns, label);
+    let resp = GraphFormatter.format(&output);
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
@@ -526,6 +528,18 @@ async fn execute_pipeline(
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
+    GraphFormatter
+        .format(&execute_output(ctx, frontend, compiled, data_model, security, redaction).await)
+}
+
+async fn execute_output(
+    ctx: &TestContext,
+    frontend: Frontend,
+    compiled: &Arc<CompiledQueryContext>,
+    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -570,7 +584,7 @@ async fn execute_pipeline(
         &compiled.pagination,
     ));
 
-    let output = PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
@@ -580,9 +594,43 @@ async fn execute_pipeline(
         result_context: hydration_output.result_context,
         execution_log: vec![],
         pagination,
-    };
+    }
+}
 
-    GraphFormatter.format(&output)
+fn assert_gql_columns(
+    output: &PipelineOutput,
+    expected: &std::collections::BTreeMap<String, Vec<String>>,
+    label: &str,
+) {
+    if expected.is_empty() {
+        return;
+    }
+    let table = GqlFormatter.format(output);
+    let table = table.as_str().expect("the gql format renders text");
+    let mut lines = table
+        .lines()
+        .filter(|line| line.starts_with('|'))
+        .map(|line| {
+            line.trim_matches('|')
+                .split(" | ")
+                .map(str::trim)
+                .collect::<Vec<_>>()
+        });
+    let header = lines
+        .next()
+        .unwrap_or_else(|| panic!("{label}: gql table has no header\n{table}"));
+    let rows: Vec<_> = lines.collect();
+    for (name, values) in expected {
+        let index = header
+            .iter()
+            .position(|column| column == name)
+            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}\n{table}"));
+        let actual: Vec<&str> = rows.iter().map(|row| row[index]).collect();
+        assert_eq!(
+            actual, *values,
+            "{label}: gql column {name} mismatch\n{table}"
+        );
+    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {

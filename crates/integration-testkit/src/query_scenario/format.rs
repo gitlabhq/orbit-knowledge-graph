@@ -152,6 +152,8 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
+    #[serde(default)]
+    pub gql_columns: BTreeMap<String, Vec<String>>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
