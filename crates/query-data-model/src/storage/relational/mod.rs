@@ -1,4 +1,10 @@
 use std::collections::BTreeMap;
+pub mod mapping;
+pub use mapping::{
+    DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
+    ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute,
+    TraversalPathLookup,
+};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 

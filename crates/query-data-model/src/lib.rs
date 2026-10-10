@@ -15,11 +15,12 @@ pub use implementations::{
     EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy, TrustedLocalCatalog,
 };
 
-pub use orbit::{
+pub use orbit::OrbitQueryModel;
+pub use storage::relational::RelationalMapping;
+pub use storage::relational::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
 };
-pub use orbit::{OrbitQueryModel, RelationalMapping};
 pub type ClickHouseDataModel =
     DataModel<Relational<implementations::clickhouse::storage::ClickHouse>, GitLabAuthzCatalog>;
 pub type DuckDbDataModel =
