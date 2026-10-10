@@ -364,7 +364,7 @@ impl State {
         state
             .resolver
             .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
-        state.resolver.configured_prefixes = walk.configured_prefixes;
+        state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
 }

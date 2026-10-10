@@ -10,8 +10,12 @@ fixtures:
     content: |
       import { value } from 'constants';
       import { value as builtin } from 'node:constants';
+      import { format } from 'util';
+      import { value as relative } from './other/constants';
       function run() { value(); }
       function runtime() { builtin(); }
+      function missingCandidate() { format(); }
+      function relativeCall() { relative(); }
   - path: other/constants/index.ts
     content: |
       export function value() {}
@@ -33,6 +37,52 @@ tests:
       - { row_count: 1 }
       - { row: { path: 'node:constants' } }
 steps:
+  - name: Explicit aliases take precedence over conditional root mappings
+    snapshot: true
+    modify:
+      - path: tsconfig.json
+        content: |
+          {"compilerOptions":{"baseUrl":"./src","paths":{"constants":["other/constants"]}}}
+    tests:
+      - name: Explicit mapping wins
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: other/constants/index.ts } }
+      - name: Missing conditional target retains runtime fallback
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+          WHERE caller.name = 'missingCandidate'
+          RETURN target.import_path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { path: util } }
+      - name: Relative path bypasses conditional mapping
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'relativeCall'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: other/constants/index.ts } }
+  - name: Removing an alias restores configured root lookup
+    snapshot: true
+    modify:
+      - path: tsconfig.json
+        content: |
+          {"compilerOptions":{"baseUrl":"./src"}}
+    tests:
+      - name: Alias removal invalidates the retained target
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: src/constants/index.ts } }
   - name: Change configured root after loading a snapshot
     snapshot: true
     modify:

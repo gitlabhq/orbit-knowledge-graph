@@ -40,6 +40,10 @@ same applies to successful bare-import lookups under an explicitly configured
 do not use that override. Inferred directory roots cannot override runtime modules.
 Changing or removing configured roots invalidates retained import targets; adding
 roots also rediscovers imports that previously had no project target.
+Configured roots compile to conditional wildcard aliases. They share ordered
+alias lookup with explicit mappings, which take priority. A conditional mapping
+applies only when its candidate exists. One lookup configuration tracks changes
+to aliases and search prefixes and is reconstructed when loading a snapshot.
 The default, `precedence: project`, retains exact and declared-root project lookup.
 Provider lists are compiled once when language rules load. They do not add a
 new resolution pass or inspect language-specific syntax in the shared engine.
