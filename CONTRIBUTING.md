@@ -22,7 +22,7 @@ Core tasks:
 | Task | Command |
 |---|---|
 | Build | `mise build` |
-| Unit + fast tests | `mise test:fast` |
+| Unit tests (no Docker) | `mise test:fast` |
 | Lint | `mise lint:code` |
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
@@ -31,14 +31,9 @@ For the full local setup (GDK, ClickHouse, NATS), see [Local development](docs/d
 
 ## Testing
 
-```shell
-mise test:fast         # Unit tests and fast integration tests (no Docker required)
-mise test:integration  # Full integration suite (requires Docker)
-mise test:cli          # CLI integration tests: concurrency and worktrees
-```
+`mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
 
-`mise test:integration` spins up ClickHouse via Docker testcontainers — make sure Docker is running
-before using it.
+For all test layers, the CI jobs, and where to add a test, see [Testing](docs/design-documents/testing.md).
 
 ## Linting
 

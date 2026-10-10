@@ -105,21 +105,26 @@ it builds the engine and runs until shutdown.
 
 ### Running tests
 
-```shell
-# Unit tests
-cargo test --lib
+This crate has no `tests/` directory. Its integration tests are in
+`crates/integration-tests/tests/indexer/` and need Docker.
 
-# Integration tests (requires Docker, make sure to look for Colima if docker is not found)
-cargo test --test '*'
+```shell
+cargo nextest run -p indexer --lib
+mise test:integration:indexer
+mise test:integration:indexer:code
+mise test:integration:indexer:sdlc:scenario <filter>
 ```
+
+`mise test:fast` runs the unit tests for the whole workspace.
 
 ### Test utilities
 
-Located in `testkit/`:
+The `src/testkit/` module has:
 
-- `MockNatsServices`, `MockHandler`
-- `TestEngineBuilder` for integration tests
-- `TestEnvelopeFactory` for message creation
+- `MockNatsServices`, `MockHandler`, and `MockLockService`.
+- `TestEngineBuilder` for integration tests.
+- `TestEnvelopeFactory` for message creation.
+- `test_meter` for metrics.
 
 ## Common tasks
 

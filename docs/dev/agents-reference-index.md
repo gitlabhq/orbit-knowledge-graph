@@ -36,10 +36,12 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
+| Testing strategy (test layers, CI jobs, where to add a test) | `docs/design-documents/testing.md` |
 | Query test fixtures | `fixtures/queries/` |
-| YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:server`; filter with `SCENARIO_FILTER=<name>`) |
+| YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:data`; filter with `SCENARIO_FILTER=<name>`) |
 | Query scenario presets | `crates/integration-tests/tests/server/data_correctness/presets/` (`seed.yaml`, `security.yaml`, `redaction.yaml`) |
 | Query scenario format reference | `crates/integration-testkit/README.md` ("Query scenarios" section) and `crates/integration-testkit/src/query_scenario/format.rs` (`QueryScenario`, `QueryExpect`, `NodeExpect`) |
+| YAML indexer scenarios | `crates/integration-tests/tests/indexer/scenarios/` (`sdlc/<domain>/`, `dispatch/`, `dispatch_degraded/`; JSON schema `config/schemas/indexer_scenario.schema.json`, validate with `mise scenarios:validate`; CI gate `indexer-scenario-schema-validate`; run SDLC scenarios with `mise test:integration:indexer:sdlc:scenario <filter>`) |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |

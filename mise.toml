@@ -114,11 +114,11 @@ description = "Build the CLI"
 
 [tasks.test]
 run = "./scripts/dev/run-unit-tests.sh"
-description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
+description = "Run unit tests (--lib, plus the xtask and orbit binaries; no integration targets, no Docker)"
 
 [tasks."test:fast"]
 run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/dev/run-unit-tests.sh"
-description = "Run unit + non-Docker integration tests with reduced debug info"
+description = "Run unit tests with reduced debug info (no integration targets, no Docker)"
 
 [tasks."test:local"]
 run = "cargo nextest run --test local"
@@ -130,7 +130,7 @@ description = "Check logical input and selected physical plans against YAML fixt
 
 [tasks."test:integration:codegraph"]
 run = "cargo nextest run -p integration-tests-codegraph --no-capture"
-description = "Run code-graph v2 validator tests — YAML Cypher suites (no Docker)"
+description = "Run code-graph and code-graph-incremental YAML suites with OpenCypher-like checks (no Docker)"
 
 [tasks."test:cli"]
 run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_repository --no-fail-fast"
@@ -139,7 +139,7 @@ description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 [tasks."test:integration"]
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
-description = "Run integration tests (requires Docker and `mise colima:start`)"
+description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
 [tasks."test:integration:server"]
 run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
