@@ -200,6 +200,24 @@ mod tests {
     }
 
     #[test]
+    fn property_names_any_of_lists_only_the_first_enum() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "propertyNames": { "anyOf": [{ "enum": ["alpha", "beta"] }, { "enum": ["hidden"] }] }
+        });
+        let validator = jsonschema::validator_for(&schema).expect("valid schema");
+        assert!(validator.is_valid(&serde_json::json!({"hidden": 1})));
+        let value = serde_json::json!({"delta": 1});
+        let err = validator
+            .iter_errors(&value)
+            .next()
+            .expect("delta must be rejected");
+        let msg = format_schema_error(&err);
+        assert!(msg.contains("Valid values: alpha, beta at"), "{msg}");
+        assert!(!msg.contains("hidden"), "{msg}");
+    }
+
+    #[test]
     fn property_names_non_enum_fallback() {
         let schema = serde_json::json!({
             "type": "object",
