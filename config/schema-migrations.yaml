@@ -19,10 +19,10 @@ migrations:
 - version: 102
   scope: none
   note: >-
-    Adds the hidden flag to traversal_path on 30 nodes. The flag is read only by
-    the client-facing schema, wildcard column, and error-candidate surfaces; extract
-    SQL, transform output, and DDL are unchanged, so every indexed row is
-    byte-identical.
+    Adds the hidden flag to traversal_path on 30 nodes and on the local edge table.
+    The flag is read only by the client-facing schema, wildcard column, and
+    error-candidate surfaces; extract SQL, transform output, and DDL are unchanged, so every
+    indexed row is byte-identical.
 - version: 101
   scope: "*"
   note: >-

@@ -730,6 +730,11 @@
                           "datetime"
                         ],
                         "description": "Column data type."
+                      },
+                      "hidden": {
+                        "type": "boolean",
+                        "description": "Whether to leave this column out of the local schema listing. Defaults to false. Queries can still read it.",
+                        "default": false
                       }
                     },
                     "additionalProperties": false

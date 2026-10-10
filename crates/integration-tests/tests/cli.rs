@@ -585,7 +585,7 @@ fn schema_raw_is_parseable_json() {
         !v.as_array()
             .unwrap()
             .iter()
-            .any(|r| r["table_name"] == "gl_definition" && r["column_name"] == "traversal_path"),
+            .any(|r| r["column_name"] == "traversal_path"),
         "hidden traversal_path listed: {stdout}"
     );
 }

@@ -283,7 +283,7 @@ settings:
         - {name: relationship_kind, type: string}
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
-        - {name: traversal_path, type: string}
+        - {name: traversal_path, type: string, hidden: true}
   auxiliary_tables:
     - name: namespace_storage_snapshot
       versioned: false
