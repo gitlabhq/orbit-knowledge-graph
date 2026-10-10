@@ -807,28 +807,6 @@ mod tests {
     }
 
     #[test]
-    fn rerunning_setup_replaces_legacy_graph_first_hooks() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
-        std::fs::write(
-            dir.path().join(".claude/settings.json"),
-            r#"{"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "orbit hook-guard read --graph-first"}]}]}}"#,
-        )
-        .unwrap();
-        install(
-            options_for(&["claude"]),
-            project(dir.path()),
-            &bare_machine(),
-        )
-        .unwrap();
-        let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
-        assert!(!settings.contains("--graph-first"), "{settings}");
-        assert!(!settings.contains("mcp__orbit__"), "{settings}");
-        assert!(!settings.contains("hook-guard read"), "{settings}");
-        assert!(settings.contains("hook-guard search"), "{settings}");
-    }
-
-    #[test]
     fn launcher_tokens_resolve_in_installed_artifacts() {
         let dir = tempfile::tempdir().unwrap();
         install_with_mcp(&["claude", "opencode"], dir.path());

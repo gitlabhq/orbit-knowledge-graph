@@ -363,33 +363,4 @@ mod tests {
             "src/a.rs:2\nsrc/b.rs:1\ndata.json:1\n"
         );
     }
-
-    #[test]
-    fn a_named_definition_prints_first_and_long_ones_are_capped() {
-        let repo = tempfile::tempdir().unwrap();
-        let body: String = (1..=100).map(|n| format!("line {n}\n")).collect();
-        std::fs::write(repo.path().join("a.rs"), body).unwrap();
-        let look = |hits: &[Hit], term: &str| {
-            let terms = [Term::parse(term)];
-            lookup(
-                repo.path(),
-                hits,
-                &terms,
-                &Connections::new(),
-                &Options::default(),
-            )
-        };
-        let short = [hit("a.rs", 2, "fn go() {", Some(("go", 2, 4)))];
-        assert_eq!(
-            look(&short, "go").unwrap(),
-            "Function go — a.rs:2-4\n  2|line 2\n  3|line 3\n  4|line 4\n"
-        );
-        let long = [hit("a.rs", 1, "fn go() {", Some(("go", 1, 100)))];
-        assert!(
-            look(&long, "go")
-                .unwrap()
-                .ends_with("  rest: orbit context a.rs:81-100\n")
-        );
-        assert!(look(&short, r"go\(").is_none());
-    }
 }

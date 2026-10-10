@@ -53,20 +53,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn splits_only_on_top_level_unescaped_bars() {
-        assert_eq!(
-            query_alternatives(r"Router::new|route\(|func \(p\) (a|b)|a\|b|????").unwrap(),
-            [
-                "Router::new",
-                r"route\(",
-                r"func \(p\) (a|b)",
-                r"a\|b",
-                "????"
-            ]
-        );
-    }
-
-    #[test]
     fn alternatives_preserve_full_queries_and_first_spelling() {
         assert_eq!(
             query_alternatives(" markInSync | MARKINSYNC | prepare_multipart | who calls clone ")

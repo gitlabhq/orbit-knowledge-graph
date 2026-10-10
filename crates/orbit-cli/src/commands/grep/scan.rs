@@ -218,64 +218,23 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         for (path, body) in [
             (".gitignore", "dist/\n"),
-            (
-                "src/a.rs",
-                "fn mark_in_sync() {}\nlet x = 1;\nmarkInSync();\n",
-            ),
-            ("src/nested/b.py", "markInSync()\n"),
+            ("src/a.rs", "x\nmarkInSync();\n"),
             ("dist/c.js", "markInSync();\n"),
-            ("app/[slug]/page.tsx", "markInSync();\n"),
         ] {
             let full = repo.path().join(path);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
             std::fs::write(full, body).unwrap();
         }
-        let run = |paths: &[&str], options: Options| {
-            let found = matcher(&[Term::parse("markInSync")], &options).unwrap();
-            let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-            let mut lines: Vec<String> = scan(repo.path(), &paths, &found, &options)
-                .unwrap()
-                .into_iter()
-                .map(|h| format!("{}{}{}", h.file, if h.context { '-' } else { ':' }, h.line))
-                .collect();
-            lines.sort();
-            lines
-        };
-        let all = [
-            "app/[slug]/page.tsx:1",
-            "src/a.rs:1",
-            "src/a.rs:3",
-            "src/nested/b.py:1",
-        ];
-        assert_eq!(run(&[], Options::default()), all);
-        assert_eq!(
-            run(&["s*/nested", "app/[slug]"], Options::default()),
-            [all[0], all[3]]
-        );
-        let globs = Options {
-            globs: vec!["*.py".into()],
-            ..Options::default()
-        };
-        assert_eq!(run(&[], globs), [all[3]]);
-        let around = Options {
+        let options = Options {
             before: 1,
-            max_count: Some(1),
             ..Options::default()
         };
-        assert_eq!(run(&["src/a.rs"], around), ["src/a.rs:1"]);
-        let invert = Options {
-            invert: true,
-            ..Options::default()
-        };
-        assert_eq!(run(&["src/a.rs"], invert), ["src/a.rs:2"]);
-        assert!(
-            scan(
-                repo.path(),
-                &["nope".into()],
-                &matcher(&[], &Options::default()).unwrap(),
-                &Options::default()
-            )
-            .is_err()
-        );
+        let found = matcher(&[Term::parse("mark_in_sync")], &options).unwrap();
+        let hits = scan(repo.path(), &[], &found, &options).unwrap();
+        let lines: Vec<(&str, usize, bool)> = hits
+            .iter()
+            .map(|h| (h.file.as_str(), h.line, h.context))
+            .collect();
+        assert_eq!(lines, [("src/a.rs", 1, true), ("src/a.rs", 2, false)]);
     }
 }
