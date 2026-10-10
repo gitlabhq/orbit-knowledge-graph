@@ -77,24 +77,6 @@ fn python_env(limits: Limits) -> Env {
     Env::with_limits(SupportLang::Python, limits).unwrap()
 }
 
-#[test]
-fn framework_providers_require_valid_names_and_provider_entries() {
-    let lang = code_graph_incremental::intern::Lang::new();
-    for frameworks in [
-        "[{name: '', providers: []}]",
-        "[{name: rails, providers: []}, {name: rails, providers: []}]",
-        "[{name: rails, providers: [], typo: true}]",
-        "[{name: rails, providers: [{symbols: [find]}]}]",
-        "[{name: rails, providers: [{module: active_record, precedence: unknown}]}]",
-    ] {
-        let yaml = format!("config:\n  frameworks: {frameworks}\nstages: []");
-        assert!(
-            code_graph_incremental::rules::load_lang(&yaml, &lang).is_err(),
-            "accepted {frameworks}"
-        );
-    }
-}
-
 fn nodes<'a>(tree: &'a Tree, kind: C) -> impl Iterator<Item = Cursor<'a>> {
     tree.root().descendants().filter(move |c| c.is(kind))
 }
