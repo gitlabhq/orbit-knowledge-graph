@@ -67,10 +67,6 @@ impl Interner {
         self.rodeo.len() as u32
     }
 
-    pub fn text_bytes(&self) -> usize {
-        self.rodeo.iter().map(|(_, text)| text.len()).sum()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

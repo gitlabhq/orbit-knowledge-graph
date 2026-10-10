@@ -265,15 +265,6 @@ Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
 to declaration identities, which also identify SSA variables and field slots.
 The linker allocates these keys per file; they do not enter the shared symbol
 interner or snapshots. Class values retain declaration node IDs through joins.
-Callers can reclaim unused symbol strings with `State::compact_symbols(&mut env, eligible)`.
-The classifier selects strings eligible for removal; live tree and resolver references
-always survive. Use `|_| true` to collect every unused string, or a prefix predicate
-to restrict collection. Cleanup replaces the environment and remaps the graph's symbol
-IDs, preserving node IDs and edges. It recompiles rules against the new symbol table.
-Call this API only when this state owns all graph references to the environment.
-Other states and cached symbol IDs must not share that environment during cleanup.
-Saving alone does not compact symbols. Compact before saving to reduce both retained
-symbol storage and snapshot size. Tree-sitter kind and field interners remain unchanged.
 Leaving a block removes its name mappings without restoring values. Assignments
 to outer bindings therefore survive block exit.
 

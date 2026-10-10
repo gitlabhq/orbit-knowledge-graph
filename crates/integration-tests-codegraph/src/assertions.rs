@@ -37,8 +37,6 @@ pub struct IncrementalStep {
     #[serde(default)]
     pub snapshot: bool,
     #[serde(default)]
-    pub compact_symbols: Option<SymbolCleanup>,
-    #[serde(default)]
     pub add: Vec<FixtureFile>,
     #[serde(default)]
     pub modify: Vec<FixtureFile>,
@@ -46,14 +44,6 @@ pub struct IncrementalStep {
     pub remove: Vec<String>,
     #[serde(default)]
     pub tests: Vec<TestCase>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SymbolCleanup {
-    #[serde(default)]
-    pub prefixes: Vec<String>,
-    #[serde(default)]
-    pub minimum_removed: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
