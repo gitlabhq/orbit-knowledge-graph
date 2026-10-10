@@ -667,7 +667,7 @@ check_docs_markdown:
     # docs that previously reached CI unlinted (design-documents deferred: #981).
     - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
     # Check links
-    - lychee --offline --include-fragments docs/source/**/*.md
+    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
