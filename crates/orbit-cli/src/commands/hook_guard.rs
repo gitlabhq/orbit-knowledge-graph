@@ -69,20 +69,18 @@ const VALUE_LONG: &[&str] = &[
     "--type-not",
 ];
 
-pub(crate) fn run(kind: Kind) {
+/// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
+pub(crate) fn run(kind: Kind) -> bool {
     let mut input = String::new();
-    if std::io::stdin().read_to_string(&mut input).is_err() {
-        return;
+    if std::io::stdin().read_to_string(&mut input).is_err() || !local_graph_exists() {
+        return false;
     }
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
-        return;
+        return false;
     };
-    if !local_graph_exists() {
-        return;
-    }
-    if let Some(response) = respond(kind, &call) {
-        println!("{response}");
-    }
+    respond(kind, &call)
+        .inspect(|response| println!("{response}"))
+        .is_some()
 }
 
 fn respond(kind: Kind, call: &Value) -> Option<Value> {

@@ -712,8 +712,9 @@ async fn main() -> Result<()> {
     match &cli.command {
         Commands::HookGuard { kind, .. } => {
             let started = Instant::now();
-            commands::hook_guard::run(*kind);
-            telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+            if commands::hook_guard::run(*kind) {
+                telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
+            }
             return Ok(());
         }
         Commands::SendEvent {

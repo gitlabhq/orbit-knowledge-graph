@@ -220,6 +220,8 @@ fn resolve_targets(
     Ok(resolved)
 }
 
+const NAMED_MAX: usize = 5;
+
 /// Definitions whose FQN ends with `target`, so a bare name or `Class.method` finds
 /// `pkg.Class.method` and `Class::method` alike.
 fn named(
@@ -230,7 +232,7 @@ fn named(
     let normalize = "regexp_replace(?3, '::|#|/', '.', 'g')";
     let batches = client.query_arrow_json(
         &format!(
-            "SELECT id FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+            "SELECT id, fqn FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
              AND (regexp_replace(fqn, '::|#|/', '.', 'g') = {normalize}
                   OR ends_with(regexp_replace(fqn, '::|#|/', '.', 'g'), '.' || {normalize}))
              ORDER BY id"
@@ -241,7 +243,17 @@ fn named(
             target.to_string().into(),
         ],
     )?;
-    Ok(duckdb_client::i64_column(&batches, "id"))
+    let (ids, fqns) = (
+        duckdb_client::i64_column(&batches, "id"),
+        duckdb_client::string_column(&batches, "fqn"),
+    );
+    anyhow::ensure!(
+        ids.len() <= NAMED_MAX,
+        "{target} names {} definitions; pass one of these FQNs: {}",
+        ids.len(),
+        fqns.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+    );
+    Ok(ids)
 }
 
 fn repo_relative_dir(repo_path: &std::path::Path, path: &str) -> Result<String> {
