@@ -120,13 +120,10 @@ fn resolve_schema(
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
     let Some(name) = node else {
-        return Ok(build_schema_response(ontology, scope, &[]));
+        return build_schema_response(ontology, scope, &[])
+            .map_err(|error| QueryError::Validation(error.to_string()));
     };
-    if name == "*"
-        || ontology.get_node(&name).is_none()
-        || (scope == IntrospectionScope::Local
-            && !ontology.local_entity_names().contains(&name.as_str()))
-    {
+    if name == "*" || !scope.includes(ontology, &name) {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));

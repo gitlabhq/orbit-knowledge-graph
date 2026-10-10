@@ -179,8 +179,15 @@ impl ToolService {
         ontology: &Ontology,
         expand_nodes: &[String],
     ) -> Result<String, ExecutorError> {
-        let response = build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-        Self::encode_schema_toon(&response)
+        Self::encode_schema_toon(&Self::schema_response(ontology, expand_nodes)?)
+    }
+
+    fn schema_response(
+        ontology: &Ontology,
+        expand_nodes: &[String],
+    ) -> Result<SchemaResponse, ExecutorError> {
+        build_schema_response(ontology, IntrospectionScope::All, expand_nodes)
+            .map_err(|error| ExecutorError::InvalidArguments(format!("expand_nodes: {error}")))
     }
 
     pub fn encode_schema_toon(response: &SchemaResponse) -> Result<String, ExecutorError> {
@@ -241,35 +248,13 @@ impl ToolService {
         expand_nodes: &[String],
         format: OutputFormat,
     ) -> Result<Value, ExecutorError> {
-        Self::reject_unknown_nodes(ontology, expand_nodes)?;
         match format {
             OutputFormat::Llm => Self::build_schema_toon(ontology, expand_nodes).map(Value::String),
             OutputFormat::Raw => {
-                let response =
-                    build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-                serde_json::to_value(response)
+                serde_json::to_value(Self::schema_response(ontology, expand_nodes)?)
                     .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))
             }
         }
-    }
-
-    fn reject_unknown_nodes(
-        ontology: &Ontology,
-        expand_nodes: &[String],
-    ) -> Result<(), ExecutorError> {
-        let unknown: Vec<&str> = expand_nodes
-            .iter()
-            .map(String::as_str)
-            .filter(|name| *name != "*" && ontology.get_node(name).is_none())
-            .collect();
-        if unknown.is_empty() {
-            return Ok(());
-        }
-        Err(ExecutorError::InvalidArguments(format!(
-            "unknown node(s) in expand_nodes: {}. Valid nodes: {}",
-            unknown.join(", "),
-            ontology.node_names().collect::<Vec<_>>().join(", ")
-        )))
     }
 
     pub(crate) fn render_query_language(format: OutputFormat) -> Result<Value, ExecutorError> {
