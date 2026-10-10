@@ -16,4 +16,4 @@ query:
     MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p LIMIT 10
 
 expect:
-  compile_error: "remove this traversal_path filter"
+  compile_error: "authorized traversal_path scope"

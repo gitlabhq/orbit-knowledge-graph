@@ -185,7 +185,7 @@ fn validate_traversal_path_within_scope(
     }
 
     Err(QueryError::Authorization(format!(
-        "{label}: path is not within an authorized traversal_path scope for this entity. Orbit scopes every query to your authorized paths, so remove this traversal_path filter or use a path inside that scope"
+        "{label}: path is not within an authorized traversal_path scope for this entity"
     )))
 }
 
