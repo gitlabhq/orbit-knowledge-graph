@@ -19,7 +19,7 @@
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - scripts/build-local-cli.sh
-        - scripts/smoke-local-cli.sh
+        - scripts/ci/smoke-local-cli.sh
         - .gitlab/ci/release-local.yml
         - crates/duckdb-client/**/*
         - rust-toolchain.toml
@@ -84,8 +84,8 @@ local-cli-build-linux-musl-arm64:
   before_script:
     - dnf install -y -q git-core gzip tar
   script:
-    - ./scripts/smoke-local-cli.sh "orbit-cli-linux-${ARCH}.tar.gz"
-    - ./scripts/smoke-local-cli.sh "orbit-cli-linux-musl-${ARCH}.tar.gz"
+    - ./scripts/ci/smoke-local-cli.sh "orbit-cli-linux-${ARCH}.tar.gz"
+    - ./scripts/ci/smoke-local-cli.sh "orbit-cli-linux-musl-${ARCH}.tar.gz"
 
 local-cli-smoke-linux-amd64:
   extends: .local-cli-smoke-linux
