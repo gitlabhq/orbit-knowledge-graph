@@ -11,7 +11,7 @@ use ontology::introspection::{
     IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
 };
 use pest::Span;
-use pest::error::{ErrorVariant, InputLocation, LineColLocation};
+use pest::error::{ErrorVariant, LineColLocation};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -147,15 +147,9 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
             let (line, column) = match error.line_col {
                 LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
             };
-            let offset = match error.location {
-                InputLocation::Pos(offset) | InputLocation::Span((offset, _)) => offset,
-            };
-            let function_hint = unsupported_function(raw, offset)
-                .map(|name| format!("\nThe function {name}() is not supported."))
-                .unwrap_or_default();
             QueryError::Validation(format!(
-                "Orbit query syntax at line {line}, column {column}: {}{function_hint}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
-                error.variant.message()
+                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
+                error.renamed_rules(rule_label).variant.message()
             ))
         })?
         .single()
@@ -163,18 +157,46 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
     QueryParser::Statement(statement).map_err(syntax_error)
 }
 
-fn unsupported_function(raw: &str, offset: usize) -> Option<&str> {
-    let (before, after) = raw.split_at_checked(offset)?;
-    if !after.starts_with('(') {
-        return None;
+fn rule_label(rule: &Rule) -> String {
+    match rule {
+        Rule::EOI => "end of query",
+        Rule::Query | Rule::Matches | Rule::Match => "MATCH",
+        Rule::Where => "WHERE",
+        Rule::Return => "RETURN",
+        Rule::Order => "ORDER BY",
+        Rule::Limit => "LIMIT",
+        Rule::Page => "PAGE",
+        Rule::After => "AFTER",
+        Rule::Debug => "DEBUG",
+        Rule::SchemaCall => "CALL db.schema()",
+        Rule::Pattern | Rule::PatternElement | Rule::NodePattern => {
+            "a node pattern such as (n:Label)"
+        }
+        Rule::PatternElementChain | Rule::RelationshipPattern => {
+            "a relationship such as -[:TYPE]->"
+        }
+        Rule::NodeLabel => "a node label",
+        Rule::RelationshipTypes => "a relationship type",
+        Rule::Variable => "a variable",
+        Rule::SchemaName | Rule::PropertyExpression => "a property such as n.name",
+        Rule::ProjectionItems | Rule::ProjectionItem | Rule::ProjectionExpression => {
+            "a RETURN item"
+        }
+        Rule::AndExpression | Rule::ComparisonExpression | Rule::TokenPredicate => "a condition",
+        Rule::ComparisonOperator => "a comparison operator",
+        Rule::StringOperator => "STARTS WITH, ENDS WITH, or CONTAINS",
+        Rule::InOperator => "IN",
+        Rule::NullOperator => "IS NULL",
+        Rule::SortItem => "a sort key",
+        Rule::SortDirection => "ASC or DESC",
+        Rule::UnsignedInteger => "a non-negative integer",
+        Rule::StringLiteral => "a string",
+        Rule::ListLiteral => "a list",
+        Rule::MapLiteral | Rule::MapEntry => "a property map such as {name: 'x'}",
+        Rule::RangeLiteral => "a hop range such as *1..3",
+        other => return format!("{other:?}"),
     }
-    let before = before.trim_end();
-    let start = before
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map_or(0, |index| index + 1);
-    let name = &before[start..];
-    name.starts_with(|c: char| c.is_ascii_alphabetic())
-        .then_some(name)
+    .to_owned()
 }
 
 fn check_bounds(query: &str) -> Result<()> {
