@@ -65,4 +65,4 @@ cargo +nightly bolero test <target_name> -p orbit-fuzz
 
 If your default toolchain is nightly, you can omit `+nightly`.
 
-CI does not run these targets. See [Known gaps](../../docs/design-documents/testing.md#known-gaps).
+CI compiles these targets but does not run them. See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
