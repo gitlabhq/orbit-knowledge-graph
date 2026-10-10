@@ -807,8 +807,7 @@ impl OrbitServiceImpl {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
                 let properties = if should_expand {
-                    n.fields
-                        .iter()
+                    n.listed_fields()
                         .map(|f| SchemaProperty {
                             name: f.name.clone(),
                             data_type: format!("{}", f.data_type),
@@ -1333,6 +1332,17 @@ mod tests {
                 domain.name
             );
         }
+    }
+
+    #[test]
+    fn test_structured_schema_leaves_out_hidden_properties() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
+        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+        let names: Vec<&str> = project.properties.iter().map(|p| p.name.as_str()).collect();
+
+        assert!(names.contains(&"full_path"), "{names:?}");
+        assert!(!names.contains(&"traversal_path"), "{names:?}");
     }
 
     #[test]

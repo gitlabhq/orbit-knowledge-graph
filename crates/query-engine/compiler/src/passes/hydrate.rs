@@ -246,7 +246,8 @@ fn build_dynamic_specs(
                         !matches!(
                             model.property_realization(property.id),
                             Some(PropertyRealization::Virtual(_))
-                        ) && property.name != "_version"
+                        ) && !model.property_is_hidden(property.id)
+                            && property.name != "_version"
                             && property.name != "_deleted"
                     })
                     .filter(|property| !admin_only.contains(property.name.as_str()))

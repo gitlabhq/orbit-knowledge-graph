@@ -30,6 +30,7 @@ struct PropertyPolicy {
     admin_only: bool,
     filterable: bool,
     like_allowed: bool,
+    hidden: bool,
 }
 
 #[derive(Debug)]
@@ -95,6 +96,12 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
         self.properties
             .get(property.index())
             .is_some_and(|policy| policy.like_allowed)
+    }
+
+    fn is_hidden(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.hidden)
     }
 
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
@@ -249,6 +256,10 @@ impl QueryAuthorizationCatalog for TrustedLocalCatalog {
             .is_some_and(|policy| policy.like_allowed)
     }
 
+    fn is_hidden(&self, _property: PropertyId) -> bool {
+        false
+    }
+
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
         static EMPTY: std::sync::LazyLock<HashMap<String, EntityAuthConfig>> =
             std::sync::LazyLock::new(HashMap::new);
@@ -273,6 +284,7 @@ fn derive_property_policy(
             admin_only: false,
             filterable: true,
             like_allowed: true,
+            hidden: false,
         };
         graph.properties().count()
     ];
@@ -295,6 +307,7 @@ fn derive_property_policy(
                 admin_only: field.admin_only,
                 filterable: field.filterable,
                 like_allowed: field.like_allowed,
+                hidden: field.hidden,
             };
         }
     }
