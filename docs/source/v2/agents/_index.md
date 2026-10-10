@@ -81,10 +81,12 @@ Run the command again at any time. It updates its changes in place.
 By default, it writes to your user configuration, so the change affects only you.
 
 ```shell
-glab orbit setup --all --mcp --dry-run
+glab orbit setup --all --mcp --dry-run --yes
 ```
 
 ```plaintext
+┌  Orbit setup (instructions, hooks, skill, mcp server)
+│
 ◇  Plan ─────────────────────────────────────────────────╮
 │  Claude Code   instructions, hooks, skill, mcp server  │
 │  Codex         instructions, skill, mcp server         │

@@ -45,7 +45,7 @@ deployment to confirm current limitations.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     accTitle: GitLab Orbit on GitLab Self-Managed
     accDescr: GitLab writes to PostgreSQL, Siphon reads the PostgreSQL write-ahead log and replicates rows through NATS JetStream into the ClickHouse data lake, the GitLab Orbit dispatcher watches the same NATS stream and creates the graph schema in ClickHouse, the GitLab Orbit indexer takes indexing tasks from NATS and builds the property graph from the data lake and from source code fetched over the GitLab internal API, and GitLab queries the GitLab Orbit webserver over gRPC.
 

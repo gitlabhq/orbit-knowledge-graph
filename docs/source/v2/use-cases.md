@@ -9,7 +9,7 @@ title: GitLab Orbit use cases
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -40,8 +40,9 @@ Code questions work on the local code graph.
 Questions about merge requests, pipelines, or vulnerabilities need the GitLab server graph.
 
 Each section also shows one query that the agent can run.
-You do not need it, but you can use it to check the answer
-or to [run the query yourself](queries/_index.md).
+You do not need it, but you can use it to check the answer.
+Each query is the `query` object of a request.
+To run it yourself, put it in a [request envelope](queries/query-language.md#request-envelope).
 
 ## Understand a codebase
 
