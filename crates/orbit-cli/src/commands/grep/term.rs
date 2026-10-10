@@ -47,6 +47,7 @@ impl Term {
     fn pattern(&self) -> String {
         match self.regex {
             Some(_) => self.raw.clone(),
+            None if compact(&self.raw).is_empty() => regex::escape(&self.raw),
             None => compact(&self.raw)
                 .chars()
                 .map(|c| regex::escape(&c.to_string()))
@@ -58,7 +59,7 @@ impl Term {
     pub(super) fn names(&self, name: &str) -> bool {
         match &self.regex {
             Some((_, whole)) => whole.is_match(name),
-            None => compact(name) == compact(&self.raw),
+            None => !compact(name).is_empty() && compact(name) == compact(&self.raw),
         }
     }
 }
