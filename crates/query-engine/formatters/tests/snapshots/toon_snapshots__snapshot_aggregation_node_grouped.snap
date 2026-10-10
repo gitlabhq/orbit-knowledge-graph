@@ -1,0 +1,18 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: aggregation
+nodes:
+  User[3]{id,username}:
+    1243277,ghost1
+    35702613,bot_a
+    26832240,bot_b
+columns[1]{name,function,target}:
+  merged_count,count,u
+group_columns[1]{name,kind,node,entity}:
+  u,node,u,User
+rows[3]{u,merged_count}:
+  1243277,65555
+  35702613,21277
+  26832240,20289

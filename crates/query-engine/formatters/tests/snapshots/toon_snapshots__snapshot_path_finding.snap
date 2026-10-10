@@ -1,0 +1,15 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: path_finding
+nodes:
+  MergeRequest[1]{id,iid,state}:
+    482927048,18,merged
+  Project[1]{id,name}:
+    278964,GitLab
+  User[1]{id,username}:
+    64248,stanhu
+edges[2]{from,from_id,type,to,to_id,path_id,step}:
+  User,64248,AUTHORED,MergeRequest,482927048,0,0
+  MergeRequest,482927048,IN_PROJECT,Project,278964,0,1

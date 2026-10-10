@@ -1,0 +1,8 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: text
+---
+query_type: traversal
+nodes:
+  WorkItem[1]{id,iid,description,title}:
+    884,884,Agents need the whole work item description to plan their changes. Agents need the whole work item description to plan their changes. Agents need the whole work item description to plan their changes. Agents need the whole work item description to plan their changes. Agents need the whole work item description to plan their changes.,Stop truncating TOON values

@@ -1,0 +1,12 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: traversal
+nodes:
+  MR[1]{id,iid}:
+    1,42
+pagination:
+  has_more: true
+  truncated: true
+  next_cursor: eyJoIjoiYWQyMTczMWM5MTZm

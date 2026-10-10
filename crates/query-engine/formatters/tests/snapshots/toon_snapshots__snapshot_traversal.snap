@@ -1,0 +1,15 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: traversal
+nodes:
+  MergeRequest[1]{id,iid,state,title}:
+    482927048,18,merged,"chore: move skill to project scope"
+  Project[1]{id,full_path,name}:
+    80212187,"gitlab-com/cx-engineering/webapp-scaffold","webapp-scaffold"
+  User[1]{id,name,username}:
+    5252563,Jordan NG,jordan_ng
+edges[2]{from,from_id,type,to,to_id}:
+  User,5252563,AUTHORED,MergeRequest,482927048
+  MergeRequest,482927048,IN_PROJECT,Project,80212187

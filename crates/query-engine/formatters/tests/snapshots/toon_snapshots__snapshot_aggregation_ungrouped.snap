@@ -1,0 +1,9 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: aggregation
+columns[1]{name,function,target}:
+  total,count,mr
+rows[1]{total}:
+  2347

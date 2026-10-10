@@ -1,0 +1,8 @@
+---
+source: crates/query-engine/formatters/tests/toon_snapshots.rs
+expression: toon_encode(&r)
+---
+query_type: traversal
+nodes:
+  MergeRequest[1]{id,iid,state,created_at,title}:
+    482821625,247,opened,"2026-05-08T14:47:05.123456Z","Add per-activity reduction policy overrides"
