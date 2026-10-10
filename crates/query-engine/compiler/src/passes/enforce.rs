@@ -34,6 +34,7 @@ pub struct EdgeMeta {
     pub src_type_column: String,
     pub dst_column: String,
     pub dst_type_column: String,
+    pub relationship: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -183,6 +184,7 @@ fn enforce_lowered_return_with(
                 column_prefix: prefix,
                 path_column: edge.path_column.clone(),
                 rel_types: edge.rel_types.clone(),
+                relationship: edge.relationship,
                 from_alias: String::new(),
                 to_alias: String::new(),
             });

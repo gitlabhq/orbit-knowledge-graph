@@ -97,6 +97,7 @@ pub struct LoweredEdge {
     pub column_prefix: String,
     pub path_column: Option<String>,
     pub rel_types: Vec<String>,
+    pub relationship: usize,
 }
 
 pub struct LoweredQuery {
@@ -190,7 +191,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         QueryPlan::Traversal(plan) => {
             let mut output = physical::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(input, output)
+            traversal::emit_traversal(input, output, &plan.hops)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
@@ -236,15 +237,12 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
         .iter()
         .enumerate()
         .map(|(index, hop)| {
-            let prefix = if hop.max_hops > 1 {
-                format!("hop_e{index}_")
-            } else {
-                format!("e{index}_")
-            };
+            let prefix = hop.column_prefix(index);
             LoweredEdge {
                 path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
                 column_prefix: prefix,
                 rel_types: hop.rel_types.clone(),
+                relationship: hop.input_index,
             }
         })
         .collect();

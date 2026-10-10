@@ -1,0 +1,8 @@
+description: RETURN type(r) on a variable-length traversal relationship rejects because the variable binds a list
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN g, type(r) LIMIT 10
+
+expect:
+  compile_error: "type(r) needs a one-hop relationship here; a variable-length relationship binds a list"

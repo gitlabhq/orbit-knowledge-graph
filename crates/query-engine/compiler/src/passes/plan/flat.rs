@@ -68,11 +68,7 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
         if !self.facts.aggregate() {
             for (index, hop) in self.facts.hops.iter().enumerate() {
                 let edge = format!("e{index}");
-                let prefix = if hop.max_hops > 1 {
-                    format!("hop_{edge}")
-                } else {
-                    edge.clone()
-                };
+                let prefix = hop.column_prefix(index);
                 plan.outputs.extend(
                     [
                         (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
@@ -85,14 +81,14 @@ impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
                     .map(|(column, suffix)| {
                         Projection::new(
                             OutputValue::Column(Column::new(&edge, column)),
-                            format!("{prefix}_{suffix}"),
+                            format!("{prefix}{suffix}"),
                         )
                     }),
                 );
                 if hop.max_hops > 1 {
                     plan.outputs.push(Projection::new(
                         OutputValue::Column(Column::new(&edge, PATH_NODES_COLUMN)),
-                        format!("{prefix}_{PATH_NODES_COLUMN}"),
+                        format!("{prefix}{PATH_NODES_COLUMN}"),
                     ));
                 }
             }

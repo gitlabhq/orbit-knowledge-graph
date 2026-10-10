@@ -1,8 +1,8 @@
-description: type(r) outside WHERE comparisons and RETURN rejects and names the supported forms
+description: type(r) on the right side of a property comparison rejects and names the supported forms
 
 query:
   gql: |
-    MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, mr.title ORDER BY type(r) LIMIT 10
+    MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE mr.title = type(r) RETURN u, mr.title LIMIT 10
 
 expect:
   compile_error: "function type() is not supported: type() takes one relationship variable and works in WHERE type(r) = 'CLOSES'"

@@ -42,6 +42,16 @@ pub struct Hop {
     pub cascade_anchor: bool,
 }
 
+impl Hop {
+    pub fn column_prefix(&self, index: usize) -> String {
+        if self.max_hops > 1 {
+            format!("hop_e{index}_")
+        } else {
+            format!("e{index}_")
+        }
+    }
+}
+
 pub struct JoinColumns {
     pub prev_alias: String,
     pub prev_col: String,
@@ -397,6 +407,7 @@ fn elide_hops(
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last
+                || input.returns_relationship(hop.input_index)
                 || input.join_predicates.iter().any(|predicate| {
                     [&predicate.lhs_node, &predicate.rhs_node]
                         .into_iter()

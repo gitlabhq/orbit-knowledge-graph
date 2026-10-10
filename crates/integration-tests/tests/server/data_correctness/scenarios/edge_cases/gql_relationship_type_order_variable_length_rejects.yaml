@@ -1,0 +1,8 @@
+description: ORDER BY type(r) on a variable-length relationship rejects because the variable binds a list
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, g ORDER BY type(r) LIMIT 10
+
+expect:
+  compile_error: "type(r) needs a one-hop relationship here; a variable-length relationship binds a list"

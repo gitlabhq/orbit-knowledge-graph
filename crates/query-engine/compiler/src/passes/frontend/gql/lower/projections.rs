@@ -3,10 +3,11 @@ use std::collections::HashSet;
 use crate::Result;
 use crate::input::{
     AggExpr, ColumnSelection, DynamicColumnMode, InputAggSort, InputAggregationMetric,
-    InputGroupByKey, InputOrderBy, PropertyRef, QueryType, TargetRef,
+    InputGroupByKey, InputOrderBy, OrderDirection, PropertyRef, QueryType, RelationshipColumn,
+    RelationshipColumnKind, RelationshipOrder, TargetRef,
 };
 
-use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, Target};
+use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, SortKey, Target};
 use super::super::errors::invalid;
 use super::Lowering;
 
@@ -199,22 +200,26 @@ impl Lowering {
                     self.graph_projection(span, variable, true, alias, aggregate, &mut selected)?;
                 }
                 Expression::RelationshipType { span, variable } => {
-                    self.relationship_index(span, &variable)?;
+                    let relationship = self.relationship_index(span, &variable)?;
                     if aggregate {
                         return Err(invalid(
                             span,
                             "grouping by relationship type is not supported yet",
                         ));
                     }
-                    if alias.is_some() {
-                        return Err(invalid(
+                    if self.input.query_type == QueryType::Traversal {
+                        self.one_hop(span, relationship)?;
+                        let name = alias
+                            .clone()
+                            .unwrap_or_else(|| format!("type({})", variable.value));
+                        self.relationship_column(
                             span,
-                            &format!(
-                                "type({}) cannot be renamed; the edges table lists each edge's type",
-                                variable.value
-                            ),
-                        ));
+                            name,
+                            relationship,
+                            RelationshipColumnKind::Type,
+                        )?;
                     }
+                    self.alias(span, alias, None)?;
                 }
             }
         }
@@ -253,8 +258,19 @@ impl Lowering {
             if all {
                 self.input.options.dynamic_columns = DynamicColumnMode::All;
             }
-            if !selected.insert(variable) {
+            if !selected.insert(variable.clone()) {
                 return Err(invalid(span, "duplicate graph projection"));
+            }
+            if relationship && self.input.query_type == QueryType::Traversal {
+                let index = self.edges[&variable];
+                if self.input.relationships[index].hops.max == 1 {
+                    self.relationship_column(
+                        span,
+                        variable,
+                        index,
+                        RelationshipColumnKind::Relationship,
+                    )?;
+                }
             }
             return Ok(());
         }
@@ -298,6 +314,37 @@ impl Lowering {
         Ok(())
     }
 
+    fn relationship_column(
+        &mut self,
+        span: pest::Span<'_>,
+        name: String,
+        relationship: usize,
+        kind: RelationshipColumnKind,
+    ) -> Result<()> {
+        let columns = &mut self.input.options.relationship_columns;
+        if columns.iter().any(|column| column.name == name)
+            || self.input.nodes.iter().any(|node| node.id == name)
+        {
+            return Err(invalid(span, "duplicate RETURN column name"));
+        }
+        columns.push(RelationshipColumn {
+            name,
+            relationship,
+            kind,
+        });
+        Ok(())
+    }
+
+    fn one_hop(&self, span: pest::Span<'_>, relationship: usize) -> Result<()> {
+        if self.input.relationships[relationship].hops.max != 1 {
+            return Err(invalid(
+                span,
+                "type(r) needs a one-hop relationship here; a variable-length relationship binds a list",
+            ));
+        }
+        Ok(())
+    }
+
     fn alias(
         &mut self,
         span: pest::Span<'_>,
@@ -316,7 +363,7 @@ impl Lowering {
         match self.input.query_type {
             QueryType::Aggregation => {
                 let column = match sort.key {
-                    Target::Property(key) => {
+                    SortKey::Property(key) => {
                         let span = key.span;
                         let PropertyRef { node, property } = key.into();
                         self.input
@@ -336,7 +383,13 @@ impl Lowering {
                                 )
                             })?
                     }
-                    Target::Variable(name) => name.value,
+                    SortKey::Variable(name) => name.value,
+                    SortKey::RelationshipType(name) => {
+                        return Err(invalid(
+                            name.span,
+                            "ORDER BY type(r) is not supported in aggregations yet",
+                        ));
+                    }
                 };
                 self.input.aggregation.sort = Some(InputAggSort {
                     column,
@@ -345,22 +398,34 @@ impl Lowering {
             }
             QueryType::Traversal => {
                 let PropertyRef { node, property } = match sort.key {
-                    Target::Property(key) => key.into(),
-                    Target::Variable(name) => match self.aliases.get(&name.value) {
-                        Some(Some(target)) => target.clone(),
-                        Some(None) => {
-                            return Err(invalid(
-                                name.span,
-                                "ORDER BY a property alias, not a node alias",
-                            ));
+                    SortKey::Property(key) => key.into(),
+                    SortKey::RelationshipType(name) => {
+                        let relationship = self.relationship_index(name.span, &name)?;
+                        self.one_hop(name.span, relationship)?;
+                        self.order_by_relationship(relationship, sort.direction);
+                        return Ok(());
+                    }
+                    SortKey::Variable(name) => {
+                        if let Some(relationship) = self.type_column(&name.value) {
+                            self.order_by_relationship(relationship, sort.direction);
+                            return Ok(());
                         }
-                        None => {
-                            return Err(invalid(
-                                name.span,
-                                "traversal ORDER BY requires node.property or a property alias",
-                            ));
+                        match self.aliases.get(&name.value) {
+                            Some(Some(target)) => target.clone(),
+                            Some(None) => {
+                                return Err(invalid(
+                                    name.span,
+                                    "ORDER BY a property alias, not a node alias",
+                                ));
+                            }
+                            None => {
+                                return Err(invalid(
+                                    name.span,
+                                    "traversal ORDER BY requires node.property or a property alias",
+                                ));
+                            }
                         }
-                    },
+                    }
                 };
                 self.input.order_by = Some(InputOrderBy {
                     node,
@@ -376,5 +441,21 @@ impl Lowering {
             }
         }
         Ok(())
+    }
+
+    fn type_column(&self, name: &str) -> Option<usize> {
+        self.input
+            .options
+            .relationship_columns
+            .iter()
+            .find(|column| column.kind == RelationshipColumnKind::Type && column.name == name)
+            .map(|column| column.relationship)
+    }
+
+    fn order_by_relationship(&mut self, relationship: usize, direction: OrderDirection) {
+        self.input.relationship_order = Some(RelationshipOrder {
+            relationship,
+            direction,
+        });
     }
 }

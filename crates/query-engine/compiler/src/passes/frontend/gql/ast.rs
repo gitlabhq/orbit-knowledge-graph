@@ -164,6 +164,12 @@ pub(super) enum AggregateFunction {
 
 pub(super) struct Sort<'i> {
     pub span: Span<'i>,
-    pub key: Target<'i>,
+    pub key: SortKey<'i>,
     pub direction: OrderDirection,
+}
+
+pub(super) enum SortKey<'i> {
+    Property(Property<'i>),
+    Variable(Name<'i>),
+    RelationshipType(Name<'i>),
 }

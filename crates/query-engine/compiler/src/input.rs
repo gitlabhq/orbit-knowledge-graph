@@ -29,6 +29,27 @@ pub struct QueryOptions {
     /// honored for instance admins only.
     #[serde(default)]
     pub include_debug_sql: bool,
+    #[serde(skip)]
+    pub relationship_columns: Vec<RelationshipColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipColumn {
+    pub name: String,
+    pub relationship: usize,
+    pub kind: RelationshipColumnKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationshipColumnKind {
+    Type,
+    Relationship,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipOrder {
+    pub relationship: usize,
+    pub direction: OrderDirection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +71,8 @@ pub struct Input {
     pub options: QueryOptions,
     #[serde(skip)]
     pub join_predicates: Vec<JoinPredicate>,
+    #[serde(skip)]
+    pub relationship_order: Option<RelationshipOrder>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +98,17 @@ impl Input {
     pub fn fetch_limit(&self) -> u32 {
         self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
     }
+
+    pub fn returns_relationship(&self, relationship: usize) -> bool {
+        self.options
+            .relationship_columns
+            .iter()
+            .any(|column| column.relationship == relationship)
+            || self
+                .relationship_order
+                .as_ref()
+                .is_some_and(|order| order.relationship == relationship)
+    }
 }
 
 impl Default for Input {
@@ -91,6 +125,7 @@ impl Default for Input {
             order_by: None,
             options: QueryOptions::default(),
             join_predicates: Vec::new(),
+            relationship_order: None,
         }
     }
 }

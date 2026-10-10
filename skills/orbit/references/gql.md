@@ -91,7 +91,10 @@ LIMIT 10
 - `RETURN mr` selects the node's default columns; `properties(mr)` selects all.
 - The response always includes node identity and relationship metadata.
 - `RETURN type(r)` and `RETURN r` are accepted. The edges table lists each
-  edge's type. Aggregations cannot group by `type(r)` yet.
+  edge's type. In the `gql` format, a traversal adds a column for each one,
+  named by its alias: `RETURN m.iid, type(r) AS kind`.
+- `ORDER BY type(r)` or its alias sorts a traversal by edge type, on one-hop
+  relationships only. Aggregations cannot group or sort by `type(r)` yet.
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
   become group keys. Alias a metric to sort by it:
   `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.

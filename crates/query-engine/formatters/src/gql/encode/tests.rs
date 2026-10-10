@@ -5,10 +5,11 @@ use arrow::array::{Array, ArrayRef, Int64Array, ListArray, StringArray, StructAr
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use compiler::input::{RelationshipColumn, RelationshipColumnKind};
 use compiler::{
-    CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext, edge_kinds_column,
-    neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column, path_column,
-    relationship_type_column,
+    CompiledQueryContext, EdgeMeta, HydrationPlan, ParameterizedQuery, ResultContext,
+    edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
+    path_column, relationship_type_column,
 };
 use orbit_utils::arrow::ColumnValue;
 use serde_json::{Map, Value, json};
@@ -176,6 +177,64 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
          \n\
          2 rows, more available\n\
          next_cursor: \"abc\"\n"
+    );
+}
+
+#[test]
+fn returned_relationship_types_add_one_column_each() {
+    let mut output = output(
+        json!({"query_type": "traversal",
+               "nodes": [{"id": "u", "entity": "User"}, {"id": "mr", "entity": "MergeRequest"}],
+               "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}]}),
+        &[("u", "User"), ("mr", "MergeRequest")],
+        vec![
+            column("_gkg_u_id", ints(&[1, 1])),
+            column("_gkg_u_type", strings(&["User", "User"])),
+            column("_gkg_mr_id", ints(&[7, 8])),
+            column("_gkg_mr_type", strings(&["MergeRequest", "MergeRequest"])),
+            column("e0_type", strings(&["APPROVED", "AUTHORED"])),
+        ],
+        None,
+    );
+    output.result_context.add_edge(EdgeMeta {
+        column_prefix: "e0_".into(),
+        path_column: None,
+        rel_types: vec!["AUTHORED".into(), "APPROVED".into()],
+        from_alias: String::new(),
+        to_alias: String::new(),
+        type_column: "e0_type".into(),
+        src_column: "e0_src".into(),
+        src_type_column: "e0_src_type".into(),
+        dst_column: "e0_dst".into(),
+        dst_type_column: "e0_dst_type".into(),
+        relationship: 0,
+    });
+    Arc::get_mut(&mut output.compiled)
+        .unwrap()
+        .input
+        .options
+        .relationship_columns = vec![
+        RelationshipColumn {
+            name: "kind".into(),
+            relationship: 0,
+            kind: RelationshipColumnKind::Type,
+        },
+        RelationshipColumn {
+            name: "r".into(),
+            relationship: 0,
+            kind: RelationshipColumnKind::Relationship,
+        },
+    ];
+    assert_eq!(
+        encode(&output),
+        "+----------------------------------------------------------------------+\n\
+         | u               | mr                      | kind       | r           |\n\
+         +----------------------------------------------------------------------+\n\
+         | (:User {id: 1}) | (:MergeRequest {id: 7}) | \"APPROVED\" | [:APPROVED] |\n\
+         | (:User {id: 1}) | (:MergeRequest {id: 8}) | \"AUTHORED\" | [:AUTHORED] |\n\
+         +----------------------------------------------------------------------+\n\
+         \n\
+         2 rows\n"
     );
 }
 

@@ -498,17 +498,23 @@ impl QueryParser {
         Ok(match_nodes!(input.into_children();
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [FunctionCall(_), SortDirection(_)] => unreachable!("FunctionCall always errors"),
+            [RelationshipType(variable)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction: OrderDirection::Asc,
+            },
             [PropertyExpression(property)] => Sort {
-                span, key: Target::Property(property), direction: OrderDirection::Asc,
+                span, key: SortKey::Property(property), direction: OrderDirection::Asc,
             },
             [Variable(variable)] => Sort {
-                span, key: Target::Variable(variable), direction: OrderDirection::Asc,
+                span, key: SortKey::Variable(variable), direction: OrderDirection::Asc,
+            },
+            [RelationshipType(variable), SortDirection(direction)] => Sort {
+                span, key: SortKey::RelationshipType(variable), direction,
             },
             [PropertyExpression(property), SortDirection(direction)] => Sort {
-                span, key: Target::Property(property), direction,
+                span, key: SortKey::Property(property), direction,
             },
             [Variable(variable), SortDirection(direction)] => Sort {
-                span, key: Target::Variable(variable), direction,
+                span, key: SortKey::Variable(variable), direction,
             },
         ))
     }
@@ -654,7 +660,7 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], and RETURN type(r)"
+            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
         | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",

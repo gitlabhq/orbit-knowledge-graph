@@ -1,0 +1,19 @@
+description: RETURN type(r) AS kind names the gql column kind, and ORDER BY kind DESC sorts by edge type
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN mr.title, type(r) AS kind
+    ORDER BY kind DESC LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+    APPROVED: [[1, 2002]]
+  gql_columns:
+    kind: ['"AUTHORED"', '"AUTHORED"', '"APPROVED"']
