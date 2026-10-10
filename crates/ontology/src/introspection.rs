@@ -155,7 +155,7 @@ fn build_domains(
                 IntrospectionScope::Local => {
                     ontology.local_entity_fields(&node.name).unwrap_or_default()
                 }
-                IntrospectionScope::All => node.fields.iter().collect(),
+                IntrospectionScope::All => node.listed_fields().collect(),
             };
 
             let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
@@ -344,6 +344,18 @@ mod tests {
         }
     }
 
+    fn expanded_props(response: &SchemaResponse, node: &str) -> Vec<String> {
+        response
+            .domains
+            .iter()
+            .flat_map(|d| d.nodes.iter())
+            .find_map(|n| match n {
+                SchemaNode::Expanded { name, props, .. } if name == node => Some(props.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{node} should be expanded"))
+    }
+
     #[test]
     fn local_expand_definition_includes_traversal_path() {
         let ont = load();
@@ -351,20 +363,31 @@ mod tests {
             build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()])
                 .unwrap();
 
-        let props = response
-            .domains
-            .iter()
-            .flat_map(|d| d.nodes.iter())
-            .find_map(|n| match n {
-                SchemaNode::Expanded { name, props, .. } if name == "Definition" => Some(props),
-                _ => None,
-            })
-            .expect("Definition should be expanded");
-
+        let props = expanded_props(&response, "Definition");
         assert!(
             props.iter().any(|p| p.starts_with("traversal_path:")),
             "traversal_path should be included in local scope for hydration TP narrowing"
         );
+    }
+
+    #[test]
+    fn hidden_fields_are_left_out_of_schema_and_node_schema() {
+        let ont = load();
+        let schema =
+            build_schema_response(&ont, IntrospectionScope::All, &["WorkItem".to_string()])
+                .unwrap();
+        let node_schema = build_node_schema_response(&ont, IntrospectionScope::All, "WorkItem");
+
+        for props in [
+            expanded_props(&schema, "WorkItem"),
+            expanded_props(&node_schema, "WorkItem"),
+        ] {
+            assert!(props.iter().any(|p| p.starts_with("title:")), "{props:?}");
+            assert!(
+                !props.iter().any(|p| p.starts_with("traversal_path:")),
+                "{props:?}"
+            );
+        }
     }
 
     #[test]
