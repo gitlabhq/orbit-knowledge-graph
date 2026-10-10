@@ -3,7 +3,7 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::intern::Lang;
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Node, Tree};
+use crate::tree::{Compact, Node, Storage, Tree};
 
 use super::matching::matches;
 use super::types::{Cap, EdgeCtx, Out, Pat, Rewrite, Text};
@@ -29,8 +29,8 @@ impl Placement {
     /// A capture used twice, or the target itself, is copied on the later use.
     fn place(&mut self, t: &mut Tree, src: NodeId, parent: NodeId) -> NodeId {
         if self.mv && src != self.target && self.moved.insert(src) {
-            src.detach(&mut t.arena);
-            parent.append(src, &mut t.arena);
+            src.detach(&mut t.storage.0);
+            parent.append(src, &mut t.storage.0);
             src
         } else {
             t.clone_within(src, parent)
@@ -68,11 +68,11 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             };
             let copy = pl.place(t, src, parent);
             if *field != 0 {
-                t.arena[copy].get_mut().field = *field;
+                t.storage.0[copy].get_mut().field = *field;
             }
             if let Some(k) = rekind {
                 let sym = t.sym_of(copy, lang);
-                let n = t.arena[copy].get_mut();
+                let n = t.storage.0[copy].get_mut();
                 n.kind = *k;
                 n.field = 0;
                 n.sym = sym;
@@ -132,7 +132,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     let copy = pl.place(t, e, parent);
                     if let Some(k) = rekind {
                         let sym = t.sym_of(copy, lang);
-                        let n = t.arena[copy].get_mut();
+                        let n = t.storage.0[copy].get_mut();
                         n.kind = *k;
                         n.sym = sym;
                     }
@@ -214,13 +214,13 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
 }
 
 fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
-    let holder = t.arena.new_node(Node::default());
+    let holder = t.storage.0.new_node(Node::default());
     materialize(t, fill, pat, holder, &mut pl);
-    let built: Vec<NodeId> = holder.children(&t.arena).collect();
+    let built: Vec<NodeId> = holder.children(&t.storage.0).collect();
     for &b in &built {
-        b.detach(&mut t.arena);
+        b.detach(&mut t.storage.0);
     }
-    holder.remove(&mut t.arena);
+    holder.remove(&mut t.storage.0);
     built
 }
 
@@ -230,7 +230,7 @@ pub fn apply_rewrites(
     rules: &[Rewrite],
     sentinels: &[&Sentinel],
 ) -> Result<(), Killed> {
-    apply_rewrites_inner(t, lang, rules, false, None, sentinels)
+    apply_rewrites_inner(t, lang, rules, false, None, sentinels, apply_structure)
 }
 
 pub fn apply_rewrites_with_edges(
@@ -241,19 +241,54 @@ pub fn apply_rewrites_with_edges(
     edge_ctx: &EdgeCtx,
     sentinels: &[&Sentinel],
 ) -> Result<(), Killed> {
-    apply_rewrites_inner(t, lang, rules, preorder, Some(edge_ctx), sentinels)
+    apply_rewrites_inner(
+        t,
+        lang,
+        rules,
+        preorder,
+        Some(edge_ctx),
+        sentinels,
+        apply_structure,
+    )
 }
 
-fn apply_rewrites_inner(
-    t: &mut Tree,
+pub fn apply_display(
+    t: Tree<Compact>,
+    lang: &Lang,
+    rules: &[Rewrite],
+    edge_ctx: &EdgeCtx,
+) -> Tree<Compact> {
+    if rules.iter().all(|rule| matches!(rule.out, Out::Tag(..))) {
+        let mut tree = t;
+        let _ = apply_rewrites_inner(
+            &mut tree,
+            lang,
+            rules,
+            true,
+            Some(edge_ctx),
+            &[],
+            |_, _, _, _, _, _| false,
+        );
+        tree
+    } else {
+        let mut tree: Tree = t.into();
+        let _ = apply_rewrites_with_edges(&mut tree, lang, rules, true, edge_ctx, &[]);
+        tree.into()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_rewrites_inner<S: Storage<Node = Node>>(
+    t: &mut Tree<S>,
     lang: &Lang,
     rules: &[Rewrite],
     preorder: bool,
     edge_ctx: Option<&EdgeCtx>,
     sentinels: &[&Sentinel],
+    structure: impl Fn(&mut Tree<S>, &Lang, S::Id, &Rewrite, &[Cap<S::Id>], Option<&EdgeCtx>) -> bool,
 ) -> Result<(), Killed> {
     let max_slots = rules.iter().map(|r| r.nslots).max().unwrap_or(1);
-    let mut caps: Vec<Cap> = (0..max_slots).map(|_| SmallVec::new()).collect();
+    let mut caps: Vec<Cap<S::Id>> = (0..max_slots).map(|_| SmallVec::new()).collect();
 
     let mut by_kind = rustc_hash::FxHashMap::<u16, Vec<usize>>::default();
     let mut generic = Vec::new();
@@ -268,19 +303,21 @@ fn apply_rewrites_inner(
         candidates.sort_unstable();
     }
 
-    let candidates = if preorder {
-        t.preorder()
-    } else {
-        t.postorder()
-    };
+    let mut candidates: Vec<_> = std::iter::once(t.root())
+        .chain(t.root().descendants())
+        .map(|c| t.storage.id(c.index()))
+        .collect();
+    if !preorder {
+        candidates.reverse();
+    }
 
     for target in candidates {
         sentinels.iter().try_for_each(|s| s.check())?;
-        if target.is_removed(&t.arena) {
+        if t.storage.is_removed(target) {
             continue;
         }
 
-        let target_kind = t.node(target).kind;
+        let target_kind = t.storage.node(S::index(target)).kind;
         for &index in by_kind.get(&target_kind).unwrap_or(&generic) {
             let r = &rules[index];
             for c in &mut caps[..r.nslots] {
@@ -294,35 +331,26 @@ fn apply_rewrites_inner(
                 let sym_a = caps[a as usize]
                     .first()
                     .copied()
-                    .map_or(0, |id| t.sym_of(id, lang));
+                    .map_or(0, |id| t.sym_at(S::index(id), lang));
                 let sym_b = caps[b as usize]
                     .first()
                     .copied()
-                    .map_or(0, |id| t.sym_of(id, lang));
+                    .map_or(0, |id| t.sym_at(S::index(id), lang));
                 (sym_a == sym_b) == eq
             });
             if !guards_ok {
                 continue;
             }
 
-            let root_node = t.node(target);
-            let fill = Fill {
-                lang,
-                caps: &caps,
-                filters: &r.filters,
-                span: (root_node.start, root_node.end),
-                edge_ctx,
-            };
-
             match &r.out {
                 Out::Tag(entries, tag_on) => {
-                    let raw = Tree::to_raw(tag_target(t, target, *tag_on));
+                    let raw = S::index(tag_target(t, target, *tag_on));
                     for entry in entries {
                         let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
                         let val = if entry.val.is_node_tf() {
                             entry.val.apply_sym(t, lang, src, edge_ctx)
                         } else {
-                            let base_sym = t.sym_of(src, lang);
+                            let base_sym = t.sym_at(S::index(src), lang);
                             if base_sym == 0 {
                                 entry.val.apply_sym(t, lang, src, edge_ctx)
                             } else {
@@ -333,61 +361,9 @@ fn apply_rewrites_inner(
                         t.set_tag(raw, entry.key, val);
                     }
                 }
-                Out::Replace(p, tag_entries, tag_on) => {
-                    let pl = Placement::new(r.unique.is_none(), target);
-                    let built = build_template(t, &fill, p, pl);
-                    let first = built.first().copied();
-                    if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
-                        let key = t.cursor(Tree::to_raw(new_root)).child_sym_of_kind(*kind);
-                        let mut ucaps: Vec<Cap> = (0..*nslots).map(|_| SmallVec::new()).collect();
-                        let taken = target.parent(&t.arena).is_some_and(|parent| {
-                            parent.children(&t.arena).filter(|&c| c != target).any(|c| {
-                                matches(t, lang, c, pat, &mut ucaps)
-                                    && t.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
-                            })
-                        });
-                        if taken {
-                            built
-                                .into_iter()
-                                .for_each(|n| n.remove_subtree(&mut t.arena));
-                            break;
-                        }
-                    }
-                    let tags: Vec<(u32, u32)> = tag_entries
-                        .iter()
-                        .flatten()
-                        .map(|entry| {
-                            let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
-                            let val = if entry.val.is_node_tf() {
-                                entry.val.apply_sym(t, lang, src, edge_ctx)
-                            } else {
-                                let base_sym = t.sym_of(src, lang);
-                                if base_sym == 0 {
-                                    entry.val.apply_sym(t, lang, src, edge_ctx)
-                                } else {
-                                    let s = lang.syms.resolve(base_sym);
-                                    lang.syms.intern(&entry.val.apply_to_str(s))
-                                }
-                            };
-                            (entry.key, val)
-                        })
-                        .collect();
-                    t.replace(target, built);
-                    if let Some(new_root) = first {
-                        let tagged = tag_target(t, new_root, *tag_on);
-                        for (key, val) in tags {
-                            t.set_tag(Tree::to_raw(tagged), key, val);
-                        }
-                    }
-                    break;
-                }
-                Out::Append(ps) => {
-                    for pat in ps {
-                        let pl = Placement::new(false, target);
-                        let built = build_template(t, &fill, pat, pl);
-                        for id in built {
-                            target.append(id, &mut t.arena);
-                        }
+                _ => {
+                    if structure(t, lang, target, r, &caps, edge_ctx) {
+                        break;
                     }
                 }
             }
@@ -396,15 +372,97 @@ fn apply_rewrites_inner(
     Ok(())
 }
 
+fn apply_structure(
+    t: &mut Tree,
+    lang: &Lang,
+    target: NodeId,
+    r: &Rewrite,
+    caps: &[Cap],
+    edge_ctx: Option<&EdgeCtx>,
+) -> bool {
+    let root_node = t.node(target);
+    let fill = Fill {
+        lang,
+        caps,
+        filters: &r.filters,
+        span: (root_node.start, root_node.end),
+        edge_ctx,
+    };
+    match &r.out {
+        Out::Replace(p, tag_entries, tag_on) => {
+            let pl = Placement::new(r.unique.is_none(), target);
+            let built = build_template(t, &fill, p, pl);
+            let first = built.first().copied();
+            if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
+                let key = t.cursor(Tree::to_raw(new_root)).child_sym_of_kind(*kind);
+                let mut ucaps: Vec<Cap> = (0..*nslots).map(|_| SmallVec::new()).collect();
+                let taken = target.parent(&t.storage.0).is_some_and(|parent| {
+                    parent
+                        .children(&t.storage.0)
+                        .filter(|&c| c != target)
+                        .any(|c| {
+                            matches(t, lang, c, pat, &mut ucaps)
+                                && t.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
+                        })
+                });
+                if taken {
+                    built
+                        .into_iter()
+                        .for_each(|n| n.remove_subtree(&mut t.storage.0));
+                    return true;
+                }
+            }
+            let tags: Vec<(u32, u32)> = tag_entries
+                .iter()
+                .flatten()
+                .map(|entry| {
+                    let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
+                    let val = if entry.val.is_node_tf() {
+                        entry.val.apply_sym(t, lang, src, edge_ctx)
+                    } else {
+                        let base_sym = t.sym_of(src, lang);
+                        if base_sym == 0 {
+                            entry.val.apply_sym(t, lang, src, edge_ctx)
+                        } else {
+                            let s = lang.syms.resolve(base_sym);
+                            lang.syms.intern(&entry.val.apply_to_str(s))
+                        }
+                    };
+                    (entry.key, val)
+                })
+                .collect();
+            t.replace(target, built);
+            if let Some(new_root) = first {
+                let tagged = tag_target(t, new_root, *tag_on);
+                for (key, val) in tags {
+                    t.set_tag(Tree::to_raw(tagged), key, val);
+                }
+            }
+            return true;
+        }
+        Out::Append(ps) => {
+            for pat in ps {
+                let pl = Placement::new(false, target);
+                let built = build_template(t, &fill, pat, pl);
+                for id in built {
+                    target.append(id, &mut t.storage.0);
+                }
+            }
+        }
+        Out::Tag(..) => {}
+    }
+    false
+}
+
 impl Tree {
     pub(crate) fn clone_within(&mut self, id: NodeId, parent: NodeId) -> NodeId {
-        let children: Vec<NodeId> = id.children(&self.arena).collect();
-        let copy = self.arena.new_node(*self.node(id));
+        let children: Vec<NodeId> = id.children(&self.storage.0).collect();
+        let copy = self.storage.0.new_node(*self.node(id));
         if let Some(tags) = self.tags.get(&Tree::to_raw(id)) {
             let tags = tags.clone();
             self.tags.insert(Tree::to_raw(copy), tags);
         }
-        parent.append(copy, &mut self.arena);
+        parent.append(copy, &mut self.storage.0);
         for child in children {
             self.clone_within(child, copy);
         }
@@ -413,8 +471,13 @@ impl Tree {
 }
 
 /// The node `tag_on:` selects: the first descendant of that kind, else `root`.
-fn tag_target(t: &Tree, root: NodeId, tag_on: Option<u16>) -> NodeId {
+fn tag_target<S: Storage<Node = Node>>(t: &Tree<S>, root: S::Id, tag_on: Option<u16>) -> S::Id {
     tag_on
-        .and_then(|k| root.descendants(&t.arena).find(|&n| t.node(n).kind == k))
+        .and_then(|k| {
+            std::iter::once(t.cursor(S::index(root)))
+                .chain(t.cursor(S::index(root)).descendants())
+                .find(|n| n.kind() == k)
+        })
+        .map(|n| t.storage.id(n.index()))
         .unwrap_or(root)
 }

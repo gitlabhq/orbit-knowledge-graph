@@ -120,12 +120,18 @@ stages:
         &env.lang,
     )
     .unwrap();
-    for tree in &mut state.trees {
-        for stage in &edits {
-            pattern::apply_rewrites(tree, &env.lang, stage, &[]).unwrap();
-        }
-        tree.prune();
-    }
+    state.trees = state
+        .trees
+        .into_iter()
+        .map(|tree| {
+            let mut tree: code_graph_incremental::tree::Tree = tree.into();
+            for stage in &edits {
+                pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]).unwrap();
+            }
+            tree.prune();
+            tree.into()
+        })
+        .collect();
     let structure = |state: &State| {
         state
             .trees
