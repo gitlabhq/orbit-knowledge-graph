@@ -1,0 +1,8 @@
+description: An unsupported function call is named in the syntax error
+
+query:
+  gql: |
+    MATCH (m:MergeRequest)-[r]->(w:WorkItem) WHERE w.id = 1 RETURN m.id, type(r) LIMIT 10
+
+expect:
+  compile_error: "The function type() is not supported."

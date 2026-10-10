@@ -241,6 +241,7 @@ impl ToolService {
         expand_nodes: &[String],
         format: OutputFormat,
     ) -> Result<Value, ExecutorError> {
+        Self::reject_unknown_nodes(ontology, expand_nodes)?;
         match format {
             OutputFormat::Llm => Self::build_schema_toon(ontology, expand_nodes).map(Value::String),
             OutputFormat::Raw => {
@@ -250,6 +251,25 @@ impl ToolService {
                     .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))
             }
         }
+    }
+
+    fn reject_unknown_nodes(
+        ontology: &Ontology,
+        expand_nodes: &[String],
+    ) -> Result<(), ExecutorError> {
+        let unknown: Vec<&str> = expand_nodes
+            .iter()
+            .map(String::as_str)
+            .filter(|name| *name != "*" && ontology.get_node(name).is_none())
+            .collect();
+        if unknown.is_empty() {
+            return Ok(());
+        }
+        Err(ExecutorError::InvalidArguments(format!(
+            "unknown node(s) in expand_nodes: {}. Valid nodes: {}",
+            unknown.join(", "),
+            ontology.node_names().collect::<Vec<_>>().join(", ")
+        )))
     }
 
     pub(crate) fn render_query_language(format: OutputFormat) -> Result<Value, ExecutorError> {

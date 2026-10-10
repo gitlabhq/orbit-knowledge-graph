@@ -11,7 +11,7 @@ use ontology::introspection::{
     IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
 };
 use pest::Span;
-use pest::error::{ErrorVariant, LineColLocation};
+use pest::error::{ErrorVariant, InputLocation, LineColLocation};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -147,14 +147,34 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
             let (line, column) = match error.line_col {
                 LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
             };
+            let offset = match error.location {
+                InputLocation::Pos(offset) | InputLocation::Span((offset, _)) => offset,
+            };
+            let function_hint = unsupported_function(raw, offset)
+                .map(|name| format!("\nThe function {name}() is not supported."))
+                .unwrap_or_default();
             QueryError::Validation(format!(
-                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
+                "Orbit query syntax at line {line}, column {column}: {}{function_hint}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
                 error.variant.message()
             ))
         })?
         .single()
         .expect("Statement produces one pair");
     QueryParser::Statement(statement).map_err(syntax_error)
+}
+
+fn unsupported_function(raw: &str, offset: usize) -> Option<&str> {
+    let (before, after) = raw.split_at_checked(offset)?;
+    if !after.starts_with('(') {
+        return None;
+    }
+    let before = before.trim_end();
+    let start = before
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map_or(0, |index| index + 1);
+    let name = &before[start..];
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        .then_some(name)
 }
 
 fn check_bounds(query: &str) -> Result<()> {
