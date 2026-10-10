@@ -726,9 +726,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
              FROM information_schema.columns \
              WHERE table_schema = 'main' \
              AND table_name IN ({placeholders}) \
-             {} \
-             ORDER BY table_name, ordinal_position",
-            sql::hidden_columns_condition()
+             ORDER BY table_name, ordinal_position"
         );
         let params: Vec<serde_json::Value> = tables.iter().map(|t| serde_json::json!(t)).collect();
         let batches = client

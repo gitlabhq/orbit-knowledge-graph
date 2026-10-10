@@ -19,8 +19,6 @@ pub(super) struct EdgeColumnYaml {
     pub name: String,
     #[serde(rename = "type")]
     pub data_type: DataType,
-    #[serde(default)]
-    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

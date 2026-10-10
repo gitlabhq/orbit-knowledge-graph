@@ -246,7 +246,7 @@ fn build_dynamic_specs(
                         !matches!(
                             model.property_realization(property.id),
                             Some(PropertyRealization::Virtual(_))
-                        ) && !property.hidden
+                        ) && !model.property_is_hidden(property.id)
                             && property.name != "_version"
                             && property.name != "_deleted"
                     })

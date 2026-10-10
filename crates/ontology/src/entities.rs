@@ -8,7 +8,6 @@ use serde::Deserialize;
 pub struct EdgeColumn {
     pub name: String,
     pub data_type: DataType,
-    pub hidden: bool,
 }
 
 /// Fully explicit `CREATE TABLE` column: the YAML gives the exact ClickHouse

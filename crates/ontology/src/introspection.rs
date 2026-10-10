@@ -155,14 +155,10 @@ fn build_domains(
                 IntrospectionScope::Local => {
                     ontology.local_entity_fields(&node.name).unwrap_or_default()
                 }
-                IntrospectionScope::All => node.fields.iter().collect(),
+                IntrospectionScope::All => node.listed_fields().collect(),
             };
 
-            let props: Vec<String> = fields
-                .iter()
-                .filter(|f| !f.hidden)
-                .map(|f| format_property(f))
-                .collect();
+            let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
 
             let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
 
@@ -361,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn local_expand_definition_hides_traversal_path() {
+    fn local_expand_definition_includes_traversal_path() {
         let ont = load();
         let response =
             build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()])
@@ -369,10 +365,9 @@ mod tests {
 
         let props = expanded_props(&response, "Definition");
         assert!(
-            !props.iter().any(|p| p.starts_with("traversal_path:")),
-            "{props:?}"
+            props.iter().any(|p| p.starts_with("traversal_path:")),
+            "traversal_path should be included in local scope for hydration TP narrowing"
         );
-        assert!(ont.get_node("Definition").unwrap().has_traversal_path);
     }
 
     #[test]

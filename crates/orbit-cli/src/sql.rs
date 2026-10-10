@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use duckdb_client::search::DEF_DOC_PREFIX;
 use duckdb_client::{DuckDbClient, bool_column, sql_lit, string_column};
-use ontology::Ontology;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
@@ -18,27 +17,9 @@ pub fn schema_introspection_sql() -> String {
          WHERE table_schema = 'main' \
            AND table_name NOT LIKE {} \
            AND table_name <> {} \
-           {} \
          ORDER BY table_name, ordinal_position",
         sql_lit(&format!("{DEF_DOC_PREFIX}%")),
-        sql_lit(META_TABLE),
-        hidden_columns_condition()
-    )
-}
-
-pub fn hidden_columns_condition() -> String {
-    let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-    let columns: Vec<String> = ontology
-        .local_hidden_columns()
-        .into_iter()
-        .map(|(table, column)| sql_lit(&format!("{table}.{column}")))
-        .collect();
-    if columns.is_empty() {
-        return String::new();
-    }
-    format!(
-        "AND table_name || '.' || column_name NOT IN ({})",
-        columns.join(", ")
+        sql_lit(META_TABLE)
     )
 }
 

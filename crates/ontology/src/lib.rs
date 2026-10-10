@@ -315,7 +315,6 @@ impl Ontology {
             .map(|(name, data_type)| EdgeColumn {
                 name: name.into(),
                 data_type,
-                hidden: false,
             })
             .collect();
         if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
@@ -1252,27 +1251,6 @@ impl Ontology {
                 .filter(|f| !exclude.iter().any(|p| p == &f.name))
                 .collect(),
         )
-    }
-
-    #[must_use]
-    pub fn local_hidden_columns(&self) -> Vec<(&str, &str)> {
-        let node_columns = self
-            .local_entities
-            .keys()
-            .filter_map(|name| Some((self.nodes.get(name)?, self.local_entity_fields(name)?)))
-            .flat_map(|(node, fields)| {
-                fields
-                    .into_iter()
-                    .filter(|field| field.hidden)
-                    .map(move |field| (node.destination_table.as_str(), field.name.as_str()))
-            });
-        let edge_columns = self.local_edge_table_name().into_iter().flat_map(|table| {
-            self.local_edge_columns()
-                .iter()
-                .filter(|column| column.hidden)
-                .map(move |column| (table, column.name.as_str()))
-        });
-        node_columns.chain(edge_columns).collect()
     }
 
     #[must_use]
@@ -3336,19 +3314,6 @@ properties:
 
         assert!(names.contains(&"fqn"));
         assert!(!names.contains(&"content"), "virtual field");
-    }
-
-    #[test]
-    fn local_hidden_columns_cover_node_and_edge_tables() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
-        let hidden = ontology.local_hidden_columns();
-        for table in ["gl_definition", "gl_file", "gl_directory", "gl_edge"] {
-            assert!(hidden.contains(&(table, "traversal_path")), "{hidden:?}");
-        }
-        assert!(
-            !hidden.iter().any(|(_, column)| *column == "id"),
-            "{hidden:?}"
-        );
     }
 
     #[test]

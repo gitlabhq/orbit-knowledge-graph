@@ -201,7 +201,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .map(|c| crate::entities::EdgeColumn {
                         name: c.name,
                         data_type: c.data_type,
-                        hidden: c.hidden,
                     })
                     .collect(),
                 storage: storage.unwrap_or_default(),
@@ -557,7 +556,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .map(|c| EdgeColumn {
                     name: c.name,
                     data_type: c.data_type,
-                    hidden: c.hidden,
                 })
                 .collect();
         }

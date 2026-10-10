@@ -581,13 +581,6 @@ fn schema_raw_is_parseable_json() {
         .collect();
     assert!(tables.contains("gl_file"));
     assert!(tables.contains("gl_edge"));
-    assert!(
-        !v.as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["column_name"] == "traversal_path"),
-        "hidden traversal_path listed: {stdout}"
-    );
 }
 
 #[test]
@@ -711,13 +704,6 @@ fn schema_scoped_raw_contains_only_requested_table() {
 
     assert_eq!(tables.len(), 1, "should contain only gl_definition");
     assert!(tables.contains("gl_definition"));
-    assert!(
-        !v.as_array()
-            .unwrap()
-            .iter()
-            .any(|r| r["column_name"] == "traversal_path"),
-        "hidden traversal_path listed: {stdout}"
-    );
 }
 
 #[test]
