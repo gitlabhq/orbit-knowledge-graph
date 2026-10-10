@@ -65,21 +65,7 @@ you can read in GitLab.
    glab orbit query --file request.json
    ```
 
-   The output is similar to:
-
-   ```plaintext
-   @header
-   query_type:traversal
-   goon_version:4.0.4
-   nodes:1
-   edges:0
-   @nodes
-   Project(1):
-   77960826 full_path=gitlab-org/orbit/knowledge-graph name="GitLab Orbit"
-   @edges
-   ```
-
-The CLI returns compact text for AI agents by default.
+By default, the CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for AI agents, with one table for each node type.
 For structured JSON, add `--response-format raw`.
 
 ## Choose a query shape
