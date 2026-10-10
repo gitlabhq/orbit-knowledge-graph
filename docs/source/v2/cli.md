@@ -216,7 +216,7 @@ With nothing indexed, `orbit list -F json` prints `[]` and exits with code `0`.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Offering: GitLab.com, GitLab Self-Managed
 - Status: Beta
 
 {{< /details >}}
@@ -297,6 +297,7 @@ Local commands and, during the beta, `query` do not consume GitLab Credits. For 
 
 ## Related topics
 
+- [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/)
 - [Connect AI agents](agents/_index.md)
 - [MCP servers](agents/mcp.md)
 - [Query the graph](queries/_index.md)
