@@ -99,9 +99,6 @@ GitLab Orbit also uses these public repositories:
 the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts), and the
 [end-to-end test harness](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness).
 
-The product name is GitLab Orbit.
-The old engineering name GitLab Knowledge Graph (GKG) stays in the `gkg-server` binary, metric names, environment variables, and NATS stream names.
-
 To report a bug, open an issue with the [bug report template](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
 GitLab team members can find the roadmap, the team, runbooks, deployments, and dashboards in the [GitLab Orbit team portal](https://gitlab-org.gitlab.io/orbit/portal/).
 
