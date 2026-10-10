@@ -88,7 +88,7 @@ To find a check, read the `build.rs` file of the crate that owns the input.
 
 Unit tests live in `#[cfg(test)]` modules next to the code they test. They need no Docker and no external services. Use them for pure logic, such as parsing and name mapping, and test behavior at a higher layer.
 
-`mise test:fast` runs them through cargo-nextest. The script is [`scripts/run-unit-tests.sh`](../../scripts/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
+`mise test:fast` runs them through cargo-nextest. The script is [`scripts/dev/run-unit-tests.sh`](../../scripts/dev/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
 
 In CI the same script uses the `ci` profile in [`.config/nextest.toml`](../../.config/nextest.toml). This profile runs every test even after a failure and retries a failed test. It also flags slow tests and publishes JUnit results.
 
