@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Configure PostgreSQL logical replication and install Siphon so GitLab data reaches ClickHouse.
 title: Set up data replication
