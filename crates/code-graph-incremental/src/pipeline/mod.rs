@@ -157,6 +157,7 @@ impl<'e> Context<'e> {
 
 #[derive(Default)]
 pub struct Report {
+    pub import_lookups: crate::resolver::ImportLookupStats,
     pub skipped: Vec<Killed>,
     pub phases: Vec<PhaseReport>,
     /// How long each file took in each per-file phase, skipped ones included.

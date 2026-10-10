@@ -55,12 +55,31 @@ pub struct ResolvedSourcePath {
 }
 
 pub struct ResolveResult {
+    pub import_lookups: ImportLookupStats,
     pub cross_edges: Vec<Edge>,
     /// Files whose cross-file pass overran its budget; their edges are absent.
     pub killed: Vec<Killed>,
     pub resolved_source_paths: Vec<ResolvedSourcePath>,
     /// How long each file's cross-file pass took.
     pub file_timings: Vec<(u32, Duration)>,
+}
+
+#[derive(Default, Debug)]
+pub struct ImportLookupStats {
+    pub sites: usize,
+    pub unique_contexts: usize,
+    pub provider_contexts: usize,
+    pub module_searches: usize,
+    pub module_searches_avoided: usize,
+}
+
+enum ImportTarget {
+    External,
+    Search {
+        path: String,
+        targets: Vec<Loc>,
+        allow_submodules: bool,
+    },
 }
 
 #[derive(Default)]
@@ -206,7 +225,7 @@ impl Resolver {
             let discovery_files = (0..trees.len() as u32)
                 .filter(|fi| !dirty_fis.contains(fi))
                 .collect();
-            let (discovered, _) = gather_imports_for(
+            let (discovered, _, _) = gather_imports_for(
                 trees,
                 &env.lang,
                 &self.file_index,
@@ -325,7 +344,7 @@ impl Resolver {
             }
         }
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
-        let (new_reqs, mut cross_edges) =
+        let (new_reqs, mut cross_edges, import_lookups) =
             gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
         self.reqs.extend(new_reqs);
         let ambiguous = propagate_reexports(
@@ -620,6 +639,7 @@ impl Resolver {
         }
 
         Ok(ResolveResult {
+            import_lookups,
             cross_edges,
             killed,
             resolved_source_paths,
@@ -771,7 +791,7 @@ fn gather_imports_for(
     lookup: &LookupConfig,
     config: &ResolveConfig,
     dirty_fis: &FxHashSet<u32>,
-) -> (Vec<ImportReq>, Vec<Edge>) {
+) -> (Vec<ImportReq>, Vec<Edge>, ImportLookupStats) {
     let tags = ReservedTags::new(lang);
     let resolved_tag_key = tags.resolved_source;
     let root_relative = lang.syms.lookup("source_root_rel");
@@ -790,78 +810,123 @@ fn gather_imports_for(
         .filter(|prefix| declared_roots.contains(prefix.as_str()))
         .cloned()
         .collect();
-    let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
-    let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
+    let context_key = |cur: Cursor| {
+        Some((
+            cur.tag(tags.original_source_path)
+                .or_else(|| cur.child_sym(C::SourcePath))?,
+            cur.tag(resolved_tag_key)?,
+            cur.tag(tags.alias_scope),
+        ))
+    };
+    let mut stats = ImportLookupStats::default();
+    let mut contexts = FxHashMap::default();
+    let mut import_sites = Vec::new();
+    for &fi in dirty_fis {
+        let mut sites = Vec::new();
+        for import in trees[fi as usize]
+            .root()
+            .descendants()
+            .filter(|cur| cur.is(C::Import) || cur.is(C::ImportType))
+        {
+            if let Some(key) = context_key(import) {
+                stats.sites += 1;
+                *contexts.entry(key).or_insert(0usize) += 1;
+                sites.push((import.index(), key));
+            }
+        }
+        import_sites.push((fi, sites));
+    }
+    stats.unique_contexts = contexts.len();
+    let mut classified = FxHashMap::default();
+    for (key @ (source, resolved, scope), sites) in contexts {
+        let mut searches = 0;
+        let source = lang.syms.resolve(source);
+        let mapped = lookup.aliases.iter().find_map(|alias| {
+            if alias.scope.is_some() && alias.scope != scope {
+                return None;
+            }
+            let path = apply_alias(source, &alias.pattern, &alias.replacement)?;
+            if alias.if_exists {
+                searches += 1;
+                if resolve_glob(&path, file_index, &[]).is_empty() {
+                    return None;
+                }
+            }
+            Some(path)
+        });
+        let runtime = mapped.is_none() && is_external(source, &config.external);
+        let standard = mapped.is_none() && is_external(source, &config.stdlib);
+        stats.provider_contexts += usize::from(runtime || standard);
+        let target = if runtime {
+            ImportTarget::External
+        } else {
+            let path = mapped.unwrap_or_else(|| lang.syms.resolve(resolved).to_owned());
+            let prefixes = if standard {
+                &stdlib_prefixes
+            } else {
+                &lookup.prefixes
+            };
+            searches += 1;
+            let targets = resolve_glob(&path, file_index, prefixes);
+            ImportTarget::Search {
+                path,
+                targets,
+                allow_submodules: !standard,
+            }
+        };
+        stats.module_searches += searches;
+        stats.module_searches_avoided += searches * (sites - 1);
+        classified.insert(key, target);
+    }
+    let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = import_sites
         .par_iter()
-        .map(|&fi| {
+        .map(|(fi, sites)| {
+            let fi = *fi;
             let tree = &trees[fi as usize];
-            tree.root()
-                .fold_tree((Vec::new(), Vec::new()), |(reqs, edges), cur, _w| {
-                    if cur.kind() != C::Import && cur.kind() != C::ImportType {
-                        return;
+            let mut reqs = Vec::new();
+            let mut edges = Vec::new();
+            for &(node_idx, key) in sites {
+                let cur = tree.cursor(node_idx);
+                let Some(ImportTarget::Search {
+                    path: target_path,
+                    targets,
+                    allow_submodules,
+                }) = classified.get(&key)
+                else {
+                    continue;
+                };
+                let direct: Vec<_> = targets.iter().copied().filter(|loc| loc.fi != fi).collect();
+                if direct.is_empty() && !allow_submodules {
+                    continue;
+                }
+                let candidates = match direct.is_empty() {
+                    false => Either::Left(
+                        direct
+                            .into_iter()
+                            .map(|loc| (loc, target_path.clone(), false)),
+                    ),
+                    true => Either::Right(cur.names().flat_map(|c| {
+                        let submod =
+                            format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
+                        resolve_glob(&submod, file_index, &lookup.prefixes)
+                            .into_iter()
+                            .map(move |loc| (loc, submod.clone(), true))
+                    })),
+                };
+                for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
+                    if is_sub {
+                        edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
                     }
-                    let Some(source_sym) = cur
-                        .tag(tags.original_source_path)
-                        .or_else(|| cur.child_sym(C::SourcePath))
-                    else {
-                        return;
-                    };
-                    let source_str = lang.syms.resolve(source_sym);
-                    let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
-                        return;
-                    };
-                    let raw_path = lang.syms.resolve(resolved_sym);
-                    let mapped = lookup.aliases.iter().find_map(|alias| {
-                        if alias.scope.is_some() && alias.scope != cur.tag(tags.alias_scope) {
-                            return None;
-                        }
-                        let path = apply_alias(source_str, &alias.pattern, &alias.replacement)?;
-                        (!alias.if_exists || !resolve_glob(&path, file_index, &[]).is_empty())
-                            .then_some(path)
+                    reqs.push(ImportReq {
+                        fi,
+                        node: node_idx,
+                        target_fi: loc.fi,
+                        anchor: loc.node,
+                        target_path: path,
                     });
-                    if mapped.is_none() && is_external(source_str, &config.external) {
-                        return;
-                    }
-                    let node_idx = cur.index();
-                    let stdlib = mapped.is_none() && is_external(source_str, &config.stdlib);
-                    let prefixes = if stdlib {
-                        &stdlib_prefixes
-                    } else {
-                        &lookup.prefixes
-                    };
-                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
-                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
-                    direct.retain(|loc| loc.fi != fi);
-                    if direct.is_empty() && stdlib {
-                        return;
-                    }
-                    let candidates = match direct.is_empty() {
-                        false => Either::Left(
-                            direct
-                                .into_iter()
-                                .map(|loc| (loc, target_path.clone(), false)),
-                        ),
-                        true => Either::Right(cur.names().flat_map(|c| {
-                            let submod =
-                                format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_glob(&submod, file_index, &lookup.prefixes)
-                                .into_iter()
-                                .map(move |loc| (loc, submod.clone(), true))
-                        })),
-                    };
-                    for (loc, path, is_sub) in candidates.filter(|c| c.0.fi != fi) {
-                        if is_sub {
-                            edges.push(Edge::new(fi, node_idx, loc.fi, 0, EdgeKind::Imports));
-                        }
-                        reqs.push(ImportReq {
-                            fi,
-                            node: node_idx,
-                            target_fi: loc.fi,
-                            anchor: loc.node,
-                            target_path: path,
-                        });
-                    }
-                })
+                }
+            }
+            (reqs, edges)
         })
         .collect();
     let mut all_reqs = Vec::new();
@@ -870,7 +935,7 @@ fn gather_imports_for(
         all_reqs.extend(reqs);
         all_edges.extend(edges);
     }
-    (all_reqs, all_edges)
+    (all_reqs, all_edges, stats)
 }
 
 fn propagate_reexports(

@@ -498,6 +498,7 @@ impl Phase<DirtyGraph> for Resolve {
             let nid = state.trees[rsp.fi as usize].to_id(rsp.node);
             state.trees[rsp.fi as usize].node_mut(nid).sym = rsp.sym;
         }
+        context.report.import_lookups = result.import_lookups;
         state.edges.extend(result.cross_edges);
         context.run.check()?;
         context

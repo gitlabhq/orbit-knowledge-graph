@@ -256,6 +256,15 @@ imports retain their existing behavior. Framework methods are not implicit globa
 application methods with names such as `find`, `create`, and `render` still resolve.
 Framework groups are configured by the language rules, not detected from manifests.
 
+Import gathering shares module lookup results for identical original paths,
+resolved paths, and alias scopes. It applies aliases before provider classification.
+Each import site still excludes its own file and handles unknown submodules.
+The cache lasts for one gathering batch, so later edits can introduce local overrides.
+The pipeline report counts import sites, unique contexts, provider contexts, module
+searches, and module searches avoided in the dirty-file batch. These counters exclude
+incremental discovery and per-symbol submodule searches. They measure lookup work,
+not elapsed-time savings or downstream type inference.
+
 Ruby rules rewrite `send`, `public_send`, and `__send__` when the first argument
 is a literal symbol or a string without interpolation. The resulting call keeps
 its receiver, remaining arguments, and block. Dynamic names keep the original

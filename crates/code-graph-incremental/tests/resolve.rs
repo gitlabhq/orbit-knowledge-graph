@@ -108,6 +108,47 @@ fn imports_and_calls_resolve_across_files() {
 }
 
 #[test]
+fn repeated_provider_imports_share_lookup_but_project_additions_still_resolve() {
+    let repo = tempfile::tempdir().unwrap();
+    let source = "import json\nimport sys\ndef run():\n    json.dumps({})\n    sys.getsizeof(1)\n";
+    for index in 0..100 {
+        std::fs::write(repo.path().join(format!("consumer_{index}.py")), source).unwrap();
+    }
+    let env = python_env(Limits::UNLIMITED);
+    let entries = inventory::walk(repo.path()).unwrap().into_inner();
+    let (context, resolved) = templates::index(Context::new(&env), repo.path(), entries)
+        .unwrap()
+        .finish();
+    let stats = &context.report.import_lookups;
+    assert_eq!(stats.sites, 200);
+    assert_eq!(stats.unique_contexts, 2);
+    assert_eq!(stats.provider_contexts, 2);
+    assert_eq!(stats.module_searches, 1);
+    assert_eq!(stats.module_searches_avoided, 99);
+    assert!(cross_file(&env, &resolved.state, EdgeKind::Calls).is_empty());
+
+    let snapshot = tempfile::NamedTempFile::new().unwrap();
+    resolved.state.save(&env, snapshot.path()).unwrap();
+    let (env, state) = State::load(snapshot.path(), SupportLang::Python).unwrap();
+    write_all(repo.path(), &[("json.py", "def dumps(value): pass\n")]);
+    let (_, resolved) = templates::reindex(
+        Context::new(&env),
+        state,
+        repo.path(),
+        Changes {
+            changed: inventory::classify(repo.path(), ["json.py".into()]),
+            removed: vec![],
+        },
+    )
+    .unwrap()
+    .finish();
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls).len(),
+        100
+    );
+}
+
+#[test]
 fn an_import_with_no_file_stays_dangling() {
     let repo = tempfile::tempdir().unwrap();
     write_all(repo.path(), &[("utils.py", UTILS), ("main.py", MAIN)]);
