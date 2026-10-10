@@ -38,7 +38,8 @@ config:
       numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
       random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket,
       socketserver, sqlite3, ssl, stat, statistics, string, struct, subprocess, sys,
-      sysconfig, tarfile, tempfile, textwrap, threading, time, timeit, tkinter, tomllib,
+      sysconfig, tarfile, tempfile, textwrap, threading,
+      { module: time, precedence: runtime }, timeit, tkinter, tomllib,
       traceback, types, typing, unicodedata, unittest, urllib, uuid, venv, warnings,
       weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
     ]

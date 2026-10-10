@@ -10,7 +10,17 @@ config:
       require, select, setmetatable, tonumber, tostring, type, warn, xpcall]
   resolve:
     external: []
-    stdlib: [coroutine, debug, io, math, os, package, string, table, utf8]
+    stdlib: [
+      { module: coroutine, precedence: runtime },
+      { module: debug, precedence: runtime },
+      { module: io, precedence: runtime },
+      { module: math, precedence: runtime },
+      { module: os, precedence: runtime },
+      { module: package, precedence: runtime },
+      { module: string, precedence: runtime },
+      { module: table, precedence: runtime },
+      { module: utf8, precedence: runtime }
+    ]
     lookup_from:
       - __source_root
 

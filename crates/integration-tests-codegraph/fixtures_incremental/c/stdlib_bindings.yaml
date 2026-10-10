@@ -11,6 +11,10 @@ fixtures:
     content: |
       #include <stdio.h>
       void external_call() { printf("standard"); puts("standard"); }
+  - path: unrelated.c
+    content: |
+      #include <vendor.h>
+      void vendor_call() { printf("vendor"); }
 tests:
   - name: Included project function wins over standard function spelling
     query: |
@@ -27,3 +31,11 @@ tests:
       RETURN target.import_path
     assert:
       - { empty: true }
+  - name: A standard spelling alone does not suppress another provider
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'vendor_call'
+      RETURN target.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: '<vendor.h>' } }

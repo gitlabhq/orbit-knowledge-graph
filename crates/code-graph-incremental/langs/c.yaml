@@ -9,31 +9,40 @@
 
 config:
   link:
-    builtins: [
-      abort, abs, acos, asin, atan, atan2, atexit, atof, atoi, atol, atoll,
-      bsearch, calloc, ceil, clearerr, clock, cos, cosh, difftime, div, exit,
-      exp, fabs, fclose, feof, ferror, fflush, fgetc, fgetpos, fgets, floor,
-      fmod, fopen, fprintf, fputc, fputs, fread, free, freopen, fscanf, fseek,
-      fsetpos, ftell, fwrite, getc, getchar, getenv, gets, gmtime, isalnum,
-      isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct,
-      isspace, isupper, isxdigit, labs, ldexp, ldiv, llabs, lldiv, localtime,
-      log, log10, malloc, memchr, memcmp, memcpy, memmove, memset, mktime,
-      modf, perror, pow, printf, putc, putchar, puts, qsort, rand, realloc,
-      remove, rename, rewind, scanf, setbuf, setvbuf, sin, sinh, snprintf,
-      sprintf, sqrt, srand, sscanf, strcat, strchr, strcmp, strcoll, strcpy,
-      strcspn, strerror, strftime, strlen, strncat, strncmp, strncpy, strpbrk,
-      strrchr, strspn, strstr, strtod, strtok, strtol, strtoll, strtoul,
-      strtoull, strxfrm, system, tan, tanh, time, tmpfile, tmpnam, tolower,
-      toupper, ungetc, vfprintf, vprintf, vsnprintf, vsprintf
-    ]
+    builtins: []
   resolve:
     external: []
     stdlib: [
-      assert.h, complex.h, ctype.h, errno.h, fenv.h, float.h, inttypes.h, iso646.h,
-      limits.h, locale.h, math.h, setjmp.h, signal.h, stdalign.h, stdarg.h,
-      stdatomic.h, stdbit.h, stdbool.h, stdckdint.h, stddef.h, stdint.h, stdio.h,
-      stdlib.h, stdnoreturn.h, string.h, tgmath.h, threads.h, time.h, uchar.h,
-      wchar.h, wctype.h
+      { module: assert.h, symbols: [assert] },
+      { module: ctype.h, symbols: [isalnum, isalpha, isblank, iscntrl, isdigit,
+          isgraph, islower, isprint, ispunct, isspace, isupper, isxdigit, tolower, toupper] },
+      { module: math.h, symbols: [acos, asin, atan, atan2, cos, sin, tan, acosh,
+          asinh, atanh, cosh, sinh, tanh, exp, exp2, expm1, frexp, ldexp, log,
+          log10, log1p, log2, logb, modf, scalbn, scalbln, cbrt, fabs, hypot,
+          pow, sqrt, erf, erfc, lgamma, tgamma, ceil, floor, nearbyint, rint,
+          lrint, llrint, round, lround, llround, trunc, fmod, remainder,
+          remquo, copysign, nan, nextafter, nexttoward, fdim, fmax, fmin, fma,
+          fpclassify, isfinite, isinf, isnan, isnormal, signbit] },
+      { module: stdio.h, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,
+          fgetpos, fgets, fopen, fprintf, fputc, fputs, fread, freopen, fscanf,
+          fseek, fsetpos, ftell, fwrite, getc, getchar, gets, perror, printf,
+          putc, putchar, puts, remove, rename, rewind, scanf, setbuf, setvbuf,
+          snprintf, sprintf, sscanf, tmpfile, tmpnam, ungetc, vfprintf, vfscanf,
+          vprintf, vscanf, vsnprintf, vsprintf, vsscanf] },
+      { module: stdlib.h, symbols: [abort, abs, atexit, atof, atoi, atol, atoll,
+          at_quick_exit, aligned_alloc, bsearch, calloc, div, exit, free, getenv,
+          labs, ldiv, llabs, lldiv, malloc, mblen, mbstowcs, mbtowc, qsort,
+          quick_exit, rand, realloc, srand, strtod, strtof, strtol, strtold,
+          strtoll, strtoul, strtoull, system, wcstombs, wctomb, _Exit] },
+      { module: string.h, symbols: [memchr, memcmp, memcpy, memmove, memset,
+          strcat, strchr, strcmp, strcoll, strcpy, strcspn, strerror, strlen,
+          strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr, strtok, strxfrm] },
+      { module: time.h, symbols: [asctime, clock, ctime, difftime, gmtime,
+          localtime, mktime, strftime, time, timespec_get, timespec_getres] },
+      complex.h, errno.h, fenv.h, float.h, inttypes.h, iso646.h, limits.h,
+      locale.h, setjmp.h, signal.h, stdalign.h, stdarg.h, stdatomic.h, stdbit.h,
+      stdbool.h, stdckdint.h, stddef.h, stdint.h, stdnoreturn.h, tgmath.h,
+      threads.h, uchar.h, wchar.h, wctype.h
     ]
     lookup_from:
       - __source_root

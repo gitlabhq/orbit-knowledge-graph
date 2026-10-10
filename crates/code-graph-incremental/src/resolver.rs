@@ -819,16 +819,17 @@ fn gather_imports_for(
                         return;
                     };
                     let source_str = lang.syms.resolve(source_sym);
-                    if is_external(source_str, &config.external) {
-                        return;
-                    }
                     let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
                         return;
                     };
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let target_path = apply_aliases(raw_path, aliases);
+                    let explicitly_aliased = target_path != raw_path;
+                    if !explicitly_aliased && is_external(source_str, &config.external) {
+                        return;
+                    }
                     let node_idx = cur.index();
-                    let stdlib = is_external(source_str, &config.stdlib);
+                    let stdlib = !explicitly_aliased && is_external(source_str, &config.stdlib);
                     let prefixes = if stdlib {
                         &stdlib_prefixes
                     } else {

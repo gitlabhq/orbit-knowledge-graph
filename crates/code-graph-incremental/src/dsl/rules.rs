@@ -58,6 +58,7 @@ pub struct LinkConfig {
     /// Names the language defines everywhere without an import. An unresolved
     /// call to one does not fall back to wildcard imports.
     pub builtins: rustc_hash::FxHashSet<u32>,
+    pub providers: Vec<(u32, rustc_hash::FxHashSet<u32>)>,
     /// Whether an import may rebind a name already defined in the same scope.
     /// Ruby autoloads must not; a local class always wins.
     pub imports_shadow_locals: bool,
@@ -70,6 +71,7 @@ impl Default for LinkConfig {
     fn default() -> Self {
         Self {
             builtins: Default::default(),
+            providers: Vec::new(),
             imports_shadow_locals: true,
             inline_modules: false,
         }
@@ -139,13 +141,34 @@ struct ResolveSettingsSection {
     #[serde(default)]
     external: Vec<String>,
     #[serde(default)]
-    stdlib: Vec<String>,
+    stdlib: Vec<Library>,
     #[serde(default)]
     lookup_from: Vec<String>,
     #[serde(default)]
     parse_files: Vec<ParseFileEntry>,
     #[serde(default)]
     merge_same_named_types: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Library {
+    Module(String),
+    Provider {
+        module: String,
+        #[serde(default)]
+        symbols: Vec<String>,
+        #[serde(default)]
+        precedence: LibraryPrecedence,
+    },
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LibraryPrecedence {
+    #[default]
+    Project,
+    Runtime,
 }
 
 fn default_true() -> bool {
@@ -156,11 +179,12 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
     let Some(section) = section else {
         return Ok(Config::default());
     };
-    let link = section
+    let mut link = section
         .link
         .as_ref()
         .map_or_else(LinkConfig::default, |l| LinkConfig {
             builtins: l.builtins.iter().map(|b| lang.syms.intern(b)).collect(),
+            providers: Vec::new(),
             imports_shadow_locals: l.imports_shadow_locals,
             inline_modules: l.inline_modules,
         });
@@ -192,9 +216,32 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             format,
         })
     };
+    let mut external = r.external.clone();
+    let mut stdlib = Vec::new();
+    for library in &r.stdlib {
+        match library {
+            Library::Module(module) => stdlib.push(module.clone()),
+            Library::Provider {
+                module,
+                symbols,
+                precedence,
+            } => {
+                match precedence {
+                    LibraryPrecedence::Project => stdlib.push(module.clone()),
+                    LibraryPrecedence::Runtime => external.push(module.clone()),
+                }
+                if !symbols.is_empty() {
+                    link.providers.push((
+                        lang.syms.intern(module),
+                        symbols.iter().map(|name| lang.syms.intern(name)).collect(),
+                    ));
+                }
+            }
+        }
+    }
     let resolve = ResolveConfig {
-        external: r.external.clone(),
-        stdlib: r.stdlib.clone(),
+        external,
+        stdlib,
         lookup_from: r
             .lookup_from
             .iter()

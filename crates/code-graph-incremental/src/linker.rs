@@ -1178,7 +1178,18 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
             && edge
                 .site
                 .and_then(|site| tree.cursor(site).child_sym(C::Callee))
-                .is_some_and(|name| config.builtins.contains(&name))
+                .is_some_and(|name| {
+                    config.builtins.contains(&name)
+                        || tree
+                            .cursor(edge.to_node)
+                            .parent()
+                            .and_then(|import| import.child_sym(C::SourcePath))
+                            .is_some_and(|source| {
+                                config.providers.iter().any(|(module, symbols)| {
+                                    *module == source && symbols.contains(&name)
+                                })
+                            })
+                })
         {
             edge.call_resolution = crate::tree::CallResolution::Reference;
         }
