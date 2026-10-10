@@ -22,7 +22,7 @@ impl PipelineStage for SecurityStage {
             .ok_or_else(|| PipelineError::Security("Claims not found in server_extensions".into()))
             .inspect_err(|e| obs.record_error(e))?;
         let result = build_security_context(claims)
-            .map_err(PipelineError::Security)
+            .map_err(PipelineError::from)
             .inspect_err(|e| obs.record_error(e))?;
         ctx.security_context = Some(result);
         Ok(())
@@ -141,6 +141,6 @@ mod tests {
         let mut obs = NoOpObserver;
 
         let err = SecurityStage.execute(&mut ctx, &mut obs).await.unwrap_err();
-        assert!(matches!(err, PipelineError::Security(_)));
+        assert!(matches!(err, PipelineError::NoEnabledNamespaces));
     }
 }

@@ -6,10 +6,14 @@ use crate::intern::Lang;
 #[derive(Clone, Copy)]
 pub struct ReservedTags {
     pub callable: u32,
+    pub non_callable: u32,
+    pub type_only: u32,
     pub scoped: u32,
     pub hoisted: u32,
     pub exports: u32,
     pub resolved_source: u32,
+    pub original_source_path: u32,
+    pub alias_scope: u32,
     pub visible_from: u32,
     pub implicit_self: u32,
 }
@@ -19,10 +23,14 @@ impl ReservedTags {
         let k = |s| lang.syms.intern(s);
         Self {
             callable: k("callable"),
+            non_callable: k("non_callable"),
+            type_only: k("type_only"),
             scoped: k("scoped"),
             hoisted: k("hoisted"),
             exports: k("exports"),
             resolved_source: k("resolved_source"),
+            original_source_path: k("original_source_path"),
+            alias_scope: k("alias_scope"),
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
         }
@@ -36,7 +44,7 @@ mod tests {
         for (name, src) in [
             ("linker.rs", include_str!("../linker.rs")),
             ("resolver.rs", include_str!("../resolver.rs")),
-            ("tree/walk.rs", include_str!("../tree/walk.rs")),
+            ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
         ] {
             for (i, line) in src.lines().enumerate() {
                 assert!(

@@ -10,6 +10,7 @@ const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
@@ -67,10 +68,7 @@ impl OrbitClient {
     }
 
     pub(crate) fn origin(&self) -> Result<String, RemoteError> {
-        let url = reqwest::Url::parse(&self.endpoint.base_url).map_err(|error| {
-            RemoteError::new(EXIT_GENERIC, format!("invalid Orbit API base URL: {error}"))
-        })?;
-        let origin = url.origin().ascii_serialization();
+        let origin = self.parse_base_url()?.origin().ascii_serialization();
         if origin == "null" {
             return Err(RemoteError::new(
                 EXIT_GENERIC,
@@ -78,6 +76,19 @@ impl OrbitClient {
             ));
         }
         Ok(origin)
+    }
+
+    pub(crate) fn get_host(&self) -> Result<String, RemoteError> {
+        let url = self.parse_base_url()?;
+        url.host_str()
+            .map(str::to_string)
+            .ok_or_else(|| RemoteError::new(EXIT_GENERIC, "Orbit API base URL must have a host"))
+    }
+
+    fn parse_base_url(&self) -> Result<reqwest::Url, RemoteError> {
+        reqwest::Url::parse(&self.endpoint.base_url).map_err(|error| {
+            RemoteError::new(EXIT_GENERIC, format!("invalid Orbit API base URL: {error}"))
+        })
     }
 
     pub(crate) async fn list_skills(&self) -> Result<SkillHttpResponse, RemoteError> {
@@ -101,7 +112,9 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<SkillHttpResponse, RemoteError> {
-        let response = self.send_authenticated(request).await?;
+        let response = self
+            .send_authenticated(request.timeout(SKILL_REQUEST_TIMEOUT))
+            .await?;
         let status = response.status().as_u16();
         let etag = response
             .headers()

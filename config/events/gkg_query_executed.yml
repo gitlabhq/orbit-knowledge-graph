@@ -1,5 +1,5 @@
 ---
-description: A query call to the webserver (query_graph and get_graph_schema) was executed
+description: A query call to the webserver (query_graph and get_graph_schema) finished, successfully or with an error
 internal_events: true
 status: active
 action: gkg_query_executed

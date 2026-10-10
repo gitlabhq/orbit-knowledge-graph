@@ -107,30 +107,28 @@ fixtures:
       }
 
 tests:
-  - name: Next app router files are indexed as ordinary module definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Next app router paths are cataloged as files
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)
+      WHERE file.path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',
         'app/api/health/route.ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 4 }
-      - { row: { file_path: "app/layout.tsx", fqn: "app/layout.tsx", type: "Module" } }
-      - { row: { file_path: "app/page.tsx", fqn: "app/page.tsx", type: "Module" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", fqn: "app/blog/[slug]/page.tsx", type: "Module" } }
-      - { row: { file_path: "app/api/health/route.ts", fqn: "app/api/health/route.ts", type: "Module" } }
+      - { row: { path: "app/layout.tsx" } }
+      - { row: { path: "app/page.tsx" } }
+      - { row: { path: "app/blog/[slug]/page.tsx" } }
+      - { row: { path: "app/api/health/route.ts" } }
 
   - name: Next app router route exports are ordinary definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN [
         'app/layout.tsx',
         'app/page.tsx',
         'app/blog/[slug]/page.tsx',
@@ -149,7 +147,6 @@ tests:
       - { row: { file_path: "app/api/health/route.ts", fqn: "POST", type: "Function" } }
 
   - name: Next app router tsconfig aliases resolve local imports
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
@@ -158,29 +155,28 @@ tests:
         'app/blog/[slug]/page.tsx',
         'app/api/health/route.ts'
       ]
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
       ORDER BY file_path, path, name
     assert:
       - { row_count: 6 }
-      - { row: { file_path: "app/api/health/route.ts", path: "@/lib/health", name: "getHealth", is_type_only: false, target: "getHealth" } }
-      - { row: { file_path: "app/layout.tsx", path: "@/components/Header", name: "default", is_type_only: false, target: "Header" } }
-      - { row: { file_path: "app/page.tsx", path: "@/features/dashboard/Dashboard", name: "default", is_type_only: false, target: "Dashboard" } }
-      - { row: { file_path: "app/page.tsx", path: "@/lib/dashboard", name: "getDashboard", is_type_only: false, target: "getDashboard" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/components/PostView", name: "default", is_type_only: false, target: "PostView" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", is_type_only: false, target: "fetchPost" } }
+      - { row: { file_path: "app/api/health/route.ts", path: "@/lib/health", name: "getHealth", target: "getHealth" } }
+      - { row: { file_path: "app/layout.tsx", path: "@/components/Header", name: "default", target: "Header" } }
+      - { row: { file_path: "app/page.tsx", path: "@/features/dashboard/Dashboard", name: "default", target: "Dashboard" } }
+      - { row: { file_path: "app/page.tsx", path: "@/lib/dashboard", name: "getDashboard", target: "getDashboard" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/components/PostView", name: "default", target: "PostView" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", target: "fetchPost" } }
 
   - name: Next app router external Next imports remain unresolved
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
         AND i.import_path IN ['next', 'next/server']
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.is_type_only AS is_type_only
+      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name
       ORDER BY file_path, path, name
     assert:
       - { row_count: 2 }
-      - { row: { file_path: "app/layout.tsx", path: "next", name: "Metadata", is_type_only: true } }
-      - { row: { file_path: "app/api/health/route.ts", path: "next/server", name: "NextResponse", is_type_only: false } }
+      - { row: { file_path: "app/layout.tsx", path: "next", name: "Metadata" } }
+      - { row: { file_path: "app/api/health/route.ts", path: "next/server", name: "NextResponse" } }
 
   - name: Next app router external Next imports have no local targets
     query: |

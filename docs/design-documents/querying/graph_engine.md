@@ -67,8 +67,73 @@ Foreign-key facts identify the source or target endpoint that holds the key, its
 The endpoint remains unambiguous for self-relationships and incoming traversals.
 Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.
 The current ontology files, archives, DDL, and indexing declarations remain unchanged.
-Planning and lowering read backend facts from the data model, then emit the shared SQL AST and physical result bindings.
-All later passes continue to use that AST.
+Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
+All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
+Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
+The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
+Built-in calls use a closed `Function` vocabulary rather than SQL names. Each renderer owns function spelling, argument placement, and dialect syntax.
+The emitted explain view prints exact `Function` variant names, such as `StartsWith`. ClickHouse codegen renders `startsWith`; DuckDB renders `starts_with`.
+Security checks recognize the prefix operation directly. String byte length is distinct from character substring operations.
+Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
+ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.
+Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
+Week buckets start on Sunday. Day and larger buckets return dates; minute and hour buckets retain timestamp output.
+Collection aggregates omit null inputs and return an empty array for empty input. Other aggregates retain their backend result conventions, including empty sums and averages.
+Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
+CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
+UNION arms also retain their local CTE definitions. Empty path arrays carry field types instead of relying on dummy values in lowering.
+
+`mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
+The shared runner and structural matcher live in `integration-testkit::plan_shape`.
+Logical assertions inspect parsed, normalized Input before scope preparation.
+They include node and relationship filters, groups, measures, ordering, and limits.
+Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
+The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
+Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(...)` matches zero or more children.
+`...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
+These assertions check plan structure; data-correctness scenarios check execution results.
+
+### Plan fixture assertions
+
+Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `ctes`, and `exact`.
+Use multiline patterns for nested operations. Expressions use readable column references and preserve explicit grouping and quoted literals.
+
+```yaml
+physical:
+  clickhouse:
+    planned:
+      bind:
+        - (CTE $projects (Project p.id AS id (_)))
+      expect:
+        - (Filter p.id IN $projects.id, ... (_))
+      occurrences:
+        - pattern: (CTE $projects (_))
+          count: 1
+      ctes:
+        exact_order: [$projects]
+    emitted:
+      expect:
+        - (Scan Table(gl_project) AS p)
+```
+
+`bind` must match exactly one subtree and introduce a named capture. Later assertions may reference it but cannot introduce new captures.
+Captures are local to one assertion block and one frontend/backend run. They capture syntax, not scoped SQL relation identities.
+`?` matches one expression token or parenthesized group; `$name` captures that same unit and requires later uses to agree.
+Quoted `'?'`, `'$name'`, and `'...'` are literal strings. Failed matches do not change capture bindings.
+
+Item lists match without order, preserve duplicate counts, and require `...` to admit extra items.
+Child order remains significant. Expressions retain token order and grouping; the matcher does not infer algebraic equivalence.
+`exact` compares the whole ordered tree, including projection order, and rejects wildcards and captures.
+`ctes.exact_order` checks the complete top-level CTE sequence, including captured names.
+Use `ctes.absent: true` to assert that no top-level CTEs exist. Omit `ctes` to leave definitions unchecked.
+The two forms are exclusive. Empty lists, empty blocks, and `absent: false` are rejected.
+Failures report the fixture path, frontend, backend, phase, and assertion index. Missing-pattern errors include the first subtree with the requested operator.
+
+The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.
+Scope-aware relation captures remain deferred to the query-local SQL identity work.
+Family explain views include neighbor access and routes, path frontier depths and endpoints, and hydration projections, paths, and dedup keys.
+Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
+The harness applies that setup after normalization; hydration remains unavailable as a user query type.
 
 Each edge-chain emitter builds node bindings as it emits scans and joins.
 Each binding contains the graph identity, visible table alias, and hydration path expression when available.
@@ -244,20 +309,9 @@ Direct projections and hydration apply ontology-derived [text excerpts](../../so
 The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering. But these are optional enhancements for performance and may be subject to change.
 Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
 
-## Unified Security and Performance Testing
+## Security and performance testing
 
-Security testing and performance testing share the same underlying techniques for the query engine. We treat them as a single validation effort:
-
-- **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer finds performance regressions (e.g., queries that blow up in time or memory). It will also surface authorization bypass attempts (e.g., queries missing required predicates).
-- **Automated Query Generation**: Property-based testing that generates random valid query shapes and verifies:
-  - All generated SQL includes `startsWith(traversal_path, ?)` predicates (security invariant).
-  - Query execution time stays within bounds (performance invariant).
-  - Result sets respect authorization constraints (correctness invariant).
-- **Automated Penetration Testing**: Scripted scenarios that attempt common bypass techniques (SQL injection, predicate stripping, cross-tenant access). These run as part of CI and are informed by the threat model.
-
-This unified approach validates security and performance together. An authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
-
-In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort. It has specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
+Security query scenarios, plan-shape fixtures, performance scenarios, and local fuzz targets check the query engine. For each test layer and its CI job, see [Testing](../testing.md). For the authorization model, see [Security Architecture](../security.md).
 
 ## References
 

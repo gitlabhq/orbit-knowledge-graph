@@ -13,6 +13,31 @@
 #   only files and index files.
 
 config:
+  stdlib: [
+      { module: java, precedence: runtime },
+      { module: java/lang, availability: implicit, precedence: runtime, symbols: [
+      AssertionError, Boolean, Byte, Character, Class, ClassCastException,
+      ClassNotFoundException, Double, Enum, Error, Exception, Float,
+      IllegalArgumentException, IllegalStateException, IndexOutOfBoundsException,
+      Integer, Long, NullPointerException, Number, Object, RuntimeException,
+      SecurityException, Short, String, StringBuffer, StringBuilder, Thread, Throwable,
+      UnsupportedOperationException, ArithmeticException, ArrayIndexOutOfBoundsException,
+      ArrayStoreException, IllegalMonitorStateException, IllegalThreadStateException,
+      InterruptedException, NegativeArraySizeException, NumberFormatException,
+      ReflectiveOperationException, StringIndexOutOfBoundsException,
+      StackTraceElement, ThreadGroup, ThreadLocal, InheritableThreadLocal,
+      ProcessBuilder, RuntimePermission
+      ] },
+      { module: javax }, { module: jdk },
+      { module: java/lang/Math, symbols: [abs, acos, asin, atan, atan2, cbrt,
+          ceil, copySign, cos, cosh, exp, expm1, floor, floorDiv, floorMod, hypot,
+          log, log10, log1p, max, min, multiplyExact, nextAfter, nextDown, nextUp,
+          pow, random, rint, round, scalb, signum, sin, sinh, sqrt, tan, tanh,
+          toDegrees, toRadians, ulp] },
+      { module: java/util/Objects, symbols: [checkFromIndexSize, checkFromToIndex,
+          checkIndex, compare, deepEquals, equals, hash, hashCode, isNull,
+          nonNull, requireNonNull, requireNonNullElse, requireNonNullElseGet, toString] }
+    ]
   resolve:
     lookup_from:
       - __source_root
@@ -74,7 +99,7 @@ stages:
       - match: '(permits (type_list $$$T:type_identifier))'
         replace: '(java_permits $$$T->__decorator)'
       - match: '(annotation name: $N:identifier arguments: $A)'
-        replace: '(__decorator @$N $A)'
+        replace: '(__decorator @$N (__args $A))'
 
       # x instanceof T [name] → type reference plus a typed pattern binding
       - match: '(instanceof_expression left: $L right: $T:type_identifier name: $N:identifier)'
@@ -133,7 +158,7 @@ stages:
       - match: '(marker_annotation name: $N:__member)'
         replace: '(__decorator $N)'
       - match: '(annotation name: $N:__member arguments: $A)'
-        replace: '(__decorator $N $A)'
+        replace: '(__decorator $N (__args $A))'
 
 
   - name: retag-expressions
@@ -171,30 +196,30 @@ stages:
   - name: classify
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T))) $V)'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__member))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V:__ssa_branch))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V))'
       - match: '(local_variable_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(local_variable_declaration declarator: (variable_declarator name: $N:identifier))'
-        replace: '(__binding @$N)'
+        replace: '(__binding @$N (__declaration))'
 
       # Assignments
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
@@ -286,6 +311,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

@@ -419,7 +419,7 @@ fn filter_operators() {
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
-    assert!(rendered.contains("positionCaseInsensitive"));
+    assert!(rendered.contains("multiSearchAny(lower("));
 }
 
 #[test]
@@ -1046,11 +1046,11 @@ fn orbit_query_rejects_inline_filters_on_variable_length_relationships() {
 fn orbit_query_rejects_aggregation_over_shortest_paths() {
     let cases = [
         (
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000}},{"id":"p","entity":"Project"}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3,"rel_types":["*"]},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":10}"#,
             "MATCH path = ANY SHORTEST (u:User)-[*1..3]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN p, count(u) AS hit LIMIT 10",
         ),
         (
-            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
+            r#"{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1],"id_range":{"start":2,"end":2}},{"id":"p","entity":"Project","node_ids":[2],"columns":["id"]}],"path":{"type":"shortest","from":"u","to":"p","max_depth":3,"rel_types":["*"]},"group_by":["p"],"aggregations":[{"count":"u","as":"hit"}],"limit":1}"#,
             "MATCH path = ANY SHORTEST (u:User {id: 1})-[*1..3]->(p:Project {id: 2}) WHERE u.id >= 2 AND u.id <= 2 RETURN p{.id}, count(u) AS hit LIMIT 1",
         ),
     ];
@@ -1348,7 +1348,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN u; DEBUG",
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
-        "MATCH (u:User) RETURN u.username AS renamed",
+        "MATCH (u:User {id: 1}) RETURN u.username AS a, u.name AS a",
+        "MATCH (u:User {id: 1}) RETURN u.username ORDER BY missing",
         "MATCH (u:User) RETURN u{.username}, u.state",
         "MATCH (u:User) RETURN u.username, u{.state}",
         "MATCH (u:User) RETURN date_trunc('month', u.created_at)",
@@ -1457,23 +1458,16 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    for query in [
-        "MATCH (u:User) WHERE u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN [] AND u.id >= 1 AND u.id <= 3 RETURN u",
-        "MATCH (u:User) WHERE u.id IN [1, 2] AND u.id IN [] RETURN u",
-        "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u",
-    ] {
-        assert!(
-            compiler::compile(
-                query,
-                compiler::Frontend::Gql,
-                &test_ontology(),
-                &test_ctx()
-            )
-            .is_err(),
-            "{query}"
-        );
-    }
+    let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
+    assert!(
+        compiler::compile(
+            query,
+            compiler::Frontend::Gql,
+            &test_ontology(),
+            &test_ctx()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1687,6 +1681,70 @@ fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
         "edge source must be the User side: {}",
         compiled.base.sql
     );
+}
+
+#[test]
+fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
+    let ontology = embedded_ontology();
+    let ctx = test_ctx();
+    let base = "MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1})";
+    for (plain, aliased) in [
+        (
+            "RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+            "RETURN mr.iid AS number, p AS project ORDER BY number LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid, p ORDER BY mr.iid LIMIT 5",
+            "RETURN mr.iid AS number, p AS project ORDER BY mr.iid LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid, p{.full_path} ORDER BY mr.iid DESC LIMIT 5",
+            "RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5",
+        ),
+        (
+            "RETURN mr.iid ORDER BY mr.iid PAGE 5",
+            "RETURN mr.iid AS number ORDER BY number PAGE 5",
+        ),
+    ] {
+        let plain = compile(&format!("{base} {plain}"), Frontend::Gql, &ontology, &ctx).unwrap();
+        let query = format!("{base} {aliased}");
+        let aliased = compile(&query, Frontend::Gql, &ontology, &ctx).unwrap();
+        assert_eq!(plain.base.render(), aliased.base.render(), "{query}");
+        assert_eq!(plain.hydration, aliased.hydration, "{query}");
+    }
+
+    let plain = compile(
+        "MATCH (center:WorkItem {id: 1})-->(n) RETURN center, n",
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    let aliased = compile(
+        "MATCH (center:WorkItem {id: 1})-->(n) RETURN center AS item, n",
+        Frontend::Gql,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(plain.base.render(), aliased.base.render());
+
+    for (query, expected) in [
+        (
+            "RETURN mr.iid, p AS project ORDER BY project",
+            "not a node alias",
+        ),
+        ("RETURN mr.iid AS x, p AS x", "duplicate alias"),
+        ("RETURN mr.iid AS x, p.full_path AS x", "duplicate alias"),
+        ("RETURN mr.iid ORDER BY missing", "or a property alias"),
+    ] {
+        let query = format!("{base} {query}");
+        let error = compile(&query, Frontend::Gql, &ontology, &ctx).expect_err(&query);
+        assert!(
+            matches!(error, QueryError::Validation(ref message) if message.contains(expected)),
+            "{query}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -1937,7 +1995,8 @@ fn gql_prepares_queries_and_scoped_schema() {
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[])).unwrap(),
+                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                    .unwrap(),
             );
         }
     }

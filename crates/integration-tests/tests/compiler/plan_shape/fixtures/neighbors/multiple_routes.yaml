@@ -1,0 +1,18 @@
+name: Multiple neighbor edge routes keep per-arm predicates and disable fusion
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE"]}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1})-[:IN_PROJECT|HAS_HEAD_PIPELINE]-(neighbor) RETURN mr, neighbor
+logical:
+  expect: ["(Input neighbors (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Neighbors center=mr direction=both directional ... (_))"]
+    emitted:
+      expect:
+        - (Union ALL (_) (_))
+        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_ci_edge) AS _e))
+        - (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'], ... (Scan Table(gl_edge) AS _e))
+      reject: ["(Bind _gkg_fused (_))"]

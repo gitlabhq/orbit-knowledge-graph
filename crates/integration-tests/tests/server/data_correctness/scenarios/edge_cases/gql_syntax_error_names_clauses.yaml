@@ -1,0 +1,9 @@
+description: Syntax errors name clauses instead of grammar rules, and a keyword followed by a parenthesis is not called a function
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) RETURN u LIMIT(1)
+
+expect:
+  compile_error: "expected end of query, ORDER BY, LIMIT, PAGE, or DEBUG"
+  compile_error_not_contains: ["EOI", "function"]

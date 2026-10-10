@@ -1,182 +1,91 @@
-//! ClickHouse parameter types shared between `compiler` and `clickhouse-client`.
-
-use std::collections::HashMap;
-use std::fmt;
-
 use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
-pub enum ChScalar {
-    String,
-    Int64,
-    Float64,
-    Bool,
+use crate::query_types::{ParamValue, SqlType, TimeZone};
+
+pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
+
+pub fn quote_sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
-impl ChScalar {
-    pub fn from_value(v: Option<&Value>) -> Self {
-        match v {
-            Some(Value::Number(n)) if n.is_i64() => ChScalar::Int64,
-            Some(Value::Number(_)) => ChScalar::Float64,
-            Some(Value::Bool(_)) => ChScalar::Bool,
-            _ => ChScalar::String,
-        }
+pub fn type_name(data_type: SqlType) -> String {
+    match data_type {
+        SqlType::String => "String".into(),
+        SqlType::Int64 => "Int64".into(),
+        SqlType::UInt32 => "UInt32".into(),
+        SqlType::Float64 => "Float64".into(),
+        SqlType::Bool => "Bool".into(),
+        SqlType::Date => "Date32".into(),
+        SqlType::Timestamp {
+            precision,
+            timezone,
+        } => match timezone {
+            Some(TimeZone::Utc) => format!("DateTime64({precision}, 'UTC')"),
+            None => format!("DateTime64({precision})"),
+        },
+        SqlType::Array(element) => format!("Array({})", type_name(element.into())),
     }
-}
-
-/// `Array(ChScalar)` maps to `Array(T)` for any scalar `T`, used in `IN`
-/// clauses with multiple values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ChType {
-    String,
-    Int64,
-    UInt32,
-    Float64,
-    Bool,
-    DateTime64,
-    Array(ChScalar),
-}
-
-impl fmt::Display for ChType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ChType::String => write!(f, "String"),
-            ChType::Int64 => write!(f, "Int64"),
-            ChType::UInt32 => write!(f, "UInt32"),
-            ChType::Float64 => write!(f, "Float64"),
-            ChType::Bool => write!(f, "Bool"),
-            ChType::DateTime64 => write!(f, "DateTime64(6, 'UTC')"),
-            ChType::Array(s) => write!(f, "Array({s})"),
-        }
-    }
-}
-
-impl From<ChScalar> for ChType {
-    fn from(s: ChScalar) -> Self {
-        match s {
-            ChScalar::String => ChType::String,
-            ChScalar::Int64 => ChType::Int64,
-            ChScalar::Float64 => ChType::Float64,
-            ChScalar::Bool => ChType::Bool,
-        }
-    }
-}
-
-impl ChType {
-    /// For arrays, inspects the first element to determine the element type.
-    pub fn from_value(v: &Value) -> Self {
-        match v {
-            Value::Number(n) if n.is_i64() => ChType::Int64,
-            Value::Number(_) => ChType::Float64,
-            Value::Bool(_) => ChType::Bool,
-            Value::Array(arr) => ChType::Array(ChScalar::from_value(arr.first())),
-            _ => ChType::String,
-        }
-    }
-
-    pub fn to_array(self) -> Self {
-        match self {
-            ChType::String | ChType::DateTime64 => ChType::Array(ChScalar::String),
-            ChType::Int64 | ChType::UInt32 => ChType::Array(ChScalar::Int64),
-            ChType::Float64 => ChType::Array(ChScalar::Float64),
-            ChType::Bool => ChType::Array(ChScalar::Bool),
-            ChType::Array(_) => self,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParamValue {
-    pub ch_type: ChType,
-    pub value: Value,
 }
 
 impl ParamValue {
-    /// DateTime types are wrapped in toDateTime64() for direct SQL use.
-    pub fn render_literal(&self) -> String {
-        match (&self.ch_type, &self.value) {
-            (ChType::DateTime64, Value::String(s)) => {
-                // Strip trailing 'Z' — toDateTime64 with explicit timezone
-                // doesn't accept the Z suffix.
-                let s = s.strip_suffix('Z').unwrap_or(s);
-                format!("toDateTime64('{}', 6, 'UTC')", s.replace('\'', "''"))
+    pub fn render_clickhouse_literal(&self) -> String {
+        match (&self.data_type, &self.value) {
+            (
+                SqlType::Timestamp {
+                    precision,
+                    timezone,
+                },
+                Value::String(value),
+            ) => {
+                let value = value.strip_suffix('Z').unwrap_or(value).replace('\'', "''");
+                let zone = if timezone.is_some() { ", 'UTC'" } else { "" };
+                format!("toDateTime64('{value}', {precision}{zone})")
+            }
+            (SqlType::Date, Value::String(value)) => {
+                format!("toDate32({})", render_value(&Value::String(value.clone())))
             }
             _ => render_value(&self.value),
         }
     }
 
-    /// Unlike `render_literal`, strings are NOT quoted — ClickHouse handles
-    /// typing via the `{name:Type}` placeholder in the SQL.
     pub fn render_http_param(&self) -> String {
         render_http_value(&self.value)
     }
 }
 
-pub const MAX_BOUND_PATH_SEGMENTS: usize = 2000;
-
-#[derive(Debug, Default)]
-pub struct ParamBindings {
-    params: HashMap<String, ParamValue>,
-    index: HashMap<(ChType, String), String>,
-}
-
-impl ParamBindings {
-    pub fn intern(&mut self, ch_type: ChType, value: &Value) -> String {
-        let key = (ch_type, value.to_string());
-        if let Some(name) = self.index.get(&key) {
-            return name.clone();
-        }
-        let name = format!("p{}", self.params.len());
-        self.index.insert(key, name.clone());
-        self.params.insert(
-            name.clone(),
-            ParamValue {
-                ch_type,
-                value: value.clone(),
-            },
-        );
-        name
-    }
-
-    pub fn into_map(self) -> HashMap<String, ParamValue> {
-        self.params
-    }
-}
-
 pub fn render_value(value: &Value) -> String {
-    fn quote(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "''"))
-    }
-
     match value {
-        Value::String(s) => quote(s),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Null => "NULL".to_string(),
-        Value::Array(arr) => {
-            let elements: Vec<String> = arr.iter().map(render_value).collect();
-            format!("[{}]", elements.join(", "))
-        }
-        other => quote(&other.to_string()),
+        Value::String(value) => format!("'{}'", value.replace('\'', "''")),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Null => "NULL".into(),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(render_value)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        other => format!("'{}'", other.to_string().replace('\'', "''")),
     }
 }
 
 fn render_http_value(value: &Value) -> String {
     match value {
-        Value::String(s) => s.clone(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Null => "\\N".to_string(),
-        Value::Array(arr) => {
-            let elements: Vec<String> = arr
+        Value::String(value) => value.clone(),
+        Value::Null => "\\N".into(),
+        Value::Array(values) => format!(
+            "[{}]",
+            values
                 .iter()
-                .map(|v| match v {
-                    Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+                .map(|value| match value {
+                    Value::String(value) => format!("'{}'", value.replace('\'', "\\'")),
                     other => render_http_value(other),
                 })
-                .collect();
-            format!("[{}]", elements.join(","))
-        }
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
         other => other.to_string(),
     }
 }
@@ -184,77 +93,49 @@ fn render_http_value(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::query_types::ScalarType;
     use serde_json::json;
 
     #[test]
-    fn render_literal_string() {
-        let p = ParamValue {
-            ch_type: ChType::String,
-            value: Value::String("hello".into()),
-        };
-        assert_eq!(p.render_literal(), "'hello'");
+    fn quote_sql_literal_escapes_quotes_and_backslashes() {
+        assert_eq!(quote_sql_literal("hello"), "'hello'");
+        assert_eq!(quote_sql_literal("it's a test"), "'it\\'s a test'");
+        assert_eq!(quote_sql_literal("back\\slash"), "'back\\\\slash'");
     }
 
     #[test]
-    fn render_literal_string_with_quotes() {
-        let p = ParamValue {
-            ch_type: ChType::String,
-            value: Value::String("it's a test".into()),
-        };
-        assert_eq!(p.render_literal(), "'it''s a test'");
-    }
-
-    #[test]
-    fn render_literal_int() {
-        let p = ParamValue {
-            ch_type: ChType::Int64,
-            value: Value::from(42),
-        };
-        assert_eq!(p.render_literal(), "42");
-    }
-
-    #[test]
-    fn render_literal_bool() {
-        let p = ParamValue {
-            ch_type: ChType::Bool,
-            value: Value::Bool(true),
-        };
-        assert_eq!(p.render_literal(), "true");
-    }
-
-    #[test]
-    fn render_literal_null() {
-        let p = ParamValue {
-            ch_type: ChType::String,
-            value: Value::Null,
-        };
-        assert_eq!(p.render_literal(), "NULL");
-    }
-
-    #[test]
-    fn render_literal_string_array() {
-        let p = ParamValue {
-            ch_type: ChType::Array(ChScalar::String),
-            value: json!(["active", "blocked"]),
-        };
-        assert_eq!(p.render_literal(), "['active', 'blocked']");
-    }
-
-    #[test]
-    fn render_literal_int_array() {
-        let p = ParamValue {
-            ch_type: ChType::Array(ChScalar::Int64),
-            value: json!([1, 2, 3]),
-        };
-        assert_eq!(p.render_literal(), "[1, 2, 3]");
-    }
-
-    #[test]
-    fn render_literal_empty_array() {
-        let p = ParamValue {
-            ch_type: ChType::Array(ChScalar::String),
-            value: json!([]),
-        };
-        assert_eq!(p.render_literal(), "[]");
+    fn parameters_render_clickhouse_values_and_temporal_types() {
+        for (data_type, value, expected) in [
+            (SqlType::String, json!("hello"), "'hello'"),
+            (SqlType::String, json!("it's a test"), "'it''s a test'"),
+            (SqlType::Int64, json!(42), "42"),
+            (SqlType::Bool, json!(true), "true"),
+            (SqlType::String, Value::Null, "NULL"),
+            (
+                SqlType::Array(ScalarType::String),
+                json!(["active", "blocked"]),
+                "['active', 'blocked']",
+            ),
+            (
+                SqlType::Array(ScalarType::Int64),
+                json!([1, 2, 3]),
+                "[1, 2, 3]",
+            ),
+            (SqlType::Array(ScalarType::String), json!([]), "[]"),
+            (SqlType::Date, json!("2026-10-05"), "toDate32('2026-10-05')"),
+            (
+                SqlType::Timestamp {
+                    precision: 6,
+                    timezone: Some(TimeZone::Utc),
+                },
+                json!("2026-10-05T01:02:03.123456Z"),
+                "toDateTime64('2026-10-05T01:02:03.123456', 6, 'UTC')",
+            ),
+        ] {
+            assert_eq!(
+                ParamValue { data_type, value }.render_clickhouse_literal(),
+                expected
+            );
+        }
     }
 }

@@ -1,0 +1,33 @@
+description: contains ignores case, spans a token boundary, matches a word prefix, and prunes granules with the ngram skip index
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                 "columns": ["title"],
+                 "filters": {"title": {"contains": "SHIP FEAT"}}}],
+      "order_by": "mr.id",
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
+    RETURN mr.title ORDER BY mr.id LIMIT 10
+
+expect:
+  sql_contains: ["multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])"]
+  indexes_used: [{ table: gl_merge_request, index: idx_title_ngram }]
+  skip_requirements: ["filter:title"]
+  node_count: 2
+  nodes:
+    MergeRequest:
+      order: [2004, 2005]
+      rows:
+        - { id: 2004, title: Ship feature E }
+        - { id: 2005, title: Ship feature F }

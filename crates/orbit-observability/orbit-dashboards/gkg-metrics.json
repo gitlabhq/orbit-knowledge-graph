@@ -73,7 +73,7 @@
     {
       "otel_name": "gkg.billing.quota.cdot.duration",
       "prom_name": "gkg_billing_quota_cdot_duration_seconds",
-      "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+      "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
       "kind": "histogram_f64",
       "unit": "s",
       "labels": [
@@ -93,7 +93,7 @@
     {
       "otel_name": "gkg.billing.quota.decisions",
       "prom_name": "gkg_billing_quota_decisions_total",
-      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
       "kind": "counter",
       "labels": [
         "decision",

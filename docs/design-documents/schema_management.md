@@ -12,13 +12,18 @@ The schema is defined by node and relationship types in the ontology (`config/on
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
 storage metadata also owns table-level MergeTree settings. These are indexes, projections, primary
-keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL.
+keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL. A `text`
+index declares the Orbit text-search pair for one column: a `text(tokenizer = splitByNonAlpha)`
+index and an `ngrambf_v1` index, both over `lower(column)`. The compiler emits `contains`,
+`starts_with`, `ends_with`, and the token operators on `lower(column)`, so they are
+case-insensitive and prune with these indexes. Sort-key columns such as `branch` stay exact so
+the primary key keeps pruning.
 
 ## Schema Version Tracking
 
 This file covers ClickHouse schema migration versions and archive-backed serving. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
-enforced by `scripts/check-pinned-version.sh`. See
+enforced by `scripts/checks/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 A request's `migration_version` is the version of the archive it was served from; telemetry and
@@ -403,8 +408,8 @@ single project failure must not hold a schema migration open indefinitely.
 Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
 pipeline ran and committed for that scope. It does not validate that the output tables contain
 the expected number of rows. This is the standard pattern for CDC/ETL systems. Silent data-loss
-bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
-data correctness validation is deferred to staging E2E tests.
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Container tests check row counts after a clone on small
+fixtures, but no production check compares row counts.
 
 ### Status transitions on completion
 

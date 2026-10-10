@@ -4,6 +4,15 @@
 # typing, new, member and this-calls, control flow.
 
 config:
+  stdlib: [{ module: java, precedence: runtime }, { module: scala }, { module: javax }, { module: jdk },
+      { module: scala/Predef, availability: implicit, symbols: [assert, assume, classOf,
+          identity, implicitly, locally, print, printf, println, require,
+          summon, synchronized, valueOf] },
+      { module: scala/math, symbols: [abs, acos, asin, atan, atan2, cbrt, ceil,
+          cos, cosh, exp, expm1, floor, hypot, log, log10, log1p, max, min,
+          pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh,
+          toDegrees, toRadians, ulp] }
+    ]
   resolve:
     lookup_from:
       - __source_root
@@ -87,16 +96,18 @@ stages:
 
   - name: classify
     rules:
+      - match: '(postfix_expression $N:identifier (identifier "_"))'
+        replace: '(identifier @$N)'
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__call)'
-        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__ssa_branch)'
-        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V)'
-        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V))'
       - match: '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__call)'
-        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
       - match: '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V)'
-        replace: '(__binding @$N (__ssa_typed? @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
@@ -132,6 +143,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

@@ -116,10 +116,19 @@ impl TestContext {
         let mut query = client.query(&pq.sql);
 
         for (name, param) in &pq.params {
-            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.ch_type);
+            query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.data_type);
         }
 
         query.fetch_arrow().await.map_err(|e| e.to_string())
+    }
+
+    pub async fn explain_plan(&self, pq: &ParameterizedQuery) -> serde_json::Value {
+        let text = self
+            .create_client()
+            .explain_plan(&pq.render())
+            .await
+            .expect("explain failed");
+        serde_json::from_str(&text).expect("explain output is JSON")
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
@@ -240,6 +249,7 @@ impl TestContext {
             .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
             .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
+            .with_env_var("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1")
             .with_label(CONTAINER_LABEL_KEY, "true")
             .with_label(SESSION_LABEL_KEY, session_id())
             .start()

@@ -202,8 +202,6 @@ tests:
       - { row: { fqn: 'exported_c', type: 'Function' } }
 
   - name: "foreign extern declarations do not create bogus local call edges"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_foreign_extern'

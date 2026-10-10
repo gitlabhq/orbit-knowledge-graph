@@ -1,0 +1,20 @@
+name: Unselective chains avoid cascade and candidate rescans
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
+logical:
+  expect: ["(EdgeScan CALLS b->c AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        absent: true
+      expect: ["(Join ON e0.target_id = e1.source_id (_) (_))"]
+      reject: ["(SemiJoin ... (_) (_))", "(Scan Table(gl_definition) ...)"]
+    emitted:
+      ctes:
+        absent: true
+      expect: ["(Deduplicate Final (Scan Table(gl_code_edge) AS e1))"]
+      reject: ["(SemiJoin ... (_) (_))"]

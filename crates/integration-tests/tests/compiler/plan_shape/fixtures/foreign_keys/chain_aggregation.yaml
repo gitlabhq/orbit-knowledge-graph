@@ -1,0 +1,43 @@
+name: FK-chain aggregation executes physical node joins with scoped current-row filters
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed", "source": "merge_request_event"}},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "aggregations": [{"count": "f", "as": "appearances"}],
+      "group_by": ["f.old_path"],
+      "limit": 60
+    }
+  gql: |
+    MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
+      -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+    RETURN f.old_path, count(f) AS appearances LIMIT 60
+logical:
+  expect:
+    - (Aggregate group f.old_path AS f_old_path, COUNT(f) AS appearances (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Project (Join ON f.merge_request_diff_id = d.id (_) (_)))
+        - (Join ON pl.merge_request_id = mr.id (_) (_))
+        - (Join ON mr.latest_merge_request_diff_id = d.id (_) (_))
+        - (Bind pl (Filter ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl))))
+        - (Bind mr (Filter ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr))))
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)
+        - (Project 'TRIGGERED' AS e0_type, ... (_))
+    emitted:
+      expect:
+        - (Aggregate group f.old_path, ... (_))

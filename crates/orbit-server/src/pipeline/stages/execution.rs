@@ -15,7 +15,7 @@ use crate::pipeline::correlation;
 
 struct PreparedQuery {
     sql: String,
-    params: HashMap<String, orbit_utils::clickhouse::ParamValue>,
+    params: HashMap<String, orbit_utils::query_types::ParamValue>,
     rendered_sql: String,
     query_id: String,
     http_settings: Vec<(String, String)>,
@@ -113,7 +113,7 @@ async fn execute_query(
         query = query.with_setting(k, v);
     }
     for (key, param) in prepared.params.iter() {
-        query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+        query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
     }
     let (batches, summary) = query
         .fetch_arrow_with_summary()

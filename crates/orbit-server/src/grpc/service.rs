@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::slice;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use ontology::Ontology;
@@ -14,7 +15,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, instrument};
+use tracing::{Instrument, info, instrument, warn};
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -40,15 +41,14 @@ use crate::proto::{
     ListToolsRequest, ListToolsResponse, NamedQueryDefinition, QueryLanguage, QueryMetadata,
     QueryType, ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
     SchemaNode, SchemaNodeStyle, SchemaProperty, SkillFile as ProtoSkillFile, SkillSummary,
-    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, get_graph_schema_response,
+    get_query_dsl_response, get_response_format_response, invoke_agent_command_response,
 };
 use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{
-    FormatName, GoonFormatter, GqlFormatter, GraphFormatter, ResultFormatter,
+    FormatName, GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter,
 };
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
@@ -109,14 +109,14 @@ fn schema_query_result(
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Toon => ProtoFormatName::Toon,
         FormatName::Gql => ProtoFormatName::Gql,
     }
 }
 
 fn query_formatter(format: i32) -> Result<&'static dyn ResultFormatter, Status> {
     match ResponseFormat::try_from(format) {
-        Ok(ResponseFormat::Llm) => Ok(&GoonFormatter),
+        Ok(ResponseFormat::Llm) => Ok(&ToonFormatter),
         Ok(ResponseFormat::Gql) => Ok(&GqlFormatter),
         Ok(ResponseFormat::Raw) => Ok(&GraphFormatter),
         Err(_) => Err(Status::invalid_argument(format!(
@@ -160,7 +160,6 @@ pub struct OrbitServiceImpl {
     graph_status: GraphStatusService,
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
-    stream_timeout_secs: u64,
     quota: Arc<QuotaService>,
 }
 
@@ -175,7 +174,11 @@ impl OrbitServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::default();
-        let pipeline = QueryPipelineService::new(Arc::clone(&client), analytics_config);
+        let pipeline = QueryPipelineService::new(
+            Arc::clone(&client),
+            analytics_config,
+            Duration::from_secs(stream_timeout_secs),
+        );
         let graph_status = GraphStatusService::new(Arc::clone(&client));
         let indexing_status = IndexingStatusService::new(Arc::clone(&client));
         let item_counts = ItemCountService::new(client);
@@ -188,7 +191,6 @@ impl OrbitServiceImpl {
             graph_status,
             indexing_status,
             item_counts,
-            stream_timeout_secs,
             quota: Arc::new(QuotaService::disabled()),
         }
     }
@@ -237,10 +239,25 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
+        let schema = inline_catalog
+            .then(|| {
+                self.active_schema
+                    .snapshot()
+                    .inspect_err(|error| {
+                        warn!(error = %error.message(), "Inlining the command catalog without relationship patterns");
+                    })
+                    .ok()
+            })
+            .flatten();
         let tools = ToolRegistry::tools_with_catalog(
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+            frontend,
             inline_catalog,
+            schema
+                .as_ref()
+                .map(|schema| schema.relationship_patterns.as_str()),
         )
         .into_iter()
         .map(proto_tool_definition)
@@ -395,7 +412,6 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let pipeline = self.pipeline.clone();
         let schema = self.active_schema.snapshot()?;
-        let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
         tokio::spawn(
@@ -433,12 +449,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                 info!(query_len = query.text.len(), "Executing query");
 
-                let timeout = std::time::Duration::from_secs(stream_timeout);
-                let result = pipeline
-                    .run_query(&schema, ctx, query, tx.clone(), stream, timeout)
-                    .await;
-
-                let result = result.and_then(|output| match output {
+                let render = |output| match output {
                     QueryServiceOutput::Schema(response) => {
                         schema_query_result(&response, text_format)
                     }
@@ -457,21 +468,17 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
                         Ok(ExecuteQueryResult { content, metadata })
                     }
-                });
+                };
+                let result = pipeline
+                    .run_query(&schema, ctx, query, &tx, stream, render)
+                    .await;
 
                 match result {
-                    Ok(result) => {
-                        info!("Sending final query result");
-                        let _ = tx
-                            .send(Ok(ExecuteQueryMessage {
-                                content: Some(execute_query_message::Content::Result(result)),
-                            }))
-                            .await;
+                    Ok(()) => {}
+                    Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
+                        info!(error = %e, "Client left before the query result");
                     }
                     Err(e @ PipelineError::Timeout) => {
-                        // run_query already logged via send_query_error and
-                        // recorded the metric through the observer chain.
-                        // Translate to deadline_exceeded for the gRPC client.
                         send_query_error(&tx, e).await;
                         let _ = tx
                             .send(Err(Status::deadline_exceeded("Query stream timed out")))
@@ -505,7 +512,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(command_error_to_status)?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
@@ -800,8 +807,7 @@ impl OrbitServiceImpl {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
                 let properties = if should_expand {
-                    n.fields
-                        .iter()
+                    n.listed_fields()
                         .map(|f| SchemaProperty {
                             name: f.name.clone(),
                             data_type: format!("{}", f.data_type),
@@ -991,14 +997,17 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 
 #[cfg(test)]
 mod tests {
+    mod billing;
     mod commands;
     mod quota;
     mod skills;
     mod status;
 
     use super::*;
-    use crate::proto::orbit_service_server::OrbitService;
+    use crate::proto::orbit_service_client::OrbitServiceClient;
+    use crate::proto::orbit_service_server::{OrbitService, OrbitServiceServer};
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
 
     fn mock_validator() -> JwtValidator {
@@ -1014,10 +1023,14 @@ mod tests {
     }
 
     fn test_service() -> OrbitServiceImpl {
+        test_service_on(&test_config())
+    }
+
+    fn test_service_on(clickhouse: &ClickHouseConfiguration) -> OrbitServiceImpl {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            clickhouse,
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1026,6 +1039,21 @@ mod tests {
 
     fn authed_request<T>(message: T) -> Request<T> {
         authed_request_for_user(message, 1)
+    }
+
+    async fn serve(service: OrbitServiceImpl) -> OrbitServiceClient<tonic::transport::Channel> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(OrbitServiceServer::new(service))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        OrbitServiceClient::connect(format!("http://{addr}"))
+            .await
+            .unwrap()
     }
 
     #[test]
@@ -1038,8 +1066,8 @@ mod tests {
             ),
             (
                 ResponseFormat::Llm as i32,
-                FormatName::Goon,
-                ProtoFormatName::Goon,
+                FormatName::Toon,
+                ProtoFormatName::Toon,
             ),
             (
                 ResponseFormat::Gql as i32,
@@ -1078,7 +1106,8 @@ mod tests {
             &test_ontology(),
             Default::default(),
             &[],
-        );
+        )
+        .unwrap();
         let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
         let result =
             schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();
@@ -1095,13 +1124,22 @@ mod tests {
     }
 
     fn authed_request_from<T>(message: T, user_id: u64, source_type: SourceType) -> Request<T> {
+        signed_request(
+            message,
+            Claims {
+                user_id,
+                source_type,
+                ..test_claims()
+            },
+        )
+    }
+
+    fn signed_request<T>(message: T, claims: Claims) -> Request<T> {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             iat: now,
             exp: now + 3600,
-            user_id,
-            source_type,
-            ..test_claims()
+            ..claims
         };
         let token = encode(
             &Header::new(Algorithm::HS256),
@@ -1294,6 +1332,17 @@ mod tests {
                 domain.name
             );
         }
+    }
+
+    #[test]
+    fn test_structured_schema_leaves_out_hidden_properties() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
+        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+        let names: Vec<&str> = project.properties.iter().map(|p| p.name.as_str()).collect();
+
+        assert!(names.contains(&"full_path"), "{names:?}");
+        assert!(!names.contains(&"traversal_path"), "{names:?}");
     }
 
     #[test]

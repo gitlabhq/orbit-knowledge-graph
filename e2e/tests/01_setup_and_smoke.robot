@@ -9,11 +9,10 @@ Suite Setup         Provision Smoke Fixtures
 
 
 *** Test Cases ***
-Feature Flags Are Enabled
-    [Documentation]    Flags are enabled during suite setup; verify they propagate.
+GQL Queries Are Enabled
+    [Documentation]    Every suite sends GQL, which Rails accepts only while orbit_gql_queries is on.
     [Tags]    smoke
-    Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph_infra
-    Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph
+    Wait Until Keyword Succeeds    90s    2s    Feature Flag Is Enabled    orbit_gql_queries
 
 Orbit Is Healthy
     [Documentation]    Wait for all components (GKG, Siphon, NATS, ClickHouse) to report healthy.
@@ -54,11 +53,7 @@ Provision Smoke Fixtures
     [Documentation]    Provision everything up front so the shared group and the canary trio
     ...                index concurrently instead of serially across test cases.
     Bootstrap E2E Credentials
-    Enable Feature Flag    knowledge_graph_infra
-    Enable Feature Flag    knowledge_graph
-    # Verify propagation before Enable Orbit reads the flags.
-    Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph_infra
-    Wait Until Keyword Succeeds    30s    2s    Feature Flag Is Enabled    knowledge_graph
+    Enable Feature Flag    orbit_gql_queries
     ${suffix}=    Random Suffix
     ${name}=    Set Variable    e2e-shared-${suffix}
     ${group}=    Create Group    ${name}

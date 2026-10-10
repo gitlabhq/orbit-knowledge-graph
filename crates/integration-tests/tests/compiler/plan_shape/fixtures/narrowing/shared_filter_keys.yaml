@@ -1,0 +1,41 @@
+name: A shared filter-only node defines authoritative keys on its first hop
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [12000], "columns": ["id"]},
+        {"id": "b", "entity": "Definition", "filters": {"name": "helper"}, "columns": ["id"]},
+        {"id": "c", "entity": "Definition", "columns": ["id"]}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"}
+      ]
+    }
+  gql: |
+    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition {name: 'helper'})-[:CALLS]->(c:Definition)
+    RETURN a.id, b.id, c.id
+logical:
+  expect:
+    - (Filter a.id IN [12000] (NodeScan Definition AS a))
+physical:
+  clickhouse:
+    planned:
+      bind:
+        - (CTE $shared (Project b.id AS id (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))
+      ctes:
+        exact_order: [$shared]
+      expect:
+        - (Filter e0p.target_id IN $shared.id, ... (_))
+      occurrences:
+        - pattern: (CTE $shared (_))
+          count: 1
+      reject:
+        - (Filter e1.source_id IN $shared.id, ... (_))
+  duckdb:
+    planned:
+      ctes:
+        exact_order: [_filter_a, _filter_b]
+      expect:
+        - (Filter e1.source_id IN _filter_b.id, ... (_))

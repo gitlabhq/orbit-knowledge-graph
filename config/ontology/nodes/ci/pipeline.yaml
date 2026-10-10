@@ -211,6 +211,7 @@ properties:
     type: string
     source: traversal_path
     filterable: false
+    hidden: true
     nullable: false
     description: "Namespace path for authz."
 
@@ -293,8 +294,7 @@ storage:
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_source, column: source, type: "set(20)", granularity: 2}
-    - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_ref, column: ref, type: text, granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_user_id, column: user_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.0001)", granularity: 1}

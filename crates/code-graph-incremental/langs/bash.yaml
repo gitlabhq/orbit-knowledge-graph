@@ -3,6 +3,18 @@
 # calls, variable assignments, control flow. Definitions hang off the file
 # stem (stem.name).
 
+config:
+  stdlib: [
+    { availability: implicit, symbols: [
+      alias, bg, bind, break, builtin, caller, cd, command, compgen, complete,
+      compopt, continue, declare, dirs, disown, echo, enable, eval, exec, exit,
+      export, 'false', fc, fg, getopts, hash, help, history, jobs, kill, let, local,
+      logout, mapfile, popd, printf, pushd, pwd, read, readarray, readonly, return,
+      set, shift, shopt, source, suspend, test, times, trap, 'true', type, typeset,
+      ulimit, umask, unalias, unset, wait
+    ] }
+  ]
+
 stages:
   - name: imports
     rules:
@@ -26,9 +38,9 @@ stages:
   - name: classify
     rules:
       - match: '(variable_assignment name: $N:variable_name value: $V:__call)'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N|prepend("$") (__rhs $V))'
       - match: '(variable_assignment name: $N:variable_name value: $V)'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N|prepend("$") (__rhs @$V))'
       - match: '(if_statement $$$X)'
         replace: '(__ssa_branch (__ssa_arm $$$X))'
       - match: '(case_statement value: $V $$$X:case_item)'

@@ -1,18 +1,22 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use indextree::NodeId;
-
 use crate::error::LoadError;
 use crate::intern::Lang;
-use crate::tree::{EdgeKind, Tree};
+use crate::tree::{EdgeKind, Node, Storage, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
-fn child_sym(t: &Tree, lang: &Lang, id: NodeId, pred: impl Fn(&crate::tree::Node) -> bool) -> u32 {
-    id.children(&t.arena)
-        .find(|&c| pred(t.node(c)))
-        .map_or(0, |c| t.sym_of(c, lang))
+fn child_sym<S: Storage<Node = Node>>(
+    t: &Tree<S>,
+    lang: &Lang,
+    id: u32,
+    pred: impl Fn(&Node) -> bool,
+) -> u32 {
+    t.cursor(id)
+        .children()
+        .find(|c| pred(t.storage.node(c.index())))
+        .map_or(0, |c| t.sym_at(c.index(), lang))
 }
 
 fn nonempty(lang: &Lang, sym: u32) -> Option<u32> {
@@ -112,6 +116,7 @@ impl Tf {
             "default" => Tf::Default(s(0)?),
             "tree_path" => Tf::TreePath(s(0)?),
             "sibling_index" => Tf::SiblingIndex,
+            "tree_node_id" => Tf::TreeNodeId,
             "kind" => Tf::KindName,
             _ => return Err(LoadError(format!("unknown transform: {name}"))),
         })
@@ -214,36 +219,48 @@ impl Tf {
         }
     }
 
-    pub(crate) fn apply_sym(
+    pub(crate) fn apply_sym<S: Storage<Node = Node>>(
         &self,
-        t: &Tree,
+        t: &Tree<S>,
         lang: &Lang,
-        id: NodeId,
+        id: S::Id,
+        edge_ctx: Option<&EdgeCtx>,
+    ) -> u32 {
+        self.apply_at(t, lang, S::index(id), edge_ctx)
+    }
+
+    pub(crate) fn apply_at<S: Storage<Node = Node>>(
+        &self,
+        t: &Tree<S>,
+        lang: &Lang,
+        id: u32,
         edge_ctx: Option<&EdgeCtx>,
     ) -> u32 {
         match self {
-            Tf::Id => t.sym_of(id, lang),
+            Tf::Id => t.sym_at(id, lang),
             Tf::Field(f) => {
                 let f = *f;
                 let found = child_sym(t, lang, id, |n| n.field == f);
                 if found != 0 {
                     found
                 } else {
-                    t.sym_of(id, lang)
+                    t.sym_at(id, lang)
                 }
             }
             Tf::Const(s) => lang.syms.intern(s),
             Tf::Child(k) => child_sym(t, lang, id, |n| n.kind == *k),
             Tf::FieldChild(f, k) => {
                 let (f, k) = (*f, *k);
-                id.children(&t.arena)
-                    .find(|&c| t.node(c).field == f)
-                    .map_or(0, |n| child_sym(t, lang, n, |n| n.kind == k))
+                t.cursor(id)
+                    .children()
+                    .find(|c| c.field() == f)
+                    .map_or(0, |n| child_sym(t, lang, n.index(), |n| n.kind == k))
             }
             Tf::ParentSym(k) => {
                 let k = *k;
-                id.parent(&t.arena)
-                    .map_or(0, |p| child_sym(t, lang, p, |n| n.kind == k))
+                t.cursor(id)
+                    .parent()
+                    .map_or(0, |p| child_sym(t, lang, p.index(), |n| n.kind == k))
             }
             Tf::AncestorSym(k) => {
                 let k = *k;
@@ -253,7 +270,7 @@ impl Tf {
                     if sym != 0 {
                         break sym;
                     }
-                    match cur.parent(&t.arena) {
+                    match t.storage.parent(cur) {
                         Some(p) => cur = p,
                         None => break 0,
                     }
@@ -263,9 +280,9 @@ impl Tf {
                 let key = *key;
                 let mut cur = id;
                 loop {
-                    match cur.parent(&t.arena) {
+                    match t.storage.parent(cur) {
                         Some(p) => {
-                            if let Some(v) = t.get_tag(Tree::to_raw(p), key) {
+                            if let Some(v) = t.get_tag(p, key) {
                                 break v;
                             }
                             cur = p;
@@ -274,28 +291,17 @@ impl Tf {
                     }
                 }
             }
-            Tf::Tag(key) => t.get_tag(Tree::to_raw(id), *key).unwrap_or(0),
+            Tf::Tag(key) => t.get_tag(id, *key).unwrap_or(0),
             Tf::LitSym(s) => *s,
             Tf::HasEdge(kind, dir) => {
-                let raw = Tree::to_raw(id);
-                let found = edge_ctx.is_some_and(|ctx| {
-                    ctx.edges.iter().any(|e| {
-                        e.kind == *kind
-                            && match dir {
-                                EdgeDir::Incoming => {
-                                    e.to_tree == ctx.tree_index && e.to_node == raw
-                                }
-                                EdgeDir::Outgoing => {
-                                    e.from_tree == ctx.tree_index && e.from_node == raw
-                                }
-                            }
-                    })
-                });
+                let raw = id;
+                let found =
+                    edge_ctx.is_some_and(|ctx| ctx.edges.has(*kind, *dir, ctx.tree_index, raw));
                 lang.syms.intern(if found { "true" } else { "false" })
             }
             Tf::Concat(sep, a, b) => {
-                let sa = nonempty(lang, a.apply_sym(t, lang, id, edge_ctx));
-                let sb = nonempty(lang, b.apply_sym(t, lang, id, edge_ctx));
+                let sa = nonempty(lang, a.apply_at(t, lang, id, edge_ctx));
+                let sb = nonempty(lang, b.apply_at(t, lang, id, edge_ctx));
                 match (sa, sb) {
                     (None, None) => 0,
                     (Some(a), None) => a,
@@ -307,35 +313,36 @@ impl Tf {
                     )),
                 }
             }
-            Tf::Or(a, b) => match nonempty(lang, a.apply_sym(t, lang, id, edge_ctx)) {
+            Tf::Or(a, b) => match nonempty(lang, a.apply_at(t, lang, id, edge_ctx)) {
                 Some(sym) => sym,
-                None => b.apply_sym(t, lang, id, edge_ctx),
+                None => b.apply_at(t, lang, id, edge_ctx),
             },
             Tf::TreePath(sep) => {
-                let mut segments: Vec<&str> = id
-                    .ancestors(&t.arena)
-                    .filter(|a| a.parent(&t.arena).is_some())
-                    .map(|a| lang.syms.resolve(t.sym_of(a, lang)))
+                let mut segments: Vec<&str> = std::iter::once(t.cursor(id))
+                    .chain(t.cursor(id).ancestors())
+                    .filter(|a| a.parent().is_some())
+                    .map(|a| lang.syms.resolve(t.sym_at(a.index(), lang)))
                     .collect();
                 segments.reverse();
                 lang.syms.intern(&segments.join(sep))
             }
-            Tf::KindName => lang.syms.intern(lang.kind_name(t.node(id).kind)),
+            Tf::KindName => lang.syms.intern(lang.kind_name(t.cursor(id).kind())),
+            Tf::TreeNodeId => lang.syms.intern(&id.to_string()),
             Tf::SiblingIndex => {
-                let index = id
-                    .preceding_siblings(&t.arena)
-                    .skip(1)
-                    .filter(|s| t.node(*s).named)
-                    .count();
+                let index = std::iter::successors(t.storage.previous_sibling(id), |&id| {
+                    t.storage.previous_sibling(id)
+                })
+                .filter(|&id| t.cursor(id).named())
+                .count();
                 lang.syms.intern(&index.to_string())
             }
             Tf::Pipeline(steps) => {
-                let mut s = t.text(id, lang).to_string();
+                let mut s = t.text_at(id, lang).to_string();
                 for step in steps {
                     if step.is_node_tf() {
                         s = lang
                             .syms
-                            .resolve(step.apply_sym(t, lang, id, edge_ctx))
+                            .resolve(step.apply_at(t, lang, id, edge_ctx))
                             .to_string();
                     } else {
                         s = step.apply_to_str(&s).into_owned();
@@ -344,7 +351,7 @@ impl Tf {
                 lang.syms.intern(&s)
             }
             _ => {
-                let s = t.text(id, lang);
+                let s = t.text_at(id, lang);
                 if s.is_empty() {
                     return 0;
                 }

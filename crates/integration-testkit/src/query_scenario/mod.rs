@@ -7,6 +7,7 @@ mod format;
 use std::path::Path;
 use std::sync::Arc;
 
+use format::ExpectedIndex;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
 };
@@ -142,9 +143,17 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
                 serde_json::json!(0),
             )]);
         }
-        crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
-            .await;
-        if !cfg.unmerged_seed {
+        if cfg.unmerged_seed {
+            for (table, rows) in &cfg.extra_seed {
+                for row in rows {
+                    let seed = Seed::from([(table.clone(), vec![row.clone()])]);
+                    crate::scenario::seed::apply_seed(&forked, &seed, &settings, &columns, name)
+                        .await;
+                }
+            }
+        } else {
+            crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
+                .await;
             forked.optimize_all().await;
         }
         forked
@@ -161,6 +170,15 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
+    let ontology = cfg
+        .ontology_overlay
+        .as_ref()
+        .map_or_else(load_ontology, |name| {
+            Arc::new(
+                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
+            )
+        });
+    let data_model = derive_clickhouse_data_model(&ontology);
 
     for (frontend_key, query_str) in &scenario.query {
         let Ok(frontend) = frontend_key.parse::<Frontend>() else {
@@ -168,7 +186,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             continue;
         };
         run_frontend(
-            &ctx,
+            (&ctx, &data_model),
             (frontend, frontend_key),
             query_str,
             &security,
@@ -181,7 +199,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 }
 
 async fn run_frontend(
-    ctx: &TestContext,
+    (ctx, data_model): (&TestContext, &Arc<query_data_model::ClickHouseDataModel>),
     (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
@@ -190,9 +208,8 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
-    let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile_model(query, frontend, &data_model, security) {
+    let compiled = match compile_model(query, frontend, data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -254,23 +271,21 @@ async fn run_frontend(
         return;
     }
 
+    if !expect.indexes_used.is_empty() {
+        let plan = ctx.explain_plan(&compiled.base).await;
+        assert_indexes_used(&plan, &expect.indexes_used, label);
+    }
+
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
-            ctx,
-            frontend,
-            query,
-            &data_model,
-            security,
-            redaction,
-            expect,
-            label,
+            ctx, frontend, query, data_model, security, redaction, expect, label,
         )
         .await;
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+    let resp = execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
@@ -278,7 +293,7 @@ async fn run_frontend(
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
             let rerun =
-                execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+                execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
@@ -297,6 +312,73 @@ async fn run_frontend(
     let view = ResponseView::for_query(&compiled.input, response);
 
     apply_expect(&view, expect, label);
+}
+
+fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
+    for ExpectedIndex { table, index } in expected {
+        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
+            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
+        });
+        let entry = skip_index(scan, index).unwrap_or_else(|| {
+            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
+        });
+        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        assert!(
+            selected < initial,
+            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
+        );
+    }
+}
+
+fn unversioned_table(description: &str) -> &str {
+    let table = description.rsplit('.').next().unwrap_or(description);
+    match table
+        .strip_prefix('v')
+        .and_then(|rest| rest.split_once('_'))
+    {
+        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
+        _ => table,
+    }
+}
+
+fn read_from_merge_tree<'a>(
+    value: &'a serde_json::Value,
+    table: &str,
+) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
+                == Some("ReadFromMergeTree");
+            let scans_table = map
+                .get("Description")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|description| unversioned_table(description) == table);
+            if is_scan && scans_table {
+                return Some(value);
+            }
+            map.values().find_map(|v| read_from_merge_tree(v, table))
+        }
+        serde_json::Value::Array(items) => {
+            items.iter().find_map(|v| read_from_merge_tree(v, table))
+        }
+        _ => None,
+    }
+}
+
+fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
+                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
+            {
+                return Some(value);
+            }
+            map.values().find_map(|v| skip_index(v, name))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
+        _ => None,
+    }
 }
 
 fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {

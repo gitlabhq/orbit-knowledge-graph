@@ -16,6 +16,25 @@
 #   file; functions and constants usually live in helper files.
 
 config:
+  stdlib: [
+    { availability: implicit, symbols: [abs, array_filter, array_keys, array_map, array_merge, array_pop,
+      array_push, array_reduce, array_reverse, array_search, array_shift,
+      array_slice, array_unique, array_values, boolval, call_user_func,
+      call_user_func_array, ceil, class_exists, count, date, defined, dirname,
+      explode, extension_loaded, file_exists, file_get_contents, file_put_contents,
+      floatval, floor, fopen, fclose, fread, fwrite, function_exists, get_class,
+      gettype, hash, htmlspecialchars, implode, in_array, intval, is_array,
+      is_bool, is_callable, is_float, is_int, is_null, is_numeric, is_object,
+      is_string, json_decode, json_encode, ltrim, max, method_exists, microtime,
+      min, number_format, preg_match, preg_replace, print_r, printf, round,
+      rtrim, serialize, sort, sprintf, str_contains, str_ends_with, str_replace,
+      str_starts_with, strlen, strpos, strtolower, strtoupper, strval, substr,
+      time, trim, uniqid, unserialize, var_dump] },
+      { module: BcMath, symbols: [Number] },
+      { module: Dom, symbols: [HTMLDocument, XMLDocument] },
+      { module: Random, symbols: [Randomizer, RandomError, BrokenRandomEngineError] },
+      { module: Random/Engine, symbols: [Mt19937, PcgOneseq128XslRr64, Xoshiro256StarStar, Secure] }
+    ]
   resolve:
     lookup_from:
       - __source_root
@@ -47,6 +66,8 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(global_declaration $$$N:variable_name)'
+        replace: '(global_names $$$N=>global_name)'
       - match: '(program $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(namespace_definition name: $N:namespace_name body: (compound_statement $$$B))'
@@ -245,6 +266,14 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(global_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "module"))'
+      - match: '(__binding "/^\$/")'
+        append: ['(__declaration "function")']
+      - match: '(__object "/^\$/")'
+        append: ['(__declaration "function")']
+      - match: '(__callee "/^\$/")'
+        append: ['(__declaration "function")']
       - match: '$R:(__ssa_return_type "self")'
         replace: '(__ssa_return_type @$R|ancestor_sym("__class"))'
       - match: '(__ssa_return $V:variable_name)'
@@ -252,10 +281,12 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(__source_file)'
+        tag: { scoped: "module" }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

@@ -156,7 +156,7 @@ The token cache (`crates/gitlab-client/src/cc_token.rs`) refreshes inline on the
 
 - It schedules the next refresh 30 minutes (plus up to 30 seconds of jitter) before the token's `exp`. The synced token lives for days, so each pod usually calls Rails about once per token lifetime.
 - A fetch can fail with an HTTP error, a non-200 status, or a malformed JWT. If a cached token already exists, a failure keeps serving it and blocks further Rails calls for 60 seconds. The same 60-second limit applies to a token Rails returns already close to expiry, so it doesn't cause a fetch per event. Before any token has ever been fetched, there is nothing to rate-limit around, so every call retries immediately.
-- When a cached token exists, the fetch is capped at 15 seconds, matching labkit's own OIDC token source. Otherwise a hung Rails would stall the whole billing send loop, not just this refresh. With no cached token, there's nothing to protect by giving up early, so the fetch waits out `GitlabClient`'s own timeouts instead.
+- While the cached token is still valid, the fetch is capped at 15 seconds, matching labkit's own OIDC token source. Otherwise a hung Rails would stall the whole billing send loop, not just this refresh. With no cached token, or only an expired one, there's nothing to protect by giving up early. The collector would reject the expired token anyway, so the fetch waits out `GitlabClient`'s own timeouts instead.
 - If the cached token has expired and Rails still cannot supply a new one, the cache sends the expired token anyway. The GitLab-hosted collector rejects it with `401`, so the error is visible on GitLab's hosted collector instead of failing silently on the customer's instance.
 
 For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
@@ -203,7 +203,7 @@ end note
 rails -[#2E7D32]> gkg : gRPC call + JWT\n(source_type in claims)
 activate gkg #C8E6C9
 
-gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-open
+gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-closed
 cdot --[#E65100]> gkg : allow / deny
 
 gkg -[#E65100]> ch : execute query
@@ -367,6 +367,8 @@ GKG queries have no per-request namespace context. Every query scopes across all
 
 **Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting. This applies when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
 
+**Orbit behavior without a namespace.** A SaaS request whose JWT has no `root_namespace_id` skips the quota check, and its billing event is dropped (`reason=root_namespace_missing`). CustomersDot attributes SaaS usage to the root namespace, so neither can be resolved. Rails is expected to block these requests before they reach Orbit.
+
 **UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
 
 **JWT wiring.** Rails resolves `knowledge_graph_governing_namespace_id` server-side per request and sets `claims.root_namespace_id` before calling GKG. GKG continues to consume only the signed JWT claim, with no untrusted body field.
@@ -390,7 +392,9 @@ GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs
 | `instance_id` / `unique_instance_id` | JWT claims | attribution on self-managed and Dedicated |
 | `feature_qualified_name` | derived from `source_type` | `orbit_{source_type}`, for example `orbit_mcp` |
 | `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
-| `metadata` | pipeline context | `query_type` plus execution metrics (compile and execute ms, rows) |
+| `metadata` | pipeline context and server build | `query_type`, `orbit_version`, plus execution metrics (compile and execute ms, rows) |
+
+Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting. This runs concurrently with the analytics tracker's own drain, so a slow or dead collector on one side can't delay the other.
 
 **Indexer events (planned for GB-based deployments).** Emitted per indexing batch from the existing `EngineMetrics` at `crates/indexer/src/metrics.rs`:
 
@@ -427,11 +431,11 @@ self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 // A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
 ```
 
-**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails open and is not cached. Orbit never logs or re-serializes the claim.
+**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails closed and is not cached. Orbit never logs or re-serializes the claim.
 
-**Cache behavior.** GKG queries CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; fail-open results are not.
+**Cache behavior.** GKG sends a `GET` to CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Redirects are not followed. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; failed checks are not, so the next request retries CustomersDot.
 
-**Fail-open vs fail-closed.** If CustomersDot is unreachable or returns an unexpected status, the query proceeds (fail-open). A billing-service outage should not block query execution.
+**Fail-closed.** Only a CustomersDot `200` allows the query. A `402` denies it, and so does every other outcome: `401`, `403`, `422`, any other status, a timeout, or a connection failure. This matches the AI Gateway, which denies on any quota-check error so an outage or a rejected credential cannot become unmetered usage. Failed checks return the same `RESOURCE_EXHAUSTED` status and `GITLAB_CREDITS_EXHAUSTED` reason as a `402`. Workhorse only maps that reason to a `402` response. The message differs: "Unable to verify GitLab credits" instead of "GitLab credits exhausted". Failed checks are recorded as `decision=fail_closed`. When the response body carries a CustomersDot `block_reason`, the gate logs it, including for cached denials.
 
 **Enforced builds.** A binary built with `ORBIT_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
 

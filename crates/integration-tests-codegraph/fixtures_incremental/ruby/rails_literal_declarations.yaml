@@ -1,0 +1,100 @@
+name: Rails literal declarations preserve Ruby receiver boundaries
+fixtures:
+  - path: app/models/post.rb
+    content: |
+      class Post
+        class_attribute :limit, :mode, default: 10
+        mattr_accessor :enabled
+        cattr_reader :category
+        has_and_belongs_to_many :tags
+        belongs_to :author, optional: true
+        delegate :title, :description, to: :author
+        def_delegator :@author, :name, :author_name
+        define_method("label") { title }
+        def original; end
+        alias :renamed :original
+        def alias_call; renamed; end
+        def inspect_record
+          limit
+          mode
+          enabled
+          category
+          tags
+          author
+          title
+          description
+          author_name
+          label
+        end
+      end
+  - path: lib/ordinary.rb
+    content: |
+      class Ordinary
+        def after_create(value); end
+        def invoke(service)
+          after_create(service)
+          service.has_many(:not_an_association)
+          service.class_attribute(:not_an_attribute)
+          service.delegate(:not_a_delegate)
+          service.define_method(:not_our_method) {}
+        end
+        define_method(dynamic_name) { "dynamic" }
+      end
+tests:
+  - name: Literal declarations create precisely the intended names
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Post::inspect_record'
+      RETURN target.name AS name
+    assert:
+      - { row_count: 10 }
+      - { column_values: { field: name, values: [limit, mode, enabled, category, tags, author, title, description, author_name, label] } }
+  - name: Options and delegated source names are not generated methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['default', 'optional', 'to', 'name', 'not_an_association', 'not_an_attribute', 'not_a_delegate', 'not_our_method', 'dynamic_name']
+      RETURN d.fqn
+    assert:
+      - { empty: true }
+  - name: Ordinary same-named methods keep their calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Ordinary::invoke'
+      RETURN target.fqn AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'Ordinary::after_create' } }
+  - name: Literal method alias keeps its original target
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(alias:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Post::alias_call'
+      RETURN alias.fqn AS alias, target.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { alias: 'Post::renamed', target: 'Post::original' } }
+steps:
+  - name: Rename a generated declaration after snapshot loading
+    snapshot: true
+    modify:
+      - path: app/models/post.rb
+        content: |
+          class Post
+            class_attribute :updated_limit
+            def inspect_record; updated_limit; end
+          end
+    tests:
+      - name: Only the current generated declaration remains reachable
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.fqn = 'Post::inspect_record'
+          RETURN target.fqn AS name
+        assert:
+          - { row_count: 1 }
+          - { row: { name: 'Post::updated_limit' } }
+      - name: Removed declarations do not survive the snapshot edit
+        query: |
+          MATCH (d:Definition)
+          WHERE d.fqn IN ['Post::limit', 'Post::mode', 'Post::tags', 'Post::label', 'Post::renamed']
+          RETURN d.fqn
+        assert:
+          - { empty: true }

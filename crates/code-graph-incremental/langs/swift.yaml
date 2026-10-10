@@ -4,6 +4,18 @@
 # init, self./super. calls, control flow.
 
 config:
+  stdlib: [
+      { module: Swift, availability: implicit, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
+      getVaList, isKnownUniquelyReferenced, max, min, numericCast, precondition,
+      preconditionFailure, print, readLine, repeatElement, sequence, stride,
+      swap, type, unsafeBitCast, unsafeDowncast, withExtendedLifetime,
+      withUnsafeBytes, withUnsafeMutableBytes, withUnsafeMutablePointer,
+      withUnsafePointer, withVaList, withoutActuallyEscaping, zip] },
+      { module: Foundation, symbols: [NSLog, NSStringFromClass, NSClassFromString,
+          NSStringFromSelector, NSSelectorFromString, NSHomeDirectory,
+          NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains] },
+      { module: Dispatch }, { module: Darwin }, { module: Glibc }, { module: ObjectiveC },
+      { module: Combine }, { module: SwiftUI }, { module: UIKit }, { module: AppKit }, { module: XCTest }]
   resolve:
     lookup_from:
       - __source_root
@@ -59,16 +71,16 @@ stages:
 
   - name: classify
     rules:
-      - match: '(property_declaration (pattern name: $N:simple_identifier) (type_annotation $T:type_identifier) $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
-      - match: '(property_declaration (pattern name: $N:simple_identifier) (type_annotation $T:type_identifier))'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
-      - match: '(property_declaration (pattern name: $N:simple_identifier) value: $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
-      - match: '(property_declaration (pattern name: $N:simple_identifier) value: $V)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
-      - match: '(property_declaration (pattern name: $N:simple_identifier) $$$R)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N) $$$R)'
+      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V:__call)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
+      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V)))'
+      - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) $$$R)'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration)) $$$R)'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R:__call)'
         replace: '(__binding $T (__rhs $R))'
       - match: '(assignment target: (directly_assignable_expression $T:__ivar) result: $R)'
@@ -116,6 +128,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(statements $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:simple_identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

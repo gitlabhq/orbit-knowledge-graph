@@ -1,0 +1,19 @@
+name: Odd path depths split the frontier and prune each scoped expansion
+query:
+  json: |
+    {"query_type":"path_finding","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["CALLS"]}}
+  gql: |
+    MATCH p = ANY SHORTEST (a:Definition {id: 1})-[:CALLS*1..3]->(b:Definition {id: 2}) RETURN p
+logical:
+  expect: ["(Input path_finding (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(PathFinding a->b depth=3 forward=2 backward=1 scoped=true ... (_) (_))"]
+    emitted:
+      ctes:
+        exact_order: [_nf_a, _nf_b, _path_scope_traversal_paths, forward, backward]
+      expect:
+        - (CTE forward (Union ALL (_) (_)))
+        - (Join ON (e1.target_id = e2.source_id) AND (e1.traversal_path = e2.traversal_path) AND (e2.relationship_kind = 'CALLS') AND e2.traversal_path IN _path_scope_traversal_paths.traversal_path AND (e2._deleted = false) (_) (_))
+        - (Filter (f.depth + b.depth) <= 3 (_))

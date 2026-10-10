@@ -16,6 +16,20 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 102
+  scope: none
+  note: >-
+    Adds the hidden flag to traversal_path on 30 nodes. The flag is read only by
+    the client-facing schema, wildcard column, and error-candidate surfaces; extract
+    SQL, transform output, and DDL are unchanged, so every indexed row is
+    byte-identical.
+- version: 101
+  scope: "*"
+  note: >-
+    Text and ngram skip indexes are keyed on lower(column) and every path index
+    tokenizes on splitByNonAlpha, so string operators are indexed and case-insensitive.
+    ATTACH PARTITION FROM rejects parts whose skip-index definitions differ, so a
+    clone cannot carry them and every table rebuilds.
 - version: 100
   scope: "*"
   note: >-

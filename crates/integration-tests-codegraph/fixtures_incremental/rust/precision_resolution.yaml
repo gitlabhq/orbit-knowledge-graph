@@ -161,6 +161,14 @@ fixtures:
       }
 
 tests:
+  - name: "imported macro invocations do not become external function calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['external_imported_calls', 'qualified_external_imported_calls']
+        AND sym.import_path IN ['tracing::info', 'serde_json::json', 'external_macros']
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { empty: true }
   - name: "module aliases resolve callable paths"
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
@@ -187,23 +195,17 @@ tests:
       - { empty: true }
 
   - name: "external imported Rust calls target imported symbols"
-    # Known gap: Imported-symbol rows for external crates differ from the old pipeline.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, name, alias
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { caller: "external_imported_calls", path: "external_actions::do_work", name: "do_work", alias: null } }
       - { row: { caller: "external_imported_calls", path: "external_actions::renamed", name: "renamed", alias: "renamed_work" } }
-      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json", alias: null } }
-      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
 
   - name: "local callable shadowing does not target imported symbols"
-    # Known gap: Field-sensitive local flow and shadowing are not modelled.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'local_callable_shadows_external_import'
@@ -211,16 +213,15 @@ tests:
     assert:
       - { empty: true }
 
-  - name: "function-scoped Rust imports only affect their own function"
-    # Known gap: rust.yaml does not model this yet.
-    skip: true
+  - name: "function-scoped imports stay local while out-of-scope calls use the wildcard"
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name
       ORDER BY caller
     assert:
-      - { row_count: 2 }
+      - { row_count: 3 }
+      - { row: { caller: "scoped_import_out_of_scope", path: "external_actions", name: "*" } }
       - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
       - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
 
@@ -236,18 +237,15 @@ tests:
       - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
 
   - name: "qualified Rust external imports target imported symbols"
-    # Known gap: Some enum variant, record and extern definitions are not emitted the way the suite expects.
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.name = 'qualified_external_imported_calls'
       RETURN caller.name AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY path, alias
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
-      - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
     query: |

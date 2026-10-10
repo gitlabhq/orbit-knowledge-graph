@@ -14,6 +14,7 @@ pub struct Args {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
+    ClickhouseSetup,
     DispatchIndexing,
     HealthCheck,
     Indexer,
@@ -27,6 +28,7 @@ impl Mode {
             Self::Indexer => "gkg-indexer",
             Self::DispatchIndexing => "gkg-dispatcher",
             Self::HealthCheck => "gkg-healthcheck",
+            Self::ClickhouseSetup => "gkg-clickhouse-setup",
         }
     }
 }

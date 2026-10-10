@@ -9,11 +9,28 @@ use crate::synth::config::{Config, EdgeRatio};
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
 use ontology::{NodeEntity, Ontology};
-use rand::{Rng, RngExt};
+use rand::rngs::Xoshiro256PlusPlus;
+use rand::{Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+
+/// Stable per-stream seed (FNV-1a + splitmix64); unlike DefaultHasher it never changes across builds.
+fn derive_seed(base: u64, org_id: u32, stream: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in base
+        .to_le_bytes()
+        .iter()
+        .chain(&org_id.to_le_bytes())
+        .chain(stream.as_bytes())
+    {
+        h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    h ^ (h >> 31)
+}
 
 /// In production, edges are scoped to the namespace where the resource lives.
 /// For association edges between a global entity (e.g. User at `1/`) and a
@@ -77,6 +94,7 @@ pub struct Generator {
     global_entity_counter: AtomicI64,
     interner: std::sync::Mutex<StringInterner>,
     pools: &'static FakeDataPools,
+    seed: u64,
 }
 
 impl std::fmt::Debug for Generator {
@@ -98,6 +116,11 @@ impl Generator {
         let fake_data_config = FakeDataConfig::load(&config.generation.fake_data_path)?;
         let pools = FakeDataPools::intern(fake_data_config);
 
+        let seed = config
+            .generation
+            .seed
+            .unwrap_or_else(|| rand::rng().random());
+
         Ok(Self {
             ontology,
             config,
@@ -105,7 +128,24 @@ impl Generator {
             global_entity_counter: AtomicI64::new(1),
             interner: std::sync::Mutex::new(StringInterner::default()),
             pools,
+            seed,
         })
+    }
+
+    fn stream_seed(&self, org_id: u32, stream: &str) -> u64 {
+        derive_seed(self.seed, org_id, stream)
+    }
+
+    fn stream_rng(&self, org_id: u32, stream: &str) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(self.stream_seed(org_id, stream))
+    }
+
+    /// Unseeded runs keep random fake values and wall-clock timestamps.
+    fn fake_seed(&self, org_id: u32, stream: &str) -> Option<u64> {
+        self.config
+            .generation
+            .seed
+            .map(|_| self.stream_seed(org_id, stream))
     }
 
     fn validate_config(config: &Config, ontology: &Ontology) -> Result<()> {
@@ -340,9 +380,9 @@ impl Generator {
     pub fn generate_organization(&self, org_id: u32) -> Result<OrganizationData> {
         let mut data = OrganizationData::default();
         let mut registry = EntityRegistry::new(org_id);
-        let mut rng = rand::rng();
 
         for node_type in self.dependency_graph.generation_order() {
+            let mut rng = self.stream_rng(org_id, &format!("structure:{node_type}"));
             let real_type = self.dependency_graph.resolve_type(node_type);
             let node = self
                 .ontology
@@ -390,7 +430,7 @@ impl Generator {
 
         registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
 
-        let association_edges = self.generate_association_edges(&registry, &mut rng);
+        let association_edges = self.generate_association_edges(&registry);
         data.edges.extend(association_edges);
 
         Ok(data)
@@ -403,9 +443,9 @@ impl Generator {
     ) -> Result<OrganizationNodes> {
         let mut data = OrganizationNodes::default();
         let mut registry = EntityRegistry::new(org_id);
-        let mut rng = rand::rng();
 
         for node_type in self.dependency_graph.generation_order() {
+            let mut rng = self.stream_rng(org_id, &format!("structure:{node_type}"));
             let real_type = self.dependency_graph.resolve_type(node_type);
             let node = self
                 .ontology
@@ -425,14 +465,8 @@ impl Generator {
                     .unwrap_or(0);
 
                 if count > 0 {
-                    let batches = self.generate_root_entities_streaming(
-                        node,
-                        org_id,
-                        count,
-                        &mut registry,
-                        &mut rng,
-                        edge_writer,
-                    )?;
+                    let batches =
+                        self.generate_root_entities_streaming(node, org_id, count, &mut registry)?;
                     data.nodes
                         .entry(real_type.to_string())
                         .or_default()
@@ -457,7 +491,7 @@ impl Generator {
         }
 
         registry.compact_with_aliases(self.dependency_graph.epsilon_to_real());
-        self.generate_association_edges_streaming(&registry, &mut rng, edge_writer)?;
+        self.generate_association_edges_streaming(&registry, edge_writer)?;
 
         Ok(data)
     }
@@ -475,7 +509,7 @@ impl Generator {
             node,
             schema,
             self.config.generation.batch_size,
-            self.config.generation.seed,
+            self.fake_seed(org_id, &format!("fake:{}", node.name)),
             self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
@@ -508,7 +542,7 @@ impl Generator {
             node,
             schema,
             self.config.generation.batch_size,
-            self.config.generation.seed,
+            self.fake_seed(registry.org_id(), &format!("fake:{registry_key}")),
             self.pools,
         );
         let mut edges = Vec::new();
@@ -579,11 +613,7 @@ impl Generator {
         Ok((builder.finish(), edges))
     }
 
-    fn generate_association_edges(
-        &self,
-        registry: &EntityRegistry,
-        rng: &mut impl Rng,
-    ) -> Vec<EdgeRecord> {
+    fn generate_association_edges(&self, registry: &EntityRegistry) -> Vec<EdgeRecord> {
         use crate::synth::config::IterationDirection;
 
         let mut edges = Vec::new();
@@ -591,6 +621,8 @@ impl Generator {
         for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
         {
+            let stream = format!("assoc:{edge_type}:{source_kind}->{target_kind}");
+            let rng = &mut self.stream_rng(registry.org_id(), &stream);
             let source_ids = match registry.get_ids_slice(&source_kind) {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
@@ -646,15 +678,13 @@ impl Generator {
         org_id: u32,
         count: usize,
         registry: &mut EntityRegistry,
-        _rng: &mut impl Rng,
-        _edge_writer: &mut StreamingEdgeWriter,
     ) -> Result<Vec<RecordBatch>> {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::with_seed(
             node,
             schema,
             self.config.generation.batch_size,
-            self.config.generation.seed,
+            self.fake_seed(org_id, &format!("fake:{}", node.name)),
             self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
@@ -688,7 +718,7 @@ impl Generator {
             node,
             schema,
             self.config.generation.batch_size,
-            self.config.generation.seed,
+            self.fake_seed(registry.org_id(), &format!("fake:{registry_key}")),
             self.pools,
         );
         let is_namespace_entity = node.name == self.config.generation.namespace_entity;
@@ -761,7 +791,6 @@ impl Generator {
     fn generate_association_edges_streaming(
         &self,
         registry: &EntityRegistry,
-        rng: &mut impl Rng,
         edge_writer: &mut StreamingEdgeWriter,
     ) -> Result<()> {
         use crate::synth::config::IterationDirection;
@@ -769,6 +798,8 @@ impl Generator {
         for (edge_type, source_kind, target_kind, ratio, direction) in
             self.config.generation.associations.all_associations()
         {
+            let stream = format!("assoc:{edge_type}:{source_kind}->{target_kind}");
+            let rng = &mut self.stream_rng(registry.org_id(), &stream);
             let source_ids = match registry.get_ids_slice(&source_kind) {
                 Some(ids) if !ids.is_empty() => ids,
                 _ => continue,
@@ -944,6 +975,9 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
     );
 
     let generator = Generator::new(ontology.clone(), config.clone())?;
+    if let Some(seed) = config.generation.seed {
+        println!("Seed: {seed}\n");
+    }
     generator.print_plan();
 
     if dry_run {
@@ -1015,7 +1049,7 @@ mod tests {
         RelationshipConfig,
     };
     use arrow::array::Array;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeMap, HashSet};
 
     fn fake_data_path() -> String {
         crate::synth::fixture_path(crate::synth::constants::DEFAULT_FAKE_DATA_PATH)
@@ -1045,12 +1079,12 @@ mod tests {
     fn test_config_and_ontology() -> (Config, Ontology) {
         let ontology = Ontology::load_embedded().expect("should load embedded ontology");
 
-        let mut roots = HashMap::new();
+        let mut roots = BTreeMap::new();
         roots.insert("User".to_string(), 5);
         roots.insert("Group".to_string(), 2);
 
-        let mut rel_edges = HashMap::new();
-        let mut contains_variants = HashMap::new();
+        let mut rel_edges = BTreeMap::new();
+        let mut contains_variants = BTreeMap::new();
         contains_variants.insert(
             "Group -> Group".to_string(),
             EdgeRatio::Recursive {
@@ -1061,12 +1095,12 @@ mod tests {
         contains_variants.insert("Group -> Project".to_string(), EdgeRatio::Count(3));
         rel_edges.insert("CONTAINS".to_string(), contains_variants);
 
-        let mut in_project_variants = HashMap::new();
+        let mut in_project_variants = BTreeMap::new();
         in_project_variants.insert("MergeRequest -> Project".to_string(), EdgeRatio::Count(2));
         rel_edges.insert("IN_PROJECT".to_string(), in_project_variants);
 
-        let mut assoc_edges = HashMap::new();
-        let mut authored_variants = HashMap::new();
+        let mut assoc_edges = BTreeMap::new();
+        let mut authored_variants = BTreeMap::new();
         authored_variants.insert(
             "User -> MergeRequest".to_string(),
             AssociationEdgeValue::Simple(EdgeRatio::Count(1)),
@@ -1241,6 +1275,106 @@ mod tests {
         }
     }
 
+    type EdgeRow = (String, String, i64, String, i64, String);
+
+    fn snapshot(data: &OrganizationData) -> (Vec<(String, Vec<RecordBatch>)>, Vec<EdgeRow>) {
+        let mut nodes: Vec<_> = data
+            .nodes
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        nodes.sort_by(|a, b| a.0.cmp(&b.0));
+        let edges = data
+            .edges
+            .iter()
+            .map(|e| {
+                let s = |v: &IStr| v.to_string();
+                (
+                    s(&e.traversal_path),
+                    s(&e.relationship_kind),
+                    e.source,
+                    s(&e.source_kind),
+                    e.target,
+                    s(&e.target_kind),
+                )
+            })
+            .collect();
+        (nodes, edges)
+    }
+
+    fn generate_with_seed(seed: u64) -> OrganizationData {
+        let (mut config, ontology) = test_config_and_ontology();
+        config.generation.seed = Some(seed);
+        Generator::new(ontology, config)
+            .unwrap()
+            .generate_organization(1)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_generator_same_seed_is_deterministic() {
+        assert_eq!(
+            snapshot(&generate_with_seed(42)),
+            snapshot(&generate_with_seed(42))
+        );
+    }
+
+    #[test]
+    fn test_generator_different_seed_differs() {
+        assert_ne!(
+            snapshot(&generate_with_seed(42)),
+            snapshot(&generate_with_seed(43))
+        );
+    }
+
+    #[test]
+    fn test_derive_seed_is_stable() {
+        assert_eq!(
+            derive_seed(42, 1, "structure:Project"),
+            16_745_228_925_137_185_783
+        );
+        assert_ne!(
+            derive_seed(42, 1, "fake:User"),
+            derive_seed(42, 2, "fake:User")
+        );
+        assert_ne!(
+            derive_seed(42, 1, "fake:Group"),
+            derive_seed(42, 1, "fake:Group@1")
+        );
+    }
+
+    #[test]
+    fn test_streaming_parquet_output_is_byte_identical() {
+        let write = |dir: &Path| -> Vec<(String, Vec<u8>)> {
+            let (config, ontology) = test_config_and_ontology();
+            let generator = Generator::new(ontology, config).unwrap();
+            let writer = ParquetWriter::new(dir);
+            let mut edges = writer.create_edge_writer(1, generator.ontology()).unwrap();
+            let nodes = generator
+                .generate_organization_streaming(1, &mut edges)
+                .unwrap();
+            writer.write_organization_nodes(1, &nodes).unwrap();
+            edges.close().unwrap();
+            let mut files: Vec<_> = std::fs::read_dir(dir.join("org_1"))
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .map(|p| {
+                    (
+                        p.file_name().unwrap().to_string_lossy().into_owned(),
+                        std::fs::read(&p).unwrap(),
+                    )
+                })
+                .collect();
+            files.sort();
+            files
+        };
+        let root = std::env::temp_dir().join(format!("synth-determinism-{}", std::process::id()));
+        let (a, b) = (write(&root.join("a")), write(&root.join("b")));
+        std::fs::remove_dir_all(&root).ok();
+        assert!(!a.is_empty());
+        assert_eq!(a, b);
+    }
+
     #[test]
     fn test_generator_global_entity_counter_across_orgs() {
         let (config, ontology) = test_config_and_ontology();
@@ -1297,7 +1431,7 @@ mod tests {
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-        let mut contains = HashMap::new();
+        let mut contains = BTreeMap::new();
         contains.insert("Group -> Group".to_string(), EdgeRatio::Count(2));
         config
             .generation
@@ -1317,7 +1451,7 @@ mod tests {
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-        let mut contains = HashMap::new();
+        let mut contains = BTreeMap::new();
         contains.insert(
             "Group -> Project".to_string(),
             EdgeRatio::Recursive {
@@ -1338,7 +1472,7 @@ mod tests {
     fn test_validation_rejects_unknown_association_edge() {
         let ontology = Ontology::load_embedded().unwrap();
         let (mut config, _) = test_config_and_ontology();
-        let mut fake_variants = HashMap::new();
+        let mut fake_variants = BTreeMap::new();
         fake_variants.insert(
             "User -> Project".to_string(),
             AssociationEdgeValue::Simple(EdgeRatio::Count(1)),
@@ -1359,7 +1493,7 @@ mod tests {
     fn test_validation_rejects_unknown_association_node() {
         let ontology = Ontology::load_embedded().unwrap();
         let (mut config, _) = test_config_and_ontology();
-        let mut fake_variants = HashMap::new();
+        let mut fake_variants = BTreeMap::new();
         fake_variants.insert(
             "FakeNode -> User".to_string(),
             AssociationEdgeValue::Simple(EdgeRatio::Count(1)),
@@ -1403,7 +1537,7 @@ mod tests {
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("User".to_string(), 1);
         config.generation.roots.insert("Group".to_string(), 1);
-        let mut fake_variants = HashMap::new();
+        let mut fake_variants = BTreeMap::new();
         fake_variants.insert("Group -> Project".to_string(), EdgeRatio::Count(1));
         config
             .generation
@@ -1422,7 +1556,7 @@ mod tests {
         let mut config = Config::default();
         config.generation.fake_data_path = fake_data_path();
         config.generation.roots.insert("Group".to_string(), 1);
-        let mut variants = HashMap::new();
+        let mut variants = BTreeMap::new();
         variants.insert("Group -> FakeChild".to_string(), EdgeRatio::Count(1));
         config
             .generation

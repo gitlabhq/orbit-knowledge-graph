@@ -2,14 +2,16 @@
 
 use orbit_server_config::QueryConfig;
 
-use crate::ast::{ChType, Cte, Expr, Insert, JoinType, Node, Op, Query, TableRef};
+use crate::ast::{
+    Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
+};
 use crate::error::Result;
 use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::{ParamValue, ParameterizedQuery, SqlDialect};
-use orbit_utils::clickhouse::ParamBindings;
+use orbit_utils::query_types::ParamBindings;
 
 pub fn codegen(
     ast: &Node,
@@ -21,6 +23,9 @@ pub fn codegen(
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if let Some(error) = ctx.error {
+        return Err(crate::error::QueryError::Codegen(error));
+    }
 
     // SETTINGS — only on SELECT queries, not INSERT or subqueries/UNION arms.
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
@@ -59,17 +64,22 @@ pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamVa
         Node::Query(q) => ctx.emit_query(q)?,
         Node::Insert(ins) => ctx.emit_insert(ins),
     };
+    if let Some(error) = ctx.error {
+        return Err(crate::error::QueryError::Codegen(error));
+    }
     Ok((sql, ctx.params.into_map()))
 }
 
 struct Context {
     params: ParamBindings,
+    error: Option<String>,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
             params: ParamBindings::default(),
+            error: None,
         }
     }
 
@@ -114,7 +124,7 @@ impl Context {
         let cte_parts: Vec<String> = ctes
             .iter()
             .map(|cte| {
-                let inner = self.emit_query_body(&cte.query)?;
+                let inner = self.emit_query(&cte.query)?;
                 if cte.materialized {
                     Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
                 } else {
@@ -164,7 +174,12 @@ impl Context {
         }
 
         for union_q in &q.union_all {
-            parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
+            let arm = self.emit_query(union_q)?;
+            parts.push(if union_q.ctes.is_empty() {
+                format!("UNION ALL {arm}")
+            } else {
+                format!("UNION ALL ({arm})")
+            });
         }
 
         // ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an
@@ -205,11 +220,88 @@ impl Context {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
             Expr::Identifier(name) => name.clone(),
+            Expr::EmptyTupleArray(fields) => format!(
+                "CAST([], 'Array(Tuple({}))')",
+                fields
+                    .iter()
+                    .map(|field| orbit_utils::clickhouse::type_name(*field))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => {
+                if !name.accepts_arity(args.len()) {
+                    self.error = Some(format!("{name} does not accept {} arguments", args.len()));
+                    return String::new();
+                }
+                let name = function_name(*name);
                 let args: Vec<_> = args.iter().map(|a| self.emit_expr(a)).collect();
                 format!("{}({})", name, args.join(", "))
+            }
+            Expr::TimeBucket { unit, value } => {
+                use crate::input::TruncateUnit;
+                let function = match unit {
+                    TruncateUnit::Minute => "toStartOfMinute",
+                    TruncateUnit::Hour => "toStartOfHour",
+                    TruncateUnit::Day => "toStartOfDay",
+                    TruncateUnit::Week => "toStartOfWeek",
+                    TruncateUnit::Month => "toStartOfMonth",
+                    TruncateUnit::Quarter => "toStartOfQuarter",
+                    TruncateUnit::Year => "toStartOfYear",
+                };
+                let bucket = format!("{function}({})", self.emit_expr(value));
+                if matches!(unit, TruncateUnit::Minute | TruncateUnit::Hour) {
+                    format!("toDateTime64({bucket}, 0)")
+                } else {
+                    format!("toDate32({bucket})")
+                }
+            }
+            Expr::TextSearch { mode, value, query } => {
+                let (value, query) = (self.emit_expr(value), self.emit_expr(query));
+                match mode {
+                    TextMatch::Contains => format!("multiSearchAny({value}, [{query}])"),
+                    TextMatch::TokenMatch => format!("hasToken({value}, {query})"),
+                    TextMatch::AllTokens => format!("hasAllTokens({value}, {query})"),
+                    TextMatch::AnyTokens => format!("hasAnyTokens({value}, {query})"),
+                }
+            }
+            Expr::Aggregate {
+                function,
+                argument,
+                distinct,
+                condition,
+            } => {
+                if let Err(error) =
+                    super::validate_aggregate(*function, argument.as_deref(), *distinct)
+                {
+                    self.error = Some(error);
+                    return String::new();
+                }
+                let base = match function {
+                    crate::input::AggFunction::Count => "count",
+                    crate::input::AggFunction::Sum => "sum",
+                    crate::input::AggFunction::Avg => "avg",
+                    crate::input::AggFunction::Min => "min",
+                    crate::input::AggFunction::Max => "max",
+                    crate::input::AggFunction::Collect => "groupArray",
+                };
+                let name = if *distinct || condition.is_some() {
+                    format!(
+                        "{base}{}{}",
+                        if *distinct { "Distinct" } else { "" },
+                        if condition.is_some() { "If" } else { "" }
+                    )
+                } else if base == "groupArray" {
+                    base.into()
+                } else {
+                    base.to_uppercase()
+                };
+                let mut args: Vec<_> = argument.iter().map(|value| self.emit_expr(value)).collect();
+                if let Some(condition) = condition {
+                    args.push(self.emit_expr(condition));
+                }
+                format!("{name}({})", args.join(", "))
             }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);
@@ -257,28 +349,27 @@ impl Context {
         }
     }
 
-    fn emit_param(&mut self, data_type: ChType, v: &Value) -> String {
+    fn emit_param(&mut self, data_type: SqlType, v: &Value) -> String {
+        let type_name = orbit_utils::clickhouse::type_name(data_type);
         match v {
             Value::Null => "NULL".into(),
-            // Array ChType: bind the whole array as a single ClickHouse Array(T) param.
-            Value::Array(_) if matches!(data_type, ChType::Array(_)) => {
+            Value::Array(_) if matches!(data_type, SqlType::Array(_)) => {
                 let name = self.params.intern(data_type, v);
-                format!("{{{name}:{data_type}}}")
+                format!("{{{name}:{type_name}}}")
             }
-            // Scalar ChType with array value: expand element-by-element.
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
                     .map(|item| {
                         let name = self.params.intern(data_type, item);
-                        format!("{{{name}:{data_type}}}")
+                        format!("{{{name}:{type_name}}}")
                     })
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
             _ => {
                 let name = self.params.intern(data_type, v);
-                format!("{{{name}:{data_type}}}")
+                format!("{{{name}:{type_name}}}")
             }
         }
     }
@@ -289,11 +380,11 @@ impl Context {
             Value::Array(arr) => {
                 let placeholders: Vec<_> = arr
                     .iter()
-                    .map(|item| self.emit_param(ChType::from_value(item), item))
+                    .map(|item| self.emit_param(SqlType::from_value(item), item))
                     .collect();
                 format!("({})", placeholders.join(", "))
             }
-            _ => self.emit_param(ChType::from_value(v), v),
+            _ => self.emit_param(SqlType::from_value(v), v),
         }
     }
 
@@ -340,6 +431,38 @@ impl Context {
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
+    }
+}
+
+pub(crate) fn function_name(function: Function) -> &'static str {
+    match function {
+        Function::StartsWith => "startsWith",
+        Function::EndsWith => "endsWith",
+        Function::Lower => "lower",
+        Function::ToString => "toString",
+        Function::ToJson => "toJSONString",
+        Function::Object => "map",
+        Function::If => "if",
+        Function::Coalesce => "coalesce",
+        Function::ByteLength => "length",
+        Function::Substring => "substringUTF8",
+        Function::Concat => "concat",
+        Function::CountSubstrings => "countSubstrings",
+        Function::Array => "array",
+        Function::Tuple => "tuple",
+        Function::ArrayConcat => "arrayConcat",
+        Function::ArrayReverse => "arrayReverse",
+        Function::ArrayResize => "arrayResize",
+        Function::ArrayContains => "has",
+        Function::ArrayContainsAny => "hasAny",
+        Function::ArrayContainsAll => "hasAll",
+        Function::ArrayFilter => "arrayFilter",
+        Function::ArrayMap => "arrayMap",
+        Function::ArrayExists => "arrayExists",
+        Function::Unnest => "arrayJoin",
+        Function::TupleElement => "tupleElement",
+        Function::ArgMax => "argMax",
+        Function::ArgMaxOrNull => "argMaxOrNull",
     }
 }
 
@@ -430,14 +553,17 @@ mod tests {
                     alias: Some("type".into()),
                 },
                 SelectExpr {
-                    expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                    expr: Expr::aggregate(
+                        crate::input::AggFunction::Count,
+                        Some(Expr::col("n", "id")),
+                    ),
                     alias: Some("count".into()),
                 },
             ],
             from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
             order_by: vec![OrderExpr {
-                expr: Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                expr: Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 desc: true,
             }],
             ..Default::default()
@@ -539,7 +665,7 @@ mod tests {
     fn param_interning() {
         let mut ctx = Context::new();
         let array = Value::Array(vec![Value::from("1/2/"), Value::from("1/3/")]);
-        let array_type = ChType::Array(crate::ast::ChScalar::String);
+        let array_type = SqlType::Array(crate::ast::ScalarType::String);
 
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
         assert_eq!(ctx.emit_literal(&Value::from("dup")), "{p0:String}");
@@ -547,7 +673,13 @@ mod tests {
         assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
         assert_eq!(ctx.emit_param(array_type, &array), "{p2:Array(String)}");
         assert_eq!(
-            ctx.emit_param(ChType::DateTime64, &Value::from("dup")),
+            ctx.emit_param(
+                SqlType::Timestamp {
+                    precision: 6,
+                    timezone: Some(crate::ast::TimeZone::Utc)
+                },
+                &Value::from("dup")
+            ),
             "{p3:DateTime64(6, 'UTC')}"
         );
         assert_eq!(ctx.params.into_map().len(), 4);
@@ -604,7 +736,7 @@ mod tests {
         let type_filter = Expr::col_in(
             "e",
             "relationship_kind",
-            ChType::String,
+            SqlType::String,
             vec![
                 Value::String("AUTHORED".into()),
                 Value::String("CONTAINS".into()),
@@ -659,13 +791,16 @@ mod tests {
         let q = Query {
             select: vec![
                 SelectExpr::new(Expr::col("n", "label"), "type"),
-                SelectExpr::new(Expr::func("COUNT", vec![Expr::col("n", "id")]), "count"),
+                SelectExpr::new(
+                    Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
+                    "count",
+                ),
             ],
             from: TableRef::scan("nodes", "n"),
             group_by: vec![Expr::col("n", "label")],
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(5),
             )),
             ..Default::default()
@@ -687,13 +822,13 @@ mod tests {
     fn having_without_group_by() {
         let q = Query {
             select: vec![SelectExpr::new(
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 "total",
             )],
             from: TableRef::scan("nodes", "n"),
             having: Some(Expr::binary(
                 Op::Gt,
-                Expr::func("COUNT", vec![Expr::col("n", "id")]),
+                Expr::aggregate(crate::input::AggFunction::Count, Some(Expr::col("n", "id"))),
                 Expr::lit(0),
             )),
             ..Default::default()
@@ -746,7 +881,7 @@ mod tests {
             group_by: vec![Expr::col("e", "source_id")],
             having: Some(Expr::eq(
                 Expr::func(
-                    "argMax",
+                    Function::ArgMax,
                     vec![Expr::col("e", "_deleted"), Expr::col("e", "_version")],
                 ),
                 Expr::lit(false),
@@ -973,14 +1108,14 @@ mod tests {
         params.insert(
             "p0".into(),
             ParamValue {
-                ch_type: ChType::String,
+                data_type: SqlType::String,
                 value: Value::from("User"),
             },
         );
         params.insert(
             "p1".into(),
             ParamValue {
-                ch_type: ChType::String,
+                data_type: SqlType::String,
                 value: Value::from("active"),
             },
         );
@@ -1005,14 +1140,14 @@ mod tests {
         params.insert(
             "p0".into(),
             ParamValue {
-                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::String),
+                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::String),
                 value: serde_json::json!(["a", "b"]),
             },
         );
         params.insert(
             "p1".into(),
             ParamValue {
-                ch_type: ChType::Array(orbit_utils::clickhouse::ChScalar::Int64),
+                data_type: SqlType::Array(orbit_utils::query_types::ScalarType::Int64),
                 value: serde_json::json!([10, 20]),
             },
         );

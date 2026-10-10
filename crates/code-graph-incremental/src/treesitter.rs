@@ -129,6 +129,23 @@ impl SupportLang {
             .map_or_else(|| self.into(), |(name, _)| name.as_str())
     }
 
+    /// Whether a rule file exists for the language; a grammar alone only
+    /// lists files.
+    pub fn has_rules(self) -> bool {
+        lang_yaml(self).is_some()
+    }
+
+    /// The language that stands for a family name (`js_ts`, `rust`): the
+    /// family's first member, or the language itself.
+    pub fn from_family(name: &str) -> Option<Self> {
+        match LANG_CONFIG.families.get(name) {
+            Some(family) => family.members.first().copied(),
+            None => all_languages()
+                .map(|(lang, _)| lang)
+                .find(|lang| <&str>::from(*lang) == name),
+        }
+    }
+
     /// The family's members in declared order; a standalone language alone.
     pub fn family_members(self) -> Vec<Self> {
         LANG_CONFIG
@@ -277,11 +294,6 @@ fn from_tree_sitter(
         let field = cursor
             .field_id()
             .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
-        let sym = if ts.is_named() && ts.named_child_count() == 0 {
-            lang.syms.intern(&source[ts.start_byte()..ts.end_byte()])
-        } else {
-            0
-        };
         let sp = ts.start_position();
         let ep = ts.end_position();
 
@@ -293,7 +305,7 @@ fn from_tree_sitter(
                 field,
                 named: ts.is_named(),
                 synth: false,
-                sym,
+                sym: 0,
                 start: ts.start_byte() as u32,
                 end: ts.end_byte() as u32,
                 start_row: sp.row as u32,

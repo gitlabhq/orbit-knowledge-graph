@@ -117,7 +117,7 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// `{alias}_props` arrives as a JSON object of strings, so Bool and DateTime fields are re-typed from the ontology.
+/// `{alias}_props` arrives as a JSON object of strings, so typed fields are re-typed from the ontology.
 pub fn parse_hydration_batches(
     batches: &[RecordBatch],
     ontology: &Ontology,
@@ -193,6 +193,8 @@ pub fn parse_hydration_batches(
 fn typed_string(cv: ColumnValue, data_type: Option<&DataType>) -> ColumnValue {
     match data_type {
         Some(DataType::Bool) => cv.coerce::<bool>().map_or(cv, ColumnValue::Bool),
+        Some(DataType::Int) => cv.coerce::<i64>().map_or(cv, ColumnValue::Int64),
+        Some(DataType::Float) => cv.coerce::<f64>().map_or(cv, ColumnValue::Float64),
         Some(DataType::DateTime) => cv
             .as_string()
             .and_then(|s| ColumnValue::parse_datetime(s))
@@ -403,12 +405,18 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
             let Some(ColumnValue::String(cv_str)) = value else {
                 return false;
             };
-            let filter_str = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            let filter_str = filter.value_str().unwrap_or("");
             match op {
                 FilterOp::Eq => cv_str == filter_str,
-                FilterOp::Contains => cv_str.to_lowercase().contains(&filter_str.to_lowercase()),
-                FilterOp::StartsWith => cv_str.starts_with(filter_str),
-                FilterOp::EndsWith => cv_str.ends_with(filter_str),
+                FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith => {
+                    let (value, needle) =
+                        (cv_str.to_ascii_lowercase(), filter_str.to_ascii_lowercase());
+                    match op {
+                        FilterOp::Contains => value.contains(&needle),
+                        FilterOp::StartsWith => value.starts_with(&needle),
+                        _ => value.ends_with(&needle),
+                    }
+                }
                 _ => true,
             }
         }

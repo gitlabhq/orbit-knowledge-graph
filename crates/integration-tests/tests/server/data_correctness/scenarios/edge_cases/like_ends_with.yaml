@@ -1,20 +1,30 @@
 # source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_ends_with_returns_matching_rows
-description: LIKE ends_with filter returns matching username
+description: ends_with filter returns the matching username regardless of case and prunes granules with the ngram skip index
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_user:
+      - { id: 50, username: zed, name: Zed Zero, state: active, user_type: human, email: zed@example.com }
 
 query:
   json: |
     {
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                 "filters": {"username": {"ends_with": "ice"}}}],
+                 "filters": {"username": {"ends_with": "ICE"}}}],
         "limit": 10
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ice' RETURN u.username LIMIT 10
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ICE' RETURN u.username LIMIT 10
 
 expect:
+  sql_contains: ["endsWith(lower(u.username), lower('ICE'))"]
+  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:
       filters:
         username: { ends_with: ice }
+      rows:
+        - { id: 1, username: alice }

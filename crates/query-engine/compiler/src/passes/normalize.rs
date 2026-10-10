@@ -44,6 +44,7 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
             let columns = properties
                 .iter()
                 .filter(|property| model.property_realization(**property).is_some())
+                .filter(|property| !model.property_is_hidden(**property))
                 .map(|property| model.graph().property(*property).name.clone())
                 .collect();
             node.columns = Some(ColumnSelection::List(columns));

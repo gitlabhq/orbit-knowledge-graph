@@ -43,6 +43,10 @@ fixtures:
       }
 
       module.exports = main;
+
+      function unrelated() {
+        function main() {}
+      }
   - path: default/main.js
     content: |
       const runMain = require('./util');
@@ -75,11 +79,11 @@ fixtures:
 
   - path: alias_chain/util.js
     content: |
+      module.exports = main;
+
       function main() {
         return "ok";
       }
-
-      module.exports = main;
   - path: alias_chain/main.js
     content: |
       const runMain = require('./util');
@@ -112,12 +116,42 @@ fixtures:
       exports.default = function defaultHelper(value) {
         return value.trim();
       };
+
+  - path: uncertain/util.js
+    content: |
+      exports.unknown = getRuntimeValue();
+      exports.HTTP_STATUS_OK = 200;
+  - path: uncertain/main.js
+    content: |
+      const { unknown, HTTP_STATUS_OK } = require('./util');
+      function unknownCall() { unknown(); }
+      function unknownMember() { HTTP_STATUS_OK.customMethod(); }
+      function numericAlias() {
+        const alias = HTTP_STATUS_OK;
+        alias();
+      }
   - path: interop/main.js
     content: |
       const util = require('./util');
 
       function run(value) {
         return util.default(value);
+      }
+
+  - path: export_names/util.js
+    content: |
+      exports.publicName = function implementation() {};
+      module.exports.otherName = function otherImplementation() {};
+      exports.anonymous = function() {};
+      module.exports.otherAnonymous = function() {};
+  - path: export_names/main.js
+    content: |
+      const util = require('./util');
+      function run() {
+        util.publicName();
+        util.otherName();
+        util.anonymous();
+        util.otherAnonymous();
       }
 
   - path: external/namespace.js
@@ -192,24 +226,48 @@ fixtures:
       function inner() {
         const { track } = require('inner-sdk');
         const alias = track;
+        const secondAlias = alias;
         function nested() { alias(); }
+        function nestedChain() { secondAlias(); }
         track();
         nested();
       }
       function other() { track(); }
 
+  - path: external/copied.js
+    content: |
+      import { track } from 'outer-sdk';
+      function references() { const alias = track; }
+      function overwritten() {
+        let alias = track;
+        alias = () => {};
+        alias();
+      }
+      function separate() {
+        const { track } = require('separate-sdk');
+        const alias = track;
+        alias();
+      }
+
 tests:
+  - name: Copied imports retain their origin without calling unused or overwritten values
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'external/copied.js'
+      RETURN caller.name AS caller, sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "separate", path: "separate-sdk" } }
   - name: CommonJS captures keep their originating import beside shadowed ESM
-    # Known gap: A CommonJS capture shadowed by a later ESM import keeps only the ESM origin.
-    skip: true
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'external/scoped.js'
       RETURN caller.name AS caller, sym.import_path AS path, sym.start_line AS import_line
     assert:
-      - { row_count: 3 }
+      - { row_count: 4 }
       - { row: { caller: "inner", path: "inner-sdk", import_line: 3 } }
       - { row: { caller: "nested", path: "inner-sdk", import_line: 3 } }
+      - { row: { caller: "nestedChain", path: "inner-sdk", import_line: 3 } }
       - { row: { caller: "other", path: "outer-sdk", import_line: 1 } }
 
   - name: Destructured require targets the exported function
@@ -268,9 +326,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "resolve" } }
 
-  - name: Default module.exports require targets the primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Default module.exports require targets the exported definition
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'default/main.js'
@@ -280,10 +336,6 @@ tests:
       - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
 
   - name: Default module.exports require call resolves to the exported function
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'default/main.js'
@@ -304,10 +356,6 @@ tests:
       - { row: { caller: "run", callee: "helper" } }
 
   - name: Bare require alias chains keep callable primary export identity
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'alias_chain/main.js'
@@ -318,18 +366,14 @@ tests:
       - { row: { caller: "boot", callee: "main" } }
 
   - name: Mixed CJS imports preserve distinct symbol identities
-
-    # Known gap: The old pipeline prefixed JavaScript fqns with the file path; the incremental engine does not.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'no_false_call/main.js'
-      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target, d.file_path AS file
     assert:
       - { row_count: 2 }
-      - { row: { name: "HTTP_STATUS_OK", alias: null, target: "no_false_call/util.js::HTTP_STATUS_OK" } }
-      - { row: { name: "trimValue", alias: null, target: "trimValue" } }
+      - { row: { name: "HTTP_STATUS_OK", alias: null, target: "HTTP_STATUS_OK", file: "no_false_call/util.js" } }
+      - { row: { name: "trimValue", alias: null, target: "trimValue", file: "no_false_call/util.js" } }
 
   - name: Imported CJS constants do not create false call edges
     query: |
@@ -340,7 +384,6 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
-
   - name: Imported CJS functions still resolve while constants stay inert
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -352,10 +395,6 @@ tests:
       - { row: { caller: "run", callee: "trimValue" } }
 
   - name: Transpiled CJS default interop resolves namespace default member calls
-
-    # Known gap: `module.exports = name` of an existing definition does not mark it as the default export yet.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.file_path = 'interop/main.js'
@@ -364,6 +403,19 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "defaultHelper" } }
+
+  - name: CommonJS export properties preserve named and anonymous function identities
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.file_path = 'export_names/main.js'
+        AND callee.file_path = 'export_names/util.js'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 4 }
+      - { row: { callee: "implementation" } }
+      - { row: { callee: "otherImplementation" } }
+      - { row: { callee: "anonymous" } }
+      - { row: { callee: "otherAnonymous" } }
 
   - name: External CommonJS calls target imported symbols
     query: |
@@ -384,11 +436,11 @@ tests:
       RETURN caller.fqn AS caller, sym.identifier_name AS name, sym.identifier_alias AS alias
       ORDER BY alias
     assert:
-      - { row_count: 4 }
+      - { row_count: 2 }
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
 
-  - name: Module-level external CommonJS calls target imported symbols from the file
+  - name: Module-level CommonJS imports remain attached to their file
     query: |
       MATCH (file:File)-[e:IMPORTS]->(sym:ImportedSymbol)
       WHERE file.path = 'external/module_level.js'
@@ -407,10 +459,6 @@ tests:
       - { empty: true }
 
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
-
-    # Known gap: A CommonJS default import that does not resolve still falls back to the import.
-
-    skip: true
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
       WHERE caller.file_path IN [
@@ -427,6 +475,16 @@ tests:
     assert:
       - { empty: true }
 
+  - name: Only proven non-callable direct imports suppress fallback
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'uncertain/main.js'
+      RETURN caller.name AS caller, sym.identifier_name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "unknownCall", name: "unknown" } }
+      - { row: { caller: "unknownMember", name: "HTTP_STATUS_OK" } }
+
   - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
@@ -439,3 +497,41 @@ tests:
       RETURN caller.file_path AS file, caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { empty: true }
+steps:
+  - name: restore captured import origins
+    snapshot: true
+    tests:
+      - name: Captured aliases keep the inner import after snapshot loading
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.file_path = 'external/scoped.js'
+          RETURN caller.name AS caller, sym.import_path AS path
+        assert:
+          - { row_count: 4 }
+          - { row: { caller: "inner", path: "inner-sdk" } }
+          - { row: { caller: "nested", path: "inner-sdk" } }
+          - { row: { caller: "nestedChain", path: "inner-sdk" } }
+          - { row: { caller: "other", path: "outer-sdk" } }
+  - name: change captured import source
+    snapshot: true
+    modify:
+      - path: external/scoped.js
+        content: |
+          import { track } from 'outer-sdk';
+          function inner() {
+            const { track } = require('replacement-sdk');
+            const alias = track;
+            function nested() { alias(); }
+            nested();
+          }
+          function other() { track(); }
+    tests:
+      - name: Reindex replaces the captured origin without changing the outer import
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.file_path = 'external/scoped.js'
+          RETURN caller.name AS caller, sym.import_path AS path
+        assert:
+          - { row_count: 2 }
+          - { row: { caller: "nested", path: "replacement-sdk" } }
+          - { row: { caller: "other", path: "outer-sdk" } }

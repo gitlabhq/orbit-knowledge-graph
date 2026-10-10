@@ -11,11 +11,71 @@
 #   __def plus an SSA __binding.
 
 config:
-  link:
-    builtins: [
-      append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
-      new, panic, print, println, real, recover
-    ]
+  stdlib:
+      - module: builtin
+        availability: implicit
+        precedence: runtime
+        symbols: [
+          append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
+          new, panic, print, println, real, recover, bool, byte, complex64, complex128,
+          float32, float64, int, int8, int16, int32, int64, rune, string, uint,
+          uint8, uint16, uint32, uint64, uintptr
+        ]
+      - module: fmt
+        precedence: runtime
+        symbols: [Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln,
+          Fscan, Fscanf, Fscanln, Print, Printf, Println, Scan, Scanf, Scanln,
+          Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
+      - module: errors
+        precedence: runtime
+        symbols: [As, Is, Join, New, Unwrap]
+
+      - { module: archive, precedence: runtime }
+      - { module: bufio, precedence: runtime }
+      - { module: bytes, precedence: runtime }
+      - { module: cmp, precedence: runtime }
+      - { module: compress, precedence: runtime }
+      - { module: container, precedence: runtime }
+      - { module: context, precedence: runtime }
+      - { module: crypto, precedence: runtime }
+      - { module: database, precedence: runtime }
+      - { module: debug, precedence: runtime }
+      - { module: embed, precedence: runtime }
+      - { module: encoding, precedence: runtime }
+      - { module: expvar, precedence: runtime }
+      - { module: flag, precedence: runtime }
+      - { module: go, precedence: runtime }
+      - { module: hash, precedence: runtime }
+      - { module: html, precedence: runtime }
+      - { module: image, precedence: runtime }
+      - { module: index, precedence: runtime }
+      - { module: io, precedence: runtime }
+      - { module: iter, precedence: runtime }
+      - { module: log, precedence: runtime }
+      - { module: maps, precedence: runtime }
+      - { module: math, precedence: runtime }
+      - { module: mime, precedence: runtime }
+      - { module: net, precedence: runtime }
+      - { module: os, precedence: runtime }
+      - { module: path, precedence: runtime }
+      - { module: plugin, precedence: runtime }
+      - { module: reflect, precedence: runtime }
+      - { module: regexp, precedence: runtime }
+      - { module: runtime, precedence: runtime }
+      - { module: slices, precedence: runtime }
+      - { module: sort, precedence: runtime }
+      - { module: strconv, precedence: runtime }
+      - { module: strings, precedence: runtime }
+      - { module: structs, precedence: runtime }
+      - { module: sync, precedence: runtime }
+      - { module: syscall, precedence: runtime }
+      - { module: testing, precedence: runtime }
+      - { module: text, precedence: runtime }
+      - { module: time, precedence: runtime }
+      - { module: unicode, precedence: runtime }
+      - { module: unique, precedence: runtime }
+      - { module: unsafe, precedence: runtime }
+      - { module: weak, precedence: runtime }
 
 stages:
   - name: normalize
@@ -79,11 +139,11 @@ stages:
     rules:
       # Bindings: x := T{} / x := f() / x := y
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
-        replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$R) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N (__declaration) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__declaration) (__rhs @$R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
@@ -159,6 +219,8 @@ stages:
 
   - name: tag-defs
     rules:
+      - match: '(block $$$V)'
+        replace: '(__scope $$$V)'
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

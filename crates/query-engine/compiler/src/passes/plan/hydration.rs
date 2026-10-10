@@ -1,11 +1,12 @@
-use std::collections::HashMap;
-
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use orbit_utils::traversal_path::TraversalPath;
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 
-use super::{Plan, PlanBody, Strategy};
+use super::context::PlanningContext;
+use super::{Hydration, Plan};
 use query_data_model::QueryDataModel;
+
+const PREFIX_SET_PATH_THRESHOLD: usize = 256;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HydrationCompileOptions {
@@ -20,19 +21,52 @@ pub struct HydrationNodePlan {
     pub id_property: String,
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
-    /// Traversal paths extracted from the base query, used to narrow hydration
-    /// scans via `startsWith(traversal_path, tp)`.
-    pub traversal_paths: Vec<TraversalPath>,
-    /// Table sort key (ReplacingMergeTree ORDER BY) — the dedup identity for the
-    /// `LIMIT 1 BY <sort_key>` latest-row scan that replaces `FINAL`. Required.
+    pub path_filter: Option<HydrationPathFilter>,
     pub sort_key: Vec<String>,
 }
 
-pub fn plan_hydration(
-    input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+pub enum HydrationPathFilter {
+    PrefixUnion(Vec<TraversalPath>),
+    PrefixSet(Vec<TraversalPath>),
+}
+
+fn path_filter(
+    paths: &[TraversalPath],
     options: HydrationCompileOptions,
-) -> Result<Plan> {
+) -> Option<HydrationPathFilter> {
+    let mut leaves = prune_to_leaves(paths);
+    if leaves.is_empty() {
+        return None;
+    }
+    if let Some(budget) = options.path_segment_budget {
+        while leaves
+            .iter()
+            .map(|path| path.segment_count())
+            .sum::<usize>()
+            > budget
+        {
+            let parents: Vec<_> = leaves.iter().map(|path| path.parent()).collect();
+            if parents == leaves {
+                break;
+            }
+            leaves = prune_to_leaves(&parents);
+        }
+    }
+    Some(
+        if options.dynamic && leaves.len() > PREFIX_SET_PATH_THRESHOLD {
+            HydrationPathFilter::PrefixSet(leaves)
+        } else {
+            HydrationPathFilter::PrefixUnion(leaves)
+        },
+    )
+}
+
+pub(super) fn plan_hydration<M: QueryDataModel + ?Sized>(
+    context: PlanningContext<'_, M>,
+    options: HydrationCompileOptions,
+) -> Result<Plan<Hydration>> {
+    let input = context.input;
+    let model = context.model;
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
@@ -55,13 +89,6 @@ pub fn plan_hydration(
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
             };
-            let sort_key = model
-                .table_sort_key(table)
-                .filter(|sk| !sk.is_empty())
-                .map(<[String]>::to_vec)
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!("hydration table {table} has no sort key"))
-                })?;
             Ok(HydrationNodePlan {
                 alias: node.id.clone(),
                 table: table.to_string(),
@@ -69,23 +96,13 @@ pub fn plan_hydration(
                 id_property: node.id_property.clone(),
                 node_ids: node.node_ids.clone(),
                 columns,
-                traversal_paths: node.traversal_paths.clone(),
-                sort_key,
+                path_filter: path_filter(&node.traversal_paths, options),
+                sort_key: context.latest_row_key(table)?.to_vec(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Plan {
-        nodes: HashMap::new(),
-        hops: vec![],
-        strategy: Strategy::SingleNode,
-        node_edge_mappings: HashMap::new(),
-        denormalized: HashMap::new(),
-        table_columns: HashMap::new(),
-        table_sort_keys: HashMap::new(),
-        body: PlanBody::Hydration {
-            nodes: hydration_nodes,
-            options,
-        },
-    })
+    Ok(context.finish(Hydration {
+        nodes: hydration_nodes,
+    }))
 }

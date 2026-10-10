@@ -5,12 +5,9 @@ use tonic::Status;
 
 use super::visibility::VisibleEntity;
 use crate::status_query::{
-    QueryCache, bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
-
-// Counting is expensive, so repeated requests reuse the cached result instead of counting again.
-const COUNT_CACHE: QueryCache = QueryCache::Use { ttl_secs: 300 };
 
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,
@@ -22,7 +19,7 @@ pub async fn count_visible_entities(
         .map(|(index, entity)| build_entity_count_query(index, entity))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
-    let batches = fetch_status_query_batches(client, &sql, "entity counts", COUNT_CACHE, |query| {
+    let batches = fetch_status_query_batches(client, &sql, "entity counts", |query| {
         entities
             .iter()
             .enumerate()

@@ -5,7 +5,6 @@ __pycache__/
 report.xml
 public
 node_modules
-bindings/go/.idea/
 .idea/
 profile.json.gz
 output/
@@ -19,7 +18,6 @@ git_diff_full.txt
 # simulator
 gl_synthetic_data*/
 gkg_simulator_manifest.json
-crates/simulator/profiles
 evaluation_results*/
 
 # Local environment (credentials)
@@ -38,7 +36,6 @@ _build/
 
 # Git worktrees
 .worktrees/
-.claude/worktrees/
 
 # Lefthook local overrides
 lefthook-local.yml
@@ -77,3 +74,4 @@ e2e/report.html
 *.tfvars
 !bench/infra/.terraform.lock.hcl
 image-digests/
+.cargo-cache/

@@ -1,0 +1,188 @@
+name: "Rust: lexical binding ownership"
+fixtures:
+  - path: parameters/main.rs
+    content: |
+      fn first() {}
+
+      fn run(first: fn()) {
+          first();
+      }
+  - path: uninitialized/main.rs
+    content: |
+      fn first() {}
+
+      fn run() {
+          let first;
+          first();
+      }
+  - path: closure/main.rs
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run() {
+          let mut f: fn() = first;
+          let unused = || {
+              f = second;
+          };
+          f();
+      }
+  - path: hoisting/main.rs
+    content: |
+      fn first() {}
+
+      fn run() {
+          target();
+          fn target() {}
+      }
+  - path: constructor_shadow/main.rs
+    content: |
+      struct First;
+
+      impl First {
+          fn ping(&self) {}
+      }
+
+      struct Second;
+
+      impl Second {
+          fn pong(&self) {}
+      }
+
+      fn run() {
+          let f = First;
+          {
+              let f = Second;
+          }
+          f.ping();
+      }
+  - path: constructor_control/main.rs
+    content: |
+      struct First;
+
+      impl First {
+          fn ping(&self) {}
+      }
+
+      fn run() {
+          let f = First;
+          f.ping();
+      }
+  - path: branch/main.rs
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run(flag: bool) {
+          let f: fn() = first;
+          if flag {
+              let f: fn() = second;
+          }
+          f();
+      }
+  - path: assignment/main.rs
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run() {
+          let mut f: fn() = first;
+          {
+              f = second;
+          }
+          f();
+      }
+  - path: import/main.rs
+    content: |
+      fn first() {}
+
+      mod dep {
+          pub fn second() {}
+      }
+
+      fn run() {
+          let f = first;
+          {
+              use crate::dep::second as f;
+          }
+          f();
+      }
+  - path: branch_initializer/main.rs
+    content: |
+      fn first() {}
+      fn second() {}
+
+      fn run(flag: bool) {
+          let f: fn() = first;
+          {
+              let f = if flag {
+                  second
+              } else {
+                  first
+              };
+          }
+          f();
+      }
+  - path: initializer/main.rs
+    content: |
+      fn first() {}
+
+      fn run() {
+          let f = first;
+          let f = f;
+          f();
+      }
+  - path: block_value/main.rs
+    content: |
+      fn first() {}
+
+      fn run() {
+          let f = {
+              let local = first;
+              local
+          };
+          f();
+      }
+  - path: field_copy/main.rs
+    content: |
+      struct H {
+          callback: fn(),
+      }
+
+      fn first() {}
+
+      fn run() {
+          let h = H { callback: first };
+          let h = h;
+          (h.callback)();
+      }
+tests:
+  - name: "Parameters and uninitialized locals block outer function lookup"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' AND caller.file_path IN ['parameters/main.rs', 'uninitialized/main.rs']
+      RETURN callee.name AS target
+    assert:
+      - { empty: true }
+  - name: "Each scope retains the correct outer binding"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN caller.file_path AS file, callee.name AS target
+    assert:
+      - { row_count: 15 }
+      - { row: { file: closure/main.rs, target: first } }
+      - { row: { file: hoisting/main.rs, target: target } }
+      - { row: { file: constructor_shadow/main.rs, target: First } }
+      - { row: { file: constructor_shadow/main.rs, target: Second } }
+      - { row: { file: constructor_shadow/main.rs, target: ping } }
+      - { row: { file: constructor_control/main.rs, target: First } }
+      - { row: { file: constructor_control/main.rs, target: ping } }
+      - { row: { file: branch/main.rs, target: first } }
+      - { row: { file: assignment/main.rs, target: second } }
+      - { row: { file: import/main.rs, target: first } }
+      - { row: { file: branch_initializer/main.rs, target: first } }
+      - { row: { file: initializer/main.rs, target: first } }
+      - { row: { file: block_value/main.rs, target: first } }
+      - { row: { file: field_copy/main.rs, target: H } }
+      - { row: { file: field_copy/main.rs, target: first } }

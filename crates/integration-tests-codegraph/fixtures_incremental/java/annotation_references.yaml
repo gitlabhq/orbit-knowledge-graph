@@ -24,7 +24,24 @@ fixtures:
           public void plainMethod() {}
       }
 
+  - path: com/example/Traceable.java
+    content: |
+      package com.example;
+      import java.lang.annotation.Target;
+      import java.lang.annotation.ElementType;
+      @Target(ElementType.METHOD)
+      public @interface Traceable {}
+
 tests:
+  - name: "Explicit annotation imports retain their declared symbol"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.Traceable'
+      RETURN symbol.import_path AS path, symbol.identifier_name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'java.lang.annotation', name: Target } }
+
   - name: Annotation ref attributed to the annotated method
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)

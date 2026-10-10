@@ -1,0 +1,19 @@
+name: Covered center filters retain fused neighbor scans and filter both tag directions
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1],"filters":{"state":"merged"}}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT","AUTHORED"]}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 1, state: 'merged'})-[:IN_PROJECT|AUTHORED]-(neighbor) RETURN mr, neighbor
+logical:
+  expect: ["(Input neighbors (...))"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
+    emitted:
+      expect:
+        - (Filter ((e.source_kind = 'MergeRequest') AND (e.source_id = 1) AND ArrayContains(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND (e.target_id = 1) AND ArrayContains(e.target_tags, 'state:merged')), ... (_))
+      occurrences:
+        - pattern: (Scan Table(gl_edge) AS e)
+          count: 1
+      reject: ["(Scan Table(gl_merge_request) ...)", "(Union ... (...))"]

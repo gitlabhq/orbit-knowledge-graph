@@ -2,7 +2,7 @@ use crate::synth::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
 use crate::synth::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
 use anyhow::{Result, bail};
 use ontology::Ontology;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Separator between entity type and depth level in epsilon node names.
 const EPSILON_DEPTH_SEPARATOR: char = '@';
@@ -20,7 +20,7 @@ pub struct ParentEdge {
 #[derive(Debug)]
 pub struct DependencyGraph {
     generation_order: Vec<String>,
-    parent_edges: HashMap<String, Vec<ParentEdge>>,
+    parent_edges: BTreeMap<String, Vec<ParentEdge>>,
     roots: HashSet<String>,
     parent_types: HashSet<String>,
     /// Maps epsilon depth-level node names to their real entity type.
@@ -30,9 +30,9 @@ pub struct DependencyGraph {
 
 impl DependencyGraph {
     pub fn build(config: &GenerationConfig, ontology: &Ontology) -> Result<Self> {
-        let mut parent_edges: HashMap<String, Vec<ParentEdge>> = HashMap::new();
+        let mut parent_edges: BTreeMap<String, Vec<ParentEdge>> = BTreeMap::new();
         let mut roots: HashSet<String> = HashSet::new();
-        let mut all_nodes: HashSet<String> = HashSet::new();
+        let mut all_nodes: BTreeSet<String> = BTreeSet::new();
         let mut epsilon_to_real: HashMap<String, String> = HashMap::new();
         // Reverse index: real type → its epsilon names. Built in pass 1, used in pass 2
         // to fan out children to all depth levels in O(1) per parent type.
@@ -272,11 +272,11 @@ impl DependencyGraph {
     /// Kahn's algorithm
     fn topological_sort(
         _roots: &HashSet<String>,
-        parent_edges: &HashMap<String, Vec<ParentEdge>>,
-        all_nodes: &HashSet<String>,
+        parent_edges: &BTreeMap<String, Vec<ParentEdge>>,
+        all_nodes: &BTreeSet<String>,
     ) -> Result<Vec<String>> {
-        let mut children: HashMap<String, Vec<String>> = HashMap::new();
-        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut in_degree: BTreeMap<String, usize> = BTreeMap::new();
 
         for node in all_nodes {
             in_degree.insert(node.clone(), 0);
@@ -391,7 +391,7 @@ mod tests {
         let mut roots = HashSet::new();
         roots.insert("A".to_string());
 
-        let mut parent_edges = HashMap::new();
+        let mut parent_edges = BTreeMap::new();
         parent_edges.insert(
             "B".to_string(),
             vec![ParentEdge {
@@ -411,7 +411,7 @@ mod tests {
             }],
         );
 
-        let mut all_nodes = HashSet::new();
+        let mut all_nodes = BTreeSet::new();
         all_nodes.insert("A".to_string());
         all_nodes.insert("B".to_string());
         all_nodes.insert("C".to_string());
@@ -430,7 +430,7 @@ mod tests {
     fn test_topological_sort_cycle_detection() {
         let roots = HashSet::new();
 
-        let mut parent_edges = HashMap::new();
+        let mut parent_edges = BTreeMap::new();
         parent_edges.insert(
             "A".to_string(),
             vec![ParentEdge {
@@ -450,7 +450,7 @@ mod tests {
             }],
         );
 
-        let mut all_nodes = HashSet::new();
+        let mut all_nodes = BTreeSet::new();
         all_nodes.insert("A".to_string());
         all_nodes.insert("B".to_string());
 
@@ -470,11 +470,11 @@ mod tests {
 
         let ontology = ontology::Ontology::load_embedded().unwrap();
 
-        let mut roots = HashMap::new();
+        let mut roots = BTreeMap::new();
         roots.insert("Group".to_string(), 2);
 
-        let mut rel_edges = HashMap::new();
-        let mut contains_variants = HashMap::new();
+        let mut rel_edges = BTreeMap::new();
+        let mut contains_variants = BTreeMap::new();
         contains_variants.insert(
             "Group -> Group".to_string(),
             EdgeRatio::Recursive {

@@ -195,6 +195,20 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     false
 }
 
+fn has_wide_id_range(node: &InputNode) -> bool {
+    node.id_range
+        .as_ref()
+        .is_some_and(|range| range.end.saturating_sub(range.start) > MAX_ID_RANGE_SPAN)
+}
+
+fn wide_id_range_hint(wide: bool) -> String {
+    if wide {
+        format!(" (an id_range counts only with a span of at most {MAX_ID_RANGE_SPAN})")
+    } else {
+        String::new()
+    }
+}
+
 #[derive(Default)]
 pub struct Skip {
     pub selectivity: bool,
@@ -378,6 +392,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             let properties: Vec<_> = entity_record
                 .into_iter()
                 .flat_map(|entity| &entity.properties)
+                .filter(|property| !self.model.get().property_is_hidden(**property))
                 .map(|property| self.model.get().graph().property(*property).name.as_str())
                 .collect();
             QueryError::AllowlistRejected(format!(
@@ -775,7 +790,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
     fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
         match filter.op.unwrap_or(FilterOp::Eq) {
             FilterOp::Eq | FilterOp::StartsWith => {
-                let Some(path) = filter.value.as_ref().and_then(|v| v.as_str()) else {
+                let Some(path) = filter.value_str() else {
                     return Err(QueryError::Validation(format!(
                         "{label}: value must be a traversal_path string"
                     )));
@@ -839,12 +854,12 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         if is_like_op && !self.model.get().property_allows_like(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) are not allowed on this field"
+                 string operators (contains/starts_with/ends_with) are not allowed on this field"
             )));
         }
 
-        // ClickHouse rejects positionCaseInsensitive/startsWith on non-string
-        // columns at execution, which would surface as an opaque 500.
+        // ClickHouse rejects lower()/startsWith on non-string columns at
+        // execution, which would surface as an opaque 500.
         if is_like_op
             && !matches!(
                 data_type,
@@ -853,7 +868,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
         {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
-                 LIKE operators (contains/starts_with/ends_with) require a text field, got {data_type}"
+                 string operators (contains/starts_with/ends_with) require a text field, got {data_type}"
             )));
         }
 
@@ -882,6 +897,18 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     Self::MIN_LIKE_PATTERN_LEN
                 )));
             }
+        }
+
+        if op == FilterOp::TokenMatch
+            && value.as_str().is_some_and(|s| {
+                s.chars()
+                    .any(|c| c.is_ascii() && !c.is_ascii_alphanumeric())
+            })
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 token_match value must be one word of letters and digits; use all_tokens for several words"
+            )));
         }
 
         match op {
@@ -940,20 +967,19 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
             QueryType::Neighbors
                 if input.nodes.first().is_none_or(|n| !node_has_selectivity(n)) =>
             {
-                return Err(QueryError::Validation(
-                    "neighbors requires node_ids or filters on the center node \
-                     to avoid scanning all edges"
-                        .into(),
-                ));
+                let hint = wide_id_range_hint(input.nodes.first().is_some_and(has_wide_id_range));
+                return Err(QueryError::Validation(format!(
+                    "neighbors requires filters or node_ids on the center node \
+                     to avoid scanning all edges{hint}"
+                )));
             }
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
-                return Err(QueryError::Validation(
-                    "traversal and aggregation queries require node_ids or filters on \
-                     at least one node to avoid full edge table scans"
-                        .into(),
-                ));
+                let hint = wide_id_range_hint(input.nodes.iter().any(has_wide_id_range));
+                return Err(QueryError::Validation(format!(
+                    "add filters or node_ids to at least one node{hint}"
+                )));
             }
             _ => {}
         }
@@ -1066,7 +1092,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                     if !matches!(data_type, DataType::Int | DataType::Float) {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
-                            function.as_sql(),
+                            function.to_string().to_uppercase(),
                             entity,
                             prop
                         )));
@@ -1366,10 +1392,10 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
             if op == FilterOp::In
                 && !value
                     .as_array()
-                    .is_some_and(|values| !values.is_empty() && values.len() <= MAX_IN_VALUES)
+                    .is_some_and(|values| values.len() <= MAX_IN_VALUES)
             {
                 return Err(QueryError::Validation(format!(
-                    "IN requires 1-{MAX_IN_VALUES} values"
+                    "IN requires 0-{MAX_IN_VALUES} values"
                 )));
             }
             if matches!(
@@ -1455,6 +1481,46 @@ mod tests {
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
+        );
+    }
+
+    #[test]
+    fn selectivity_error_mentions_id_range_cap_only_for_wide_ranges() {
+        let ontology = test_ontology();
+        let error_for = |json: &str| {
+            let input = parse_input(json).unwrap();
+            validator(&ontology)
+                .check_references(&input)
+                .unwrap_err()
+                .to_string()
+        };
+
+        let plain =
+            error_for(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#);
+        assert!(
+            plain.ends_with("add filters or node_ids to at least one node"),
+            "{plain}"
+        );
+
+        let neighbors = error_for(
+            r#"{"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User"}],
+                "neighbors": {"node": "u", "direction": "both"}}"#,
+        );
+        assert!(
+            neighbors.ends_with("on the center node to avoid scanning all edges"),
+            "{neighbors}"
+        );
+
+        let wide_neighbors = error_for(
+            r#"{"query_type": "neighbors",
+                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}],
+                "neighbors": {"node": "u", "direction": "both"}}"#,
+        );
+        assert!(
+            wide_neighbors.ends_with(
+                "avoid scanning all edges (an id_range counts only with a span of at most 100000)"
+            ),
+            "{wide_neighbors}"
         );
     }
 
@@ -2581,7 +2647,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}]
             }"#,
-            "full edge table scans",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2613,7 +2679,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
-            "full edge table scans",
+            "filters or node_ids to at least one node",
         );
         assert_ok(
             r#"{
@@ -2634,7 +2700,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
-            "full edge table scans",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2660,7 +2726,7 @@ mod tests {
                 "group_by": ["p"],
                 "aggregations": [{"count": "u", "as": "c"}]
             }"#,
-            "full edge table scans",
+            "filters or node_ids to at least one node",
         );
 
         assert_ok(
@@ -2674,7 +2740,8 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "full edge table scans",
+            "add filters or node_ids to at least one node \
+             (an id_range counts only with a span of at most 100000)",
         );
         assert_ok(
             r#"{
@@ -2791,7 +2858,7 @@ mod tests {
 
         let err = validator.check_references(&input).unwrap_err();
         assert!(
-            err.to_string().contains("LIKE operators"),
+            err.to_string().contains("string operators"),
             "expected like_allowed rejection, got: {err}"
         );
     }

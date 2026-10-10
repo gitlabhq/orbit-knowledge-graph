@@ -29,6 +29,9 @@
     "graph": {
       "$ref": "#/$defs/ClickHouseConfiguration"
     },
+    "clickhouse_setup": {
+      "$ref": "#/$defs/ClickHouseSetupConfig"
+    },
     "engine": {
       "$ref": "#/$defs/EngineConfiguration"
     },
@@ -86,6 +89,7 @@
     "nats",
     "datalake",
     "graph",
+    "clickhouse_setup",
     "engine",
     "gitlab",
     "schedule",
@@ -337,6 +341,43 @@
         "query_log",
         "processors",
         "instance_health"
+      ]
+    },
+    "ClickHouseSetupConfig": {
+      "description": "Inputs of `--mode clickhouse-setup`. Each password is a secret file under\n`/etc/secrets/clickhouse_setup/`.",
+      "type": "object",
+      "properties": {
+        "admin_username": {
+          "type": "string"
+        },
+        "admin_password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writer_password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reader_password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "siphon_reader_password": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "admin_username"
       ]
     },
     "EngineConfiguration": {

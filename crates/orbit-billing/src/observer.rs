@@ -11,11 +11,12 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::constants::{
-    CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, feature_qualified_name, normalize_realm,
+    CATEGORY, EVENT_TYPE, REALM_SAAS, UNIT_OF_MEASURE, feature_qualified_name, normalize_realm,
 };
 use crate::inputs::BillingInputs;
 use crate::metrics::{
     METRICS, REASON_EVENT_BUILD_FAILED, REASON_REALM_MISSING, REASON_REALM_UNRECOGNIZED,
+    REASON_ROOT_NAMESPACE_MISSING,
 };
 use crate::tracker::BillingTracker;
 
@@ -40,6 +41,7 @@ struct BillingMetadata<'a> {
     source_type: &'a str,
     coding_agent: Option<&'a str>,
     is_gitlab_team_member: Option<bool>,
+    orbit_version: &'static str,
 }
 
 pub struct BillingObserver {
@@ -69,6 +71,7 @@ impl BillingObserver {
             source_type: &self.inputs.source_type,
             coding_agent: self.inputs.coding_agent.as_deref(),
             is_gitlab_team_member: self.inputs.is_gitlab_team_member,
+            orbit_version: orbit_utils::version::get(),
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "failed to serialize billing metadata");
@@ -103,6 +106,17 @@ impl BillingObserver {
             record_dropped(REASON_REALM_UNRECOGNIZED);
             return None;
         };
+        if realm == REALM_SAAS && self.inputs.root_namespace_id.is_none() {
+            tracing::warn!(
+                user_id = self.inputs.user_id,
+                source_type = %self.inputs.source_type,
+                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
+                correlation_id = %correlation_id,
+                "billing event skipped: root_namespace_id missing from SaaS JWT claims"
+            );
+            record_dropped(REASON_ROOT_NAMESPACE_MISSING);
+            return None;
+        }
 
         let mut builder = BillingEvent::builder(CATEGORY, EVENT_TYPE, realm, UNIT_OF_MEASURE, 1.0);
 
@@ -279,7 +293,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_on_finish() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.finish(42, 3);
@@ -298,6 +312,7 @@ mod tests {
         assert_eq!(metadata["source_type"], "mcp");
         assert_eq!(metadata["coding_agent"], "claude-code");
         assert_eq!(metadata["is_gitlab_team_member"], true);
+        assert_eq!(metadata["orbit_version"], orbit_utils::version::get());
     }
 
     #[test]
@@ -323,6 +338,7 @@ mod tests {
             "source_type",
             "coding_agent",
             "is_gitlab_team_member",
+            "orbit_version",
         ];
         let metrics = serde_json::to_value(ExecMetrics::default()).unwrap();
         let metrics = metrics.as_object().unwrap();
@@ -336,7 +352,7 @@ mod tests {
 
     #[test]
     fn billing_observer_skips_on_error() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.record_error(&PipelineError::Execution("test error".into()));
@@ -347,7 +363,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_with_lowercase_realm_alias() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("saas".into()),
             ..test_inputs()
@@ -361,7 +377,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_with_self_managed_realm_alias() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("self-managed".into()),
             ..test_inputs()
@@ -375,7 +391,7 @@ mod tests {
 
     #[test]
     fn billing_observer_skips_when_realm_absent() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: None,
             ..test_inputs()
@@ -388,8 +404,37 @@ mod tests {
     }
 
     #[test]
+    fn billing_observer_skips_saas_without_root_namespace() {
+        let tracker = Arc::new(InMemoryBillingTracker::default());
+        let inputs = BillingInputs {
+            root_namespace_id: None,
+            ..test_inputs()
+        };
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
+        obs.set_query_type("traversal");
+        obs.finish(1, 0);
+
+        assert_eq!(tracker.count(), 0);
+    }
+
+    #[test]
+    fn billing_observer_emits_self_managed_without_root_namespace() {
+        let tracker = Arc::new(InMemoryBillingTracker::default());
+        let inputs = BillingInputs {
+            realm: Some("self-managed".into()),
+            root_namespace_id: None,
+            ..test_inputs()
+        };
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
+        obs.set_query_type("traversal");
+        obs.finish(1, 0);
+
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
     fn billing_observer_skips_when_realm_unrecognized() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             realm: Some("bogus".into()),
             ..test_inputs()
@@ -403,7 +448,7 @@ mod tests {
 
     #[test]
     fn billing_observer_emits_when_optional_fields_absent() {
-        let tracker = Arc::new(InMemoryBillingTracker::new());
+        let tracker = Arc::new(InMemoryBillingTracker::default());
         let inputs = BillingInputs {
             organization_id: None,
             instance_id: None,
@@ -411,7 +456,6 @@ mod tests {
             instance_version: None,
             global_user_id: None,
             host_name: None,
-            root_namespace_id: None,
             deployment_type: None,
             ..test_inputs()
         };

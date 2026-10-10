@@ -4,6 +4,25 @@
 # initializer calls, control flow.
 
 config:
+  stdlib: [
+    { availability: implicit, symbols: ['@as', '@alignCast', '@alignOf', '@bitCast', '@bitOffsetOf',
+      '@bitSizeOf', '@byteSwap', '@call', '@cDefine', '@cImport', '@cInclude',
+      '@cUndef', '@clz', '@compileError', '@compileLog', '@ctz', '@embedFile',
+      '@enumFromInt', '@errorFromInt', '@errorName', '@errorReturnTrace',
+      '@field', '@fieldParentPtr', '@floatCast', '@floatFromInt', '@hasDecl',
+      '@hasField', '@import', '@inComptime', '@intCast', '@intFromBool',
+      '@intFromEnum', '@intFromError', '@intFromFloat', '@intFromPtr', '@max',
+      '@memcpy', '@memset', '@min', '@offsetOf', '@panic', '@popCount',
+      '@ptrCast', '@ptrFromInt', '@sizeOf', '@src', '@tagName', '@This',
+      '@trap', '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector',
+      '@abs', '@addWithOverflow', '@atomicLoad', '@atomicRmw', '@atomicStore',
+      '@bitReverse', '@ceil', '@cmpxchgStrong', '@cmpxchgWeak', '@cos', '@divExact',
+      '@divFloor', '@divTrunc', '@exp', '@exp2', '@floor', '@log',
+      '@log2', '@log10', '@mod', '@mulAdd', '@mulWithOverflow', '@reduce', '@rem',
+      '@round', '@select', '@shlExact', '@shlWithOverflow', '@shrExact', '@shuffle',
+      '@sin', '@splat', '@sqrt', '@subWithOverflow', '@tan', '@trunc'] },
+    { module: std, precedence: runtime }, { module: builtin, precedence: runtime }
+  ]
   resolve:
     lookup_from:
       - __source_root
@@ -31,10 +50,10 @@ stages:
 
   - name: retag-calls
     rules:
-      - match: '(call_expression (field_expression object: $O:identifier member: $M:identifier) $A:arguments)'
-        replace: '(__call (__callee (__member @$M (__object @$O))) $A)'
-      - match: '(call_expression $F:identifier $A:arguments)'
-        replace: '(__call (__callee @$F) $A)'
+      - match: '(call_expression function: (field_expression object: $O:identifier member: $M:identifier) $$$A)'
+        replace: '(__call (__callee (__member @$M (__object @$O))) $$$A)'
+      - match: '(call_expression function: $F:identifier $$$A)'
+        replace: '(__call (__callee @$F) $$$A)'
       - match: '(struct_initializer $T:identifier $L:initializer_list)'
         replace: '(__call (__callee @$T) $L)'
 
@@ -46,12 +65,16 @@ stages:
         replace: '(__def (__defname @$N) (__enum) $D)'
       - match: '(variable_declaration $N:identifier $D:union_declaration)'
         replace: '(__def (__defname @$N) (__struct) $D)'
-      - match: '(variable_declaration (const) $N:identifier $$$V:__call)'
-        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__rhs $$$V)))'
+      - match: '(variable_declaration (const) $N:identifier $V:__call)'
+        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs $V)))'
+      - match: '(variable_declaration (const) $N:identifier ("=") $V:identifier)'
+        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs @$V)))'
       - match: '(variable_declaration (const) $N:identifier $$$V)'
         replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N $$$V))'
-      - match: '(variable_declaration (var) $N:identifier $$$V:__call)'
-        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $$$V)))'
+      - match: '(variable_declaration (var) $N:identifier $V:__call)'
+        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs $V)))'
+      - match: '(variable_declaration (var) $N:identifier ("=") $V:identifier)'
+        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs @$V)))'
       - match: '(variable_declaration (var) $N:identifier $$$V)'
         replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N $$$V))'
       - match: '(if_expression $$$X)'
@@ -73,6 +96,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(block $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

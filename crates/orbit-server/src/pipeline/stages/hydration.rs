@@ -93,7 +93,8 @@ impl HydrationStage {
             ctx.security_context()?,
         )
         .map_err(|e| PipelineError::Compile {
-            client_safe: e.is_client_safe(),
+            client_safe: false,
+            reason: e.rejection_reason(),
             message: e.to_string(),
         })?;
 
@@ -116,7 +117,7 @@ impl HydrationStage {
             correlation::log_comment(Some(&format!("hydration:{kind}"))),
         );
         for (key, param) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
         }
         let (batches, summary) = query
             .fetch_arrow_with_summary()

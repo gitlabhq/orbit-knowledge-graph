@@ -11,10 +11,10 @@ const RED_ZONE: usize = 128 * 1024;
 const STACK_SEGMENT: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BlockId(pub usize);
+pub struct BlockId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PhiId(usize);
+pub struct PhiId(u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
@@ -22,32 +22,10 @@ pub enum Value {
     ImportRef(u32),
     Type(u32),
     Call(u32),
-    Alias(u32),
     Opaque,
+    Undefined,
     Marker,
     Phi(PhiId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ParseValue {
-    LocalDef(u32),
-    ImportRef(u32),
-    Type(u32),
-    Call(u32),
-    Opaque,
-}
-
-impl Value {
-    pub fn to_parse_value(&self) -> Option<ParseValue> {
-        match self {
-            Value::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
-            Value::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
-            Value::Type(t) => Some(ParseValue::Type(*t)),
-            Value::Call(c) => Some(ParseValue::Call(*c)),
-            Value::Opaque => Some(ParseValue::Opaque),
-            Value::Alias(_) | Value::Marker | Value::Phi(_) => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,8 +48,6 @@ pub struct SsaEngine {
     current_def: FxHashMap<u32, FxHashMap<BlockId, Value>>,
     incomplete_phis: FxHashMap<BlockId, FxHashMap<u32, PhiId>>,
     read_depth: usize,
-    /// Variables that have ever been written. A read of any other name in a
-    /// fully sealed graph is Opaque without walking the block chain.
     written: FxHashSet<u32>,
     unsealed: usize,
 }
@@ -90,7 +66,7 @@ impl SsaEngine {
     }
 
     pub fn add_block(&mut self) -> BlockId {
-        let id = BlockId(self.blocks.len());
+        let id = BlockId(u32::try_from(self.blocks.len()).expect("block index exceeds u32"));
         self.blocks.push(Block {
             predecessors: SmallVec::new(),
             sealed: false,
@@ -100,7 +76,7 @@ impl SsaEngine {
     }
 
     pub fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
-        self.blocks[block.0].predecessors.push(pred);
+        self.blocks[block.0 as usize].predecessors.push(pred);
     }
 
     pub fn seal_block(&mut self, block: BlockId) {
@@ -109,8 +85,8 @@ impl SsaEngine {
                 self.add_phi_operands(variable, phi_id);
             }
         }
-        if !self.blocks[block.0].sealed {
-            self.blocks[block.0].sealed = true;
+        if !self.blocks[block.0 as usize].sealed {
+            self.blocks[block.0 as usize].sealed = true;
             self.unsealed -= 1;
         }
     }
@@ -118,7 +94,7 @@ impl SsaEngine {
     pub fn seal_remaining(&mut self) {
         for id in 0..self.blocks.len() {
             if !self.blocks[id].sealed {
-                self.seal_block(BlockId(id));
+                self.seal_block(BlockId(u32::try_from(id).expect("block index exceeds u32")));
             }
         }
     }
@@ -169,48 +145,26 @@ impl SsaEngine {
                 return true;
             }
             if seen.insert(b) {
-                stack.extend(self.blocks[b.0].predecessors.iter().copied());
+                stack.extend(self.blocks[b.0 as usize].predecessors.iter().copied());
             }
         }
         false
     }
 
     pub fn write_variable(&mut self, variable: u32, block: BlockId, value: Value) {
-        let resolved = if let Value::Alias(alias_name) = value {
-            let alias_val = self.read_variable_internal(alias_name, block);
-            if alias_val != Value::Opaque {
-                alias_val
-            } else {
-                Value::Alias(alias_name)
-            }
-        } else {
-            value
-        };
         self.written.insert(variable);
         self.current_def
             .entry(variable)
             .or_default()
-            .insert(block, resolved);
+            .insert(block, value);
     }
 
-    pub fn read_variable(&mut self, variable: u32, block: BlockId) -> Vec<ParseValue> {
-        let mut value = self.read_variable_internal(variable, block);
-        let mut depth = 0;
-        while let Value::Alias(target) = &value {
-            depth += 1;
-            if depth > 8 {
-                break;
-            }
-            let target_value = self.read_variable_internal(*target, block);
-            if matches!(target_value, Value::Opaque | Value::Marker) {
-                break;
-            }
-            value = target_value;
-        }
+    pub fn read_variable(&mut self, variable: u32, block: BlockId) -> Vec<Value> {
+        let value = self.read_variable_internal(variable, block);
         self.resolve_value(&value)
     }
 
-    fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
+    pub(crate) fn read_variable_internal(&mut self, variable: u32, block: BlockId) -> Value {
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
@@ -218,7 +172,7 @@ impl SsaEngine {
         }
         // No unsealed block means no phi to create.
         if self.unsealed == 0 && !self.written.contains(&variable) {
-            return Value::Opaque;
+            return Value::Undefined;
         }
         if self.read_depth >= MAX_READ_DEPTH {
             return Value::Opaque;
@@ -232,8 +186,8 @@ impl SsaEngine {
     }
 
     fn read_variable_recursive(&mut self, variable: u32, block: BlockId) -> Value {
-        let sealed = self.blocks[block.0].sealed;
-        let num_preds = self.blocks[block.0].predecessors.len();
+        let sealed = self.blocks[block.0 as usize].sealed;
+        let num_preds = self.blocks[block.0 as usize].predecessors.len();
 
         let val = if !sealed {
             let phi_id = self.new_phi(block, variable);
@@ -243,9 +197,9 @@ impl SsaEngine {
                 .insert(variable, phi_id);
             Value::Phi(phi_id)
         } else if num_preds == 0 {
-            Value::Opaque
+            Value::Undefined
         } else if num_preds == 1 {
-            let pred = self.blocks[block.0].predecessors[0];
+            let pred = self.blocks[block.0 as usize].predecessors[0];
             self.read_variable_internal(variable, pred)
         } else {
             self.read_variable_marker(variable, block)
@@ -264,7 +218,7 @@ impl SsaEngine {
             .or_default()
             .insert(block, Value::Marker);
 
-        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
         let mut same: Option<Value> = None;
         let mut need_phi = false;
 
@@ -297,7 +251,7 @@ impl SsaEngine {
     }
 
     fn new_phi(&mut self, block: BlockId, variable: u32) -> PhiId {
-        let id = PhiId(self.phis.len());
+        let id = PhiId(u32::try_from(self.phis.len()).expect("phi index exceeds u32"));
         self.phis.push(PhiNode {
             block,
             variable,
@@ -308,25 +262,25 @@ impl SsaEngine {
     }
 
     fn add_phi_operands(&mut self, variable: u32, phi_id: PhiId) -> Value {
-        let block = self.phis[phi_id.0].block;
-        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
+        let block = self.phis[phi_id.0 as usize].block;
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0 as usize].predecessors.clone();
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
             if val != Value::Phi(phi_id) {
-                let phi = &mut self.phis[phi_id.0];
+                let phi = &mut self.phis[phi_id.0 as usize];
                 if phi.witnesses[0].is_none() {
                     phi.witnesses[0] = Some(val.clone());
                 } else if phi.witnesses[1].is_none() && phi.witnesses[0].as_ref() != Some(&val) {
                     phi.witnesses[1] = Some(val.clone());
                 }
             }
-            self.phis[phi_id.0].operands.push(val);
+            self.phis[phi_id.0 as usize].operands.push(val);
         }
         self.try_remove_trivial_phi(phi_id)
     }
 
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> Value {
-        let w = &self.phis[phi_id.0].witnesses;
+        let w = &self.phis[phi_id.0 as usize].witnesses;
         if let (Some(w0), Some(w1)) = (w[0].as_ref(), w[1].as_ref())
             && w0 != w1
             && *w0 != Value::Phi(phi_id)
@@ -336,8 +290,8 @@ impl SsaEngine {
         }
 
         let mut same: Option<Value> = None;
-        for i in 0..self.phis[phi_id.0].operands.len() {
-            let op = self.phis[phi_id.0].operands[i].clone();
+        for i in 0..self.phis[phi_id.0 as usize].operands.len() {
+            let op = self.phis[phi_id.0 as usize].operands[i].clone();
             if op == Value::Phi(phi_id) || Some(&op) == same.as_ref() {
                 continue;
             }
@@ -349,8 +303,8 @@ impl SsaEngine {
 
         let replacement = same.unwrap_or(Value::Opaque);
 
-        let variable = self.phis[phi_id.0].variable;
-        let block = self.phis[phi_id.0].block;
+        let variable = self.phis[phi_id.0 as usize].variable;
+        let block = self.phis[phi_id.0 as usize].block;
         if let Some(block_defs) = self.current_def.get_mut(&variable)
             && block_defs.get(&block) == Some(&Value::Phi(phi_id))
         {
@@ -361,13 +315,15 @@ impl SsaEngine {
             .phis
             .iter()
             .enumerate()
-            .filter(|(i, phi)| *i != phi_id.0 && phi.operands.contains(&Value::Phi(phi_id)))
-            .map(|(i, _)| PhiId(i))
+            .filter(|(i, phi)| {
+                *i != phi_id.0 as usize && phi.operands.contains(&Value::Phi(phi_id))
+            })
+            .map(|(i, _)| PhiId(u32::try_from(i).expect("phi index exceeds u32")))
             .collect();
 
         let phi_val = Value::Phi(phi_id);
         for user_id in &phi_users {
-            let user = &mut self.phis[user_id.0];
+            let user = &mut self.phis[user_id.0 as usize];
             for op in &mut user.operands {
                 if *op == phi_val {
                     *op = replacement.clone();
@@ -390,7 +346,10 @@ impl SsaEngine {
     }
 
     pub fn remove_redundant_phi_sccs(&mut self) {
-        let phi_ids: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
+        let phi_ids: Vec<PhiId> = (0..u32::try_from(self.phis.len())
+            .expect("phi count exceeds u32"))
+            .map(PhiId)
+            .collect();
         self.remove_redundant_phi_sccs_inner(&phi_ids, 0);
     }
 
@@ -408,7 +367,7 @@ impl SsaEngine {
             adj.push(Vec::new());
         }
         for (i, &pid) in phi_ids.iter().enumerate() {
-            for op in &self.phis[pid.0].operands {
+            for op in &self.phis[pid.0 as usize].operands {
                 if let Value::Phi(target) = op
                     && let Some(&j) = index_map.get(target)
                 {
@@ -433,7 +392,7 @@ impl SsaEngine {
 
             for &pid in &scc {
                 let mut has_external = false;
-                for op in &self.phis[pid.0].operands {
+                for op in &self.phis[pid.0 as usize].operands {
                     match op {
                         Value::Phi(p) if scc_set.contains(p) => {}
                         other => {
@@ -454,8 +413,8 @@ impl SsaEngine {
                     .expect("a trivial phi has exactly one outer value");
                 let phi_vals: Vec<Value> = scc.iter().map(|&p| Value::Phi(p)).collect();
                 for &pid in &scc {
-                    let variable = self.phis[pid.0].variable;
-                    let block = self.phis[pid.0].block;
+                    let variable = self.phis[pid.0 as usize].variable;
+                    let block = self.phis[pid.0 as usize].block;
                     if let Some(block_defs) = self.current_def.get_mut(&variable)
                         && block_defs.get(&block) == Some(&Value::Phi(pid))
                     {
@@ -482,48 +441,27 @@ impl SsaEngine {
         }
     }
 
-    fn resolve_value(&self, value: &Value) -> Vec<ParseValue> {
-        match value {
-            Value::LocalDef(_)
-            | Value::ImportRef(_)
-            | Value::Type(_)
-            | Value::Call(_)
-            | Value::Alias(_) => value.to_parse_value().into_iter().collect(),
-            Value::Opaque | Value::Marker => vec![],
-            Value::Phi(_) => {
-                let mut values = SmallVec::<[Value; 2]>::new();
-                let mut visited = FxHashSet::default();
-                self.resolve_value_recursive(value, &mut values, &mut visited);
-                let mut seen = FxHashSet::default();
-                values.retain(|v| seen.insert(v.clone()));
-                values
-                    .into_iter()
-                    .filter_map(|v| v.to_parse_value())
-                    .collect()
+    pub(crate) fn resolve_value(&self, value: &Value) -> Vec<Value> {
+        if !matches!(value, Value::Phi(_)) {
+            return match value {
+                Value::Undefined | Value::Marker => vec![],
+                _ => vec![value.clone()],
+            };
+        }
+        let mut pending = SmallVec::<[&Value; 8]>::from_slice(&[value]);
+        let mut visited = FxHashSet::default();
+        let mut values = Vec::new();
+        while let Some(value) = pending.pop() {
+            if !visited.insert(value) {
+                continue;
+            }
+            match value {
+                Value::Phi(phi) => pending.extend(self.phis[phi.0 as usize].operands.iter().rev()),
+                Value::Undefined | Value::Marker => {}
+                _ => values.push(value.clone()),
             }
         }
-    }
-
-    fn resolve_value_recursive(
-        &self,
-        value: &Value,
-        out: &mut SmallVec<[Value; 2]>,
-        visited: &mut FxHashSet<PhiId>,
-    ) {
-        match value {
-            Value::Phi(phi_id) => {
-                if !visited.insert(*phi_id) {
-                    return;
-                }
-                for op in &self.phis[phi_id.0].operands {
-                    stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || {
-                        self.resolve_value_recursive(op, out, visited)
-                    });
-                }
-            }
-            Value::Opaque | Value::Marker => {}
-            other => out.push(other.clone()),
-        }
+        values
     }
 }
 
@@ -620,7 +558,7 @@ mod tests {
         ssa.seal_block(b);
         ssa.write_variable(1, b, Value::LocalDef(0));
         let result = ssa.read_variable(1, b);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -631,7 +569,7 @@ mod tests {
         let b1 = ssa.add_sealed_successor(b0);
         ssa.write_variable(1, b0, Value::LocalDef(0));
         let result = ssa.read_variable(1, b1);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -648,8 +586,8 @@ mod tests {
 
         let result = ssa.read_variable(1, join);
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&ParseValue::LocalDef(0)));
-        assert!(result.contains(&ParseValue::LocalDef(1)));
+        assert!(result.contains(&Value::LocalDef(0)));
+        assert!(result.contains(&Value::LocalDef(1)));
     }
 
     #[test]
@@ -663,7 +601,7 @@ mod tests {
 
         ssa.write_variable(1, entry, Value::LocalDef(0));
         let result = ssa.read_variable(1, join);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -679,8 +617,8 @@ mod tests {
         let exit = ssa.finish_loop(header, body);
         let result = ssa.read_variable(1, exit);
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&ParseValue::LocalDef(0)));
-        assert!(result.contains(&ParseValue::LocalDef(1)));
+        assert!(result.contains(&Value::LocalDef(0)));
+        assert!(result.contains(&Value::LocalDef(1)));
     }
 
     #[test]
@@ -694,7 +632,7 @@ mod tests {
 
         let exit = ssa.finish_loop(header, body);
         let result = ssa.read_variable(1, exit);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -705,7 +643,7 @@ mod tests {
         ssa.write_variable(1, b, Value::LocalDef(0));
         ssa.write_variable(1, b, Value::LocalDef(1));
         let result = ssa.read_variable(1, b);
-        assert_eq!(result, vec![ParseValue::LocalDef(1)]);
+        assert_eq!(result, vec![Value::LocalDef(1)]);
     }
 
     #[test]
@@ -760,7 +698,7 @@ mod tests {
 
         ssa.remove_redundant_phi_sccs();
         let result = ssa.read_variable(1, exit);
-        assert_eq!(result, vec![ParseValue::LocalDef(0)]);
+        assert_eq!(result, vec![Value::LocalDef(0)]);
     }
 
     #[test]
@@ -771,7 +709,7 @@ mod tests {
         ssa.write_variable(1, b, Value::ImportRef(0));
         ssa.write_variable(2, b, Value::LocalDef(0));
 
-        assert_eq!(ssa.read_variable(1, b), vec![ParseValue::ImportRef(0)]);
-        assert_eq!(ssa.read_variable(2, b), vec![ParseValue::LocalDef(0)]);
+        assert_eq!(ssa.read_variable(1, b), vec![Value::ImportRef(0)]);
+        assert_eq!(ssa.read_variable(2, b), vec![Value::LocalDef(0)]);
     }
 }

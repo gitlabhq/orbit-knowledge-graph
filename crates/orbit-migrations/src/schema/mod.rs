@@ -2,6 +2,7 @@ pub(crate) mod translate;
 
 use ontology::Ontology;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use orbit_utils::clickhouse::quote_sql_literal;
 
 pub use translate::render_refreshable_view_select;
 
@@ -39,9 +40,21 @@ pub struct Column {
 #[derive(Debug, Clone)]
 pub struct Index {
     pub name: String,
-    pub expression: String,
+    pub column: String,
+    pub lowercase: bool,
     pub index_type: String,
     pub granularity: u32,
+}
+
+impl Index {
+    pub fn expression(&self) -> String {
+        let column = quote_identifier(&self.column);
+        if self.lowercase {
+            format!("lower({column})")
+        } else {
+            column
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,7 +231,7 @@ impl Table {
             body.push(format!(
                 "    INDEX {} {} TYPE {} GRANULARITY {}",
                 quote_identifier(&index.name),
-                quote_identifier(&index.expression),
+                index.expression(),
                 index.index_type,
                 index.granularity,
             ));
@@ -493,10 +506,6 @@ fn quote_identifier(name: &str) -> String {
     } else {
         bare
     }
-}
-
-fn quote_sql_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 #[cfg(test)]

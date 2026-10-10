@@ -20,6 +20,7 @@ pub struct QueryScenario {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioConfig {
+    pub ontology_overlay: Option<String>,
     #[serde(default)]
     pub extra_seed: Seed,
     #[serde(default)]
@@ -71,6 +72,13 @@ pub struct RedactionConfig {
     pub deny: BTreeMap<String, Vec<i64>>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedIndex {
+    pub table: String,
+    pub index: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
@@ -120,6 +128,8 @@ pub struct QueryExpect {
     pub hydration: Option<HydrationKind>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
+    #[serde(default)]
+    pub indexes_used: Vec<ExpectedIndex>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,

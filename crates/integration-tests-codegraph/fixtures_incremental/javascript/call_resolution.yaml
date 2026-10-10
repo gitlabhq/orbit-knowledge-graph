@@ -1,0 +1,145 @@
+name: "JavaScript call outcomes survive snapshots and target edits"
+fixtures:
+  - path: util.js
+    content: |
+      exports.value = 200;
+      exports.helper = function helper() {};
+  - path: main.js
+    content: |
+      const { value, helper } = require('./util');
+      const external = require('external-sdk');
+      const saved = external.emit;
+      function run() {
+        helper();
+        value();
+        saved();
+      }
+      function objectIsNotCallable() {
+        const object = { callback: external.emit };
+        object();
+      }
+      function objectInitializer() {
+        const object = { value: external.emit() };
+      }
+      function copiedObjectIsNotCallable() {
+        const object = { callback: external.emit };
+        const copy = object;
+        copy();
+      }
+tests:
+  - name: "numeric and object calls never become local definition calls"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.file_path = 'main.js'
+      RETURN caller.name AS caller, target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: run, name: helper, file: 'util.js' } }
+  - name: "an object containing an imported callback is not itself a call to the import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
+      RETURN sym.import_path
+    assert:
+      - { empty: true }
+  - name: "calls inside object initializers still reach the import"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'objectInitializer'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'external-sdk' } }
+  - name: "a resolved call does not hide an unrelated external call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'run'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "external-sdk" } }
+steps:
+  - name: numeric outcome survives a snapshot
+    snapshot: true
+    tests:
+      - name: "only the external call needs fallback"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name = 'run'
+          RETURN sym.import_path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { path: "external-sdk" } }
+      - name: "snapshot does not turn object values into imported calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
+          RETURN sym.import_path
+        assert:
+          - { empty: true }
+  - name: numeric export becomes callable
+    snapshot: true
+    modify:
+      - path: util.js
+        content: |
+          exports.value = function value() {};
+          exports.helper = function helper() {};
+    tests:
+      - name: "the unchanged caller resolves the new function"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'run'
+          RETURN callee.name AS name
+        assert:
+          - { row_count: 2 }
+          - { row: { name: "helper" } }
+          - { row: { name: "value" } }
+  - name: callable export becomes unknown
+    snapshot: true
+    modify:
+      - path: util.js
+        content: |
+          exports.value = getRuntimeValue();
+          exports.helper = function helper() {};
+    tests:
+      - name: "unknown export loses its previous concrete call"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS name, target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { name: helper, file: 'util.js' } }
+      - name: "fallback returns for the unknown value only"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name = 'run'
+          RETURN sym.import_path AS path, sym.identifier_name AS name
+        assert:
+          - { row_count: 2 }
+          - { row: { path: "./util", name: "value" } }
+          - { row: { path: "external-sdk", name: "default" } }
+  - name: unknown export becomes numeric again
+    snapshot: true
+    modify:
+      - path: util.js
+        content: |
+          exports.value = 200;
+          exports.helper = function helper() {};
+    tests:
+      - name: "numeric export leaves only the helper definition call"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.name AS name, target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { name: helper, file: 'util.js' } }
+      - name: "numeric calls are rejected again without losing external calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name = 'run'
+          RETURN sym.import_path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { path: "external-sdk" } }

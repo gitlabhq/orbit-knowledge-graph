@@ -6,7 +6,7 @@ This repository implements both Orbit Remote and Orbit Local. They share the Rus
 
 Today, the repository includes the following major components:
 
-- Orbit Remote's `gkg-server` binary, which runs in four modes: `Webserver`, `Indexer`, `DispatchIndexing`, and `HealthCheck`.
+- Orbit Remote's `gkg-server` binary, which runs in five modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, and `ClickhouseSetup`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
 - Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [Orbit query frontend](querying/orbit_query_frontend.md) compiles it into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
@@ -24,11 +24,12 @@ A secure query layer on top of the graph lets developers and AI agents query tha
 - [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon), the CDC bridge that streams PostgreSQL logical replication events into NATS.
 - [NATS](https://docs.nats.io/), the durable message broker for CDC and event-driven work such as consuming [`p_knowledge_graph_code_indexing_tasks`](https://gitlab.com/gitlab-org/gitlab/-/blob/master/db/docs/p_knowledge_graph_code_indexing_tasks.yml) for code indexing (see [ADR 005](decisions/005_code_indexing_task_table.md)).
 - [ClickHouse](https://clickhouse.com/), the remote datalake and property-graph store. Orbit does not connect directly to the GitLab OLTP database.
-- **Orbit Remote's service binary**, with four runtime modes:
+- **Orbit Remote's service binary**, with five runtime modes:
   - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, REST, and MCP traffic. It validates query requests against their frontend and the ontology. It compiles them to ClickHouse SQL. It applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
   - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. It also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle, including ontology archive publication.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
+  - **`ClickhouseSetup`** (`gkg-server --mode clickhouse-setup`): Runs once as a ClickHouse administrator before install and upgrade. It applies `config/clickhouse-setup.sql`, which creates the graph database, the Orbit users, their roles, and their grants, and then exits.
 - **The `orbit` CLI**, which exposes one flat command tree. Local commands parse repositories, store code graphs in DuckDB, accept read-only DuckDB SQL, and serve MCP tools over stdio; hosted commands query Orbit Remote. `glab orbit` installs and runs this binary.
 - **UI and product experiences**, which consume Orbit Remote through GitLab APIs and the GitLab Duo Agent Platform.
 
@@ -76,6 +77,7 @@ See the following design documents for more details on the Orbit architecture:
 - [Orbit Schema Management](schema_management.md)
 - [Orbit Security](security.md)
 - [Orbit Observability](observability.md)
+- [Orbit Testing](testing.md)
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [Architecture Decision Records](decisions/): numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 

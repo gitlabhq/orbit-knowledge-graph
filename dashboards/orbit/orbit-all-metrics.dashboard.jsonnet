@@ -22,8 +22,8 @@ local items =
   + o.externalSection('Siphon producers', ext.SIPHON_PRODUCERS, 'ORBIT_DS', o.SIPHON_SEL)
   + o.externalSection('Siphon ClickHouse consumers', ext.SIPHON_CONSUMERS, 'ORBIT_DS', o.SIPHON_SEL)
   + o.externalSection('NATS JetStream + varz', ext.NATS_METRICS, 'ORBIT_DS', o.NATS_SEL)
-  + o.externalSection('Rails KG request path', ext.RAILS_KG_REQUEST, 'RAILS_DS', o.RAILS_SEL)
-  + o.externalSection('Rails KG traversal compaction', ext.RAILS_KG_TRAVERSAL, 'RAILS_DS', o.RAILS_SEL);
+  + o.externalSection('Rails Orbit request path', ext.RAILS_KG_REQUEST, 'RAILS_DS', o.RAILS_SEL)
+  + o.externalSection('Rails Orbit traversal compaction', ext.RAILS_KG_TRAVERSAL, 'RAILS_DS', o.RAILS_SEL);
 
 local annotations = [
   o.deployAnnotation('ORBIT_DS', o.GKG_ANY_SEL),

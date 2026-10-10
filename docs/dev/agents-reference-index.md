@@ -9,8 +9,8 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Indexer crate guide (handlers, reuse-infra checklist) | **`crates/indexer/AGENTS.md`** |
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
-| FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/check-fips-graph.sh`, `scripts/check-fips-binary.sh`; design in `docs/design-documents/security.md` |
-| Image signing (keyless cosign, canonical project only) | `scripts/publish-manifest.sh`, `scripts/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
+| FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/checks/fips/check-graph.sh`, `scripts/checks/fips/check-binary.sh`; design in `docs/design-documents/security.md` |
+| Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; design in `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
 | Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/design-documents/querying/orbit_query_frontend.md` |
@@ -32,21 +32,23 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/orbit-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
 | Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
 | Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `orbit-server`, `local/` feeds `orbit-cli`; embedded via rust-embed and build-time validated by `crates/orbit-prompts`) |
-| Orbit skill sources, `orbit skills get <name> [path]` command, server contract, and build checks | `skills/orbit/` (remote), `skills/orbit-cli/` (local, with references under `references/local/`), `crates/orbit-server/src/skills/mod.rs` and gRPC `ListSkills`/`GetSkill` (whole-tree contract), `crates/orbit-cli/src/skill.rs` (resolution, cache, composition, and fallback), `crates/orbit-prompts/src/marker.rs` (shared build-time/runtime marker parser and composer), and `crates/orbit-prompts/src/skill.rs` (build-time path, link, and command validation). The trees stay standalone: GKG embeds only the remote tree and the CLI embeds only the local tree |
+| Orbit skill sources, `orbit skills get <name> [path]` command, server contract, and build checks | `skills/orbit/` (remote), `skills/orbit-cli/` (local, with references under `references/local/`), `skills/orbit-wrapper/` (thin wrapper that loads the composed skill from the CLI; a drift test in `crates/orbit-server/src/skills/mod.rs` keeps its description equal to `skills/orbit/`), `crates/orbit-server/src/skills/mod.rs` and gRPC `ListSkills`/`GetSkill` (whole-tree contract), `crates/orbit-cli/src/skill.rs` (resolution, cache, composition, and fallback), `crates/orbit-prompts/src/marker.rs` (shared build-time/runtime marker parser and composer), and `crates/orbit-prompts/src/skill.rs` (build-time path, link, and command validation). The trees stay standalone: GKG embeds only the remote tree and the CLI embeds only the local tree |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
+| Testing strategy (test layers, CI jobs, where to add a test) | `docs/design-documents/testing.md` |
 | Query test fixtures | `fixtures/queries/` |
-| YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:server`; filter with `SCENARIO_FILTER=<name>`) |
+| YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:data`; filter with `SCENARIO_FILTER=<name>`) |
 | Query scenario presets | `crates/integration-tests/tests/server/data_correctness/presets/` (`seed.yaml`, `security.yaml`, `redaction.yaml`) |
 | Query scenario format reference | `crates/integration-testkit/README.md` ("Query scenarios" section) and `crates/integration-testkit/src/query_scenario/format.rs` (`QueryScenario`, `QueryExpect`, `NodeExpect`) |
+| YAML indexer scenarios | `crates/integration-tests/tests/indexer/scenarios/` (`sdlc/<domain>/`, `dispatch/`, `dispatch_degraded/`; JSON schema `config/schemas/indexer_scenario.schema.json`, validate with `mise scenarios:validate`; CI gate `indexer-scenario-schema-validate`; run SDLC scenarios with `mise test:integration:indexer:sdlc:scenario <filter>`) |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot); `build_unversioned_definitions` in `crates/orbit-migrations/src/schema/translate.rs` builds all kinds |
 | Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (table chain, column contract), `crates/ontology/src/loading/mod.rs` (`resolve_denormalized_join`), `crates/query-engine/compiler/src/passes/codegen/ddl/denormalized.rs` (table and feeding views composed from the source tables' generated DDL); design in `docs/design-documents/querying/graph_engine.md` |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
-| Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `goon_output_format`, `gql_output_format` semvers enforced by `scripts/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
+| Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `toon_output_format`, `gql_output_format` semvers enforced by `scripts/checks/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
 | Vendored dependency system | `docs/dev/runbooks/vendored_dependencies.md` (lifecycle, YAML contract, script contract, validation layers); generic runner in `scripts/vendored/run.sh` |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
@@ -56,7 +58,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/orbit-server-config/src/query.rs` |
 | Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
 | Local development guide | `docs/dev/local-development.md` |
-| Local development (`mise run dev`) | `scripts/orbit-native-dev.sh`, `docs/dev/local-development.md` |
+| Local development (`mise run dev`) | `scripts/dev/orbit-native-dev.sh`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
 | **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |

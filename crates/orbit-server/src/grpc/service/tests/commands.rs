@@ -69,9 +69,20 @@ async fn graph_schema_defaults_to_formatted_text() {
 }
 
 #[tokio::test]
-async fn graph_schema_ignores_unknown_expansion_nodes() {
-    let text = graph_schema_text(r#"{"expand_nodes":["FakeNode"]}"#).await;
-    assert!(text.contains("domains"));
+async fn graph_schema_rejects_unknown_expansion_nodes() {
+    let error = command_response(
+        "get_graph_schema",
+        r#"{"expand_nodes":["User","FakeNode"]}"#,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    assert!(error.message().contains("FakeNode"), "{}", error.message());
+    assert!(
+        error.message().contains("MergeRequest"),
+        "{}",
+        error.message()
+    );
 }
 
 #[tokio::test]
@@ -565,5 +576,7 @@ async fn list_tools_inlines_the_command_catalog_only_for_dws_callers() {
     }
 
     assert!(descriptions[0].contains("\"name\":\"query_graph\""));
+    assert!(descriptions[0].contains("(User)-[:AUTHORED]->("));
     assert!(!descriptions[1].contains("\"name\":\"query_graph\""));
+    assert!(!descriptions[1].contains("Graph relationships"));
 }

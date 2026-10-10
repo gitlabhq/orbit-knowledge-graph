@@ -362,13 +362,21 @@ tests:
       - { row: { name: "handleError", fqn: "OncallSchedulesWrapper::handleError", type: "Method" } }
 
   - name: Plain GitLab entrypoints still resolve cross-file calls with monolith aliases
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     queries:
       - query: |
-          MATCH (file:File)-[e:DEFINES|CALLS]->(callee:Definition)
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.fqn IN ['mountVersionCheck', 'dismissAlert', 'resolveSchedule']
+          RETURN caller.name AS caller, callee.name AS name, callee.file_path AS file
+        assert:
+          - { row_count: 6 }
+          - { row: { caller: mountVersionCheck, name: parseBoolean, file: 'app/assets/javascripts/lib/utils/common_utils.js' } }
+          - { row: { caller: dismissAlert, name: getHideAlertModalCookie, file: 'app/assets/javascripts/gitlab_version_check/utils.js' } }
+          - { row: { caller: dismissAlert, name: setHideAlertModalCookie, file: 'app/assets/javascripts/gitlab_version_check/utils.js' } }
+          - { row: { caller: dismissAlert, name: track, file: 'app/assets/javascripts/tracking.js' } }
+          - { row: { caller: resolveSchedule, name: captureException, file: 'app/assets/javascripts/sentry.js' } }
+          - { row: { caller: resolveSchedule, name: buildSchedulePath, file: 'ee/app/assets/javascripts/oncall_schedules/utils.js' } }
+      - query: |
+          MATCH (file:File)-[e:CALLS]->(callee:Definition)
           WHERE file.path = 'app/assets/javascripts/gitlab_version_check/index.js'
             AND callee.fqn = 'parseBoolean'
           RETURN file.path AS caller, callee.fqn AS callee

@@ -163,6 +163,11 @@
               "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
               "default": false
             },
+            "hidden": {
+              "type": "boolean",
+              "description": "Whether to leave this field out of every client-facing listing: schemas, wildcard columns, and error candidates. Defaults to false. Explicit requests for the field still work.",
+              "default": false
+            },
             "selectivity": {
               "type": "string",
               "enum": [
@@ -1480,8 +1485,8 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\)|ngrambf_v1\\([0-9, ]+\\)|tokenbf_v1\\([0-9, ]+\\))$",
-          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), text(tokenizer = ...), ngrambf_v1(n, size, hashes, seed), or tokenbf_v1(size, hashes, seed)."
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text)$",
+          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), or text. text declares the Orbit text-search index pair (text + ngram over lower(column)) so string operators are indexed and case-insensitive."
         },
         "granularity": {
           "type": "integer",

@@ -11,11 +11,27 @@
 #   get the same treatment as properties: a __def plus SSA bindings.
 
 config:
-  link:
-    builtins: [
-      println, print, readLine, require, requireNotNull, check, checkNotNull, error,
-      TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
-      mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
+  stdlib: [{ module: java, precedence: runtime }, { module: javax }, { module: jdk },
+      { module: kotlin, availability: implicit, precedence: runtime, symbols: [
+      require, requireNotNull, check, checkNotNull, error,
+      TODO, lazy, run, with, repeat, arrayOf, assert, arrayOfNulls,
+      booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,
+      intArrayOf, longArrayOf, shortArrayOf, runCatching,
+      synchronized, Pair, Triple, Result, Unit, Any, String, Boolean, Byte,
+      Char, Double, Float, Int, Long, Short, Array, BooleanArray, ByteArray,
+      CharArray, DoubleArray, FloatArray, IntArray, LongArray, ShortArray
+      ] },
+      { module: kotlin/io, availability: implicit, symbols: [print, println, readLine,
+          readln, readlnOrNull] },
+      { module: kotlin/collections, availability: implicit, symbols: [listOf, setOf,
+          mapOf, mutableListOf, mutableSetOf, mutableMapOf, emptyList, emptySet,
+          emptyMap, setOfNotNull, listOfNotNull, linkedMapOf, linkedSetOf,
+          hashMapOf, hashSetOf, buildList, buildMap, buildSet] },
+      { module: kotlin/sequences, availability: implicit, symbols: [sequenceOf, emptySequence] },
+      { module: kotlin/math, symbols: [abs, acos, acosh, asin, asinh, atan,
+          atan2, atanh, cbrt, ceil, cos, cosh, exp, expm1, floor, hypot, ln,
+          ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan,
+          tanh, truncate] }
     ]
   resolve:
     lookup_from:
@@ -40,6 +56,8 @@ stages:
 
   - name: normalize
     rules:
+      - match: '(callable_reference $N:simple_identifier)'
+        replace: '(simple_identifier @$N)'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_header $I:identifier)'
@@ -152,20 +170,20 @@ stages:
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T?:type_identifier) $G:getter)'
         replace: '(__def (__defname @$N) (__property) (__ssa_return_type? @$T) $G)'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:__member) $$$V)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T)))) $$$V)'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee $T))))) (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T)))) $$$V)'
       # Properties and locals: a __def for the graph plus SSA bindings
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier $T:type_identifier))'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__call)'
-        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs $V))) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:__ssa_branch)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $V:simple_identifier)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs @$V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs @$V)))'
       - match: '(property_declaration (binding_pattern_kind) (variable_declaration $N:simple_identifier) $$$V)'
-        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__rhs $$$V)))'
+        replace: '(kt_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $$$V)))'
 
       # Assignments
       - match: '(assignment (directly_assignable_expression $N:__ivar) $R:__call)'
@@ -228,6 +246,8 @@ stages:
         replace: '(__def $$$A (modifiers (class_modifier "data")) $$$B (__positional $$$P) $$$C)'
   - name: ssa-cleanup
     rules:
+      - match: '(statements $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:simple_identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

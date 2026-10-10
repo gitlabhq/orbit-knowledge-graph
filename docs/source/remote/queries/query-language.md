@@ -54,7 +54,7 @@ query object in a top-level `query` field:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `query` | Yes | The query object documented below. |
-| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+| `response_format` | No | `"llm"` (default when omitted; compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text with one table per node type, optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
 
 Pass this envelope to `orbit query` with `--file`.
 
@@ -187,31 +187,45 @@ objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 | `eq` | Equal to a scalar value. |
 | `gt`, `gte`, `lt`, `lte` | Numeric, date, or timestamp comparison. |
 | `in` | Value is in an array. Maximum 100 values. |
-| `contains` | String contains a substring. |
+| `contains` | String contains the value as a plain substring. |
 | `starts_with` | String starts with a prefix. |
 | `ends_with` | String ends with a suffix. |
 | `is_null` | Null check. Takes a boolean: `false` matches non-null. |
 | `is_not_null` | Not-null check. Takes a boolean: `false` matches null. |
-| `token_match` | Text index contains one token. |
-| `all_tokens` | Text index contains all tokens. |
-| `any_tokens` | Text index contains any token. |
+| `token_match` | Property contains the value as one whole word. The value is a single word. |
+| `all_tokens` | Property contains every word in the value, in any order. |
+| `any_tokens` | Property contains at least one word in the value. |
 
-`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID properties.
-Token operators work only on properties with text indexes.
+`contains`, `starts_with`, `ends_with`, and the token operators ignore ASCII
+case: `contains: "Migration"` and `contains: "MIGRATION"` return the same rows.
+The server (ClickHouse) folds ASCII letters only, so `starts_with: "ÄRG"` does
+not match `ärger`. Local queries (DuckDB) fold Unicode, so the same query does.
+`eq` and `in` compare exact values, and so does every operator on a sort-key
+column such as `branch`, so the primary key keeps pruning.
+`contains`, `starts_with`, and `ends_with` work only on string, enum, and UUID
+properties. Token operators work only on text-indexed properties and reject
+other properties at compile time.
 
 ### Text-indexed properties
 
 The following properties support `token_match`, `all_tokens`, and `any_tokens`.
-Using these operators on other properties falls back to a full string scan, which is slower.
+Words are the runs of letters and digits in the property, so `main` matches
+`src/main.rs` and `yml` matches `.gitlab-ci.yml`. On these properties
+`contains`, `starts_with`, and `ends_with` prune with an ngram skip index and
+the token operators prune with a text skip index. Use `contains` for a word
+prefix (`migrat`) or a phrase with its words in order (`fix flaky`), and a token
+operator when word order does not matter.
 
-<!-- The table below is generated from the ontology's `text(...)` storage indexes. -->
+<!-- The table below is generated from the ontology's `text` storage indexes. -->
 <!-- Do not edit it by hand: run `mise run docs:query-language` and commit. CI fails on drift. -->
 <!-- BEGIN GENERATED: text-indexed-properties -->
 
 | Entity | Text-indexed properties |
 |--------|------------------------|
 | `Branch` | `name` |
+| `ContainerRepository` | `name` |
 | `Definition` | `file_path`, `fqn`, `name` |
+| `Dependency` | `name` |
 | `Deployment` | `ref` |
 | `Directory` | `name`, `path` |
 | `Environment` | `environment_type`, `name` |
@@ -225,6 +239,8 @@ Using these operators on other properties falls back to a full string scan, whic
 | `MergeRequestDiffFile` | `new_path`, `old_path` |
 | `Milestone` | `description`, `title` |
 | `Note` | `note` |
+| `Package` | `name` |
+| `PackageFile` | `file_name` |
 | `Pipeline` | `ref` |
 | `Project` | `description`, `name` |
 | `Runner` | `name` |
@@ -597,6 +613,15 @@ Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The cen
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 The response lists the center node alongside its neighbors, so leave the center out
 when counting neighbors.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `direction` | `string` | `outgoing`, `incoming`, or `both`. Default `outgoing`. |
+| `rel_types` | `array` | Relationship types to traverse. Default: all types. |
+
+With the default direction, the response has only the relationships that start
+at the center node. To also get the relationships that point at it, set
+`direction` to `incoming` or `both`.
 
 ```json orbit-query
 {

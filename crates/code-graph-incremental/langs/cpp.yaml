@@ -12,6 +12,55 @@
 #   Namespace or Concept kind.
 
 config:
+  stdlib: [
+      { module: cstdio, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,
+          fgetpos, fgets, fopen, fprintf, fputc, fputs, fread, freopen, fscanf,
+          fseek, fsetpos, ftell, fwrite, getc, getchar, perror, printf, putc,
+          putchar, puts, remove, rename, rewind, scanf, setbuf, setvbuf,
+          snprintf, sprintf, sscanf, tmpfile, tmpnam, ungetc, vfprintf,
+          vfscanf, vprintf, vscanf, vsnprintf, vsprintf, vsscanf] },
+      { module: cstdlib, symbols: [abort, abs, atexit, atof, atoi, atol, atoll,
+          at_quick_exit, aligned_alloc, bsearch, calloc, div, exit, free, getenv,
+          labs, ldiv, llabs, lldiv, malloc, mblen, mbstowcs, mbtowc, qsort,
+          quick_exit, rand, realloc, srand, strtod, strtof, strtol, strtold,
+          strtoll, strtoul, strtoull, system, wcstombs, wctomb, _Exit] },
+      { module: cstring, symbols: [memchr, memcmp, memcpy, memmove, memset,
+          strcat, strchr, strcmp, strcoll, strcpy, strcspn, strerror, strlen,
+          strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr, strtok, strxfrm] },
+      { module: cassert, symbols: [assert] },
+      { module: cmath, symbols: [abs, acos, asin, atan, atan2, ceil, cos, cosh,
+          exp, exp2, expm1, fabs, floor, fmod, frexp, hypot, ldexp, log, log10,
+          log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt, tan, tanh, trunc] },
+      { module: cctype, symbols: [isalnum, isalpha, isblank, iscntrl, isdigit,
+          isgraph, islower, isprint, ispunct, isspace, isupper, isxdigit, tolower, toupper] },
+      { module: algorithm }, { module: any }, { module: array }, { module: atomic },
+      { module: barrier }, { module: bit }, { module: bitset }, { module: cerrno },
+      { module: cfenv }, { module: cfloat }, { module: charconv }, { module: chrono },
+      { module: cinttypes }, { module: climits }, { module: clocale }, { module: codecvt },
+      { module: compare }, { module: complex }, { module: concepts },
+      { module: condition_variable }, { module: coroutine }, { module: csetjmp },
+      { module: csignal }, { module: cstdarg }, { module: cstddef }, { module: cstdint },
+      { module: ctime }, { module: cuchar }, { module: cwchar }, { module: cwctype },
+      { module: deque }, { module: exception }, { module: execution }, { module: expected },
+      { module: filesystem }, { module: format }, { module: forward_list },
+      { module: fstream }, { module: functional }, { module: future },
+      { module: initializer_list }, { module: iomanip }, { module: ios },
+      { module: iosfwd }, { module: iostream }, { module: istream }, { module: iterator },
+      { module: latch }, { module: limits }, { module: list }, { module: locale },
+      { module: map }, { module: memory }, { module: memory_resource },
+      { module: mutex }, { module: new }, { module: numbers }, { module: numeric },
+      { module: optional }, { module: ostream }, { module: print }, { module: queue },
+      { module: random }, { module: ranges }, { module: ratio }, { module: regex },
+      { module: scoped_allocator }, { module: semaphore }, { module: set },
+      { module: shared_mutex }, { module: source_location }, { module: span },
+      { module: sstream }, { module: stack }, { module: stacktrace }, { module: stdexcept },
+      { module: stop_token }, { module: streambuf }, { module: string },
+      { module: string_view }, { module: syncstream }, { module: system_error },
+      { module: thread }, { module: tuple }, { module: type_traits }, { module: typeindex },
+      { module: typeinfo }, { module: unordered_map }, { module: unordered_set },
+      { module: utility }, { module: valarray }, { module: variant },
+      { module: vector }, { module: version }
+    ]
   resolve:
     lookup_from:
       - __source_root
@@ -131,31 +180,31 @@ stages:
         replace: '(__def (__defname @$N) (__field_def))'
       # Locals (Type name(args) and Ns::Type name)
       - match: '(declaration type: $T:type_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
-        replace: '(__binding @$N (__ssa_typed @$T) $A)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (function_declarator declarator: $N:identifier parameters: $A))'
-        replace: '(__binding @$N (__ssa_typed @$T|split_last("::")) $A)'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")) $A)'
       - match: '(declaration type: $T:qualified_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__ssa_typed @$T|split_last("::")) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")) (__rhs $V))'
       - match: '(declaration type: $T:qualified_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T|split_last("::")))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T|split_last("::")))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V))'
       - match: '(declaration type: $T:type_identifier declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V))'
       - match: '(declaration type: $T:type_identifier declarator: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
       - match: '(declaration type: $T:type_identifier declarator: (pointer_declarator declarator: $N:identifier))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
       - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V:__call))'
-        replace: '(__binding @$N (__rhs $V))'
+        replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(declaration declarator: (init_declarator declarator: $N:identifier value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(declaration declarator: (init_declarator declarator: (pointer_declarator declarator: $N:identifier) value: $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
@@ -194,6 +243,8 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(compound_statement $$$B)'
+        replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 

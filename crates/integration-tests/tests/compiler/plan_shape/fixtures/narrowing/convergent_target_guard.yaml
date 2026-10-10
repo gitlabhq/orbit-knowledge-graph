@@ -1,0 +1,18 @@
+name: Convergent joined targets avoid an edge-derived narrowing rescan
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}],"group_by":["c.name"],"aggregations":[{"count":"a","as":"n"}]}
+  gql: |
+    MATCH (a:Definition {name: 'compile'})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition) RETURN c.name, count(a) AS n
+logical:
+  expect: ["(EdgeScan CALLS b->c AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        exact_order: [_filter_a]
+      expect: ["(Bind c (Filter c._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS c))))"]
+      reject: ["(CTE _narrow_c (_))"]
+    emitted:
+      expect: ["(Deduplicate Final (Scan Table(gl_definition) AS c))"]
+      reject: ["(CTE _narrow_c (_))"]

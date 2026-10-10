@@ -228,6 +228,101 @@ Orbit Local rebuilds its shared DuckDB graph when the code-index revision change
 even if repository commits have not changed. Repositories are re-indexed as used;
 Orbit Remote schema versions are unaffected.
 
+The incremental engine stores trees as `Tree<Mutable<Node>>` or `Tree<Compact<Node>>`.
+Storage owns its records and exposes node reads and updates through an associated node type.
+Generic cursor navigation works with any payload; code-specific helpers specialize on `Node`.
+`Mutable` uses
+`indextree` for structural rewrites. `Compact` stores node payloads and five
+32-bit links in a contiguous vector. Both use the same cursor operations.
+Parsing keeps source-backed text as byte spans until a rule needs a symbol.
+Canonicalization interns surviving text, releases the source, and builds compact
+storage directly from live nodes in preorder, before linking assigns edges.
+The compact vector reserves the live-node count rather than growing during conversion.
+The consuming `From` conversions preserve node IDs in both directions, including
+removed slots. `compact_and_remap` instead removes holes and renumbers nodes; use it
+before linking. Compact storage supports symbol and tag updates in place. Display
+uses the shared matcher to apply tag-only rules directly to compact trees. Rules
+that append or replace nodes convert one file at a time to mutable storage and back.
+Incremental indexing builds new trees for changed files and retains compact trees
+for unchanged files. Snapshot loading builds compact storage directly.
+
+The incremental engine distinguishes an undefined name from a local value whose
+target is unknown. Unknown locals block fallback to same-named imports or functions.
+Rust identifier initializers use ordinary bindings. Unit struct declarations have
+an anonymous binding whose initializer constructs the struct. The linker follows
+that declaration rather than capitalization. Imported bindings use the existing
+type-flow path; unresolved references do not become calls.
+Direct Rust tuple destructuring reads the source bindings before assigning the
+destination bindings, including positions discarded with `_`.
+Rust pattern rules lower tuple and record components to ordinary declarations
+with field reads. Nested patterns repeat the same rewrite. A temporary binding
+holds the source before destination names become visible. Field initializers
+also use temporaries so later expressions cannot change earlier captured values.
+The `tree_node_id` transform supplies unique names within the rewritten file; these
+temporary names are internal and do not become graph definitions.
+Record fields and tuple-struct positions use separate SSA bindings within each
+function. Copies retain the current field values; whole-value replacement clears
+old fields. Calls through fields or loop joins retain their reaching values until
+the linker seals the loop back-edges.
+
+Language YAML groups external framework providers under `config.frameworks`.
+Each group has a unique `name` and a `providers` list using the same schema as
+`config.stdlib`. Both lists compile into the existing provider lookup tables.
+Ruby declares Rails library roots with runtime precedence to prevent unrelated
+repository paths from capturing framework imports. Explicit aliases and relative
+imports retain their existing behavior. Framework methods are not implicit globals;
+application methods with names such as `find`, `create`, and `render` still resolve.
+Framework groups are configured by the language rules, not detected from manifests.
+
+Ruby rules rewrite `send`, `public_send`, and `__send__` when the first argument
+is a literal symbol or a string without interpolation. The resulting call keeps
+its receiver, remaining arguments, and block. Dynamic names keep the original
+dispatch call. These rules assume the standard Ruby dispatch methods; they do
+not detect custom overrides of those methods.
+
+Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
+to declaration identities, which also identify SSA variables and field slots.
+The linker allocates these keys per file; they do not enter the shared symbol
+interner or snapshots. Class values retain declaration node IDs through joins.
+Leaving a block removes its name mappings without restoring values. Assignments
+to outer bindings therefore survive block exit.
+
+Incremental snapshots store live tree nodes in traversal order, with their arena
+IDs and parent IDs. Loading preserves those IDs and sibling order, including when
+nodes were added or removed after linking. Edges, tags, and cached resolver
+locations therefore keep their targets. Removed slots have no serialized node
+payload. Snapshot version 15 requires a fresh index for older saved graphs.
+Snapshots also retain original import paths so resolved paths cannot change
+standard-library classification on reindex. Language YAML distinguishes builtin
+callable names, external module roots, and shadowable standard-library roots.
+Loading rebuilds the file index from saved trees and manifests before edits apply.
+
+Import discovery scans retained files only when the file index gains keys.
+Existing imports are checked separately for changed targets. Dirty files and
+redirected imports seed one reverse-dependency traversal with a shared visited set.
+Each affected file resolves once, including when dependency paths overlap or cycle.
+
+An empty `__declaration` marker introduces a binding after its initializer.
+A named marker selects a matching scope label. The linker registers these names
+before walking that scope, so reads before assignment cannot fall back to outer
+names. TypeScript rules use block labels for `let` and `const`, and function labels
+for `var`. Python assignment rules use function labels. Rust declarations take
+effect in source order. Scope labels are YAML symbols; the engine does not branch
+on language names.
+
+C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
+local declarations introduce bindings independently of assignments to outer names.
+JavaScript-family iteration rules retain the source expression and bind the loop
+variable in its block or function scope. Rust blocks use the existing hoisting
+tag to register local items before walking statements.
+
+An `__alias` on a named declaration selects an enclosing scope with that label.
+The linker registers these aliases before local declarations. Python `global`
+and PHP `global` select the module; Python `nonlocal` selects an outer function.
+PHP rules register variable reads in their function scope so undeclared locals
+cannot inherit file-level values. Bash variable bindings use their `$` prefix
+to keep them separate from literal command names.
+
 ##### Inventory-driven indexing pipeline
 
 The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:

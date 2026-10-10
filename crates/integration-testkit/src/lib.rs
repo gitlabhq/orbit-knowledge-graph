@@ -2,6 +2,7 @@ mod assertions;
 pub mod cli;
 mod context;
 pub mod mock_redaction;
+pub mod plan_shape;
 pub mod query_scenario;
 pub mod scenario;
 mod seed;
@@ -25,6 +26,10 @@ fn load_unprefixed_ontology() -> ontology::Ontology {
     else {
         return ontology::Ontology::load_embedded().expect("embedded ontology should load");
     };
+    load_ontology_overlay(&name)
+}
+
+pub fn load_ontology_overlay(name: &str) -> ontology::Ontology {
     let dir = format!("{}/overlays/{name}", env!("SEEDS_DIR"));
     assert!(
         std::path::Path::new(&dir).is_dir(),

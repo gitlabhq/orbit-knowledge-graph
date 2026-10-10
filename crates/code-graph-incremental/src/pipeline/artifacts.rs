@@ -9,7 +9,7 @@ use orbit_utils::fs_walk::FileInventoryEntry;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{SourceFile, State};
-use crate::tree::{Edge, Tree};
+use crate::tree::{Compact, Edge, Tree};
 
 /// A repository's classified files; parse entries are read from `root` as
 /// workers take them.
@@ -35,11 +35,14 @@ pub struct ReindexInput {
 pub struct Workset<C> {
     pub state: State,
     pub items: C,
-    pub dirty: FxHashSet<usize>,
+    pub dirty: FxHashSet<u32>,
     pub listed: Listed,
 }
 
-pub type Lazy<T> = Box<dyn Iterator<Item = T> + Send>;
+pub struct SourcePaths {
+    pub root: PathBuf,
+    pub paths: Vec<String>,
+}
 
 /// What the inventory held besides parseable code: manifests for the
 /// resolver, every other file with the reason it was not parsed, and each
@@ -58,16 +61,16 @@ pub struct Parsed(pub Tree);
 pub struct Rewritten(pub Tree);
 
 /// Only canonical nodes remain; the source text is gone.
-pub struct Canonical(pub Tree);
+pub struct Canonical(pub Tree<Compact>);
 
 pub struct LinkedFile {
-    pub tree: Tree,
+    pub tree: Tree<Compact>,
     pub edges: Vec<Edge>,
 }
 
 pub struct DirtyGraph {
     pub state: State,
-    pub dirty: FxHashSet<usize>,
+    pub dirty: FxHashSet<u32>,
 }
 
 pub struct Resolved {
@@ -81,4 +84,34 @@ pub struct Displayed {
 pub struct Exported {
     pub state: State,
     pub tables: Vec<(String, RecordBatch)>,
+}
+
+impl super::Labelled for SourceFile {
+    fn label(&self) -> &str {
+        &self.path
+    }
+}
+
+impl super::Labelled for Parsed {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for Rewritten {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for Canonical {
+    fn label(&self) -> &str {
+        &self.0.label
+    }
+}
+
+impl super::Labelled for LinkedFile {
+    fn label(&self) -> &str {
+        &self.tree.label
+    }
 }

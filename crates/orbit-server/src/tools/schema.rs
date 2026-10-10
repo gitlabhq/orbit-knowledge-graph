@@ -347,6 +347,45 @@ mod tests {
     }
 
     #[test]
+    fn query_schema_requires_non_empty_path_rel_types() {
+        let query = |path: Value| {
+            serde_json::json!({
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "start", "entity": "User", "node_ids": [1]},
+                    {"id": "end", "entity": "Project", "node_ids": [278964]}
+                ],
+                "path": path
+            })
+        };
+
+        let errors = validate_query_schema(query(serde_json::json!(
+            {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+        )));
+        assert!(
+            errors.iter().any(|error| error.contains("rel_types")),
+            "expected rel_types schema error, got: {errors:?}"
+        );
+
+        let errors = validate_query_schema(query(serde_json::json!(
+            {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": []}
+        )));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for empty rel_types"
+        );
+
+        let errors = validate_query_schema(query(serde_json::json!(
+            {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
+             "rel_types": ["AUTHORED", "IN_PROJECT"]}
+        )));
+        assert!(
+            errors.is_empty(),
+            "expected schema success, got: {errors:?}"
+        );
+    }
+
+    #[test]
     fn query_schema_accepts_multi_node_aggregation_with_group_by() {
         let errors = validate_query_schema(serde_json::json!({
             "query_type": "aggregation",

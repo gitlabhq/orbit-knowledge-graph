@@ -150,6 +150,7 @@ pub trait QueryAuthorizationCatalog: Send + Sync + Sized + 'static {
     fn is_admin_only(&self, property: PropertyId) -> bool;
     fn is_filterable(&self, property: PropertyId) -> bool;
     fn is_like_allowed(&self, property: PropertyId) -> bool;
+    fn is_hidden(&self, property: PropertyId) -> bool;
     fn entity_auth(&self) -> &HashMap<String, crate::EntityAuthConfig>;
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
     fn required_access_level(&self, entity: EntityId) -> Option<u32>;
@@ -260,6 +261,11 @@ pub trait QueryDataModel {
         self.query_backend().table_sort_key(table)
     }
 
+    fn in_sort_key(&self, table: &str, column: &str) -> bool {
+        self.table_sort_key(table)
+            .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
+    }
+
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
     }
@@ -284,6 +290,10 @@ pub trait QueryDataModel {
 
     fn property_is_admin_only(&self, property: PropertyId) -> bool {
         self.query_authorization().is_admin_only(property)
+    }
+
+    fn property_is_hidden(&self, property: PropertyId) -> bool {
+        self.query_authorization().is_hidden(property)
     }
 
     fn property_is_filterable(&self, entity: &str, property: &str) -> bool {

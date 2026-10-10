@@ -2,20 +2,65 @@
 # Stamps all synthetics needed by SSA and resolver.
 
 config:
-  resolve:
-    external: [
-      abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
-      concurrent, configparser, contextlib, contextvars, copy, csv, ctypes, dataclasses,
-      datetime, decimal, difflib, email, enum, errno, fnmatch, fractions, ftplib,
-      functools, gc, glob, gzip, hashlib, heapq, hmac, html, http, importlib, inspect,
-      io, ipaddress, itertools, json, logging, math, mimetypes, multiprocessing,
-      numbers, operator, os, pathlib, pdb, pickle, pkgutil, platform, pprint, queue,
-      random, re, secrets, select, selectors, shelve, shlex, shutil, signal, socket,
-      socketserver, sqlite3, ssl, stat, statistics, string, struct, subprocess, sys,
-      sysconfig, tarfile, tempfile, textwrap, threading, time, timeit, tkinter, tomllib,
-      traceback, types, typing, unicodedata, unittest, urllib, uuid, venv, warnings,
-      weakref, xml, xmlrpc, zipfile, zlib, zoneinfo
+  stdlib: [
+      { module: sys, precedence: runtime },
+      { module: builtins, availability: implicit, precedence: runtime, symbols: [
+      __import__, abs, aiter, all, anext, any, ascii, bin, bool, breakpoint, bytearray,
+      bytes, callable, chr, classmethod, compile, complex, delattr, dict, dir, divmod,
+      enumerate, eval, exec, filter, float, format, frozenset, getattr, globals,
+      hasattr, hash, help, hex, id, input, int, isinstance, issubclass, iter, len,
+      list, locals, map, max, memoryview, min, next, object, oct, open, ord, pow,
+      print, property, range, repr, reversed, round, set, setattr, slice, sorted,
+      staticmethod, str, sum, super, tuple, type, vars, zip,
+      BaseException, BaseExceptionGroup, Exception, ExceptionGroup, ArithmeticError,
+      AssertionError, AttributeError, BlockingIOError, BrokenPipeError, BufferError,
+      ChildProcessError, ConnectionAbortedError, ConnectionError,
+      ConnectionRefusedError, ConnectionResetError, EOFError, FileExistsError,
+      FileNotFoundError, FloatingPointError, GeneratorExit, ImportError,
+      IndentationError, IndexError, InterruptedError, IsADirectoryError, KeyError,
+      KeyboardInterrupt, LookupError, MemoryError, ModuleNotFoundError, NameError,
+      NotADirectoryError, NotImplementedError, OSError, OverflowError,
+      PermissionError, ProcessLookupError, RecursionError, ReferenceError,
+      RuntimeError, StopAsyncIteration, StopIteration, SyntaxError, SystemError,
+      SystemExit, TabError, TimeoutError, TypeError, UnboundLocalError,
+      UnicodeDecodeError, UnicodeEncodeError, UnicodeError, UnicodeTranslateError,
+      ValueError, ZeroDivisionError, Warning, UserWarning, DeprecationWarning,
+      PendingDeprecationWarning, SyntaxWarning, RuntimeWarning, FutureWarning,
+      ImportWarning, UnicodeWarning, BytesWarning, ResourceWarning, EncodingWarning
+      ] },
+      { module: abc }, { module: argparse }, { module: ast }, { module: asyncio },
+      { module: base64 }, { module: bisect }, { module: calendar }, { module: collections },
+      { module: concurrent }, { module: configparser }, { module: contextlib },
+      { module: contextvars }, { module: copy }, { module: csv }, { module: ctypes },
+      { module: dataclasses }, { module: datetime }, { module: decimal },
+      { module: difflib }, { module: email }, { module: enum }, { module: errno },
+      { module: fnmatch }, { module: fractions }, { module: ftplib },
+      { module: functools }, { module: gc }, { module: glob }, { module: gzip },
+      { module: hashlib }, { module: heapq }, { module: hmac }, { module: html },
+      { module: http }, { module: importlib }, { module: inspect }, { module: io },
+      { module: ipaddress }, { module: itertools }, { module: json }, { module: logging },
+      { module: math, symbols: [acos, acosh, asin, asinh, atan, atan2, atanh,
+          cbrt, ceil, comb, copysign, cos, cosh, degrees, dist, erf, erfc, exp,
+          exp2, expm1, fabs, factorial, floor, fmod, frexp, fsum, gamma, gcd,
+          hypot, isclose, isfinite, isinf, isnan, isqrt, lcm, ldexp, lgamma,
+          log, log10, log1p, log2, modf, nextafter, perm, pow, prod, radians,
+          remainder, sin, sinh, sqrt, sumprod, tan, tanh, trunc, ulp] },
+      { module: mimetypes }, { module: multiprocessing }, { module: numbers },
+      { module: operator }, { module: os }, { module: pathlib }, { module: pdb },
+      { module: pickle }, { module: pkgutil }, { module: platform }, { module: pprint },
+      { module: queue }, { module: random }, { module: re }, { module: secrets },
+      { module: select }, { module: selectors }, { module: shelve }, { module: shlex },
+      { module: shutil }, { module: signal }, { module: socket }, { module: socketserver },
+      { module: sqlite3 }, { module: ssl }, { module: stat }, { module: statistics },
+      { module: string }, { module: struct }, { module: subprocess }, { module: sysconfig },
+      { module: tarfile }, { module: tempfile }, { module: textwrap }, { module: threading },
+      { module: time, precedence: runtime }, { module: timeit }, { module: tkinter },
+      { module: tomllib }, { module: traceback }, { module: types }, { module: typing },
+      { module: unicodedata }, { module: unittest }, { module: urllib }, { module: uuid },
+      { module: venv }, { module: warnings }, { module: weakref }, { module: xml },
+      { module: xmlrpc }, { module: zipfile }, { module: zlib }, { module: zoneinfo }
     ]
+  resolve:
     lookup_from:
       - __source_root
 
@@ -94,6 +139,10 @@ stages:
 
   - name: classify
     rules:
+      - match: '(global_statement $$$N:identifier)'
+        replace: '(global_names $$$N=>global_name)'
+      - match: '(nonlocal_statement $$$N:identifier)'
+        replace: '(nonlocal_names $$$N=>nonlocal_name)'
       # Defs
       - match: '(assignment left: $N right: $R:lambda)'
         replace: '(__def (__defname @$N) (__lambda) $R)'
@@ -114,11 +163,11 @@ stages:
       - match: '(assignment left: $N:__ivar right: $R)'
         replace: '(__binding $N (__rhs @$R))'
       - match: '(assignment left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs $R))'
       - match: '(assignment left: $N right: $R:__ssa_loop)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__declaration "function") (__rhs @$R))'
       - match: '(assignment left: $N:__ivar)'
         replace: '(__binding $N)'
       - match: '(assignment left: $N)'
@@ -173,15 +222,21 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      - match: '(global_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "module"))'
+      - match: '(nonlocal_name)'
+        replace: '(__binding @$ROOT (__declaration "function") (__alias "function"))'
       - match: '(__ssa_return $V:identifier)'
         replace: '(__ssa_return (__rhs @$V))'
 
   - name: tag-defs
     rules:
+      - match: '(__source_file)'
+        tag: { scoped: "module" }
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__lambda))'

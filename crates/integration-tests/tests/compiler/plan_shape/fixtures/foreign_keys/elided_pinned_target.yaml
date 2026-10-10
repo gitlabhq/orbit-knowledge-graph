@@ -1,0 +1,16 @@
+name: A pinned FK target becomes a holder predicate after the first edge
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[1000]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"aggregations":[{"count":"mr","as":"n"}]}
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN count(mr) AS n
+logical:
+  expect: ["(EdgeScan IN_PROJECT mr->p AS e1)"]
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Filter mr.project_id = 1000, ... (_))"]
+      reject: ["(Scan Table(gl_project) ...)", "(Scan Table(gl_edge) ...)"]
+    emitted:
+      expect: ["(Filter mr.project_id = 1000, ... (_))"]
+      reject: ["(Scan Table(gl_project) ...)", "(Scan Table(gl_edge) ...)"]

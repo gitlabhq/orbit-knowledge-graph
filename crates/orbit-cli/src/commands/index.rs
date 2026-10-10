@@ -145,7 +145,14 @@ pub(crate) fn run(
 ) -> Result<()> {
     let person_is_watching = std::io::stdout().is_terminal();
     install_tracing(verbose, person_is_watching);
-    let mut indexer = LocalIndexer::open(path, threads, show_stats, db)?;
+    let opened = LocalIndexer::open(path, threads, show_stats, db);
+    if person_is_watching
+        && let Err(error) = &opened
+        && let Some(NoRepositoryFound(folder)) = error.downcast_ref()
+    {
+        return show_how_to_pick_a_repository(folder);
+    }
+    let mut indexer = opened?;
 
     if !person_is_watching {
         indexer.pipeline_config.cancel = cancel_on_ctrl_c();
@@ -222,6 +229,63 @@ pub(crate) fn grep_command_line(definition_name: &str) -> String {
     };
     format!("{} grep {argument}", spec::launcher())
 }
+
+pub(crate) fn index_command_line(path: &str) -> String {
+    let is_plain_path = path
+        .chars()
+        .all(|c| c.is_alphanumeric() || "_-./~:\\".contains(c));
+    let argument = match is_plain_path {
+        true => path.to_string(),
+        false => format!("'{}'", path.replace('\'', "'\\''")),
+    };
+    format!("{} index {argument}", spec::launcher())
+}
+
+pub(crate) fn example_repository_path() -> &'static str {
+    if cfg!(windows) {
+        r"C:\code\app"
+    } else if cfg!(target_os = "macos") {
+        "~/Projects/app"
+    } else {
+        "~/src/app"
+    }
+}
+
+fn show_how_to_pick_a_repository(folder: &Path) -> Result<()> {
+    let example = example_repository_path();
+    let steps = [
+        ("Index a repository by path:", index_command_line(example)),
+        ("Or go into it first:", format!("cd {example}")),
+        ("", index_command_line(".")),
+    ]
+    .map(|(label, command)| format!("{label:<27}  {command}"))
+    .join("\n");
+
+    tui::intro("Orbit index")?;
+    tui::card(
+        "No git repository here",
+        format!(
+            "{} has no git repository in it.\n\n{steps}",
+            folder.display()
+        ),
+    )?;
+    tui::outro("Nothing indexed.")
+}
+
+#[derive(Debug)]
+struct NoRepositoryFound(PathBuf);
+
+impl std::fmt::Display for NoRepositoryFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "no git repository found in {}. Pass a repository path, or a directory containing one.",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for NoRepositoryFound {}
 
 fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
     let batches = crate::sql::open_graph(db)
@@ -432,12 +496,11 @@ struct LocalIndexer {
 impl LocalIndexer {
     fn open(path: PathBuf, threads: usize, show_stats: bool, db: Option<PathBuf>) -> Result<Self> {
         let db_path = workspace::resolve_db_path(db)?;
-        let repos = workspace::Workspace::open_default()?.resolve_repos(&path)?;
+        let workspace = workspace::Workspace::open_default()?;
+        let path = dunce::canonicalize(&path)?;
+        let repos = workspace.resolve_repos(&path)?;
         if repos.is_empty() {
-            bail!(
-                "no git repository found in {}. Pass a repository path, or a directory containing one.",
-                path.display()
-            );
+            return Err(NoRepositoryFound(path).into());
         }
 
         let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;

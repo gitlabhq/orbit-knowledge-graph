@@ -39,7 +39,7 @@ struct Cli {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("index"))]
 struct IndexArgs {
-    /// Repository path, or a directory that holds repositories (default: current directory).
+    /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
@@ -433,8 +433,10 @@ enum Commands {
     /// Show the Orbit MCP tool manifest.
     Tools,
     /// Show indexing progress for a namespace or project.
+    ///
+    /// Without a scope flag, inspects the project behind this clone's `origin` remote.
     #[command(name = "graph-status")]
-    #[command(group(clap::ArgGroup::new("graph_status_scope").required(true).args(["full_path", "namespace_id", "project_id"])))]
+    #[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
     GraphStatus {
         /// Full path of a project or group, such as `gitlab-org/gitlab`.
         #[arg(long)]
@@ -450,7 +452,7 @@ enum Commands {
 
         #[arg(
             long,
-            help = "Server response format. Defaults to raw (structured JSON).",
+            help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
             value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
                 .map(|value| match value.as_str() {
                     "raw" => remote::ResponseFormat::Raw,
@@ -652,12 +654,30 @@ async fn dispatch(
             let components = commands::setup::Component::from_flags(mcp, &skip);
             let options = flags.to_options(agents, all, !no_index, graph_first, components);
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::install(options, flags.target()?, &machine)
+            let run = commands::setup::install(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_CONFIGURED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::Uninstall { agents, flags } => {
             let options = flags.to_options(agents, false, false, false, Default::default());
             let machine = commands::setup::detect::Machine::current()?;
-            commands::setup::uninstall(options, flags.target()?, &machine)
+            let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
+            if let Some(tracker) = &tracker {
+                telemetry::emit_setup_event(
+                    tracker,
+                    telemetry::AGENTS_REMOVED_ACTION,
+                    &run,
+                    coding_agent.as_deref(),
+                );
+            }
+            Ok(())
         }
         Commands::HookGuard {
             kind,

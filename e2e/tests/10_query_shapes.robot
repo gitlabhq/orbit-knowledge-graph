@@ -1,7 +1,7 @@
 *** Settings ***
 Documentation       Exercise the query_type variants and response formats beyond the traversal /
 ...                 aggregation shapes already used by 02-05: neighbors, path_finding, and the llm
-...                 (GOON) response format. Seeds one project + issue (IN_PROJECT) under the shared
+...                 (TOON) response format. Seeds one project + issue (IN_PROJECT) under the shared
 ...                 namespace and asserts the specific seeded nodes appear in each result.
 
 Resource            gitlab.resource
@@ -14,44 +14,41 @@ Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Quer
 Neighbors Query Includes The Adjacent Issue
     [Documentation]    The project's neighbors must include the issue that is IN_PROJECT it.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
-    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}
+    Wait Until Result Node Ids Contain    MATCH (p:Project {id: ${SHAPE_PROJECT_ID}})--(n) RETURN p, n
+    ...    ${SHAPE_ISSUE_ID}
 
 Path Finding Connects The Issue To The Project
     [Documentation]    The shortest IN_PROJECT path must contain both endpoints.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "path_finding", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}, {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "path": {"type": "shortest", "from": "w", "to": "p", "max_depth": 2, "rel_types": ["IN_PROJECT"]}}
-    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}    ${SHAPE_PROJECT_ID}
+    Wait Until Result Node Ids Contain
+    ...    MATCH path = ANY SHORTEST (w:WorkItem {id: ${SHAPE_ISSUE_ID}})-[:IN_PROJECT*1..2]->(p:Project {id: ${SHAPE_PROJECT_ID}}) RETURN path
+    ...    ${SHAPE_ISSUE_ID}    ${SHAPE_PROJECT_ID}
 
-GOON Format Encodes The Neighbors Result
-    [Documentation]    The llm response is GOON text: a header naming the query_type plus the seeded
-    ...                project's name. The GOON body is empty on the pinned e2e GitLab+Workhorse
-    ...                stack (Workhorse does not relay formatted_text from the current GKG; verified
-    ...                non-empty in production), so the content assertions are skipped there rather
-    ...                than failing on an upstream version gap.
+LLM Format Encodes The Neighbors Result As TOON
+    [Documentation]    The llm response is TOON: the query_type, then a Project table holding the
+    ...                seeded project and its name. The body is empty on the pinned e2e
+    ...                GitLab+Workhorse stack (Workhorse does not relay formatted_text from the current
+    ...                GKG; verified non-empty in production), so the content assertions are skipped
+    ...                there rather than failing on an upstream version gap.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
-    ${resp}=    Orbit Query LLM    ${query}
+    ${resp}=    Orbit Query LLM    MATCH (p:Project {id: ${SHAPE_PROJECT_ID}})--(n) RETURN p, n
     IF    not $resp.text
-        Log    GOON/llm body empty on the pinned GitLab+Workhorse stack; skipping content check.
+        Log    llm body empty on the pinned GitLab+Workhorse stack; skipping content check.
         ...    level=WARN
-        Pass Execution    GOON relay unavailable on the pinned stack
+        Pass Execution    llm relay unavailable on the pinned stack
     END
-    Should Contain    ${resp.text}    @header    GOON body is not GOON-formatted
-    Should Contain    ${resp.text}    query_type:neighbors    GOON header missing query_type
-    Should Contain    ${resp.text}    ${SHAPE_PROJECT_NAME}    GOON body missing the seeded project name
+    Should Contain    ${resp.text}    query_type: neighbors    llm body is not TOON
+    Should Contain    ${resp.text}    Project[1]{id,    llm body has no Project table
+    Should Contain    ${resp.text}    ${SHAPE_PROJECT_ID},    llm body missing the seeded project
+    Should Contain    ${resp.text}    ${SHAPE_PROJECT_NAME}    llm body missing the seeded project name
 
 Truncated Date Group Key Serializes As An ISO Date String
     [Documentation]    A month-truncated group key must arrive as an ISO date string, not the
     ...                epoch-day integer ClickHouse's Arrow output uses for Date columns on some
     ...                server versions.
     [Tags]    query-shapes
-    ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"count": "w", "as": "n"}], "limit": 5}
-    ${resp}=    Orbit Query    ${query}
+    ${resp}=    Orbit Query
+    ...    MATCH (w:WorkItem {id: ${SHAPE_ISSUE_ID}}) RETURN date_trunc('month', w.created_at), count(w) AS n LIMIT 5
     ${month}=    Aggregation Value    ${resp}    w_created_at_month
     ${month}=    Convert To String    ${month}
     Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$
