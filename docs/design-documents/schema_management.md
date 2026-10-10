@@ -23,7 +23,7 @@ the primary key keeps pruning.
 
 This file covers ClickHouse schema migration versions and archive-backed serving. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
-enforced by `scripts/check-pinned-version.sh`. See
+enforced by `scripts/checks/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 A request's `migration_version` is the version of the archive it was served from; telemetry and

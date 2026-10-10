@@ -2,7 +2,7 @@
 # Apply the GKG graph schema (config/graph.sql) to a ClickHouse database.
 #
 # Usage:
-#   scripts/apply-graph-schema.sh [OPTIONS]
+#   scripts/dev/apply-graph-schema.sh [OPTIONS]
 #
 # Options:
 #   --host HOST       ClickHouse host (default: localhost)
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Defaults (overridable by env vars, then by flags)
 HOST="${CLICKHOUSE_HOST:-localhost}"

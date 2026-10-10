@@ -9,11 +9,11 @@ against origin/main. CI checks the merge request diff base against HEAD. The
 pre-commit hook uses --staged so the check evaluates the exact staged snapshot.
 
 Usage:
-    python3 scripts/check-skill-version-bump.py
-    python3 scripts/check-skill-version-bump.py --ci
-    python3 scripts/check-skill-version-bump.py --staged --ci
-    python3 scripts/check-skill-version-bump.py --base-ref origin/main --ci
-    python3 scripts/check-skill-version-bump.py --debug
+    python3 scripts/checks/check-skill-version-bump.py
+    python3 scripts/checks/check-skill-version-bump.py --ci
+    python3 scripts/checks/check-skill-version-bump.py --staged --ci
+    python3 scripts/checks/check-skill-version-bump.py --base-ref origin/main --ci
+    python3 scripts/checks/check-skill-version-bump.py --debug
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 DEBUG = False

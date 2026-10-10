@@ -6,7 +6,7 @@ set -euo pipefail
 # image, with .google-oidc:auth already attached. For .zip archives the
 # environment must also provide `unzip` and `zip`.
 #
-# Usage: scripts/sign-and-repackage.sh <archive> <platform> <binary>
+# Usage: scripts/release/sign-and-repackage.sh <archive> <platform> <binary>
 # Platforms: macos, windows
 # Archives:  .tar.gz/.tgz, .zip
 
