@@ -58,6 +58,10 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Design documents describe the current system. Update the owning document under
   `docs/design-documents/` in the same MR as a behavior change.
 - Rewrite or remove stale text instead of preserving history.
+- Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
+  Put lists such as languages, entity types, and commands only in the page that
+  owns them, and link to that page. Link to repository files by relative path, so
+  the `check_docs_markdown` CI job checks each link.
 - When you add, move, or remove an owning guide, update its pointers in the
   byte-identical `AGENTS.md` and `CLAUDE.md` files.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
