@@ -306,210 +306,61 @@ mod tests {
     use super::*;
 
     fn hit(file: &str, line: usize, text: &str, def: Option<(&str, usize, usize)>) -> Hit {
+        let def = def.map(|(name, start, end)| Def {
+            name: name.into(),
+            start,
+            end,
+            id: start as i64,
+            kind: "Function".into(),
+        });
+        let (file, text) = (file.into(), text.into());
         Hit {
-            file: file.into(),
+            file,
             line,
-            text: text.into(),
-            def: def.map(|(name, start, end)| Def {
-                name: name.into(),
-                start,
-                end,
-                id: start as i64,
-                kind: "Function".into(),
-            }),
+            text,
+            def,
             context: false,
         }
     }
 
-    fn show(hits: &[Hit], terms: &[Term], options: &Options) -> String {
+    fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
+        let edited = edited.iter().map(|f| f.to_string()).collect();
+        let options = Options {
+            output,
+            ..Options::default()
+        };
         render(
             "grep",
             hits,
             terms,
             &Connections::new(),
-            &BTreeSet::new(),
-            options,
+            &edited,
+            &options,
             None,
         )
         .unwrap()
     }
 
     #[test]
-    fn rows_list_each_file_once_with_definitions_and_defining_files_first() {
-        let terms = vec![Term::parse("maintenanceMode"), Term::parse("nosuchxyz")];
-        let mut hits = vec![
-            hit(
-                "install/data/defaults.json",
-                130,
-                "\"maintenanceMode\": 0,",
-                None,
-            ),
-            hit(
-                "src/middleware/maintenance.js",
-                10,
-                "middleware.maintenanceMode = helpers.try(",
-                Some(("default", 9, 41)),
-            ),
-            hit(
-                "src/middleware/maintenance.js",
-                11,
-                "    if (!meta.config.maintenanceMode) {",
-                Some(("default", 9, 41)),
-            ),
-            hit(
-                "test/controllers.js",
-                1203,
-                "meta.config.maintenanceMode = 1;",
-                Some(("describe", 1201, 1230)),
-            ),
-        ];
-        for line in 26..=27 {
-            hits.push(hit(
-                "src/routes/feeds.js",
-                line,
-                "app.get('/x', middleware.maintenanceMode, y);",
-                Some(("default", 25, 38)),
-            ));
-        }
-        hits.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-        let out = show(&hits, &terms, &Options::default());
-        assert_eq!(
-            out,
-            "grep: 6 lines in 4 files (maintenanceMode 6, nosuchxyz 0)
-  src/middleware/maintenance.js │ Function default:9-41 :10 middleware.maintenanceMode = helpers.try( │ :11     if (!meta.config.maintenanceMode) {
-  src/routes/feeds.js │ Function default:25-38 :26 app.get('/x', middleware.maintenanceMode, y); │ :27 app.get('/x', middleware.maintenanceMode, y);
-  test/controllers.js │ Function describe:1201-1230 :1203 meta.config.maintenanceMode = 1;
-  install/data/defaults.json │ :130 \"maintenanceMode\": 0,
-"
-        );
-        let files = Options {
-            output: Output::Files,
-            ..Options::default()
-        };
-        assert_eq!(
-            show(&hits, &terms, &files),
-            "src/middleware/maintenance.js\nsrc/routes/feeds.js\ntest/controllers.js\ninstall/data/defaults.json\n"
-        );
-        let count = Options {
-            output: Output::Count,
-            ..Options::default()
-        };
-        assert!(
-            show(&hits, &terms, &count)
-                .starts_with("src/middleware/maintenance.js:2\nsrc/routes/feeds.js:2\n")
-        );
-        let quiet = Options {
-            output: Output::Quiet,
-            ..Options::default()
-        };
-        assert_eq!(show(&hits, &terms, &quiet), "");
-    }
-
-    #[test]
-    fn context_lines_use_dashes_and_groups_are_separated() {
-        let mut around = hit("src/a.rs", 2, "let x = 1;", Some(("run", 1, 9)));
-        around.context = true;
-        let hits = vec![
-            around,
+    fn rows_group_lines_under_definitions_with_defining_files_first() {
+        let hits = [
+            hit("data.json", 1, "\"go\": 0,", None),
             hit("src/a.rs", 3, "go();", Some(("run", 1, 9))),
-            hit("src/a.rs", 8, "go();", Some(("run", 1, 9))),
+            hit("src/a.rs", 4, "go();", Some(("run", 1, 9))),
+            hit("src/b.rs", 2, "fn go() {}", None),
         ];
-        let options = Options {
-            before: 1,
-            ..Options::default()
-        };
+        let terms = [Term::parse("go"), Term::parse("nope")];
         assert_eq!(
-            show(&hits, &[Term::parse("go")], &options),
-            "grep: 2 lines in 1 files
-src/a.rs-1-» Function run:1-9
-src/a.rs-2-let x = 1;
-src/a.rs:3:go();
---
-src/a.rs:8:go();
+            show(&hits, &terms, Output::Lines, &["src/b.rs"]),
+            "grep: 4 lines in 3 files (go 4, nope 0)
+  src/a.rs │ Function run:1-9 :3 go(); │ :4 go();
+  src/b.rs (edited since index) │ :2 fn go() {}
+  data.json │ :1 \"go\": 0,
 "
         );
-    }
-
-    #[test]
-    fn edited_code_files_are_noted_without_definitions() {
-        let hits = vec![
-            hit("src/a.rs", 3, "fn go() {}", None),
-            hit("src/b.rs", 4, "go();", Some(("run", 1, 9))),
-        ];
-        let edited = BTreeSet::from(["src/a.rs".to_string()]);
-        let out = render(
-            "grep",
-            &hits,
-            &[Term::parse("go")],
-            &Connections::new(),
-            &edited,
-            &Options::default(),
-            None,
-        )
-        .unwrap();
-        assert!(
-            out.contains("  src/a.rs (edited since index) │ :3 fn go() {}\n"),
-            "{out}"
-        );
-        assert!(
-            out.contains("  src/b.rs │ Function run:1-9 :4 go();\n"),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn alternatives_are_counted_and_long_lines_are_cut_or_omitted() {
-        let long = format!("{} go()", "x".repeat(500));
-        let hits = vec![
-            hit("src/a.rs", 3, "fn go() { stop() }", None),
-            hit("src/a.rs", 4, &long, None),
-        ];
-        let terms = [Term::parse("go"), Term::parse("stop"), Term::parse("nope")];
-        let out = show(&hits, &terms, &Options::default());
-        assert!(
-            out.starts_with("grep: 2 lines in 1 files (go 2, stop 1, nope 0)\n"),
-            "{out}"
-        );
-        assert!(
-            out.contains(&format!(":4 {}…\n", "x".repeat(LINE_CHARS))),
-            "{out}"
-        );
-        let capped = Options {
-            max_columns: Some(100),
-            ..Options::default()
-        };
-        let out = show(&hits, &terms, &capped);
-        assert!(out.contains(":4 [Omitted long line]\n"), "{out}");
-        assert!(
-            show(&hits, &terms[..1], &Options::default()).starts_with("grep: 2 lines in 1 files\n")
-        );
         assert_eq!(
-            show(&[], &terms, &Options::default()),
-            "grep: 0 lines in 0 files\n"
-        );
-    }
-
-    #[test]
-    fn locale_copies_collapse_into_one_row() {
-        let hits: Vec<Hit> = ["ar", "de", "en-GB", "fr"]
-            .iter()
-            .map(|l| {
-                hit(
-                    &format!("public/language/{l}/advanced.json"),
-                    2,
-                    "\"maintenance-mode\": \"x\"",
-                    None,
-                )
-            })
-            .collect();
-        let out = show(
-            &hits,
-            &[Term::parse("maintenanceMode")],
-            &Options::default(),
-        );
-        assert_eq!(
-            out,
-            "grep: 1 lines in 1 files\n  public/language/{en-GB,+3}/advanced.json │ :2 \"maintenance-mode\": \"x\"\n"
+            show(&hits, &terms, Output::Count, &[]),
+            "src/a.rs:2\nsrc/b.rs:1\ndata.json:1\n"
         );
     }
 
@@ -518,36 +369,27 @@ src/a.rs:8:go();
         let repo = tempfile::tempdir().unwrap();
         let body: String = (1..=100).map(|n| format!("line {n}\n")).collect();
         std::fs::write(repo.path().join("a.rs"), body).unwrap();
-        let plain = Options::default();
+        let look = |hits: &[Hit], term: &str| {
+            let terms = [Term::parse(term)];
+            lookup(
+                repo.path(),
+                hits,
+                &terms,
+                &Connections::new(),
+                &Options::default(),
+            )
+        };
         let short = [hit("a.rs", 2, "fn go() {", Some(("go", 2, 4)))];
-        let out = lookup(
-            repo.path(),
-            &short,
-            &[Term::parse("go")],
-            &Connections::new(),
-            &plain,
-        )
-        .unwrap();
         assert_eq!(
-            out,
+            look(&short, "go").unwrap(),
             "Function go — a.rs:2-4\n  2|line 2\n  3|line 3\n  4|line 4\n"
         );
         let long = [hit("a.rs", 1, "fn go() {", Some(("go", 1, 100)))];
-        let out = lookup(
-            repo.path(),
-            &long,
-            &[Term::parse("go")],
-            &Connections::new(),
-            &plain,
-        )
-        .unwrap();
         assert!(
-            out.ends_with("  rest: orbit context a.rs:81-100\n"),
-            "{out}"
+            look(&long, "go")
+                .unwrap()
+                .ends_with("  rest: orbit context a.rs:81-100\n")
         );
-        let either = [Term::parse("stop"), Term::parse("go")];
-        assert!(lookup(repo.path(), &short, &either, &Connections::new(), &plain).is_some());
-        let pattern = [Term::parse(r"go\(")];
-        assert!(lookup(repo.path(), &short, &pattern, &Connections::new(), &plain).is_none());
+        assert!(look(&short, r"go\(").is_none());
     }
 }

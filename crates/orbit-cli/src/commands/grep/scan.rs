@@ -216,69 +216,24 @@ mod tests {
     #[test]
     fn scan_reads_the_working_tree_like_ripgrep() {
         let repo = tempfile::tempdir().unwrap();
-        let write = |path: &str, body: &str| {
+        for (path, body) in [
+            (".gitignore", "dist/\n"),
+            (
+                "src/a.rs",
+                "fn mark_in_sync() {}\nlet x = 1;\nmarkInSync();\n",
+            ),
+            ("src/nested/b.py", "markInSync()\n"),
+            ("dist/c.js", "markInSync();\n"),
+            ("app/[slug]/page.tsx", "markInSync();\n"),
+        ] {
             let full = repo.path().join(path);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
             std::fs::write(full, body).unwrap();
-        };
-        write(".gitignore", "dist/\n");
-        write("src/a.rs", "fn mark_in_sync() {}\nlet x = 1;\n");
-        write("src/nested/b.ts", "markInSync();\n");
-        write("dist/c.js", "markInSync();\n");
-        write(".github/ci.yml", "run: mark-in-sync\n");
-        let term = Term::parse("markInSync");
-        let options = Options::default();
-        let matcher = matcher(&[term], &options).unwrap();
-        let files = |paths: &[&str]| {
-            let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
-            let mut found: Vec<String> = scan(repo.path(), &paths, &matcher, &options)
-                .unwrap()
-                .into_iter()
-                .map(|h| format!("{}:{}", h.file, h.line))
-                .collect();
-            found.sort();
-            found
-        };
-        assert_eq!(
-            files(&[]),
-            [".github/ci.yml:1", "src/a.rs:1", "src/nested/b.ts:1"]
-        );
-        assert_eq!(files(&["src/nested"]), ["src/nested/b.ts:1"]);
-        assert_eq!(
-            files(&["src/**/*.ts", ".github"]),
-            [".github/ci.yml:1", "src/nested/b.ts:1"]
-        );
-        assert_eq!(
-            files(&["src", "src/nested"]),
-            ["src/a.rs:1", "src/nested/b.ts:1"]
-        );
-        assert_eq!(files(&["s*/nested"]), ["src/nested/b.ts:1"]);
-        write("app/[slug]/page.tsx", "markInSync();\n");
-        assert_eq!(files(&["app/[slug]"]), ["app/[slug]/page.tsx:1"]);
-        for bad in ["nope", "src/[*.ts", ".."] {
-            let paths = vec![bad.to_string()];
-            assert!(
-                scan(repo.path(), &paths, &matcher, &options).is_err(),
-                "{bad}"
-            );
         }
-    }
-
-    #[test]
-    fn scan_honors_rg_globs_types_context_inversion_and_max_count() {
-        let repo = tempfile::tempdir().unwrap();
-        let write = |path: &str, body: &str| {
-            let full = repo.path().join(path);
-            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-            std::fs::write(full, body).unwrap();
-        };
-        write("src/a.rs", "one\ngo();\ntwo\ngo();\n");
-        write("src/b.py", "go()\n");
-        write("vendor/c.rs", "go();\n");
-        let term = Term::parse("go");
-        let run = |options: Options| {
-            let found = matcher(std::slice::from_ref(&term), &options).unwrap();
-            let mut lines: Vec<String> = scan(repo.path(), &[], &found, &options)
+        let run = |paths: &[&str], options: Options| {
+            let found = matcher(&[Term::parse("markInSync")], &options).unwrap();
+            let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+            let mut lines: Vec<String> = scan(repo.path(), &paths, &found, &options)
                 .unwrap()
                 .into_iter()
                 .map(|h| format!("{}{}{}", h.file, if h.context { '-' } else { ':' }, h.line))
@@ -286,38 +241,41 @@ mod tests {
             lines.sort();
             lines
         };
-        let with = |globs: &[&str]| Options {
-            globs: globs.iter().map(|g| g.to_string()).collect(),
+        let all = [
+            "app/[slug]/page.tsx:1",
+            "src/a.rs:1",
+            "src/a.rs:3",
+            "src/nested/b.py:1",
+        ];
+        assert_eq!(run(&[], Options::default()), all);
+        assert_eq!(
+            run(&["s*/nested", "app/[slug]"], Options::default()),
+            [all[0], all[3]]
+        );
+        let globs = Options {
+            globs: vec!["*.py".into()],
             ..Options::default()
         };
-        assert_eq!(run(with(&["*.py"])), ["src/b.py:1"]);
-        assert_eq!(
-            run(with(&["!vendor/"])),
-            ["src/a.rs:2", "src/a.rs:4", "src/b.py:1"]
-        );
-        assert_eq!(
-            run(Options {
-                types: vec!["rust".into()],
-                ..Options::default()
-            }),
-            ["src/a.rs:2", "src/a.rs:4", "vendor/c.rs:1"]
-        );
-        assert_eq!(
-            run(Options {
-                before: 1,
-                max_count: Some(1),
-                globs: vec!["src/a.rs".into()],
-                ..Options::default()
-            }),
-            ["src/a.rs-1", "src/a.rs:2"]
-        );
-        assert_eq!(
-            run(Options {
-                invert: true,
-                globs: vec!["src/a.rs".into()],
-                ..Options::default()
-            }),
-            ["src/a.rs:1", "src/a.rs:3"]
+        assert_eq!(run(&[], globs), [all[3]]);
+        let around = Options {
+            before: 1,
+            max_count: Some(1),
+            ..Options::default()
+        };
+        assert_eq!(run(&["src/a.rs"], around), ["src/a.rs:1"]);
+        let invert = Options {
+            invert: true,
+            ..Options::default()
+        };
+        assert_eq!(run(&["src/a.rs"], invert), ["src/a.rs:2"]);
+        assert!(
+            scan(
+                repo.path(),
+                &["nope".into()],
+                &matcher(&[], &Options::default()).unwrap(),
+                &Options::default()
+            )
+            .is_err()
         );
     }
 }

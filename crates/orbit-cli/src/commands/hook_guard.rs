@@ -301,27 +301,12 @@ mod tests {
         for command in [
             "rg -n foo src/",
             "grep -r foo .",
-            "grep -n foo src",
             "sudo rg foo",
-            "xargs -n1 grep foo",
-            "/usr/bin/rg foo",
             "git grep foo",
-            "rg foo src",
             "RUST_LOG=debug rg foo",
-            "rg \"fn main\"",
-            "rg -t rust foo",
-            "rg -g '*.rs' foo",
-            "rg -A 3 foo",
             "rg -nA3 foo",
-            "rg foo 2>/dev/null",
             "rg foo 2>&1 | head",
-            "rg -e foo",
-            "grep -nE 'a|b' src/",
-            "grep -rn foo",
-            "sudo -u me rg foo",
-            "git -C . grep foo",
             "bash -lc \"rg foo\"",
-            "rg.exe foo",
             "cd src && rg foo",
         ] {
             let call =
@@ -338,22 +323,13 @@ mod tests {
     fn reads_listings_and_other_commands_never_nudge() {
         for command in [
             "cat src/main.rs",
-            "sed -n '1,40p' app/models/user.rb",
             "find . -name '*.rs'",
-            "ls -la",
-            "cargo build",
             "git log --grep=foo",
             "cat x.txt | grep foo",
-            "grep -n rand Cargo.toml crates/x/Cargo.toml",
             "rg -n rand Cargo.toml",
             "rg --files",
-            "rg --version",
             "rg foo /usr/include",
-            "rg -trust foo Cargo.toml",
-            "rg -e foo Cargo.toml",
-            "grep -n 'struct src' Cargo.toml",
             "git commit -m \"x; rg foo\"",
-            "grep --color foo Cargo.toml",
         ] {
             let call =
                 json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});

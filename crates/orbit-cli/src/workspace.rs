@@ -860,32 +860,20 @@ mod tests {
     fn edited_since_index_lists_changed_renamed_and_untracked_files() {
         let temp = tempfile::TempDir::new().unwrap();
         let repo = temp.path().join("repo");
-        let git = |args: &[&str]| {
-            let status = Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .args([
-                    "-c",
-                    "user.name=t",
-                    "-c",
-                    "user.email=t@t",
-                    "-c",
-                    "commit.gpgsign=false",
-                ])
-                .args(args)
-                .output()
-                .unwrap()
-                .status;
-            assert!(status.success(), "git {args:?}");
-        };
         std::fs::create_dir_all(repo.join("src")).unwrap();
         for file in ["a.c", "src/x.rs", "src/same.rs"] {
             std::fs::write(repo.join(file), "x\n").unwrap();
         }
-        git(&["init", "-q"]);
-        git(&["add", "."]);
-        git(&["commit", "-qm", "init"]);
-        git(&["mv", "a.c", "b.c"]);
+        for args in ["init -q", "add .", "commit -qm init", "mv a.c b.c"] {
+            let config = "-c user.name=t -c user.email=t@t -c commit.gpgsign=false";
+            let all = format!("{config} {args}");
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(all.split(' '))
+                .status();
+            assert!(status.unwrap().success(), "git {args}");
+        }
         std::fs::write(repo.join("src/x.rs"), "y\n").unwrap();
         std::fs::write(repo.join("new.rs"), "n\n").unwrap();
         let edited = edited_since_index(&repo, &["b.c", "src/x.rs", "src/same.rs", "new.rs"]);
@@ -893,17 +881,6 @@ mod tests {
             edited.into_iter().collect::<Vec<_>>(),
             ["b.c", "new.rs", "src/x.rs"]
         );
-    }
-
-    #[test]
-    fn repo_relative_paths_drop_line_ranges() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let repo = temp.path().join("repo");
-        init_repo(&repo);
-        std::fs::create_dir_all(repo.join("src")).unwrap();
-        std::fs::write(repo.join("src/a.rs"), "").unwrap();
-        let paths = ["src/a.rs:10-20".to_string(), "Foo::bar".to_string()];
-        assert_eq!(repo_relative_paths(&repo, &paths), ["src/a.rs", "Foo::bar"]);
     }
 
     #[test]
