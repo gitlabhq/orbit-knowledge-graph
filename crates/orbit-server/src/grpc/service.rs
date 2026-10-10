@@ -512,7 +512,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(command_error_to_status)?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
@@ -1107,7 +1107,8 @@ mod tests {
             &test_ontology(),
             Default::default(),
             &[],
-        );
+        )
+        .unwrap();
         let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
         let result =
             schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();

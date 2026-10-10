@@ -253,7 +253,18 @@ impl QueryParser {
             [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
                 span, property: lhs, op, value: None, rhs_property: Some(rhs),
             }],
+            [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         ))
+    }
+
+    #[alias(predicate)]
+    fn FunctionPredicate(input: Node) -> Result<Vec<Comparison>> {
+        let call = input.children().next().ok_or_else(|| mismatch(&input))?;
+        Err(unsupported_function(&call))
+    }
+
+    fn FunctionCall(input: Node) -> Result<()> {
+        Err(unsupported_function(&input))
     }
 
     #[alias(predicate)]
@@ -349,6 +360,7 @@ impl QueryParser {
             [Aggregate(expression)] => expression,
             [DateTrunc(expression)] => expression,
             [AllProperties(expression)] => expression,
+            [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [NodeProjection(expression)] => expression,
             [PropertyExpression(property)] => Expression::Property(property),
             [Variable(variable)] => Expression::Variable(variable),
@@ -436,6 +448,8 @@ impl QueryParser {
     fn SortItem(input: Node) -> Result<Sort> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
+            [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+            [FunctionCall(_), SortDirection(_)] => unreachable!("FunctionCall always errors"),
             [PropertyExpression(property)] => Sort {
                 span, key: Target::Property(property), direction: OrderDirection::Asc,
             },
@@ -586,6 +600,21 @@ fn error_at(span: Span<'_>, message: &str) -> Error<Rule> {
         },
         span,
     )
+}
+
+fn unsupported_function(call: &Node) -> Error<Rule> {
+    let name = call.children().next().map_or("", |node| node.as_str());
+    let hint = match name.to_ascii_lowercase().as_str() {
+        "type" => {
+            "match a typed relationship such as -[r:CLOSES]->; each edge type is listed under @edges in the response"
+        }
+        "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
+        | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
+        _ => {
+            "RETURN supports count, sum, avg, min, max, date_trunc, and properties; WHERE supports token_match, all_tokens, and any_tokens"
+        }
+    };
+    call.error(format!("function {name}() is not supported: {hint}"))
 }
 
 fn mismatch(node: &Node) -> Error<Rule> {

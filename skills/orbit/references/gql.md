@@ -108,6 +108,9 @@ window is incomplete. Do not report the returned rows as a complete list.
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
 subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
+Other function calls, such as `type(r)` or `collect(x)`, reject with an error
+that names the function. For relationship types, match a typed relationship
+such as `-[r:CLOSES]->`. The response lists each edge type under `@edges`.
 
 ## Recipes
 
