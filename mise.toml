@@ -20,7 +20,7 @@ GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
-"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
+"rust" = { version = "1.98.1", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/checks/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -37,7 +37,6 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 clickhouse = "26.3.41.4-lts"
 duckdb = "1.5.1"
 uv = "0.9.28"
-vendir = "0.45.3"
 node = "26"
 markdownlint-cli2 = "0.22.1"
 lychee = "0.23"
@@ -114,11 +113,11 @@ run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/b
 description = "Build the CLI"
 
 [tasks.test]
-run = "./scripts/run-unit-tests.sh"
+run = "./scripts/dev/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/run-unit-tests.sh"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/dev/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests with reduced debug info"
 
 [tasks."test:local"]
@@ -178,7 +177,7 @@ env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run SDLC indexer scenarios matching a folder/name substring, e.g. `mise test:integration:indexer:sdlc:scenario ci/` or `... processes_jobs`"
 
 [tasks.clean]
-run = ["cargo clean", "rm -rf lib/*/"]
+run = "cargo clean"
 description = "Clean the crates"
 
 [tasks."lint:fmt"]
@@ -238,14 +237,14 @@ run = 'cargo run -p query-profiler -- "$@"'
 description = "Profile a GKG query against ClickHouse (use -- to pass args)"
 
 [tasks."query:diff"]
-run = 'python3 scripts/devtools/diff-profiler-results.py "$@"'
+run = 'python3 scripts/dev/diff-profiler-results.py "$@"'
 description = "Compare query-profiler result files (use -- to pass args)"
 
 [tasks."perf:gtime"]
-run = "./scripts/devtools/gtime.sh"
+run = "./scripts/dev/gtime.sh"
 
 [tasks."perf:rss"]
-run = './scripts/devtools/average_rss.sh ${usage_repo_path?} ${usage_interval:-0.025}'
+run = './scripts/dev/average_rss.sh ${usage_repo_path?} ${usage_interval:-0.025}'
 description = "Measure average RSS memory usage during indexing"
 usage = '''
 arg "<repo_path>"
@@ -282,11 +281,11 @@ run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml
 description = "List benchmark repo groups"
 
 [tasks."proto:go"]
-run = "scripts/proto-go.sh generate"
+run = "scripts/dev/proto-go.sh generate"
 description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
 
 [tasks."proto:go:check"]
-run = "scripts/proto-go.sh check"
+run = "scripts/dev/proto-go.sh check"
 description = "Verify Go proto stubs are up to date"
 
 [tasks."proto:ruby"]
@@ -308,17 +307,12 @@ ruby clients/protogem/build-proto-gem
 '''
 description = "Build gitlab-orbit-proto Ruby gem from proto definitions"
 
-[tasks."proto:publish-gem"]
-depends = ["proto:build-gem"]
-run = 'gem push _build/gitlab-gkg-proto-*.gem'
-description = "Publish gitlab-gkg-proto gem to RubyGems.org"
-
 [tasks."server:start"]
-run = "./scripts/orbit-native-dev.sh webserver"
+run = "./scripts/dev/orbit-native-dev.sh webserver"
 description = "Start the GKG server (webserver mode)"
 
 [tasks."server:dispatch"]
-run = "./scripts/orbit-native-dev.sh dispatcher"
+run = "./scripts/dev/orbit-native-dev.sh dispatcher"
 description = "Start the GKG server (dispatch-indexing mode)"
 
 [tasks.dev]
@@ -333,49 +327,37 @@ run = "mise run dev"
 description = "Alias for the local GKG environment connected to GDK services"
 
 [tasks."dev:check"]
-run = "./scripts/orbit-native-dev.sh check"
+run = "./scripts/dev/orbit-native-dev.sh check"
 description = "Verify GDK-connected local development prerequisites"
 
 [tasks."dev:status"]
-run = "./scripts/orbit-native-dev.sh config"
+run = "./scripts/dev/orbit-native-dev.sh config"
 description = "Show the derived GDK-backed configuration for local development"
-
-[tasks."dev:restart"]
-run = "mise run dev"
-description = "Restart the local GKG environment"
 
 [tasks."dev:stop"]
 run = "echo 'Use Ctrl+C in the running mise session to stop all dev processes'"
 description = "Explain how to stop the local GKG environment"
 
 [tasks."dev:setup"]
-run = "./scripts/orbit-native-dev.sh setup"
+run = "./scripts/dev/orbit-native-dev.sh setup"
 description = "Create the graph database and apply config/graph.sql to ClickHouse"
 
 [tasks."dev:web"]
-run = "./scripts/orbit-native-dev.sh webserver"
+run = "./scripts/dev/orbit-native-dev.sh webserver"
 description = "Start a local GKG webserver connected to GDK services"
 
 [tasks."dev:indexer"]
-run = "./scripts/orbit-native-dev.sh indexer"
+run = "./scripts/dev/orbit-native-dev.sh indexer"
 description = "Start a local GKG indexer connected to GDK services"
 
 [tasks."dev:dispatcher"]
-run = "./scripts/orbit-native-dev.sh dispatcher"
+run = "./scripts/dev/orbit-native-dev.sh dispatcher"
 description = "Start a local GKG dispatch-indexing process connected to GDK services"
 
 [tasks."dev:healthcheck"]
-run = "./scripts/orbit-native-dev.sh healthcheck"
+run = "./scripts/dev/orbit-native-dev.sh healthcheck"
 description = "Start the local GKG health-check process"
 
-
-[tasks."iglu:bump"]
-run = "bash ./scripts/vendored/run.sh vendor iglu"
-description = "Fetch Iglu schemas for all pins (edit versions.yaml first, then run this)"
-
-[tasks."iglu:check"]
-run = "bash ./scripts/vendored/run.sh check iglu"
-description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 
 [tasks."vendor"]
 run = "bash ./scripts/vendored/run.sh vendor ${@}"
@@ -417,11 +399,11 @@ run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
 
 [tasks."toolchain:generate"]
-run = "bash ./scripts/check-rust-toolchain.sh --write"
+run = "bash ./scripts/checks/check-rust-toolchain.sh --write"
 description = "Regenerate rust-toolchain.toml from mise.toml"
 
 [tasks."toolchain:check"]
-run = "bash ./scripts/check-rust-toolchain.sh --check"
+run = "bash ./scripts/checks/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
 [tasks."schema:bump"]

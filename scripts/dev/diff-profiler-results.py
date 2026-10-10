@@ -2,9 +2,9 @@
 """Compare two or more query-profiler result files side by side.
 
 Usage:
-    python3 scripts/devtools/diff-profiler-results.py baseline.json dedup.json
-    python3 scripts/devtools/diff-profiler-results.py a.json b.json c.json --labels main,dedup,v2
-    python3 scripts/devtools/diff-profiler-results.py a.json b.json --metric elapsed_ms
+    python3 scripts/dev/diff-profiler-results.py baseline.json dedup.json
+    python3 scripts/dev/diff-profiler-results.py a.json b.json c.json --labels main,dedup,v2
+    python3 scripts/dev/diff-profiler-results.py a.json b.json --metric elapsed_ms
 """
 
 import argparse
