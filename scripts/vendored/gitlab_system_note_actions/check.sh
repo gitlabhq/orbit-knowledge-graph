@@ -25,7 +25,7 @@ CE_RAILS_PATH="app/models/system_note_metadata.rb"
 EE_RAILS_PATH="ee/app/models/ee/system_note_metadata.rb"
 GITLAB_PROJECT="gitlab-org/gitlab"
 
-source "$(dirname "$VERSIONS_FILE")/../scripts/ci-skip-utils.sh"
+source "$(dirname "$VERSIONS_FILE")/../scripts/checks/ci-skip-utils.sh"
 
 if ci_skip_requested "system-note-actions-check"; then
     echo "[skip system-note-actions-check] found — skipping."

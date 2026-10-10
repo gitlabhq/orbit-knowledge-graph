@@ -16,9 +16,7 @@ missing_frontends:
   json: The JSON frontend does not expose property-to-property comparisons.
 ```
 
-This inventory traces the planner and lowerer at `caecd53c9`, the base of !2681.
-It covers access-path choices and their important eligibility guards. It does
-not measure latency or replace database correctness tests.
+The fixtures cover access-path choices and their important eligibility guards.
 
 CTE assertions refer to top-level named query definitions, not execution order.
 Use one of these forms in a planned or emitted assertion block:
@@ -96,41 +94,9 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 - Compiler unit tests retain synthetic catalog guards that the embedded ontology
   cannot express, such as an FK chain made entirely of global hubs.
 - Scope enforcement, role scans, virtual-property hydration, cursor handling,
-  and backend code-generation optimizations run outside this harness boundary.
-  Existing compiler and database suites cover those phases.
+  and backend code-generation optimizations are outside this harness.
 
-## Rust test migration
-
-The following tests have been removed after moving their assertions to YAML.
-Paths below the fixture root identify the replacements.
-
-| Removed Rust test | Replacement |
-|---|---|
-| `compiler::tests::path_finding_filtered_endpoint_produces_anchor_cte` | `path_finding/filtered_anchor.yaml` |
-| `compiler::tests::cascade_narrowing_skipped_for_convergent_join_target` | `narrowing/convergent_target_guard.yaml` |
-| `compiler::tests::hydration_uses_limit_by_for_latest_rows` | `hydration/projection_pruning.yaml` |
-| `compiler::tests::fk_center_group_by_aggregation_drops_redundant_narrow_scan` | `foreign_keys/aggregation_avoids_target_rescan.yaml` (includes scan count) |
-| `compiler::tests::fk_center_traversal_keeps_narrow_scan` | `foreign_keys/star_target_narrowing.yaml` |
-| `compiler::tests::fk_star_unfiltered_join_narrow_uses_candidate_scan` | `foreign_keys/star_target_narrowing.yaml` (plain candidate, FINAL center, outer deletion check) |
-| `lower::hydration::tests::dynamic_single_tp_emits_starts_with` | `hydration/dynamic_single_leaf.yaml` |
-| `lower::hydration::tests::dynamic_multiple_tps_emit_or_disjunction` | `hydration/leaf_pruning.yaml` |
-| `lower::hydration::tests::static_single_tp_emits_starts_with` | `hydration/without_ids.yaml` |
-| `lower::hydration::tests::static_multiple_tps_emit_or_chain` | `hydration/static_prefixes.yaml` |
-| `lower::hydration::tests::dynamic_no_tp_omits_path_filter` | `hydration/dynamic_without_paths.yaml` |
-| `lower::hydration::tests::static_no_tp_omits_path_filter` | `hydration/projection_pruning.yaml` |
-| `lower::hydration::tests::dynamic_leaf_pruning_drops_broad_prefix` | `hydration/dynamic_single_leaf.yaml` |
-| `lower::hydration::tests::static_leaf_pruning_drops_broad_prefix` | `hydration/without_ids.yaml` |
-| `compiler::ontology::multi_hop_traversal_generates_union_subquery` | `variable_hops/depth_arms.yaml` (union, depth, and edge output) |
-| `compiler::ontology::multi_hop_with_floor_filter` | `variable_hops/exact_hops.yaml` |
-| `compiler::tests::denorm_eq_filter_pushes_to_edge_tags` | `edge_scans/denormalized_filter.yaml` (scalar tag and no definitions) |
-| `compiler::tests::denorm_in_list_filter_uses_has_any` | `edge_scans/denormalized_incoming_set.yaml` (both target-tag values) |
-| `compiler::tests::denorm_in_list_single_value_uses_has` | `edge_scans/denormalized_value_forms.yaml` |
-| `compiler::tests::denorm_boolean_filter_renders_value_token` | `edge_scans/denormalized_value_forms.yaml` (true token and empty-token rejection) |
-| `compiler::tests::denorm_partial_filters_joins_for_non_denorm` | `edge_scans/uncovered_filter_fallback.yaml` (join, node filter, and edge tag) |
-| `compiler::tests::path_finding_id_range_endpoint_produces_anchor_cte` | `path_finding/range_anchor.yaml` |
-| `compiler::tests::path_finding_user_paths_do_not_join_on_traversal_path` | `path_finding/unscoped_intersection.yaml` |
-
-### Keep in Rust
+## Keep in Rust
 
 These assertions exceed the current YAML contract. Keep them active; they are
 not ignored tests or missing fixture migrations.
@@ -147,13 +113,8 @@ not ignored tests or missing fixture migrations.
 | `compiler::tests::multi_hop_aggregation_generates_cascade_cte` | Also checks security injection after lowering |
 | Compiler cursor, scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
 | Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
+| Input deserialization, normalization, schema-limit, validation-error, GQL hashing, cursor-token, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
 
-Other existing tests remain where the current fixture has only partial assertion
-overlap. A coverage-index entry alone is not permission to delete a Rust test.
-
-The wider compiler audit also retains input deserialization, normalization,
-schema-limit consistency, validation errors, GQL statement hashing, security
-injection/checking, cursor tokens, hydration metadata, and DDL tests. Running a
-valid query through those components does not replace their contract assertions.
-Remaining denormalization tests cover relationship-specific tag availability,
-count arguments, and role enforcement beyond the migrated value-form checks.
+Keep a Rust test until a fixture checks every one of its assertions. For the
+plan-shape layer and its limits, see
+[Plan-shape fixtures](../../../../../docs/design-documents/testing.md#plan-shape-fixtures).

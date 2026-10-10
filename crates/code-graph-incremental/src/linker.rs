@@ -33,7 +33,6 @@ enum BindingKey {
 /// Which wildcard imports an unresolved bare name may fall back to.
 #[derive(Clone, Copy)]
 enum Wildcards {
-    None,
     All,
     Callable,
 }
@@ -445,16 +444,12 @@ impl<'t> Fold<'t> {
                 matches!(value, Value::Phi(_)).then_some(value)
             });
         if let Some(value) = value {
-            let fallback = if callee
-                .sym_opt()
-                .is_some_and(|sym| !self.config.builtins.contains(&sym))
-                && !callee.has(C::Member)
-                && !callee.has(C::Ivar)
-            {
-                self.wildcards.clone()
-            } else {
-                Vec::new()
-            };
+            let fallback =
+                if callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar) {
+                    self.wildcards.clone()
+                } else {
+                    Vec::new()
+                };
             self.pending_calls.push((value, from, c.index(), fallback));
         } else if let Some(m) = callee.child(C::Member) {
             if let Some(obj) = m.child(C::Object) {
@@ -471,11 +466,7 @@ impl<'t> Fold<'t> {
             if c.has_tag(self.tags.implicit_self) {
                 self.resolve_implicit(sym, from);
             } else {
-                let fallback = match self.config.builtins.contains(&sym) {
-                    true => Wildcards::None,
-                    false => Wildcards::All,
-                };
-                self.resolve_name(sym, from, fallback);
+                self.resolve_name(sym, from, Wildcards::All);
             }
         }
         for edge in &mut self.edges[first..] {
@@ -900,7 +891,6 @@ impl<'t> Fold<'t> {
                 import.is_some_and(|i| i.has_tag(self.tags.callable))
             };
             let wild = self.wildcards.iter().filter(|n| match fallback {
-                Wildcards::None => false,
                 Wildcards::All => true,
                 Wildcards::Callable => callable_import(n),
             });
@@ -1183,6 +1173,29 @@ pub fn link(tree: &Tree, env: &Env, run: &Sentinel) -> Result<Vec<Edge>, Killed>
         }
     }
 
+    for edge in &mut f.edges {
+        if edge.kind == EdgeKind::Imports
+            && (tree.cursor(edge.to_node).sym() == f.wildcard
+                || tree.cursor(edge.to_node).child_sym(C::SsaHint) == Some(f.wildcard))
+            && edge
+                .site
+                .and_then(|site| tree.cursor(site).child_sym(C::Callee))
+                .is_some_and(|name| {
+                    config.builtins.contains(&name)
+                        || tree
+                            .cursor(edge.to_node)
+                            .parent()
+                            .and_then(|import| import.child_sym(C::SourcePath))
+                            .is_some_and(|source| {
+                                config.providers.iter().any(|(module, symbols)| {
+                                    *module == source && symbols.contains(&name)
+                                })
+                            })
+                })
+        {
+            edge.call_resolution = crate::tree::CallResolution::Reference;
+        }
+    }
     Ok(f.edges)
 }
 

@@ -1,0 +1,17 @@
+name: Review Python interpreter builtins take precedence
+fixtures:
+  - path: time.py
+    content: |
+      def time(): return 42
+  - path: main.py
+    content: |
+      from time import time
+      def run(): return time()
+tests:
+  - name: Builtin time cannot be shadowed by time.py
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path
+    assert:
+      - { empty: true }

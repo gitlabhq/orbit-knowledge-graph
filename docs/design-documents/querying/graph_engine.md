@@ -309,20 +309,9 @@ Direct projections and hydration apply ontology-derived [text excerpts](../../so
 The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering. But these are optional enhancements for performance and may be subject to change.
 Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
 
-## Unified Security and Performance Testing
+## Security and performance testing
 
-Security testing and performance testing share the same underlying techniques for the query engine. We treat them as a single validation effort:
-
-- **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer finds performance regressions (e.g., queries that blow up in time or memory). It will also surface authorization bypass attempts (e.g., queries missing required predicates).
-- **Automated Query Generation**: Property-based testing that generates random valid query shapes and verifies:
-  - All generated SQL includes `startsWith(traversal_path, ?)` predicates (security invariant).
-  - Query execution time stays within bounds (performance invariant).
-  - Result sets respect authorization constraints (correctness invariant).
-- **Automated Penetration Testing**: Scripted scenarios that attempt common bypass techniques (SQL injection, predicate stripping, cross-tenant access). These run as part of CI and are informed by the threat model.
-
-This unified approach validates security and performance together. An authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
-
-In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort. It has specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
+Security query scenarios, plan-shape fixtures, performance scenarios, and local fuzz targets check the query engine. For each test layer and its CI job, see [Testing](../testing.md). For the authorization model, see [Security Architecture](../security.md).
 
 ## References
 

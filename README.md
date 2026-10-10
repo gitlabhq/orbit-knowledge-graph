@@ -133,7 +133,7 @@ Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted 
 | [AI coding agents](docs/source/ai_coding_agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
 | [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [cookbook](docs/source/remote/cookbook.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
 | [Local: how it works](docs/source/local/how-it-works.md) · [indexing](docs/source/local/indexing.md) · [schema](docs/source/local/schema.md) · [`orbit` CLI](docs/source/local/access/cli.md) | [Adding a language](docs/dev/adding-a-language.md) |
-| [MCP tool reference](docs/source/queries/mcp_tools.md) | [E2E testing](docs/dev/e2e-testing.md) |
+| [MCP tool reference](docs/source/queries/mcp_tools.md) | [Testing strategy](docs/design-documents/testing.md) · [E2E testing](docs/dev/e2e-testing.md) |
 | [Configuration](docs/source/configure.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |
 | [Troubleshooting](docs/source/orbit_troubleshooting.md) | [Runbooks](docs/dev/runbooks/) |
 
@@ -148,8 +148,8 @@ All tasks run through [mise](https://mise.jdx.dev/).
 
 ```shell
 mise build            # Build the workspace
-mise test:fast        # Unit + fast integration tests
-mise test:integration # Full integration suite (requires Docker)
+mise test:fast        # Unit tests (no Docker)
+mise test:integration # Container tests (ClickHouse and NATS in Docker)
 mise lint:code        # Clippy with warnings as errors
 mise lint:code:fix    # Apply clippy fixes
 mise server:start     # Run gkg-server locally
@@ -158,6 +158,7 @@ mise server:start     # Run gkg-server locally
 The product name is Orbit. The binary and metrics still use the engineering name GKG (binary `gkg-server`, metric names).
 
 - [Local development guide](docs/dev/local-development.md)
+- [Testing strategy](docs/design-documents/testing.md)
 - [E2E testing harness](docs/dev/e2e-testing.md)
 - [Adding a new language](docs/dev/adding-a-language.md)
 - [Indexer crate guide](crates/indexer/AGENTS.md)

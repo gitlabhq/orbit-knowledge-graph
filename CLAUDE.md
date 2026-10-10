@@ -10,6 +10,7 @@ Use mise for all tasks.
 | Fast tests | `mise test:fast` |
 | Local tests | `mise test:local` |
 | Integration tests | `mise test:integration` |
+| Code-graph integration tests | `mise test:integration:codegraph` |
 | Server integration tests | `mise test:integration:server` |
 | CLI integration tests | `mise test:cli` |
 | Check or fix code | `mise lint:code`, `mise lint:code:fix` |
@@ -37,7 +38,7 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 List these directories and read the relevant owner before you act:
 
-- `docs/design-documents/` for architecture, security, schema, querying, and indexing.
+- `docs/design-documents/` for architecture, security, schema, querying, indexing, and testing (`testing.md`).
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 

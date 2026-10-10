@@ -18,7 +18,7 @@
     - !reference [.local-cli-release-rules, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
-        - scripts/build-local-cli.sh
+        - scripts/release/build-local-cli.sh
         - scripts/ci/smoke-local-cli.sh
         - .gitlab/ci/release-local.yml
         - crates/duckdb-client/**/*
@@ -38,7 +38,7 @@
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file
   script:
-    - ./scripts/build-local-cli.sh
+    - ./scripts/release/build-local-cli.sh
     - sccache --show-stats || true
   artifacts:
     paths:
@@ -137,7 +137,7 @@ local-cli-build-windows-amd64:
     - ./scripts/ci/install-llvm-mingw.sh
     - export PATH="/opt/llvm-mingw/bin:$PATH"
   script:
-    - ./scripts/build-local-cli.sh
+    - ./scripts/release/build-local-cli.sh
     - sccache --show-stats || true
 
 .local-cli-build-darwin:
@@ -162,7 +162,7 @@ local-cli-build-windows-amd64:
     - rustup default "$RUST_VERSION"
     - rustup target add aarch64-apple-darwin x86_64-apple-darwin
   script:
-    - ./scripts/build-local-cli.sh
+    - ./scripts/release/build-local-cli.sh
   artifacts:
     paths:
       - orbit-cli-darwin-*.tar.gz
@@ -191,9 +191,9 @@ local-cli-code-sign:
     - local-cli-build-darwin-arm64
     - local-cli-build-windows-amd64
   script:
-    - ./scripts/sign-and-repackage.sh ./orbit-cli-darwin-x86_64.tar.gz macos orbit
-    - ./scripts/sign-and-repackage.sh ./orbit-cli-darwin-aarch64.tar.gz macos orbit
-    - ./scripts/sign-and-repackage.sh ./orbit-cli-windows-x86_64.zip windows orbit.exe
+    - ./scripts/release/sign-and-repackage.sh ./orbit-cli-darwin-x86_64.tar.gz macos orbit
+    - ./scripts/release/sign-and-repackage.sh ./orbit-cli-darwin-aarch64.tar.gz macos orbit
+    - ./scripts/release/sign-and-repackage.sh ./orbit-cli-windows-x86_64.zip windows orbit.exe
   artifacts:
     paths:
       - orbit-cli-darwin-*.tar.gz
@@ -218,7 +218,7 @@ local-cli-publish:
   before_script:
     - apk add --no-cache bash curl coreutils
   script:
-    - bash ./scripts/upload-local-cli-release.sh
+    - bash ./scripts/release/upload-local-cli-release.sh
 
 local-cli-publish-npm:
   extends:
