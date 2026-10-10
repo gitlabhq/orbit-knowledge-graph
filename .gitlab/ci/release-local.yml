@@ -246,3 +246,36 @@ local-cli-publish-npm:
     - npm install --global npm@11.19.0
   script:
     - ./scripts/release/publish-npm.sh
+
+tmp-local-cli-distro-matrix:
+  extends: .local-cli-linux-rules
+  stage: build
+  image: $IMAGE
+  tags:
+    - $RUNNER
+  needs:
+    - local-cli-build-linux-amd64
+    - local-cli-build-linux-arm64
+    - local-cli-build-linux-musl-amd64
+    - local-cli-build-linux-musl-arm64
+  parallel:
+    matrix:
+      - ARCH: x86_64
+        RUNNER: saas-linux-small-amd64
+        IMAGE: [oraclelinux:9, oraclelinux:10, rockylinux:8, ubuntu:20.04, ubuntu:24.04, debian:12, amazonlinux:2023, alpine:3.22]
+      - ARCH: aarch64
+        RUNNER: saas-linux-small-arm64
+        IMAGE: [oraclelinux:9, oraclelinux:10, rockylinux:8, ubuntu:20.04, ubuntu:24.04, debian:12, amazonlinux:2023, alpine:3.22]
+  script:
+    - |
+      if command -v dnf >/dev/null; then
+        dnf install -y -q git-core gzip tar
+      elif command -v apt-get >/dev/null; then
+        apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git >/dev/null
+      else
+        apk add --no-cache bash git >/dev/null
+      fi
+    - ldd --version 2>&1 | head -1 || true
+    - if ! command -v apk >/dev/null; then ./scripts/smoke-local-cli.sh "orbit-cli-linux-${ARCH}.tar.gz"; fi
+    - ./scripts/smoke-local-cli.sh "orbit-cli-linux-musl-${ARCH}.tar.gz"
+    - tar -xzf "orbit-cli-linux-${ARCH}.tar.gz" orbit && ./orbit version
