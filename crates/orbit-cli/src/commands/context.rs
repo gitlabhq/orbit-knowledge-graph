@@ -200,16 +200,48 @@ fn resolve_targets(
                         ],
                         None,
                     )?;
-                    if matches.is_empty() {
+                    matches.sort_by_key(|node| node.id);
+                    let mut found: Vec<i64> = matches.into_iter().map(|node| node.id).collect();
+                    if found.is_empty() {
+                        found = named(client, git, target)?;
+                    }
+                    if found.is_empty() {
                         return Err(error);
                     }
-                    matches.sort_by_key(|node| node.id);
-                    ids.extend(matches.into_iter().map(|node| node.id));
+                    for id in found {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
                 }
             }
         }
     }
     Ok(resolved)
+}
+
+/// Definitions whose FQN ends with `target`, so a bare name or `Class.method` finds
+/// `pkg.Class.method` and `Class::method` alike.
+fn named(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    target: &str,
+) -> Result<Vec<i64>> {
+    let normalize = "regexp_replace(?3, '::|#|/', '.', 'g')";
+    let batches = client.query_arrow_json(
+        &format!(
+            "SELECT id FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+             AND (regexp_replace(fqn, '::|#|/', '.', 'g') = {normalize}
+                  OR ends_with(regexp_replace(fqn, '::|#|/', '.', 'g'), '.' || {normalize}))
+             ORDER BY id"
+        ),
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            target.to_string().into(),
+        ],
+    )?;
+    Ok(duckdb_client::i64_column(&batches, "id"))
 }
 
 fn repo_relative_dir(repo_path: &std::path::Path, path: &str) -> Result<String> {
