@@ -212,7 +212,10 @@ fn write_row_table(out: &mut String, rows: &[Properties]) {
                 Some((_, id, _)) => {
                     let _ = write!(out, "{id}");
                 }
-                None => write_value(out, cell),
+                None => match cell {
+                    Value::String(text) => write_text(out, &truncate(text, column)),
+                    other => write_value(out, other),
+                },
             }
         }
         out.push('\n');
@@ -478,5 +481,17 @@ mod tests {
             json!({"Group": [{"id": 22, "name": "Toolbox"}]})
         );
         assert_eq!(value["rows"], json!([{"g": 22, "n": 1}, {"g": 22, "n": 2}]));
+
+        aggregation.rows = Some(vec![
+            json!({"title": "t".repeat(250), "n": 1})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ]);
+        let value = decoded(&encode_response(&aggregation));
+        assert_eq!(
+            value["rows"][0]["title"].as_str().unwrap().chars().count(),
+            200
+        );
     }
 }
