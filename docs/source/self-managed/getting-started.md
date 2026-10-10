@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Prerequisites, installation order, and shared configuration values for GitLab Orbit on GitLab Self-Managed.
 title: Get started with GitLab Orbit on GitLab Self-Managed

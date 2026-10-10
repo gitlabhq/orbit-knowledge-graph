@@ -13,59 +13,27 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Getting started](https://docs.gitlab.com/orbit/local/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [CLI](https://docs.gitlab.com/orbit/cli/) · [AI coding agents](https://docs.gitlab.com/orbit/agents/)
 
 </div>
 
 Orbit indexes your GitLab SDLC and source code into one property graph, then lets you query it from the GitLab UI, a CLI, MCP, or REST. The graph can live on your machine — a single binary that builds a code-only graph from any repository, offline — or in the hosted service that spans a top-level GitLab.com group across SDLC and code. Same ontology, same query surface.
 
-> Beta. The Query DSL and ontology may change. The hosted graph is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
-
-## For contributors
-
-New here? Start with:
-
-- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — build setup, test commands, MR conventions
-- **[Quickstart](#quickstart)** — index a repo and run queries in minutes, no server needed
-- **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
-- **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
-
-Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
-
-## Using Orbit
-
-The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file — no GitLab account is required at query time, and it runs offline after install. The hosted graph additionally indexes your SDLC (groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and default-branch source code across a top-level GitLab.com group, enforcing GitLab authorization on every query.
-
-Both cover the same 11+ languages: Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir. Local checkouts share one database at `~/.gitlab/orbit/graph.duckdb`, each identified by its filesystem path; reindexing after switching branches replaces that checkout's graph, so use separate worktrees to keep multiple branches.
-
-| Access method | Use for |
-|---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect a graph directly |
-| [`glab orbit`](docs/source/local/access/glab.md) | Install and run Orbit through `glab` |
-| [MCP](docs/source/local/access/mcp.md) | Expose the graph to AI coding agents over stdio |
-| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Natural-language questions in the GitLab UI |
-| [REST API](docs/source/remote/access/api.md) | Pipelines, custom tooling, scripts |
-
-Start with the [getting started guide](docs/source/local/getting-started.md).
-
-```mermaid
-flowchart LR
-    subgraph GitLab["GitLab instance"]
-        SDLC[SDLC data]
-        Code[Source code]
-    end
-
-    SDLC -- CDC --> DIP[Data Insights Platform]
-    DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> Orbit[Orbit service]
-    CH <--> Orbit
-
-    Orbit --> REST[REST API]
-    Orbit --> MCP[MCP tools]
-    Orbit --> DAP[GitLab Duo Agent Platform]
-```
+> Beta. The Query DSL and ontology may change. An Owner of a top-level group must turn on Orbit for the group before the hosted graph indexes it.
 
 ## Quickstart
+
+### Set up with glab
+
+Requires the [GitLab CLI](https://docs.gitlab.com/cli/) (`glab`) 1.117 or later.
+
+```shell
+glab auth login
+glab orbit --install
+glab orbit setup
+```
+
+For the full guide, see the [GitLab Orbit documentation](https://docs.gitlab.com/orbit/).
 
 ### Index a local repository
 
@@ -81,8 +49,7 @@ orbit sql 'SELECT count(*) FROM gl_definition'
 ### Query the hosted graph
 
 ```shell
-# Requires glab 1.117+, authenticated (glab auth login), with Orbit enabled on your group.
-# See docs/source/remote/getting-started.md. Replace your-group/ with your top-level group path.
+# Replace your-group/ with your top-level group path.
 glab orbit ontology
 ```
 
@@ -108,7 +75,51 @@ Put the request body in `/tmp/orbit-query.json`:
 glab orbit query --file /tmp/orbit-query.json
 ```
 
-The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pipeline-health, and vulnerability recipes.
+The [use cases](docs/source/use-cases.md) page has blast-radius, dependency, pipeline-health, and vulnerability recipes.
+
+## For contributors
+
+New here? Start with:
+
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — build setup, test commands, MR conventions
+- **[Quickstart](#quickstart)** — index a repo and run queries in minutes, no server needed
+- **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
+- **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
+
+Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
+
+## Using Orbit
+
+The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file — no GitLab account is required at query time, and it runs offline after install. The hosted graph additionally indexes your SDLC (groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and default-branch source code across a top-level GitLab.com group, enforcing GitLab authorization on every query.
+
+Both index the same languages; see [supported languages](docs/source/schema.md#supported-languages). Local checkouts share one database at `~/.gitlab/orbit/graph.duckdb`, each identified by its filesystem path; reindexing after switching branches replaces that checkout's graph, so use separate worktrees to keep multiple branches.
+
+| Access method | Use for |
+|---|---|
+| [`orbit` CLI](docs/source/cli.md) | Index, query, and inspect a graph directly |
+| [`glab orbit`](docs/source/cli.md) | Install and run Orbit through `glab` |
+| [MCP](docs/source/agents/mcp.md) | Expose the graph to AI coding agents over stdio or HTTP |
+| [GitLab Duo Agent Platform](docs/source/agents/duo.md) | Natural-language questions in the GitLab UI |
+| [REST API](docs/source/queries/api.md) | Pipelines, custom tooling, scripts |
+
+Start with the [quickstart](docs/source/_index.md).
+
+```mermaid
+flowchart LR
+    subgraph GitLab["GitLab instance"]
+        SDLC[SDLC data]
+        Code[Source code]
+    end
+
+    SDLC -- CDC --> DIP[Data Insights Platform]
+    DIP --> CH[(ClickHouse)]
+    Code -- Rails API --> Orbit[Orbit service]
+    CH <--> Orbit
+
+    Orbit --> REST[REST API]
+    Orbit --> MCP[MCP tools]
+    Orbit --> DAP[GitLab Duo Agent Platform]
+```
 
 ## Features
 
@@ -129,13 +140,13 @@ Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted 
 
 | User docs | Developer docs |
 |---|---|
-| [Orbit overview](docs/source/_index.md) | [Local development](docs/dev/local-development.md) |
-| [AI coding agents](docs/source/ai_coding_agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
-| [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [cookbook](docs/source/remote/cookbook.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
-| [Local: how it works](docs/source/local/how-it-works.md) · [indexing](docs/source/local/indexing.md) · [schema](docs/source/local/schema.md) · [`orbit` CLI](docs/source/local/access/cli.md) | [Adding a language](docs/dev/adding-a-language.md) |
-| [MCP tool reference](docs/source/queries/mcp_tools.md) | [E2E testing](docs/dev/e2e-testing.md) |
-| [Configuration](docs/source/configure.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |
-| [Troubleshooting](docs/source/orbit_troubleshooting.md) | [Runbooks](docs/dev/runbooks/) |
+| [Orbit overview](docs/source/_index.md) · [use cases](docs/source/use-cases.md) | [Local development](docs/dev/local-development.md) |
+| [CLI](docs/source/cli.md) · [AI coding agents](docs/source/agents/_index.md) · [MCP](docs/source/agents/mcp.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
+| [Queries](docs/source/queries/_index.md) · [Query DSL](docs/source/queries/query-language.md) · [REST API](docs/source/queries/api.md) | [Design documents](docs/design-documents/) |
+| [What Orbit indexes](docs/source/schema.md) · [How it works](docs/source/how-it-works.md) | [Adding a language](docs/dev/adding-a-language.md) |
+| [Security](docs/source/security.md) | [E2E testing](docs/dev/e2e-testing.md) |
+| [Self-managed setup](docs/source/self-managed/_index.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |
+| [Troubleshooting](docs/source/troubleshooting.md) | [Runbooks](docs/dev/runbooks/) |
 
 The published site is [`docs.gitlab.com/orbit`](https://docs.gitlab.com/orbit/).
 

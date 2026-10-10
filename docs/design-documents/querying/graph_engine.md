@@ -287,7 +287,7 @@ A `GraphFormatter` handles the transformation, and a JSON Schema defines the res
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
-Direct projections and hydration apply ontology-derived [text excerpts](../../source/remote/queries/query-language.md#text-excerpts) in SQL before serialization, without changing filters, joins, authorization, grouping, sorting, or cursor keys.
+Direct projections and hydration apply ontology-derived [text excerpts](../../source/queries/query-language.md#text-excerpts) in SQL before serialization, without changing filters, joins, authorization, grouping, sorting, or cursor keys.
 
 ## Authorization and Safety
 

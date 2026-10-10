@@ -50,6 +50,22 @@ mise lint:docs        # markdownlint + Vale + lychee link checks
 
 Run `mise lint:docs` before pushing any documentation changes.
 
+## Documentation site preview
+
+To see `docs/source/` on the [GitLab documentation site](https://docs.gitlab.com), use these tasks:
+
+```shell
+mise docs:serve       # Live preview at http://localhost:1313/orbit/
+mise docs:build       # The strict build that the docs_hugo_build CI job runs
+```
+
+The tasks clone `docs-gitlab-com` into `target/docs-site/` one time and reuse it.
+To update the clone, run `git pull` in it.
+Both tasks write to `public/` in the clone, so stop `docs:serve` before you run `docs:build`.
+The global navigation is in that clone, in `data/en-us/navigation.yaml`.
+A page that is not in the navigation gives a warning.
+A navigation entry under `orbit/` that has no page fails the build.
+
 ## Engineering conventions
 
 - Comments explain why. Do not narrate what the code shows.

@@ -3,11 +3,11 @@ use clap::{Parser, Subcommand};
 
 mod dashboards;
 mod ddl;
+mod docs;
 mod integration_lanes;
 mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
-mod query_docs;
 mod schema;
 mod synth;
 
@@ -84,13 +84,9 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
-    /// Regenerate the auto-derived tables in the query language reference doc
-    /// from the ontology (currently the text-indexed properties table).
-    QueryDocs {
-        /// Path to the doc to update instead of the default.
-        #[arg(short, long)]
-        doc: Option<std::path::PathBuf>,
-        /// Diff the regenerated table against the committed doc and return a
+    /// Regenerate the ontology-derived tables in the docs.
+    Docs {
+        /// Diff the regenerated tables against the committed docs and return a
         /// non-zero exit if they differ.
         #[arg(long)]
         check: bool,
@@ -368,7 +364,7 @@ async fn main() -> Result<()> {
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::IntegrationLanes { check } => integration_lanes::run(check),
-        Command::QueryDocs { doc, check } => query_docs::run(doc, check),
+        Command::Docs { check } => docs::run(check),
         Command::Loadtest {
             endpoint,
             concurrency,

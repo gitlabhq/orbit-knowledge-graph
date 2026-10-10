@@ -383,7 +383,7 @@ dashboards-check:
   script:
     - mise run dashboards:check
 
-query-language-docs-check:
+docs-generated-check:
   stage: lint
   extends:
     - .job-template
@@ -391,7 +391,7 @@ query-language-docs-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - mise run docs:query-language:check
+    - mise run docs:check
 
 ddl-freshness-check:
   stage: lint
@@ -678,7 +678,7 @@ check_docs_markdown:
     # docs that previously reached CI unlinted (design-documents deferred: #981).
     - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
     # Check links
-    - lychee --offline --include-fragments docs/source/**/*.md
+    - lychee --offline --include-fragments 'docs/source/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
@@ -697,57 +697,22 @@ check_docs_i18n_markdown:
     # Lint Markdown
     - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
     # Check links
-    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+    - lychee --offline --include-fragments "docs-locale/${LOCALE_CODE}/source/**/*.md"
 
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   needs: []
-  extends:
-    - .mr-only-rules
-  variables:
-    DOCS_BRANCH: "main"
-  before_script:
-    # Check if this a release branch, which would be the case for a backport.
-    # If this is a backport MR, we need to checkout the appropriate version
-    # of the Docs website.
-    - |
-      if [[ $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ [0-9]+-[0-9]+-stable ]]; then
-        BRANCH_NAME=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-        echo "Detected merge request to stable branch: $BRANCH_NAME"
-      # Check if we're directly on a stable branch (direct push/commit)
-      elif [[ $CI_COMMIT_BRANCH =~ [0-9]+-[0-9]+-stable ]]; then
-        BRANCH_NAME=$CI_COMMIT_BRANCH
-        echo "Detected direct commit to stable branch: $BRANCH_NAME"
-      fi
-
-      # Extract version info if we found a stable branch
-      if [[ -n $BRANCH_NAME ]]; then
-        MAJOR=$(echo $BRANCH_NAME | cut -d '-' -f 1)
-        MINOR=$(echo $BRANCH_NAME | cut -d '-' -f 2)
-        # Convert GitLab style (17-9-stable-ee) to Docs style (17.9)
-        DOCS_BRANCH_CANDIDATE="$MAJOR.$MINOR"
-
-        # Check if the branch exists in the Docs website repo, fallback to main if not
-        if git ls-remote --heads --exit-code https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git "refs/heads/$DOCS_BRANCH_CANDIDATE" >/dev/null 2>&1; then
-          DOCS_BRANCH="$DOCS_BRANCH_CANDIDATE"
-          echo "Using docs-gitlab-com branch $DOCS_BRANCH for release branch"
-        else
-          DOCS_BRANCH="main"
-          echo "Branch $DOCS_BRANCH_CANDIDATE does not exist, falling back to main"
-        fi
-      fi
-    # Clone the Docs website project
-    - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
-    - cd docs-gitlab-com
-    - make add-latest-icons
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - docs/source/**/*
+        - scripts/docs/**/*
+        - .gitlab-ci.yml
+      interruptible: true
   script:
-    # Test that Hugo will build
-    - hugo --gc --printPathWarnings --panicOnWarning  --environment test
-    # Test for invalid index pages
-    # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
-    - make check-index-pages SEARCH_DIR="../docs/source"
-    #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
+    - bash ./scripts/docs/site.sh build
 
 # Test Stage
 

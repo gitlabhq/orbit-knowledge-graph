@@ -14,7 +14,7 @@ try {
     `@gitlab/orbit: no prebuilt orbit binary for ${process.platform}-${process.arch}.\n` +
       `The optional dependency ${packageName} is not installed. Reinstall without ` +
       `--no-optional / --omit=optional, or use another install method: ` +
-      `https://docs.gitlab.com/orbit/local/getting-started/`
+      `https://docs.gitlab.com/orbit/cli/`
   );
   process.exit(1);
 }

@@ -21,7 +21,7 @@ Both manifests' front matter and local-section placeholders are validated at bui
 ## Syncing the query-language reference
 
 `references/query_language.md` is synced from
-`docs/source/remote/queries/query-language.md`. Edit the upstream file, then run:
+`docs/source/queries/query-language.md`. Edit the upstream file, then run:
 
 ```bash
 mise run skill:sync:orbit

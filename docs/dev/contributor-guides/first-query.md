@@ -213,12 +213,12 @@ between them.
 
 ## Where to go next
 
-- [Orbit Local schema reference](../../source/local/schema.md) for the four
+- [What Orbit indexes](../../source/schema.md) for the four
   local node types and their properties.
-- [Orbit Local access methods](../../source/local/getting-started.md) for
+- [Orbit CLI](../../source/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
-- [Orbit query language reference](../../source/remote/queries/query-language.md)
+- [Orbit query language reference](../../source/queries/query-language.md)
   for the Query DSL used by Orbit Remote and agent-facing graph queries.
-- [Cookbook](../../source/remote/cookbook.md) for copy-paste query ideas.
+- [Use cases](../../source/use-cases.md) for copy-paste query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.

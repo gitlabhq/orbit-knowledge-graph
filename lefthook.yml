@@ -53,9 +53,9 @@ pre-commit:
         - "AGENTS.md"
         - "CLAUDE.md"
     - name: orbit-skill-docs-sync
-      run: diff docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md
+      run: diff docs/source/queries/query-language.md skills/orbit/references/query_language.md
       glob:
-        - "docs/source/remote/queries/query-language.md"
+        - "docs/source/queries/query-language.md"
         - "skills/orbit/references/query_language.md"
     - name: rust-toolchain-sync
       run: mise run toolchain:check
@@ -85,13 +85,15 @@ pre-commit:
         - "crates/orbit-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
         - "crates/orbit-observability/orbit-dashboards/gkg-metrics.json"
-    - name: query-language-docs-check
-      run: mise run docs:query-language:check
+    - name: docs-generated-check
+      run: mise run docs:check
       glob:
         - "config/ontology/**/*.yaml"
-        - "crates/xtask/src/query_docs.rs"
-        - "crates/ontology/src/lib.rs"
-        - "docs/source/remote/queries/query-language.md"
+        - "crates/xtask/src/docs/**/*.rs"
+        - "crates/xtask/src/main.rs"
+        - "crates/ontology/src/**/*.rs"
+        - "docs/source/queries/query-language.md"
+        - "docs/source/schema.md"
         - "skills/orbit/references/query_language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit
