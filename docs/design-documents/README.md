@@ -163,16 +163,16 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.
 
 Local `grep` scans the working tree with ripgrep's engine (`grep-searcher`,
-`grep-regex`, `ignore`), so results follow `.gitignore` and see unsaved edits.
-Each OR alternative is a regex when it contains regex syntax, and otherwise a
-literal that ignores case, `_`, `-`, and spaces. Output follows rg:
-`path:line:text` for each match, `path-line-text` for `-A`/`-B`/`-C` context,
-and the common rg and grep flags, with unsupported ones skipped and a warning.
-Before the lines of each enclosing indexed definition, a `path-N-» Kind name`
-line names it with its callers and callees, in rg's context-line form so every
-line keeps its path. Files edited since the indexed commit are marked and carry
-no definitions, because the graph describes the commit. Files order defining
-code first, then other code, tests, and text files.
+`grep-regex`, `ignore`). Results follow `.gitignore` and see unsaved edits.
+Each OR alternative is a regex when it contains regex syntax. Otherwise it is
+a literal that ignores case, `_`, `-`, and spaces. The common rg and grep flags
+work, and unsupported ones are skipped with a warning. Each file prints as one
+row, with matching lines grouped under their enclosing indexed definition.
+Each definition shows its kind, span, callers, and callees. A definition that a
+plain term names prints first with its source. With `-A`, `-B`, or `-C`, output
+switches to rg's `path:line:text` lines. Files edited since the indexed commit
+are marked and carry no definitions, because the graph describes the commit.
+Files order defining code first, then other code, tests, and text files.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
