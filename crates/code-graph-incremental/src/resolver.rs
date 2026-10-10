@@ -15,9 +15,11 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type,
-    members_by_level, reachable,
+    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, members_by_level,
+    reachable,
 };
+type Tree = crate::tree::Tree<Compact>;
+type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 use crate::treesitter::SupportLang;
 
 pub const CLASS_LIKE: &[C] = &[

@@ -44,7 +44,7 @@ mod tests {
         for (name, src) in [
             ("linker.rs", include_str!("../linker.rs")),
             ("resolver.rs", include_str!("../resolver.rs")),
-            ("tree/walk.rs", include_str!("../tree/walk.rs")),
+            ("tree/semantic.rs", include_str!("../tree/semantic.rs")),
         ] {
             for (i, line) in src.lines().enumerate() {
                 assert!(

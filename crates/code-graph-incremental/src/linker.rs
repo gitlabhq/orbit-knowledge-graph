@@ -11,7 +11,9 @@ use crate::rules::LinkConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::ssa::{BlockId, SsaEngine, Value};
 use crate::tags::ReservedTags;
-use crate::tree::{Cursor, Edge, EdgeKind, Tree, members_by_level};
+use crate::tree::{Compact, Edge, EdgeKind, members_by_level};
+type Tree = crate::tree::Tree<Compact>;
+type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 enum WorkItem {
     Visit(u32),
