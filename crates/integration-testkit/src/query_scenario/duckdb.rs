@@ -5,8 +5,9 @@ use std::sync::Arc;
 use duckdb_client::DuckDbClient;
 use orbit_server::redaction::QueryResult;
 use query_engine::compiler::{Frontend, compile_local, generate_local_ddl};
+use query_engine::formatters::{GraphFormatter, ResultFormatter};
 
-use super::{assert_response, format_output, read_scenarios, seed_preset};
+use super::{assert_response, pipeline_output, read_scenarios, seed_preset};
 use crate::scenario::seed::{group_by_columns, values_insert};
 use crate::scenario::{Seed, discover};
 
@@ -43,13 +44,13 @@ pub fn run_duckdb_dir(root: &str, presets: &str, seed: &str) {
                 .query_arrow(&sql)
                 .unwrap_or_else(|e| panic!("{label}: {e}\n{sql}"));
             let query_result = QueryResult::from_batches(&batches, &compiled.base.result_context);
-            let response = format_output(
+            let response = GraphFormatter.format(&pipeline_output(
                 &compiled,
                 query_result,
                 0,
                 compiled.base.result_context.clone(),
                 sql,
-            );
+            ));
             assert_response(&compiled.input, response, &scenario.expect, &label);
         }
         ran += 1;
