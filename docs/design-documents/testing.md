@@ -2,7 +2,7 @@
 
 ## Overview
 
-Orbit has tests at every layer of the stack. Each layer answers a different question, and each one is cheaper than the layer above it.
+Orbit has tests at every layer of the stack.
 
 1. Build scripts check the configuration before any test runs.
 2. Unit tests check one function or module.
@@ -13,7 +13,7 @@ Orbit has tests at every layer of the stack. Each layer answers a different ques
 
 Most coverage is data, not Rust. A contributor adds a YAML file, and the harness turns it into a test. This keeps tests short and lets one harness check many cases.
 
-This document describes each layer, what it proves, how to run it, and where it runs in CI. Then it gives the rules for where a new test goes. This document covers this repository. The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
+This document describes each layer, what it proves, how to run it, and where it runs in CI. Then it gives the principles that every new test follows. This document covers this repository. The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
 
 ## Terms
 
@@ -309,44 +309,14 @@ Next to the tests, CI runs checks on each MR:
 
 Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../dev/sox-billing-boundary.md).
 
-## Releases and rollouts
+## Testing principles
 
-semantic-release cuts a release from main, on a schedule or by hand. Then the `release-deploy-mr` job opens an MR in [gl-infra/argocd/apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps). That MR changes the image for staging and production. The MR description says if the schema version changed. A change with no new version is an image swap that takes minutes. A new version starts a migration.
-
-The [migration ledger](schema_management.md#ledger-scopes) tells each migration what to rebuild. Some versions rebuild nothing, some rebuild only SDLC or code data, and some rebuild all data. During a migration, every webserver serves the active version, and new pods load its ontology from the archive. After promotion, every webserver changes to the new version. See [Webserver readiness gate](schema_management.md#webserver-readiness-gate).
-
-Each rollout is watched for the same signals:
-
-| Milestone | Signal |
-| --- | --- |
-| New pods are up | pod status and a restart count of 0 |
-| New webserver serves the active version | `/ready` returns 200 |
-| Migration starts | the dispatcher logs `marking schema version as migrating` |
-| Backfill progresses | the indexing completion rate in Prometheus and the `gkg.schema.indexed_units` metric |
-| Promotion gate | the `migration completion status` log, with indexed and enabled namespace counts |
-| Migration is active | the dispatcher logs `marking migrating version as active`, the `gkg_schema_version` table shows the new version, and `orbit remote status` succeeds |
-
-## Where to add a test
-
-Use the cheapest layer that can prove the behavior. Every bug fix gets a test that fails before the fix.
-
-| You changed | Add |
-| --- | --- |
-| Query results, filters, redaction, or pagination | a query scenario in `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` |
-| The plan that the compiler picks | a plan-shape fixture in `crates/integration-tests/tests/compiler/plan_shape/fixtures/` |
-| SQL text for one dialect | a test in `crates/integration-tests/tests/compiler/dialects/` |
-| How the indexer maps rows to nodes and edges | an indexer scenario in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/` |
-| Schema migrations or ledger scopes | a test in `crates/integration-tests/tests/indexer/schema/` |
-| NATS or indexing engine behavior | a test in `crates/integration-tests/tests/indexer/nats.rs` or `engine.rs` |
-| A language parser or resolver | a YAML suite in `crates/integration-tests-codegraph/fixtures/<language>/` and `fixtures_incremental/<language>/`, a `code-indexing-benchmark.yaml` entry for a new language, and fixture repositories in `fixtures/code/` |
-| CLI behavior | a test in `crates/integration-tests/tests/cli.rs` |
-| A query example in the docs | mark it `json orbit-query` or `gql orbit-query` |
-| A flow across Rails and Orbit | a Robot Framework suite in `e2e/tests/` |
-
-Follow these rules:
-
-- Write new correctness tests as YAML suites, not as Rust modules.
+- Use the cheapest layer that can prove the behavior. Move up a layer only when the lower layer cannot show the bug.
+- Every bug fix gets a test that fails before the fix.
+- Write new correctness tests as YAML suites, not as Rust modules. Query scenarios, indexer scenarios, code-graph suites, and plan-shape fixtures cover most changes. If a case does not fit, extend the harness.
 - Do not delete a Rust test until a YAML suite checks every one of its assertions.
-- In a test that gates CI, measure performance with deterministic numbers, such as rows or bytes read, not wall-clock time.
-- Do not add a test that depends on another test's state. E2E suites after the first suite must not depend on each other.
+- Test against real infrastructure for behavior that Orbit owns. Mock only the systems that Orbit does not own, such as Rails authorization and Gitaly.
+- Keep tests deterministic. In a test that gates CI, measure performance with deterministic numbers, such as rows or bytes read, not wall-clock time.
+- Do not add a test that depends on another test's state.
+- Mark every query example in the docs as `json orbit-query` or `gql orbit-query`, so CI runs it.
 - Put a new test in a target that a CI job runs. A file under a crate's `tests/` directory does not run in CI unless a job selects it.

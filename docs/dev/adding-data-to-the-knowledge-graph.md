@@ -283,7 +283,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 ### 5.5 Test fixtures + SDLC scenario
 
 - **`fixtures/siphon.sql`**: add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
-- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../design-documents/testing.md#where-to-add-a-test)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
+- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../design-documents/testing.md#testing-principles)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
 
   ```yaml
   description: ...

@@ -31,7 +31,7 @@ The three `containers` lanes run each container test one time.
 `integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
 
 New correctness tests are YAML suites. See
-[Where to add a test](../../docs/design-documents/testing.md#where-to-add-a-test).
+[Testing principles](../../docs/design-documents/testing.md#testing-principles).
 
 ## Running
 
