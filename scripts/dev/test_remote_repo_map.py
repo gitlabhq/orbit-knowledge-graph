@@ -5,7 +5,7 @@ These cover the partition / hop-bound logic without touching the network: the
 helpers are exercised against canned `nodes`/`edges` payloads shaped like a
 `glab orbit query --response-format raw` response.
 
-Run with: python3 scripts/test_remote_repo_map.py
+Run with: python3 scripts/dev/test_remote_repo_map.py
 """
 from __future__ import annotations
 

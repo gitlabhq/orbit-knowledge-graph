@@ -226,22 +226,11 @@ stages:
         ALPINE_IMAGE: alpine:latest
     - !reference [.mr-only-rules, rules]
 
-.canonical-only-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-
 .canonical-mr-only-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-
-.canonical-main-only-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Lint Stage
 

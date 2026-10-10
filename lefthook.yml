@@ -70,7 +70,7 @@ pre-commit:
       glob: "config/prompts/**/*.yml"
     - name: ontology-schema
       run: mise run ontology:validate
-      glob: "fixtures/ontology/**/*.yaml"
+      glob: "config/ontology/**/*.yaml"
     - name: pinned-version-check
       run: bash ./scripts/checks/check-pinned-version.sh
       glob:
