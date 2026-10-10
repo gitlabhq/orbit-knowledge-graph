@@ -35,7 +35,12 @@ globals, including Bash commands, Zig `@` functions, and PHP/JavaScript globals.
 
 `precedence: runtime` selects the runtime module before ordinary project lookup.
 Explicit project aliases are applied before either module classification. The
-default, `precedence: project`, retains exact and declared-root project lookup.
+same applies to successful bare-import lookups under an explicitly configured
+`baseUrl`. Relative paths and scheme-qualified imports such as `node:constants`
+do not use that override. Inferred directory roots cannot override runtime modules.
+Changing or removing configured roots invalidates retained import targets; adding
+roots also rediscovers imports that previously had no project target.
+The default, `precedence: project`, retains exact and declared-root project lookup.
 Provider lists are compiled once when language rules load. They do not add a
 new resolution pass or inspect language-specific syntax in the shared engine.
 

@@ -489,6 +489,7 @@ impl Phase<DirtyGraph> for Resolve {
             &dirty,
             env.lang_id,
             &walk.prefixes,
+            &walk.configured_prefixes,
             &env.resolve.config,
             &walk.aliases,
             &walk.entrypoints,

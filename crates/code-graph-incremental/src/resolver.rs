@@ -128,6 +128,7 @@ impl ImportReq {
 }
 
 pub struct Resolver {
+    pub(crate) configured_prefixes: Vec<String>,
     visible: VisibleMap,
     reqs: Vec<ImportReq>,
     file_index: FileIndex,
@@ -138,6 +139,7 @@ pub struct Resolver {
 impl Resolver {
     pub fn new(lang: &Lang) -> Self {
         Self {
+            configured_prefixes: Vec::new(),
             visible: Vec::new(),
             reqs: Vec::new(),
             file_index: FileIndex::default(),
@@ -173,12 +175,14 @@ impl Resolver {
         std::mem::replace(&mut self.file_index, index)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn invalidate(
         &self,
         previous_index: &FileIndex,
         trees: &[Tree],
         dirty_fis: &FxHashSet<u32>,
         lookup_prefixes: &[String],
+        configured_prefixes: &[String],
         aliases: &[(String, String)],
         env: &Env,
     ) -> FxHashSet<u32> {
@@ -186,8 +190,9 @@ impl Resolver {
             .reqs
             .iter()
             .filter(|req| {
-                !resolve_glob(&req.target_path, &self.file_index, lookup_prefixes)
-                    .contains(&Loc::new(req.target_fi as usize, req.anchor))
+                self.configured_prefixes != configured_prefixes
+                    || !resolve_glob(&req.target_path, &self.file_index, lookup_prefixes)
+                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
             .chain(dirty_fis.iter().copied())
@@ -197,7 +202,7 @@ impl Resolver {
             .keys
             .keys()
             .any(|key| !previous_index.keys.contains_key(key));
-        if added_keys {
+        if added_keys || self.configured_prefixes != configured_prefixes {
             let known_imports: FxHashSet<_> =
                 self.reqs.iter().map(|req| (req.fi, req.node)).collect();
             let discovery_files = (0..trees.len() as u32)
@@ -208,6 +213,7 @@ impl Resolver {
                 &env.lang,
                 &self.file_index,
                 lookup_prefixes,
+                configured_prefixes,
                 &env.resolve.config,
                 &discovery_files,
                 aliases,
@@ -304,6 +310,7 @@ impl Resolver {
         dirty_fis: &FxHashSet<u32>,
         support_lang: SupportLang,
         lookup_prefixes: &[String],
+        configured_prefixes: &[String],
         config: &ResolveConfig,
         aliases: &[(String, String)],
         entrypoints: &[(String, String)],
@@ -317,9 +324,11 @@ impl Resolver {
             trees,
             dirty_fis,
             lookup_prefixes,
+            configured_prefixes,
             aliases,
             env,
         );
+        self.configured_prefixes = configured_prefixes.to_vec();
         edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
 
         self.visible.resize_with(trees.len(), Default::default);
@@ -335,6 +344,7 @@ impl Resolver {
             lang,
             &self.file_index,
             lookup_prefixes,
+            configured_prefixes,
             config,
             dirty_fis,
             aliases,
@@ -776,11 +786,13 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
     names
 }
 
+#[allow(clippy::too_many_arguments)]
 fn gather_imports_for(
     trees: &[Tree],
     lang: &Lang,
     file_index: &FileIndex,
     lookup_prefixes: &[String],
+    configured_prefixes: &[String],
     config: &ResolveConfig,
     dirty_fis: &FxHashSet<u32>,
     aliases: &[(String, String)],
@@ -825,17 +837,39 @@ fn gather_imports_for(
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let target_path = apply_aliases(raw_path, aliases);
                     let explicitly_aliased = target_path != raw_path;
-                    if !explicitly_aliased && is_external(source_str, &config.external) {
+                    let configured = if !explicitly_aliased
+                        && !source_str.starts_with(['.', '/'])
+                        && !source_str.contains(':')
+                    {
+                        configured_prefixes.iter().find_map(|prefix| {
+                            let path = format!("{prefix}/{source_str}");
+                            let path = path.strip_prefix("./").unwrap_or(&path);
+                            let targets = resolve_glob(path, file_index, &[]);
+                            (!targets.is_empty()).then(|| (path.to_owned(), targets))
+                        })
+                    } else {
+                        None
+                    };
+                    let configured_override = configured.is_some();
+                    if !explicitly_aliased
+                        && !configured_override
+                        && is_external(source_str, &config.external)
+                    {
                         return;
                     }
                     let node_idx = cur.index();
-                    let stdlib = !explicitly_aliased && is_external(source_str, &config.stdlib);
+                    let stdlib = !explicitly_aliased
+                        && !configured_override
+                        && is_external(source_str, &config.stdlib);
                     let prefixes = if stdlib {
                         &stdlib_prefixes
                     } else {
                         lookup_prefixes
                     };
-                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
+                    let (target_path, mut direct) = configured.unwrap_or_else(|| {
+                        let direct = resolve_glob(&target_path, file_index, prefixes);
+                        (target_path, direct)
+                    });
                     direct.retain(|loc| loc.fi != fi);
                     if direct.is_empty() && stdlib {
                         return;

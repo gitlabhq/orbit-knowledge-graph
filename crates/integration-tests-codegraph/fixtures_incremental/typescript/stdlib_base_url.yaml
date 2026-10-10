@@ -1,0 +1,87 @@
+name: Explicit baseUrl resolves project modules sharing Node names
+fixtures:
+  - path: tsconfig.json
+    content: |
+      {"compilerOptions":{"baseUrl":"./src"}}
+  - path: src/constants/index.ts
+    content: |
+      export function value() {}
+  - path: main.ts
+    content: |
+      import { value } from 'constants';
+      import { value as builtin } from 'node:constants';
+      function run() { value(); }
+      function runtime() { builtin(); }
+  - path: other/constants/index.ts
+    content: |
+      export function value() {}
+tests:
+  - name: Configured project module remains reachable
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/constants/index.ts } }
+  - name: Explicit runtime spelling stays external
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'runtime'
+      RETURN target.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'node:constants' } }
+steps:
+  - name: Change configured root after loading a snapshot
+    snapshot: true
+    modify:
+      - path: tsconfig.json
+        content: |
+          {"compilerOptions":{"baseUrl":"./other"}}
+    tests:
+      - name: Unchanged importer switches roots without retaining the old edge
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: other/constants/index.ts } }
+  - name: Remove baseUrl
+    snapshot: true
+    modify:
+      - path: tsconfig.json
+        content: |
+          {"compilerOptions":{}}
+    tests:
+      - name: Inferred directories cannot override runtime modules
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path
+        assert:
+          - { empty: true }
+      - name: Bare name returns to runtime fallback
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+          WHERE caller.name = 'run'
+          RETURN target.import_path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { path: constants } }
+  - name: Restore baseUrl without adding files
+    snapshot: true
+    modify:
+      - path: tsconfig.json
+        content: |
+          {"compilerOptions":{"baseUrl":"src"}}
+    tests:
+      - name: Previously external importer is rediscovered
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: src/constants/index.ts } }

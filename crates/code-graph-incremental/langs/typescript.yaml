@@ -431,7 +431,7 @@ resolve:
         - match: '(__file "webpack.config.js" $$$F:__field)'
           replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
-        - match: '(__file "/^(ts|js)config\\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" (__str $V)) $$$REST))) $$$OUTER)'
+        - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
           replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 
     - name: aliases

@@ -11,6 +11,7 @@ use crate::tree::{Cursor, Node, Step, Tag, Tree};
 pub struct WalkResult {
     pub entrypoints: Vec<(String, String)>,
     pub prefixes: Vec<String>,
+    pub configured_prefixes: Vec<String>,
     pub aliases: Vec<(String, String)>,
     /// Per file: the tags rules put on it and on its ancestor directories,
     /// nearest first, plus `source_root_rel`, its path below the nearest source root.
@@ -81,6 +82,7 @@ impl<'a> ProjectTree<'a> {
             return WalkResult {
                 entrypoints: vec![],
                 prefixes: vec![],
+                configured_prefixes: vec![],
                 aliases: vec![],
                 file_tags: vec![],
                 tag_keys,
@@ -91,6 +93,30 @@ impl<'a> ProjectTree<'a> {
         pt.collect_aliases();
         pt.collect_prefixes();
         let file_tags = pt.collect_file_tags();
+        let configured_prefixes = pt
+            .tree
+            .root()
+            .descendants()
+            .filter(|node| node.is(C::File))
+            .flat_map(|file| {
+                file.children()
+                    .filter(|child| config.lookup_from.contains(&child.kind()))
+                    .filter_map(|marker| marker.sym_opt())
+                    .map(move |symbol| (file, symbol))
+            })
+            .map(|(file, symbol)| {
+                let parent = file
+                    .parent()
+                    .map(|parent| pt.node_path(parent))
+                    .unwrap_or_default();
+                let relative = lang.syms.resolve(symbol);
+                if parent.is_empty() {
+                    relative.to_owned()
+                } else {
+                    format!("{parent}/{relative}")
+                }
+            })
+            .collect();
         let entrypoints = pt
             .tree
             .root()
@@ -104,6 +130,7 @@ impl<'a> ProjectTree<'a> {
         WalkResult {
             entrypoints,
             prefixes: pt.prefixes,
+            configured_prefixes,
             aliases: pt.aliases,
             file_tags,
             tag_keys,
