@@ -149,12 +149,41 @@ fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
             };
             QueryError::Validation(format!(
                 "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
-                error.renamed_rules(rule_label).variant.message()
+                expected_message(&error.variant)
             ))
         })?
         .single()
         .expect("Statement produces one pair");
     QueryParser::Statement(statement).map_err(syntax_error)
+}
+
+fn expected_message(variant: &ErrorVariant<Rule>) -> String {
+    match variant {
+        ErrorVariant::ParsingError {
+            positives,
+            negatives,
+        } => match (labels(positives), labels(negatives)) {
+            (expected, unexpected) if unexpected.is_empty() => format!("expected {expected}"),
+            (expected, unexpected) if expected.is_empty() => format!("unexpected {unexpected}"),
+            (expected, unexpected) => format!("unexpected {unexpected}; expected {expected}"),
+        },
+        ErrorVariant::CustomError { message } => message.clone(),
+    }
+}
+
+fn labels(rules: &[Rule]) -> String {
+    let mut labels: Vec<String> = Vec::new();
+    for label in rules.iter().map(rule_label) {
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    match labels.as_slice() {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first, second] => format!("{first} or {second}"),
+        [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+    }
 }
 
 fn rule_label(rule: &Rule) -> String {
@@ -178,7 +207,8 @@ fn rule_label(rule: &Rule) -> String {
         Rule::NodeLabel => "a node label",
         Rule::RelationshipTypes => "a relationship type",
         Rule::Variable => "a variable",
-        Rule::SchemaName | Rule::PropertyExpression => "a property such as n.name",
+        Rule::SchemaName => "a label, relationship type, or property name",
+        Rule::PropertyExpression => "a property such as n.name",
         Rule::ProjectionItems | Rule::ProjectionItem | Rule::ProjectionExpression => {
             "a RETURN item"
         }
@@ -190,7 +220,11 @@ fn rule_label(rule: &Rule) -> String {
         Rule::SortItem => "a sort key",
         Rule::SortDirection => "ASC or DESC",
         Rule::UnsignedInteger => "a non-negative integer",
-        Rule::StringLiteral => "a string",
+        Rule::StringLiteral
+        | Rule::NumberLiteral
+        | Rule::BooleanLiteral
+        | Rule::TemporalLiteral
+        | Rule::FunctionName => "a value",
         Rule::ListLiteral => "a list",
         Rule::MapLiteral | Rule::MapEntry => "a property map such as {name: 'x'}",
         Rule::RangeLiteral => "a hop range such as *1..3",
