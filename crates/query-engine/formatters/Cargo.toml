@@ -23,7 +23,6 @@ toon-format = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
-insta = { workspace = true }
 
 [lints]
 workspace = true

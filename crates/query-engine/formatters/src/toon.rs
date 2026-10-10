@@ -59,7 +59,7 @@ struct Pagination<'a> {
     pagination: Option<&'a PaginationResponse>,
 }
 
-pub fn encode_response(response: &GraphResponse) -> String {
+fn encode_response(response: &GraphResponse) -> String {
     let mut out = String::with_capacity(256 + response.nodes.len() * 128);
     out.push_str("query_type: ");
     write_text(&mut out, &response.query_type);

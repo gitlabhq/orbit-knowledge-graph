@@ -18,7 +18,7 @@ pub use graph::{
     PaginationResponse,
 };
 pub use raw_row::row_to_json;
-pub use toon::{TOON_OUTPUT_FORMAT_VERSION, ToonFormatter, encode_response as toon_encode};
+pub use toon::{TOON_OUTPUT_FORMAT_VERSION, ToonFormatter};
 
 pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
     orbit_versions::VERSIONS
