@@ -935,13 +935,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {
                         let node = input.nodes.iter().find(|n| n.id == *endpoint);
-                        if node.is_none_or(|n| {
-                            !path_endpoint_has_selectivity(n)
-                                && !input.positive_predicates().any(|leaf| {
-                                    leaf.target == crate::input::PredicateTarget::Node(n.id.clone())
-                                        && leaf.filter.rhs_column.is_none()
-                                })
-                        }) {
+                        if node.is_none_or(|n| !path_endpoint_has_selectivity(n)) {
                             return Err(QueryError::Validation(format!(
                                 "path_finding requires node_ids, filters, or id_range \
                                  (max span {MAX_PATH_ANCHOR_RANGE}) on endpoint \"{endpoint}\""
@@ -951,13 +945,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 }
             }
             QueryType::Neighbors
-                if input.nodes.first().is_none_or(|n| {
-                    !node_has_selectivity(n)
-                        && !input.positive_predicates().any(|leaf| {
-                            leaf.target == crate::input::PredicateTarget::Node(n.id.clone())
-                                && leaf.filter.rhs_column.is_none()
-                        })
-                }) =>
+                if input.nodes.first().is_none_or(|n| !node_has_selectivity(n)) =>
             {
                 return Err(QueryError::Validation(
                     "neighbors requires node_ids or filters on the center node \
@@ -966,11 +954,7 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 ));
             }
             QueryType::Traversal | QueryType::Aggregation
-                if !input.nodes.iter().any(node_has_selectivity)
-                    && !input.positive_predicates().any(|leaf| {
-                        matches!(leaf.target, crate::input::PredicateTarget::Node(_))
-                            && leaf.filter.rhs_column.is_none()
-                    }) =>
+                if !input.nodes.iter().any(node_has_selectivity) =>
             {
                 return Err(QueryError::Validation(
                     "add a filter or node ID on at least one node".into(),
@@ -1154,10 +1138,6 @@ impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
                 if unit.requires_selectivity_guard()
                     && node.node_ids.is_empty()
                     && !node.filters.contains_key(property)
-                    && !input.positive_predicates().any(|leaf| {
-                        leaf.target == crate::input::PredicateTarget::Node(node.id.clone())
-                            && leaf.property == property
-                    })
                 {
                     return Err(QueryError::Validation(format!(
                         "group_by[{i}]: truncate \"{}\" on \"{}\" requires either node_ids on \"{}\" \

@@ -20,7 +20,6 @@ pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, Entit
 
 pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -> Result<Input> {
     let mut input = input;
-    input.collect_predicates();
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
             continue;
@@ -48,6 +47,11 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
                 .map(|property| model.graph().property(*property).name.clone())
                 .collect();
             node.columns = Some(ColumnSelection::List(columns));
+        }
+        for (property, filters) in &mut node.filters {
+            for filter in filters {
+                coerce_filter(filter, model.property(entity, property));
+            }
         }
     }
     for expression in &mut input.predicates {
@@ -174,9 +178,7 @@ mod tests {
         let input = parse_input(json).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology)).unwrap();
-        let mut input = normalize(input, model.as_ref()).unwrap();
-        input.extract_scan_filters();
-        input
+        normalize(input, model.as_ref()).unwrap()
     }
 
     #[test]

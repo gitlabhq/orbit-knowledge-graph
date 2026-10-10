@@ -260,7 +260,6 @@ fn check<M: QueryDataModel>(
         }
         let mut input =
             normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
-        input.extract_scan_filters();
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
             input.query_type = compiler::input::QueryType::Hydration;

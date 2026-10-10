@@ -63,11 +63,11 @@ The compiler supports two query frontends:
 ### Compiler pass pipeline
 
 Native compiler input can carry grouped predicates with `AND` and `NOT`.
-Both frontends collect filter maps into that representation before validation.
+Ordinary filters stay in node and relationship maps. Grouped predicates use expression trees.
 Property-to-property comparisons use the same leaves; there is no separate join-predicate list.
 Validation and restriction check every leaf. Normalization coerces enum values within each group.
-Before scope planning, positive scan predicates move into node and edge filters.
-Negated groups and cross-node comparisons remain expressions and are bound by the planner.
+Validation and access checks inspect both forms through shared filter iterators.
+The planner binds grouped predicates and cross-node comparisons while ordinary filters keep their existing scan paths.
 Planning keeps referenced nodes and edges available, pushes single-node groups into node scans,
 and applies cross-alias groups after their joins. Latest-row scans recheck mutable predicates.
 Negated ID lists and bounds remain predicates rather than positive ID selectors.
