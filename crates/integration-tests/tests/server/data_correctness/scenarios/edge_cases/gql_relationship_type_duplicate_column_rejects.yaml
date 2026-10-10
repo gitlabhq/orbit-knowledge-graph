@@ -1,0 +1,8 @@
+description: A type(r) alias that repeats a node variable rejects because the gql table would have two columns with one name
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, type(r) AS mr LIMIT 10
+
+expect:
+  compile_error: "duplicate RETURN column name"

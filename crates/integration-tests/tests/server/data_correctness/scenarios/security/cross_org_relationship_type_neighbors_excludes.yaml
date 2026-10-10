@@ -11,11 +11,13 @@ query:
     MATCH (u:User {id: 1})-[r]->(n) WHERE type(r) = 'AUTHORED' RETURN u, n, type(r)
 
 expect:
+  node_count: 6
   referential_integrity: true
   nodes:
+    User:
+      ids: [1]
     MergeRequest:
+      ids: [2000, 2001]
       absent: [9100]
-  edge_exists:
-    AUTHORED: [[1, 2000], [1, 2001]]
-  edge_absent:
-    AUTHORED: [[1, 9100]]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001], [1, 3000], [1, 4000], [1, 4002]]

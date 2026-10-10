@@ -43,6 +43,16 @@ pub struct Hop {
     pub cascade_anchor: bool,
 }
 
+impl Hop {
+    pub fn column_prefix(&self, index: usize) -> String {
+        if self.max_hops > 1 {
+            format!("hop_e{index}_")
+        } else {
+            format!("e{index}_")
+        }
+    }
+}
+
 pub struct JoinColumns {
     pub prev_index: usize,
     pub prev_col: String,
@@ -435,6 +445,7 @@ fn elide_hops(
                     .into_iter()
                     .any(|node| input.references(&PredicateTarget::Node(node.clone())))
                 || input.references(&PredicateTarget::Relationship(hop.input_index))
+                || input.returns_relationship(hop.input_index)
             {
                 return None;
             }

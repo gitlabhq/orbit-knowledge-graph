@@ -1,0 +1,8 @@
+description: ORDER BY type(r) on a neighbors query rejects because neighbors have a fixed order
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n ORDER BY type(r)
+
+expect:
+  compile_error: "path finding and neighbors have fixed result ordering"

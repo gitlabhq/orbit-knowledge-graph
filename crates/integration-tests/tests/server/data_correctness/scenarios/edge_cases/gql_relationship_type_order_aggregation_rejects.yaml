@@ -1,0 +1,8 @@
+description: ORDER BY type(r) in an aggregation rejects until relationship-type grouping exists
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN mr.state, count(mr) AS n ORDER BY type(r)
+
+expect:
+  compile_error: "ORDER BY type(r) is not supported in aggregations yet"

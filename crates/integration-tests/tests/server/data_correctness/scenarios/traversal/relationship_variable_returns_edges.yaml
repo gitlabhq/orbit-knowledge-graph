@@ -17,5 +17,8 @@ query:
 expect:
   node_count: 3
   referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
   edges:
     AUTHORED: [[1, 2000], [1, 2001]]

@@ -1,0 +1,20 @@
+description: RETURN type(r) keeps a hop that the planner could answer from a foreign key, so its edges and types stay in the response
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[r:IN_PROJECT]->(p:Project {id: 1000})
+    RETURN mr.title, type(r) LIMIT 10
+
+expect:
+  node_count: 4
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+    Project:
+      ids: [1000]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+    IN_PROJECT: [[2000, 1000], [2001, 1000]]
+  gql_columns:
+    type(r): ['"IN_PROJECT"', '"IN_PROJECT"']

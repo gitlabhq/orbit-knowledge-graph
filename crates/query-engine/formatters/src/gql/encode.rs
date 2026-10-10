@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use compiler::input::{Direction, group_by_output_names};
+use compiler::input::{
+    Direction, RelationshipColumn, RelationshipColumnKind, group_by_output_names,
+};
 use compiler::{QueryType, ResultContext, neighbor_is_outgoing_column, relationship_type_column};
 use orbit_utils::arrow::ColumnValue;
 use orbit_utils::strings::quote_escaped;
@@ -27,13 +29,9 @@ type Table = (Vec<String>, Vec<Vec<String>>);
 fn node_table(output: &PipelineOutput) -> Table {
     let context = &output.result_context;
     let prefixes = edge_prefixes(context);
-    let aliases: Vec<String> = output
-        .compiled
-        .input
-        .nodes
-        .iter()
-        .map(|n| n.id.clone())
-        .collect();
+    let input = &output.compiled.input;
+    let aliases: Vec<String> = input.nodes.iter().map(|n| n.id.clone()).collect();
+    let relationships = &input.options.relationship_columns;
     let rows = output
         .query_result
         .authorized_rows()
@@ -41,10 +39,35 @@ fn node_table(output: &PipelineOutput) -> Table {
             aliases
                 .iter()
                 .map(|alias| row_node(row, context, &prefixes, alias).unwrap_or_else(null))
+                .chain(
+                    relationships
+                        .iter()
+                        .map(|column| relationship_cell(row, context, column)),
+                )
                 .collect()
         })
         .collect();
-    (aliases, rows)
+    let columns = aliases
+        .into_iter()
+        .chain(relationships.iter().map(|column| column.name.clone()))
+        .collect();
+    (columns, rows)
+}
+
+fn relationship_cell(
+    row: &QueryResultRow,
+    context: &ResultContext,
+    column: &RelationshipColumn,
+) -> String {
+    context
+        .edges()
+        .iter()
+        .find(|edge| edge.relationship == column.relationship)
+        .and_then(|edge| row.get_column_string(&edge.type_column))
+        .map_or_else(null, |kind| match column.kind {
+            RelationshipColumnKind::Type => quote_escaped(&kind),
+            RelationshipColumnKind::Relationship => format!("[:{kind}]"),
+        })
 }
 
 fn path_table(output: &PipelineOutput) -> Table {
