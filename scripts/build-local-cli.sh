@@ -12,8 +12,8 @@ set -euo pipefail
 #   {x86_64,aarch64}-apple-darwin
 #   x86_64-pc-windows-gnullvm        (cross-compiled with llvm-mingw on Linux)
 #
-# Linux builds default to the existing glibc target. Set LIBC=musl to build the
-# fully static musl variant with cargo-zigbuild.
+# Linux builds use cargo-zigbuild. The default glibc build links against glibc
+# 2.28 so it runs on EL8 and later. Set LIBC=musl for the fully static variant.
 # Set PRINT_TARGET=1 to print the resolved Rust target and archive name without
 # building; this is useful for validating PLATFORM/ARCH/LIBC combinations.
 
@@ -78,12 +78,14 @@ rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
 # Bundle libduckdb (compile from C++) so the released binary is self-contained.
-if [[ "$TARGET" == *-musl ]]; then
+if [ "$PLATFORM" = "linux" ]; then
     command -v cargo-zigbuild >/dev/null || {
-        echo "cargo-zigbuild is required for musl local CLI builds" >&2
+        echo "cargo-zigbuild is required for Linux local CLI builds" >&2
         exit 1
     }
-    rustup run "$TOOLCHAIN" cargo zigbuild --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled
+    ZIG_TARGET="$TARGET"
+    [ "$LIBC" = "gnu" ] && ZIG_TARGET="${TARGET}.2.28"
+    rustup run "$TOOLCHAIN" cargo zigbuild --release --locked -p orbit-cli --bin orbit --target "$ZIG_TARGET" --features duckdb-client/bundled
 else
     rustup run "$TOOLCHAIN" cargo build --release --locked -p orbit-cli --bin orbit --target "$TARGET" --features duckdb-client/bundled
 fi

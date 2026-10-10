@@ -117,8 +117,8 @@ stages:
     # So only merged code writes the cache; set in unit-test.
     policy: $CARGO_HOME_CACHE_POLICY
 
-# For jobs that resolve no dependencies, and for the tag-only release CLI
-# builds, which fetch fresh because git/db and the index are not verified.
+# For jobs that resolve no dependencies, and for the release CLI builds,
+# which fetch fresh because git/db and the index are not verified.
 # Extend it after `.job-template` so its `cache` replaces the template's.
 .no-cargo-home-cache:
   variables:
