@@ -13,248 +13,107 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Getting started](https://docs.gitlab.com/orbit/local/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Use cases](docs/source/remote/cookbook.md) · [CLI](docs/source/remote/access/glab.md) · [Contribute](#contribute)
 
 </div>
 
-Orbit indexes your GitLab SDLC and source code into one property graph, then lets you query it from the GitLab UI, a CLI, MCP, or REST. The graph can live on your machine — a single binary that builds a code-only graph from any repository, offline — or in the hosted service that spans a top-level GitLab.com group across SDLC and code. Same ontology, same query surface.
+**Ask your GitLab anything.**
+GitLab Orbit is the context graph of your software lifecycle.
+It connects your code, merge requests, pipelines, work items, and vulnerabilities in one graph that every AI agent can query.
+Ask what breaks if a service changes, or which CI/CD jobs fail most.
+Each answer shows only the data that your GitLab role lets you see.
 
-> Beta. The Query DSL and ontology may change. The hosted graph is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
-
-## For contributors
-
-New here? Start with:
-
-- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — build setup, test commands, MR conventions
-- **[Quickstart](#quickstart)** — index a repo and run queries in minutes, no server needed
-- **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
-- **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
-
-Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
-
-## Using Orbit
-
-The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file — no GitLab account is required at query time, and it runs offline after install. The hosted graph additionally indexes your SDLC (groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and default-branch source code across a top-level GitLab.com group, enforcing GitLab authorization on every query.
-
-Both cover the same 11+ languages: Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir. Local checkouts share one database at `~/.gitlab/orbit/graph.duckdb`, each identified by its filesystem path; reindexing after switching branches replaces that checkout's graph, so use separate worktrees to keep multiple branches.
-
-| Access method | Use for |
-|---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect a graph directly |
-| [`glab orbit`](docs/source/local/access/glab.md) | Install and run Orbit through `glab` |
-| [MCP](docs/source/local/access/mcp.md) | Expose the graph to AI coding agents over stdio |
-| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Natural-language questions in the GitLab UI |
-| [REST API](docs/source/remote/access/api.md) | Pipelines, custom tooling, scripts |
-
-Start with the [getting started guide](docs/source/local/getting-started.md).
-
-```mermaid
-flowchart LR
-    subgraph GitLab["GitLab instance"]
-        SDLC[SDLC data]
-        Code[Source code]
-    end
-
-    SDLC -- CDC --> DIP[Data Insights Platform]
-    DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> Orbit[Orbit service]
-    CH <--> Orbit
-
-    Orbit --> REST[REST API]
-    Orbit --> MCP[MCP tools]
-    Orbit --> DAP[GitLab Duo Agent Platform]
-```
+> [!note]
+> GitLab Orbit is in beta. The query language and the schema can change.
+> The graph of your group needs GitLab Premium or Ultimate.
 
 ## Quickstart
 
-### Index a local repository
+Install the [GitLab CLI](https://docs.gitlab.com/cli/) (`glab`) 1.119 or later.
+Then, in a Git repository, run:
 
 ```shell
-# Install (macOS, Linux glibc, Linux musl; --libc musl forces the static build)
-curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
-
-# Index the current repository, then query it
-orbit index .
-orbit sql 'SELECT count(*) FROM gl_definition'
+glab auth login
+glab orbit setup
 ```
 
-### Query the hosted graph
+`setup` downloads the GitLab Orbit CLI, connects the AI agents on your machine, and indexes the repository.
+Open your agent in the repository, and ask it this question.
 
-```shell
-# Requires glab 1.117+, authenticated (glab auth login), with Orbit enabled on your group.
-# See docs/source/remote/getting-started.md. Replace your-group/ with your top-level group path.
-glab orbit ontology
+```plaintext
+Using GitLab Orbit, what does this project do, and how is it structured?
 ```
 
-Put the request body in `/tmp/orbit-query.json`:
+To ask about merge requests, pipelines, and vulnerabilities, an Owner of your top-level group must
+[turn on GitLab Orbit](docs/source/remote/getting-started.md#step-1-enable-gitlab-orbit) first.
+For the full walkthrough with example output, see the [GitLab Orbit documentation](https://docs.gitlab.com/orbit/).
 
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "filters": {
-        "full_path": {"starts_with": "your-group/"}
-      }
-    }],
-    "limit": 5
-  }
-}
-```
+## Ways to use GitLab Orbit
 
-```shell
-glab orbit query --file /tmp/orbit-query.json
-```
-
-The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pipeline-health, and vulnerability recipes.
-
-## Features
-
-| Capability | Local graph | Hosted graph |
-|---|---|---|
-| Scope | Code only | SDLC and code |
-| Query interface | Raw DuckDB SQL | Query DSL compiled to ClickHouse SQL |
-| GitLab authorization | Filesystem permissions only | Enforced per query |
-| Runs offline | Yes (after install) | No |
-
-The local graph exposes raw SQL, so traversals are expressed as joins. The hosted graph adds the Query DSL — aggregations, traversals, neighbors, and pathfinding at multi-billion-edge scale.
-
-## Architecture
-
-Orbit shares a Rust workspace and YAML ontology across two runtimes. The hosted service runs the `gkg-server` service modes against ClickHouse and serves HTTP, gRPC, REST, and MCP requests. The `orbit` CLI runs standalone against DuckDB and exposes direct commands plus a stdio MCP server. See the [design documents](docs/design-documents/) and the [data model](docs/design-documents/data_model.md) for the full picture.
-
-## Documentation
-
-| User docs | Developer docs |
+| Surface | Use it to |
 |---|---|
-| [Orbit overview](docs/source/_index.md) | [Local development](docs/dev/local-development.md) |
-| [AI coding agents](docs/source/ai_coding_agents.md) | [Domain glossary (CONTEXT.md)](CONTEXT.md) |
-| [Remote: how it works](docs/source/remote/how-it-works.md) · [indexing](docs/source/remote/indexing.md) · [schema](docs/source/remote/schema.md) · [cookbook](docs/source/remote/cookbook.md) · [Query DSL](docs/source/remote/queries/query-language.md) | [Design documents](docs/design-documents/) |
-| [Local: how it works](docs/source/local/how-it-works.md) · [indexing](docs/source/local/indexing.md) · [schema](docs/source/local/schema.md) · [`orbit` CLI](docs/source/local/access/cli.md) | [Adding a language](docs/dev/adding-a-language.md) |
-| [MCP tool reference](docs/source/queries/mcp_tools.md) | [Testing strategy](docs/design-documents/testing.md) · [E2E testing](docs/dev/e2e-testing.md) |
-| [Configuration](docs/source/configure.md) | [Indexer crate guide](crates/indexer/AGENTS.md) |
-| [Troubleshooting](docs/source/orbit_troubleshooting.md) | [Runbooks](docs/dev/runbooks/) |
+| [`glab orbit`](docs/source/remote/access/glab.md) | Search code, read definitions with their callers, and query the graph from a terminal. |
+| [AI coding agents](docs/source/ai_coding_agents.md) | Give your coding agents the graph and the GitLab Orbit skill through `glab orbit setup`. |
+| [MCP](docs/source/remote/access/mcp.md) | Connect any MCP client to the graph. |
+| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Ask questions in the GitLab UI. |
+| [REST API](docs/source/remote/access/api.md) | Query the graph from scripts, pipelines, and your own tools. |
 
-The published site is [`docs.gitlab.com/orbit`](https://docs.gitlab.com/orbit/).
+For the query language, the schema, security, and troubleshooting, see the [GitLab Orbit documentation](https://docs.gitlab.com/orbit/).
 
-## Development
+## How it works
 
-<details>
-<summary>Build, test, and run from source</summary>
-
-All tasks run through [mise](https://mise.jdx.dev/).
-
-```shell
-mise build            # Build the workspace
-mise test:fast        # Unit tests (no Docker)
-mise test:integration # Container tests (ClickHouse and NATS in Docker)
-mise lint:code        # Clippy with warnings as errors
-mise lint:code:fix    # Apply clippy fixes
-mise server:start     # Run gkg-server locally
+```mermaid
+flowchart LR
+  accTitle: How GitLab Orbit answers a question
+  accDescr: GitLab Orbit indexes GitLab data and code into the Orbit graph. Your agent asks GitLab. GitLab checks your permissions, queries the graph, and returns only the data that you can read.
+  source[GitLab data<br/>and code] -- index --> store[(Orbit graph)]
+  agent[Your AI agent] -- ask --> rails[GitLab<br/>checks permissions]
+  rails -- query --> store
+  rails -- answer --> agent
 ```
 
-The product name is Orbit. The binary and metrics still use the engineering name GKG (binary `gkg-server`, metric names).
+1. **Index.** GitLab Orbit copies the data and the default-branch code of each top-level group into a graph in ClickHouse.
+   It updates the graph when the data changes.
+1. **Ask.** Your agent sends a question through `glab orbit`, MCP, the REST API, or GitLab Duo.
+1. **Check.** GitLab checks your permissions, runs the query on the graph, and returns only the data that you can read.
 
-- [Local development guide](docs/dev/local-development.md)
-- [Testing strategy](docs/design-documents/testing.md)
-- [E2E testing harness](docs/dev/e2e-testing.md)
-- [Adding a new language](docs/dev/adding-a-language.md)
-- [Indexer crate guide](crates/indexer/AGENTS.md)
-- [Operational runbooks](docs/dev/runbooks/)
-- [Server configuration runbook](docs/dev/runbooks/server_configuration.md)
-- [Contributing](CONTRIBUTING.md) — quickstart, testing, linting, and MR conventions.
+`glab orbit` also indexes the repository on your machine, so code questions work offline.
+For the components, see [how GitLab Orbit works](docs/source/remote/how-it-works.md) and the [design documents](docs/design-documents/).
 
-</details>
+## Contribute
 
-## Project and operations
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. It has the setup, the `mise` tasks, good first issues, and the MR conventions.
+Many tasks need no deep Rust knowledge, for example docs, ontology YAML, and test fixtures for a language.
 
-<details>
-<summary>Epics, related repositories, infrastructure, contacts, and SOX boundary</summary>
-
-### Epic landscape
-
-- [Primary GA epic (#19744)](https://gitlab.com/groups/gitlab-org/-/work_items/19744)
-- [L4: Introduce GitLab Orbit (#773)](https://gitlab.com/groups/gitlab-operating-model/-/work_items/773)
-- [GKG on Dedicated (#915, confidential)](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated)
-- [First Iteration, predecessor (#17514, closed)](https://gitlab.com/groups/gitlab-org/-/work_items/17514)
-- Workstream epics: [Product (#20884)](https://gitlab.com/groups/gitlab-org/-/work_items/20884) · [Core Development (#20357)](https://gitlab.com/groups/gitlab-org/-/work_items/20357) · [Security (#20248)](https://gitlab.com/groups/gitlab-org/-/work_items/20248) · [Infra/Delivery (#36)](https://gitlab.com/groups/gitlab-org/rust/-/work_items/36) · [Architecture & Discovery (#20885)](https://gitlab.com/groups/gitlab-org/-/work_items/20885)
-- Cross-functional: [Infra support (#1804)](https://gitlab.com/groups/gitlab-com/gl-infra/-/work_items/1804) · [DataSec support (#407)](https://gitlab.com/groups/gitlab-com/gl-security/-/work_items/407) · [DE&M data product (#86)](https://gitlab.com/groups/gitlab-operating-model/-/work_items/86) · [Monetization (#79)](https://gitlab.com/groups/gitlab-operating-model/-/work_items/79)
-- [PREP readiness review !64](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64)
-- [Issues labeled `knowledge graph` (the historical feature label)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=knowledge+graph)
-
-### Related repositories
-
-| Repository | Role |
+| Guide | Use it to |
 |---|---|
-| [`orbit/knowledge-graph`](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | This repo. Server, indexer, CLI. |
-| [`orbit/orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) | Official Helm chart. |
-| [`orbit/orbit-e2e-harness`](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness) | GKE bootstrap for end-to-end tests. |
-| [`orbit/documentation/orbit-artifacts`](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes. |
-| [`analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon) | External CDC pipeline that feeds the datalake. |
-| [`analytics-section/platform-insights/siphon-helm-charts`](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | Production Siphon Helm chart. |
-| [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab) | Rails monolith. Owns authorization and serves source code over the internal API. |
-| [`gitlab-org/rust/build-images`](https://gitlab.com/gitlab-org/rust/build-images) | CI builder images. |
+| [Local development](docs/dev/local-development.md) | Run the full stack with GDK, ClickHouse, and NATS. |
+| [Testing strategy](docs/design-documents/testing.md) | Learn which tests a change needs. |
+| [Adding a language](docs/dev/adding-a-language.md) | Add a parser for a new language. |
+| [Design documents](docs/design-documents/) | Read the design of each area before you change it. |
 
-### Infrastructure
+GitLab Orbit also uses these public repositories:
+[GitLab Rails](https://gitlab.com/gitlab-org/gitlab),
+[Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon),
+the [Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts), and the
+[end-to-end test harness](https://gitlab.com/gitlab-org/orbit/orbit-e2e-harness).
 
-- Helmfiles: [Siphon](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/tree/master/releases/siphon) · [NATS](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/tree/master/releases/nats) · [Data Insights Platform](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/tree/master/releases/data-insights-platform)
-- ClickHouse Cloud Terraform: gstg and gprd `clickhouse-cloud.tf` files under [`config-mgmt`](https://ops.gitlab.net/gitlab-com/gl-infra/config-mgmt) (`environments/gstg/` and `environments/gprd/`)
-- [Architecture readiness](https://gitlab.com/gitlab-org/architecture/readiness)
-- [Data Insights Platform infra module](https://gitlab.com/gitlab-org/analytics-section/platform-insights/data-insights-platform-infra)
+The product name is GitLab Orbit.
+The old engineering name GKG stays in the `gkg-server` binary, metric names, environment variables, and NATS stream names.
 
-### Pipeline operations
-
-- [SDLC indexing runbook](docs/dev/runbooks/sdlc_indexing.md)
-- [Code indexing runbook](docs/dev/runbooks/code_indexing.md)
-- [Server configuration runbook](docs/dev/runbooks/server_configuration.md)
-- [All runbooks](docs/dev/runbooks/)
-
-### Billing and SOX
-
-Billing emission is on the SOX audit boundary. Before touching billing code, read [SOX billing boundary](docs/dev/sox-billing-boundary.md).
-
-- [`crates/orbit-billing/`](crates/orbit-billing/): Snowplow billing-event emission and CDot quota enforcement.
-- [`crates/orbit-server/src/billing_adapter.rs`](crates/orbit-server/src/billing_adapter.rs): the single `Claims` to `BillingInputs` conversion point.
-
-### People
-
-| Role | DRI |
-|---|---|
-| Engineering lead | [@michaelangeloio](https://gitlab.com/michaelangeloio) |
-| Product Manager | [@mcorren](https://gitlab.com/mcorren) |
-| TPM | [@lyle](https://gitlab.com/lyle) |
-| Siphon and DIP architecture | [@ahegyi](https://gitlab.com/ahegyi) |
-
-### Cross-functional partners
-
-| Name | Area |
-|---|---|
-| Nitin Singhal ([@nitinsinghal74](https://gitlab.com/nitinsinghal74)) | ELT lead |
-| Stephanie Jackson | Infrastructure, SRE, PREP |
-| Ankit Bhatnagar ([@ankitbhatnagar](https://gitlab.com/ankitbhatnagar)) | NATS, DIP |
-| Gus Gray ([`@ggray-gitlab`](https://gitlab.com/ggray-gitlab)) | Security, AuthZ design |
-| Jason Plum ([@WarheadsSE](https://gitlab.com/WarheadsSE)) | Delivery, Self-Managed, Dedicated |
-| Brian Greene ([@bgreene1](https://gitlab.com/bgreene1)) | Ontology standards |
-| Dennis Tang ([@dennis](https://gitlab.com/dennis)) | Analytics stage, ClickHouse operations |
-| Nick Leonard ([@nickleonard](https://gitlab.com/nickleonard)) | Design |
-| Jerome Ng ([@jeromezng](https://gitlab.com/jeromezng)) | Usage billing system architect |
-
-GitLab stage: Orbit. Group: Context Systems.
-
-</details>
+To report a bug, open an issue with the [bug report template](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
+GitLab team members can find the roadmap, the team, runbooks, deployments, and dashboards in the [Orbit portal](https://gitlab-org.gitlab.io/orbit/portal/).
 
 ## Maintainers and contributors
 
-Orbit was founded by:
+These people founded GitLab Orbit:
 
-- [@michaelangeloio](https://gitlab.com/michaelangeloio) (Angelo Rivera). Overall engineering lead.
-- [@michaelusa](https://gitlab.com/michaelusa) (Michael Usachenko). Code graph and query engine.
-- [@jgdoyon1](https://gitlab.com/jgdoyon1) (Jean-Gabriel Doyon). ETL engine and the overall indexing engine.
-- [@bohdanpk](https://gitlab.com/bohdanpk) (Bohdan Parkhomchuk). Infrastructure, web server, and security.
+- [@michaelangeloio](https://gitlab.com/michaelangeloio) (Angelo Rivera): engineering lead.
+- [@michaelusa](https://gitlab.com/michaelusa) (Michael Usachenko): code graph and query engine.
+- [@jgdoyon1](https://gitlab.com/jgdoyon1) (Jean-Gabriel Doyon): ETL engine and indexing.
+- [@bohdanpk](https://gitlab.com/bohdanpk) (Bohdan Parkhomchuk): infrastructure, web server, and security.
 
-Orbit has received contributions from 75+ GitLab team members. See the [contributors graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/graphs/main) for the live list.
+See the [contributors graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/graphs/main) for everyone who contributes to GitLab Orbit.
 
 ## License
 
