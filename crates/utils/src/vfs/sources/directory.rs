@@ -1,27 +1,16 @@
-//! Directory walks with git ignore rules; Changeset loads explicit relative paths without walking.
-//! Metadata and link targets are read through pinned parent descriptors without following links.
-//! Missing files are skipped; other I/O errors fail loading. Real host paths remain separate from
-//! inventory keys. Relative roots are canonicalized once so later reads do not depend on cwd.
-
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
-use rayon::prelude::*;
 use tracing::warn;
 use typed_path::Utf8UnixPathBuf;
 
-use super::{Loading, Put, Source, SourceError, Tag, is_safe_relative_path};
+use super::{Loading, Put, Source, SourceError, Tag};
 use crate::safe_fs;
 
 pub struct Directory<'a>(pub &'a Path);
-
-pub struct Changeset<'a> {
-    pub root: &'a Path,
-    pub paths: Vec<String>,
-}
 
 impl Source for Directory<'_> {
     fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
@@ -83,21 +72,11 @@ impl Source for Directory<'_> {
     }
 }
 
-impl Source for Changeset<'_> {
-    fn fill<T: Tag>(self, into: &Loading<T>) -> Result<(), SourceError> {
-        let root = dunce::canonicalize(self.root)?;
-        self.paths.into_par_iter().try_for_each(|path| {
-            if !is_safe_relative_path(Path::new(&path)) || path.is_empty() {
-                return Err(
-                    std::io::Error::new(ErrorKind::InvalidInput, "invalid changeset path").into(),
-                );
-            }
-            put(root.join(&path), &virtual_path(Path::new(&path))?, into)
-        })
-    }
-}
-
-fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), SourceError> {
+pub(super) fn put<T: Tag>(
+    on_disk: PathBuf,
+    path: &str,
+    into: &Loading<T>,
+) -> Result<(), SourceError> {
     let entry = match safe_fs::inspect(&on_disk) {
         Ok(entry) => entry,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
@@ -118,7 +97,7 @@ fn put<T: Tag>(on_disk: PathBuf, path: &str, into: &Loading<T>) -> Result<(), So
     }
 }
 
-fn virtual_path(path: &Path) -> std::io::Result<String> {
+pub(super) fn virtual_path(path: &Path) -> std::io::Result<String> {
     let mut virtual_path = Utf8UnixPathBuf::new();
     for component in path.components() {
         let part = match component {
