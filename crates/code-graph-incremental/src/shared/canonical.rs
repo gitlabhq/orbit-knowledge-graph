@@ -244,7 +244,7 @@ impl Canonical {
     }
 }
 
-pub fn def_type_of<S: crate::tree::Storage<crate::tree::Node>>(
+pub fn def_type_of<S: crate::tree::Storage<Node = crate::tree::Node>>(
     cursor: Cursor<'_, S>,
 ) -> Option<Canonical> {
     cursor.children().find_map(|c| {

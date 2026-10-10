@@ -7,7 +7,7 @@ use crate::tree::{EdgeKind, Node, Storage, Tree};
 
 use super::types::{Ctx, EdgeCtx, EdgeDir, Tf};
 
-fn child_sym<S: Storage<Node>>(
+fn child_sym<S: Storage<Node = Node>>(
     t: &Tree<S>,
     lang: &Lang,
     id: u32,
@@ -15,7 +15,7 @@ fn child_sym<S: Storage<Node>>(
 ) -> u32 {
     t.cursor(id)
         .children()
-        .find(|c| pred(S::node(&t.arena, c.index())))
+        .find(|c| pred(t.storage.node(c.index())))
         .map_or(0, |c| t.sym_at(c.index(), lang))
 }
 
@@ -219,7 +219,7 @@ impl Tf {
         }
     }
 
-    pub(crate) fn apply_sym<S: Storage<Node>>(
+    pub(crate) fn apply_sym<S: Storage<Node = Node>>(
         &self,
         t: &Tree<S>,
         lang: &Lang,
@@ -229,7 +229,7 @@ impl Tf {
         self.apply_at(t, lang, S::index(id), edge_ctx)
     }
 
-    pub(crate) fn apply_at<S: Storage<Node>>(
+    pub(crate) fn apply_at<S: Storage<Node = Node>>(
         &self,
         t: &Tree<S>,
         lang: &Lang,
@@ -270,7 +270,7 @@ impl Tf {
                     if sym != 0 {
                         break sym;
                     }
-                    match S::parent(&t.arena, cur) {
+                    match t.storage.parent(cur) {
                         Some(p) => cur = p,
                         None => break 0,
                     }
@@ -280,7 +280,7 @@ impl Tf {
                 let key = *key;
                 let mut cur = id;
                 loop {
-                    match S::parent(&t.arena, cur) {
+                    match t.storage.parent(cur) {
                         Some(p) => {
                             if let Some(v) = t.get_tag(p, key) {
                                 break v;
@@ -329,8 +329,8 @@ impl Tf {
             Tf::KindName => lang.syms.intern(lang.kind_name(t.cursor(id).kind())),
             Tf::TreeNodeId => lang.syms.intern(&id.to_string()),
             Tf::SiblingIndex => {
-                let index = std::iter::successors(S::previous_sibling(&t.arena, id), |&id| {
-                    S::previous_sibling(&t.arena, id)
+                let index = std::iter::successors(t.storage.previous_sibling(id), |&id| {
+                    t.storage.previous_sibling(id)
                 })
                 .filter(|&id| t.cursor(id).named())
                 .count();

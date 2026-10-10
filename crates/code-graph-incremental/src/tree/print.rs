@@ -1,8 +1,8 @@
 use crate::intern::Lang;
 
-use super::walk::Cursor;
+use super::Cursor;
 
-pub fn pretty_print<S: super::Storage<super::Node>>(
+pub fn pretty_print<S: super::Storage<Node = super::Node>>(
     tree: &super::Tree<S>,
     lang: &Lang,
     color: bool,
@@ -14,7 +14,7 @@ pub fn pretty_print<S: super::Storage<super::Node>>(
     const RESET: &str = "\x1b[0m";
     const GREEN: &str = "\x1b[32m";
 
-    fn build<S: super::Storage<super::Node>>(
+    fn build<S: super::Storage<Node = super::Node>>(
         cursor: Cursor<'_, S>,
         lang: &Lang,
         color: bool,

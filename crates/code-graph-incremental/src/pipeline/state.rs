@@ -147,7 +147,7 @@ impl From<&Tree<Compact>> for TreeSnapshot {
     fn from(tree: &Tree<Compact>) -> Self {
         let mut nodes = Vec::with_capacity(tree.len() as usize);
         for id in std::iter::once(tree.root()).chain(tree.root().descendants()) {
-            let n = &tree.arena[id.index() as usize].node;
+            let n = id.node();
             let parent = id.parent().map_or(NONE, |p| p.index());
             nodes.push(SnapshotNode {
                 id: id.index(),
@@ -218,7 +218,7 @@ impl From<TreeSnapshot> for Tree<Compact> {
             }
         }
         Self {
-            arena,
+            storage: Compact(arena),
             root,
             label: snap.label,
             tags: snap

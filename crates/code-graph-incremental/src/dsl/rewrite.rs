@@ -29,8 +29,8 @@ impl Placement {
     /// A capture used twice, or the target itself, is copied on the later use.
     fn place(&mut self, t: &mut Tree, src: NodeId, parent: NodeId) -> NodeId {
         if self.mv && src != self.target && self.moved.insert(src) {
-            src.detach(&mut t.arena);
-            parent.append(src, &mut t.arena);
+            src.detach(&mut t.storage.0);
+            parent.append(src, &mut t.storage.0);
             src
         } else {
             t.clone_within(src, parent)
@@ -68,11 +68,11 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             };
             let copy = pl.place(t, src, parent);
             if *field != 0 {
-                t.arena[copy].get_mut().field = *field;
+                t.storage.0[copy].get_mut().field = *field;
             }
             if let Some(k) = rekind {
                 let sym = t.sym_of(copy, lang);
-                let n = t.arena[copy].get_mut();
+                let n = t.storage.0[copy].get_mut();
                 n.kind = *k;
                 n.field = 0;
                 n.sym = sym;
@@ -132,7 +132,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     let copy = pl.place(t, e, parent);
                     if let Some(k) = rekind {
                         let sym = t.sym_of(copy, lang);
-                        let n = t.arena[copy].get_mut();
+                        let n = t.storage.0[copy].get_mut();
                         n.kind = *k;
                         n.sym = sym;
                     }
@@ -214,13 +214,13 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
 }
 
 fn build_template(t: &mut Tree, fill: &Fill, pat: &Pat, mut pl: Placement) -> Vec<NodeId> {
-    let holder = t.arena.new_node(Node::default());
+    let holder = t.storage.0.new_node(Node::default());
     materialize(t, fill, pat, holder, &mut pl);
-    let built: Vec<NodeId> = holder.children(&t.arena).collect();
+    let built: Vec<NodeId> = holder.children(&t.storage.0).collect();
     for &b in &built {
-        b.detach(&mut t.arena);
+        b.detach(&mut t.storage.0);
     }
-    holder.remove(&mut t.arena);
+    holder.remove(&mut t.storage.0);
     built
 }
 
@@ -278,7 +278,7 @@ pub fn apply_display(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_rewrites_inner<S: Storage<Node>>(
+fn apply_rewrites_inner<S: Storage<Node = Node>>(
     t: &mut Tree<S>,
     lang: &Lang,
     rules: &[Rewrite],
@@ -305,7 +305,7 @@ fn apply_rewrites_inner<S: Storage<Node>>(
 
     let mut candidates: Vec<_> = std::iter::once(t.root())
         .chain(t.root().descendants())
-        .map(|c| S::id(&t.arena, c.index()))
+        .map(|c| t.storage.id(c.index()))
         .collect();
     if !preorder {
         candidates.reverse();
@@ -313,11 +313,11 @@ fn apply_rewrites_inner<S: Storage<Node>>(
 
     for target in candidates {
         sentinels.iter().try_for_each(|s| s.check())?;
-        if S::is_removed(&t.arena, target) {
+        if t.storage.is_removed(target) {
             continue;
         }
 
-        let target_kind = S::node(&t.arena, S::index(target)).kind;
+        let target_kind = t.storage.node(S::index(target)).kind;
         for &index in by_kind.get(&target_kind).unwrap_or(&generic) {
             let r = &rules[index];
             for c in &mut caps[..r.nslots] {
@@ -396,16 +396,19 @@ fn apply_structure(
             if let (Some((pat, kind, nslots)), Some(new_root)) = (&r.unique, first) {
                 let key = t.cursor(Tree::to_raw(new_root)).child_sym_of_kind(*kind);
                 let mut ucaps: Vec<Cap> = (0..*nslots).map(|_| SmallVec::new()).collect();
-                let taken = target.parent(&t.arena).is_some_and(|parent| {
-                    parent.children(&t.arena).filter(|&c| c != target).any(|c| {
-                        matches(t, lang, c, pat, &mut ucaps)
-                            && t.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
-                    })
+                let taken = target.parent(&t.storage.0).is_some_and(|parent| {
+                    parent
+                        .children(&t.storage.0)
+                        .filter(|&c| c != target)
+                        .any(|c| {
+                            matches(t, lang, c, pat, &mut ucaps)
+                                && t.cursor(Tree::to_raw(c)).child_sym_of_kind(*kind) == key
+                        })
                 });
                 if taken {
                     built
                         .into_iter()
-                        .for_each(|n| n.remove_subtree(&mut t.arena));
+                        .for_each(|n| n.remove_subtree(&mut t.storage.0));
                     return true;
                 }
             }
@@ -442,7 +445,7 @@ fn apply_structure(
                 let pl = Placement::new(false, target);
                 let built = build_template(t, &fill, pat, pl);
                 for id in built {
-                    target.append(id, &mut t.arena);
+                    target.append(id, &mut t.storage.0);
                 }
             }
         }
@@ -453,13 +456,13 @@ fn apply_structure(
 
 impl Tree {
     pub(crate) fn clone_within(&mut self, id: NodeId, parent: NodeId) -> NodeId {
-        let children: Vec<NodeId> = id.children(&self.arena).collect();
-        let copy = self.arena.new_node(*self.node(id));
+        let children: Vec<NodeId> = id.children(&self.storage.0).collect();
+        let copy = self.storage.0.new_node(*self.node(id));
         if let Some(tags) = self.tags.get(&Tree::to_raw(id)) {
             let tags = tags.clone();
             self.tags.insert(Tree::to_raw(copy), tags);
         }
-        parent.append(copy, &mut self.arena);
+        parent.append(copy, &mut self.storage.0);
         for child in children {
             self.clone_within(child, copy);
         }
@@ -468,13 +471,13 @@ impl Tree {
 }
 
 /// The node `tag_on:` selects: the first descendant of that kind, else `root`.
-fn tag_target<S: Storage<Node>>(t: &Tree<S>, root: S::Id, tag_on: Option<u16>) -> S::Id {
+fn tag_target<S: Storage<Node = Node>>(t: &Tree<S>, root: S::Id, tag_on: Option<u16>) -> S::Id {
     tag_on
         .and_then(|k| {
             std::iter::once(t.cursor(S::index(root)))
                 .chain(t.cursor(S::index(root)).descendants())
                 .find(|n| n.kind() == k)
         })
-        .map(|n| S::id(&t.arena, n.index()))
+        .map(|n| t.storage.id(n.index()))
         .unwrap_or(root)
 }

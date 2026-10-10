@@ -22,7 +22,7 @@ use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
 use crate::sentinel::{Killed, Sentinel};
-use crate::tree::{Edge, Tag, Tree};
+use crate::tree::{Edge, Storage, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
 pub struct Prepare;
@@ -340,7 +340,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
             tree.node_mut(id).sym = sym;
         }
         tree.source = std::sync::Arc::from("");
-        Ok(Canonical(tree.into_compact()))
+        Ok(Canonical(tree.compact_and_remap()))
     }
 }
 
@@ -482,7 +482,7 @@ impl Phase<DirtyGraph> for Resolve {
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            state.trees[rsp.fi as usize].node_mut(rsp.node).sym = rsp.sym;
+            state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;

@@ -5,7 +5,7 @@ use crate::tree::{Node, Storage, Tree};
 
 use super::types::{Cap, Pat, Text};
 
-pub(crate) fn matches<S: Storage<Node>>(
+pub(crate) fn matches<S: Storage<Node = Node>>(
     t: &Tree<S>,
     lang: &Lang,
     id: S::Id,
@@ -13,7 +13,7 @@ pub(crate) fn matches<S: Storage<Node>>(
     caps: &mut [Cap<S::Id>],
 ) -> bool {
     let raw = S::index(id);
-    let n = S::node(&t.arena, raw);
+    let n = t.storage.node(raw);
     let field_ok = |f: u16| f == 0 || f == n.field;
     match p {
         Pat::Var { .. } | Pat::Spread { .. } => false,
@@ -66,7 +66,7 @@ pub(crate) fn matches<S: Storage<Node>>(
             let children: Vec<_> = t
                 .cursor(raw)
                 .children()
-                .map(|c| S::id(&t.arena, c.index()))
+                .map(|c| t.storage.id(c.index()))
                 .collect();
             let mut ci = 0;
             for (k, kid) in kids.iter().enumerate() {
@@ -100,7 +100,7 @@ pub(crate) fn matches<S: Storage<Node>>(
                     Pat::Desc(inner) => {
                         let mut found = false;
                         for desc in t.cursor(raw).descendants() {
-                            if matches(t, lang, S::id(&t.arena, desc.index()), inner, caps) {
+                            if matches(t, lang, t.storage.id(desc.index()), inner, caps) {
                                 found = true;
                                 break;
                             }
