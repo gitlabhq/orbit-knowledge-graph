@@ -5,7 +5,7 @@
 # elsewhere in this pipeline.
 #
 # Build and publish run on tag pipelines (`vX.Y.Z`) on the canonical project.
-# Linux builds and smoke tests also run on merge requests that change them.
+# Linux builds and smoke tests also run on main when their inputs change.
 
 .local-cli-release-rules:
   rules:
@@ -16,16 +16,13 @@
 .local-cli-linux-rules:
   rules:
     - !reference [.local-cli-release-rules, rules]
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - scripts/build-local-cli.sh
         - scripts/smoke-local-cli.sh
         - .gitlab/ci/release-local.yml
         - crates/duckdb-client/**/*
         - rust-toolchain.toml
-      interruptible: true
-      variables:
-        SCCACHE_GCS_RW_MODE: READ_ONLY
 
 .local-cli-build-linux:
   extends:
