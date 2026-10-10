@@ -210,7 +210,7 @@ impl Lowering {
                         return Err(invalid(
                             span,
                             &format!(
-                                "type({}) cannot be renamed; each edge type is listed under @edges in the response",
+                                "type({}) cannot be renamed; the edges table lists each edge's type",
                                 variable.value
                             ),
                         ));

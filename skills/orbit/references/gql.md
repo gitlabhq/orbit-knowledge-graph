@@ -90,8 +90,8 @@ LIMIT 10
 - `RETURN mr.iid, mr.title` selects properties.
 - `RETURN mr` selects the node's default columns; `properties(mr)` selects all.
 - The response always includes node identity and relationship metadata.
-- `RETURN type(r)` and `RETURN r` add no column. Each edge's type is already
-  listed under `@edges`. Aggregations cannot group by `type(r)` yet.
+- `RETURN type(r)` and `RETURN r` are accepted. The edges table lists each
+  edge's type. Aggregations cannot group by `type(r)` yet.
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
   become group keys. Alias a metric to sort by it:
   `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.

@@ -1,4 +1,4 @@
-description: RETURN r in a traversal is accepted; the relationship's edges are listed under @edges
+description: RETURN r in a traversal is accepted; the edges table lists the relationship's edges
 
 query:
   json: |
