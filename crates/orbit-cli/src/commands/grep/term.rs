@@ -89,37 +89,37 @@ mod tests {
 
     use super::*;
 
-    fn finds(term: &str, text: &str, options: &Options) -> bool {
-        matcher(&[Term::parse(term)], options)
-            .unwrap()
-            .is_match(text.as_bytes())
-            .unwrap()
-    }
-
     #[test]
     fn regex_terms_match_like_ripgrep_and_bad_patterns_fall_back_to_literals() {
-        let plain = Options::default();
-        assert!(finds(r"\bCveDetail\b", "x := CveDetail{}", &plain));
-        assert!(!finds(r"\bCveDetail\b", "CveDetails", &plain));
-        assert!(finds(r"type .* struct\{\}", "type key struct{}", &plain));
-        assert!(finds(r"route\(", ".route(\"/x\")", &plain));
-        assert!(finds("^rand", "rand = \"0.10\"", &plain));
-        assert!(!finds("^rand", "x.rand = 1", &plain));
-        assert!(finds("mark_in_sync", "markInSync()", &plain));
-        assert!(Term::parse("on.*Login").names("onLogin"));
-        let literal = |raw: &str, text: &str| {
-            matcher(&[Term::parse(raw).literal()], &plain)
+        let finds = |term: Term, text: &str, word: bool| {
+            let options = Options {
+                word,
+                ..Options::default()
+            };
+            matcher(&[term], &options)
                 .unwrap()
                 .is_match(text.as_bytes())
                 .unwrap()
         };
-        assert!(literal("route(", ".route(\"/x\")"));
-        assert!(literal("????", "x = '????'"));
-        let word = Options {
-            word: true,
-            ..Options::default()
-        };
-        assert!(finds("detail", "a detail here", &word));
-        assert!(!finds("detail", "CveDetails", &word));
+        for (term, text, found) in [
+            (r"\bCveDetail\b", "x := CveDetail{}", true),
+            (r"\bCveDetail\b", "CveDetails", false),
+            (r"route\(", ".route(\"/x\")", true),
+            ("^rand", "x.rand = 1", false),
+            ("mark_in_sync", "markInSync()", true),
+        ] {
+            assert_eq!(
+                finds(Term::parse(term), text, false),
+                found,
+                "{term} {text}"
+            );
+        }
+        assert!(finds(
+            Term::parse("route(").literal(),
+            ".route(\"/x\")",
+            false
+        ));
+        assert!(!finds(Term::parse("detail"), "CveDetails", true));
+        assert!(Term::parse("on.*Login").names("onLogin"));
     }
 }

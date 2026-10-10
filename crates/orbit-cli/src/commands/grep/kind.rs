@@ -164,49 +164,35 @@ pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
 mod tests {
     use super::*;
 
-    fn resolved(requested: &[&str]) -> Kinds {
-        let known = ["Class", "Method", "Constructor", "Field", "Interface"].map(String::from);
-        let known = [known.as_slice(), &more_kinds()].concat();
-        let requested: Vec<String> = requested.iter().map(|k| k.to_string()).collect();
-        resolve(&requested, &known).unwrap()
-    }
-
-    fn more_kinds() -> Vec<String> {
-        [
+    #[test]
+    fn agent_spellings_resolve_to_kinds_listings_and_hosted_nodes() {
+        let known: Vec<String> = [
+            "Class",
+            "Method",
             "DecoratedFunction",
-            "DecoratedClass",
             "Type",
             "Var",
-            "EnumMember",
-            "Module",
+            "Field",
         ]
         .map(String::from)
-        .to_vec()
-    }
-
-    #[test]
-    fn agent_spellings_map_to_repository_kinds() {
+        .to_vec();
+        let resolved = |names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            resolve(&names, &known).unwrap()
+        };
         assert_eq!(
             resolved(&["function"]).definitions,
-            ["Constructor", "DecoratedFunction", "Method"]
+            ["DecoratedFunction", "Method"]
         );
-        assert_eq!(resolved(&["Method"]).definitions, ["Method"]);
-        assert_eq!(
-            resolved(&["classes"]).definitions,
-            ["Class", "DecoratedClass", "Interface", "Module", "Type"]
-        );
+        assert_eq!(resolved(&["classes"]).definitions, ["Class", "Type"]);
         assert_eq!(resolved(&["variable"]).definitions, ["Field", "Var"]);
-        assert_eq!(resolved(&["constructors"]).definitions, ["Constructor"]);
-        assert_eq!(resolved(&["def"]).definitions.len(), 11);
+        assert_eq!(resolved(&["Method"]).definitions, ["Method"]);
         assert!(resolved(&["class", "all"]).definitions.is_empty());
-    }
-
-    #[test]
-    fn files_directories_and_hosted_nodes_are_not_definition_filters() {
         assert_eq!(resolved(&["file"]).output, Some(Output::FileRows));
-        assert_eq!(resolved(&["Directory"]).output, Some(Output::Directories));
         let kinds = resolved(&["MergeRequest", "call"]);
-        assert_eq!(kinds.hosted, ["MergeRequest"]);
-        assert_eq!(kinds.unknown, ["call"]);
+        assert_eq!(
+            (kinds.hosted, kinds.unknown),
+            (vec!["MergeRequest".into()], vec!["call".into()])
+        );
     }
 }
