@@ -183,27 +183,48 @@ tests:
       - { row: { file_path: "src/Home.tsx", fqn: "NativeOnly", type: "Function" } }
       - { row: { file_path: "src/Plain.jsx", fqn: "PlainJsx", type: "Function" } }
 
-  - name: React barrel imports resolve default named namespace and member targets
-
-    # Known gap: JSX components reached through a namespace default or star re-export chain are not resolved.
-
-    skip: true
+  - name: React barrel imports resolve to concrete definitions
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
+        AND i.import_type <> 'NamespaceImport'
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
       ORDER BY import_type, name, target
     assert:
-      - { row_count: 9 }
+      - { row_count: 7 }
       - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "Card" } }
       - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "Button" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "src/components/index.ts::Card" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "src/components/index.ts::CardFooter" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "Card" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "CardFooter" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "src/components/index.ts::PrimaryButton" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "Button" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
-      - { row: { import_type: "NamespaceImport", path: "./components/card", name: null, alias: "CardModule", target: "src/components/card.tsx" } }
-      - { row: { import_type: "NamespaceImport", path: "./components", name: null, alias: "Reexported", target: "src/components/index.ts" } }
+  - name: Namespace imports resolve only the definitions accessed through their binding
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Home.tsx' AND i.import_type = 'NamespaceImport'
+      RETURN i.identifier_alias AS alias, d.name AS name, d.file_path AS file
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: Reexported, name: IconButton, file: 'src/components/button.tsx' } }
+      - { row: { alias: CardModule, name: Card, file: 'src/components/card.tsx' } }
+  - name: Namespace default access calls exactly the original component
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'NamespaceDefaultHost'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Card, file: 'src/components/card.tsx' } }
+  - name: React namespace imports retain their source and alias
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/Home.tsx' AND i.import_type = 'NamespaceImport'
+      RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
+    assert:
+      - { row_count: 2 }
+      - { row: { path: './components/card', name: '*', alias: CardModule } }
+      - { row: { path: './components', name: '*', alias: Reexported } }
 
   - name: External React and package imports stay unresolved
     query: |

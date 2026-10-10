@@ -80,12 +80,23 @@ fixtures:
       }
 
 tests:
-  - name: Generic pipeline indexes module definitions for JS-family extensions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Each JS-family source file owns its concrete definition
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN ['jsx/component.jsx', 'tsx/component.tsx', 'esm/component.mjs', 'cjs/component.cjs', 'mts/component.mts', 'cts/component.cts']
+      RETURN file.path AS file, d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 6 }
+      - { row: { file: 'jsx/component.jsx', name: renderBadge, type: Function } }
+      - { row: { file: 'tsx/component.tsx', name: renderPanel, type: Function } }
+      - { row: { file: 'esm/component.mjs', name: normalizeMjs, type: Function } }
+      - { row: { file: 'cjs/component.cjs', name: runCjs, type: Function } }
+      - { row: { file: 'mts/component.mts', name: formatMts, type: Function } }
+      - { row: { file: 'cts/component.cts', name: formatCts, type: Function } }
+  - name: Generic pipeline catalogs files for JS-family extensions
+    query: |
+      MATCH (file:File)
+      WHERE file.path IN [
         'jsx/component.jsx',
         'tsx/component.tsx',
         'esm/component.mjs',
@@ -93,16 +104,16 @@ tests:
         'mts/component.mts',
         'cts/component.cts'
       ]
-      RETURN d.fqn AS fqn
-      ORDER BY fqn
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 6 }
-      - { row: { fqn: "cjs/component.cjs" } }
-      - { row: { fqn: "cts/component.cts" } }
-      - { row: { fqn: "esm/component.mjs" } }
-      - { row: { fqn: "jsx/component.jsx" } }
-      - { row: { fqn: "mts/component.mts" } }
-      - { row: { fqn: "tsx/component.tsx" } }
+      - { row: { path: "cjs/component.cjs" } }
+      - { row: { path: "cts/component.cts" } }
+      - { row: { path: "esm/component.mjs" } }
+      - { row: { path: "jsx/component.jsx" } }
+      - { row: { path: "mts/component.mts" } }
+      - { row: { path: "tsx/component.tsx" } }
 
   - name: Generic pipeline resolves imports across JS-family extensions
     query: |

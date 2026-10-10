@@ -79,6 +79,8 @@ stages:
 
   - name: retag-refs
     rules:
+      - match: '(object $$$V)'
+        replace: '(__obj $$$V)'
       - match: '(member_expression object: $O:call_expression property: $M)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O:__ivar property: $M)'
@@ -174,12 +176,14 @@ stages:
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) $$$SPECS->__name))'
 
       # export * from './source' — star re-export (no export_clause)
+      - match: '(export_statement (namespace_export $N:identifier) source: (string $S:string_fragment))'
+        replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*" (__alias @$N))))'
       - match: '(export_statement source: (string $S:string_fragment))'
         replace: '(__module_export (__import (__source @$S) (__source_path @$S) (__name "*")))'
 
       # export { A, B } — local re-export (no source)
       - match: '(export_statement (export_clause $$$SPECS:export_specifier))'
-        replace: '(export_statement $$$SPECS)'
+        replace: '(__module_export $$$SPECS->__name)'
 
 
 
@@ -337,13 +341,13 @@ stages:
           resolved_source: '@$ROOT|child_sym("__source_path")'
       - match: '(__import (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("/$", "")|regex_replace("^/", "")'
       - match: '(__import_type)'
         tag:
           resolved_source: '@$ROOT|child_sym("__source_path")'
       - match: '(__import_type (__source_path "^."))'
         tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
   stages:
@@ -362,14 +366,20 @@ resolve:
     - name: aliases
       rules:
         - match: '(__alias $V:__str)'
-          replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("^/", "")))'
+          replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("^/", "")))'
         - match: '(path_alias (__arr $V:__str $$$REST))'
           replace: '(__alias @$ROOT (__str @$V|strip_prefix("./")))'
 
     - name: packages
       rules:
+        - match: '(__dir (__file "package.json" (__obj (__field "main" $M:__str))))'
+          append: ['(__source_path @$M)']
         - match: '(__dir (__file "package.json"))'
           append: ['(__package_root)']
+    - name: package-entrypoints
+      rules:
+        - match: '(__source_path)'
+          replace: '(__source_path @$ROOT|tree_path("/")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1"))'
     - name: index_dirs
       rules:
         - match: '(__dir (__file "index.ts"))'

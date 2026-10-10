@@ -328,6 +328,11 @@ impl<'a> Cursor<'a> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
     }
 
+    pub fn bare_rhs(self) -> Option<Self> {
+        self.child(C::Rhs)
+            .filter(|rhs| rhs.children().next().is_none())
+    }
+
     pub fn initializer(self) -> Option<Self> {
         self.child(C::Binding)
             .filter(|binding| binding.sym_opt().is_none())

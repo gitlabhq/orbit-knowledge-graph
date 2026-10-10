@@ -308,6 +308,9 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        if c.has(C::ImplBlock) {
+            self.link_reference(c.child(C::DefName).unwrap());
+        }
         self.register_def(c);
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
@@ -400,6 +403,12 @@ impl<'t> Fold<'t> {
                 .child(C::Dispatch)
                 .is_some_and(|dispatch| !dispatch.has(C::Object))
             {
+                for reference in member
+                    .children()
+                    .filter(|node| node.is(C::Object) || node.is(C::Dispatch))
+                {
+                    self.link_reference(reference);
+                }
                 return;
             }
             if let Some(receiver) = member
@@ -485,6 +494,19 @@ impl<'t> Fold<'t> {
         }
     }
 
+    fn link_reference(&mut self, reference: Cursor<'t>) {
+        self.handle_inline_imports(reference);
+        if let [Value::LocalDef(target) | Value::ImportRef(target)] =
+            self.lookup_chain(reference).as_slice()
+            && *target != reference.parent().map_or(reference.index(), Cursor::index)
+        {
+            self.edges.push(Edge {
+                call_resolution: crate::tree::CallResolution::Reference,
+                ..Edge::local(reference.index(), *target, EdgeKind::Imports)
+            });
+        }
+    }
+
     fn handle_binding(&mut self, c: Cursor<'t>) -> bool {
         let field = self.member_binding(c).map(|(root, field)| {
             let key = self.key(BindingKey::Field(root, field));
@@ -536,11 +558,16 @@ impl<'t> Fold<'t> {
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
-            if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
+            if let Some(rhs) = c.bare_rhs() {
                 for value in self.lookup(rhs.sym()) {
                     match value {
-                        Value::ImportRef(_) => {
+                        Value::ImportRef(node) => {
                             val = Value::Call(c.index());
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                call_resolution: crate::tree::CallResolution::Reference,
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Imports)
+                            });
                             self.edges.push(Edge {
                                 site: Some(c.index()),
                                 ..Edge::local(self.enclosing(), c.index(), EdgeKind::TypeFlow)
