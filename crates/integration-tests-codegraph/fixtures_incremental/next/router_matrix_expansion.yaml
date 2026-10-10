@@ -186,12 +186,23 @@ fixtures:
       }
 
 tests:
-  - name: Next app router special path shapes are preserved as module definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: Special route files own their page components
     query: |
-      MATCH (d:Definition)
-      WHERE d.fqn IN [
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path IN ['src/app/loading.tsx', 'src/app/error.tsx', 'src/app/not-found.tsx', 'src/app/template.tsx', 'src/app/default.tsx', 'src/app/@modal/(.)login/page.tsx']
+      RETURN file.path AS file, d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 6 }
+      - { row: { file: 'src/app/loading.tsx', name: Loading, type: Function } }
+      - { row: { file: 'src/app/error.tsx', name: ErrorBoundary, type: Function } }
+      - { row: { file: 'src/app/not-found.tsx', name: NotFound, type: Function } }
+      - { row: { file: 'src/app/template.tsx', name: Template, type: Function } }
+      - { row: { file: 'src/app/default.tsx', name: SlotDefault, type: Function } }
+      - { row: { file: 'src/app/@modal/(.)login/page.tsx', name: LoginModal, type: Function } }
+  - name: Next app router special path shapes are preserved in the file catalog
+    query: |
+      MATCH (file:File)
+      WHERE file.path IN [
         'src/app/(marketing)/blog/[...slug]/page.tsx',
         'src/app/shop/[[...filters]]/page.tsx',
         'src/app/@modal/(.)login/page.tsx',
@@ -202,23 +213,23 @@ tests:
         'src/app/default.tsx',
         'src/app/api/items/[id]/route.ts'
       ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
-      ORDER BY file_path
+      RETURN file.path AS path
+      ORDER BY path
     assert:
       - { row_count: 9 }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", fqn: "src/app/(marketing)/blog/[...slug]/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", fqn: "src/app/shop/[[...filters]]/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", fqn: "src/app/@modal/(.)login/page.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/loading.tsx", fqn: "src/app/loading.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/error.tsx", fqn: "src/app/error.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/not-found.tsx", fqn: "src/app/not-found.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/template.tsx", fqn: "src/app/template.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/default.tsx", fqn: "src/app/default.tsx", type: "Module" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", fqn: "src/app/api/items/[id]/route.ts", type: "Module" } }
+      - { row: { path: "src/app/(marketing)/blog/[...slug]/page.tsx" } }
+      - { row: { path: "src/app/shop/[[...filters]]/page.tsx" } }
+      - { row: { path: "src/app/@modal/(.)login/page.tsx" } }
+      - { row: { path: "src/app/loading.tsx" } }
+      - { row: { path: "src/app/error.tsx" } }
+      - { row: { path: "src/app/not-found.tsx" } }
+      - { row: { path: "src/app/template.tsx" } }
+      - { row: { path: "src/app/default.tsx" } }
+      - { row: { path: "src/app/api/items/[id]/route.ts" } }
 
   - name: Route convention exports are indexed as their real definitions
     query: |
-      MATCH (d:Definition)
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
       WHERE d.fqn IN [
         'MarketingCatchAll',
         'ShopOptionalCatchAll',
@@ -244,10 +255,6 @@ tests:
       - { row: { fqn: "revalidate", type: "Variable" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
-
-    # Known gap: Next.js route conventions are not fully resolved.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
@@ -261,15 +268,31 @@ tests:
       ORDER BY file_path, path, name
     assert:
       - { row_count: 9 }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "src/components/index.ts::Banner" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "src/components/index.ts::Nav" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "Banner" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "Nav" } }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "Dashboard" } }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "getMarketing" } }
-      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: null, import_type: "NamespaceImport", target: "src/components/index.ts" } }
       - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "Banner" } }
       - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "getItem" } }
       - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "updateItem" } }
       - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
+      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: "*", import_type: "NamespaceImport", target: "Nav" } }
+  - name: Next namespace imports retain their binding alongside component calls
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/app/shop/[[...filters]]/page.tsx'
+      RETURN i.import_path AS path, i.identifier_name AS name, i.import_type AS type, i.identifier_alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { path: components, name: '*', type: NamespaceImport, alias: Components } }
+  - name: Optional catch-all namespace access calls exactly the original component
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'ShopOptionalCatchAll'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Nav, file: 'src/components/Nav.tsx' } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |

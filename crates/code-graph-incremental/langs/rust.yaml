@@ -103,7 +103,7 @@ stages:
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
         replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T) (__dispatch @$Q))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
       - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
@@ -351,6 +351,8 @@ stages:
 
   - name: scoped-supertypes
     rules:
+      - match: '(__object $T:scoped_type_identifier)'
+        replace: '(__object (__member @$T|field("name") (__object @$T|field("path"))))'
       # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
       # a path in supertype position is a scoped import of its last segment
       - match: '(__supertype "/::/")'
