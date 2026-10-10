@@ -1,11 +1,11 @@
-mod mapping;
+pub(crate) mod mapping;
 pub mod storage;
 
 use std::collections::HashSet;
 
 use super::PropertyBackendFacts;
 use crate::{
-    DataModelError, DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
+    DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
     QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
@@ -19,7 +19,10 @@ pub struct DuckDbEntityLayout {
 
 #[derive(Debug)]
 pub struct DuckDbCatalog {
-    storage: storage::StorageCatalog,
+    edge_table: String,
+    edge_sort_key: Vec<String>,
+    edge_column_types: std::collections::BTreeMap<String, ontology::DataType>,
+    edge_columns: HashSet<String>,
     entities: Vec<Option<DuckDbEntityLayout>>,
     property_facts: Vec<PropertyBackendFacts>,
     relationships: Vec<String>,
@@ -27,10 +30,6 @@ pub struct DuckDbCatalog {
 }
 
 impl QueryBackendCatalog for DuckDbCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        mapping::derive(ontology, graph)
-    }
-
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
@@ -108,7 +107,7 @@ impl QueryBackendCatalog for DuckDbCatalog {
 
     fn table_sort_key(&self, table: &str) -> Option<&[String]> {
         if table == self.edge_table() {
-            return Some(&self.storage.edge.sort_key);
+            return Some(&self.edge_sort_key);
         }
         self.entities
             .iter()
@@ -140,14 +139,14 @@ impl DuckDbCatalog {
     }
 
     pub fn edge_table(&self) -> &str {
-        &self.storage.edge.name
+        &self.edge_table
     }
 
     pub fn edge_columns(&self) -> &HashSet<String> {
-        &self.storage.edge.columns
+        &self.edge_columns
     }
 
     pub fn edge_column_type(&self, column: &str) -> Option<ontology::DataType> {
-        self.storage.edge.column_types.get(column).copied()
+        self.edge_column_types.get(column).copied()
     }
 }

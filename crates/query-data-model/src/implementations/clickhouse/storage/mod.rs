@@ -4,10 +4,22 @@ mod derive;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
-pub struct Column {
-    pub name: String,
-    pub storage_type: String,
-    pub default: Option<String>,
+pub struct ClickHouse;
+
+impl crate::RelationalBackend for ClickHouse {
+    type StorageType = String;
+    type TableOptions = TableOptions;
+    type ColumnOptions = ColumnOptions;
+    type Metadata = Metadata;
+    type Mapping = super::ClickHouseCatalog;
+}
+
+pub type StorageCatalog = crate::storage::relational::Schema<ClickHouse>;
+pub type Table = crate::storage::relational::Table<ClickHouse>;
+pub type Column = crate::storage::relational::Column<ClickHouse>;
+
+#[derive(Debug, Clone, Default)]
+pub struct ColumnOptions {
     pub codecs: Vec<String>,
 }
 
@@ -17,14 +29,16 @@ pub fn system_columns(version_type: Option<&str>) -> Vec<Column> {
             name: ontology::VERSION_COLUMN.into(),
             storage_type: "UInt64".into(),
             default: None,
-            codecs: vec![],
+            options: ColumnOptions::default(),
         }
     } else {
         Column {
             name: ontology::VERSION_COLUMN.into(),
             storage_type: "DateTime64(6, 'UTC')".into(),
             default: Some("now64(6)".into()),
-            codecs: vec!["Delta(8)".into(), "ZSTD(1)".into()],
+            options: ColumnOptions {
+                codecs: vec!["Delta(8)".into(), "ZSTD(1)".into()],
+            },
         }
     };
     vec![
@@ -33,7 +47,7 @@ pub fn system_columns(version_type: Option<&str>) -> Vec<Column> {
             name: ontology::DELETED_COLUMN.into(),
             storage_type: "Bool".into(),
             default: Some("false".into()),
-            codecs: vec![],
+            options: ColumnOptions::default(),
         },
     ]
 }
@@ -65,15 +79,10 @@ pub enum Projection {
 }
 
 #[derive(Debug, Clone)]
-pub struct Table {
-    pub name: String,
-    pub columns: Vec<Column>,
-    pub column_types: BTreeMap<String, ontology::DataType>,
+pub struct TableOptions {
     pub indexes: Vec<Index>,
     pub projections: Vec<Projection>,
     pub engine: Engine,
-    pub sort_key: Vec<String>,
-    pub primary_key: Option<Vec<String>>,
     pub settings: Vec<(String, String)>,
     pub ttl: Option<String>,
 }
@@ -167,13 +176,12 @@ pub struct EdgeRoute {
 }
 
 #[derive(Debug)]
-pub struct StorageCatalog {
+pub struct Metadata {
     auxiliary_tables: Vec<AuxiliaryTable>,
     dictionaries: Vec<Dictionary>,
     views: Vec<MaterializedView>,
     refreshable_views: Vec<RefreshableView>,
     graph_tables: Vec<GraphTable>,
-    tables: Vec<Table>,
     joins: Vec<MaterializedJoin>,
     writers: BTreeMap<String, BTreeSet<String>>,
     edge_routes: Vec<EdgeRoute>,
@@ -182,60 +190,54 @@ pub struct StorageCatalog {
 
 impl StorageCatalog {
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
-        &self.auxiliary_tables
+        &self.metadata.auxiliary_tables
     }
 
     pub fn dictionaries(&self) -> &[Dictionary] {
-        &self.dictionaries
+        &self.metadata.dictionaries
     }
 
     pub fn views(&self) -> &[MaterializedView] {
-        &self.views
+        &self.metadata.views
     }
 
     pub fn refreshable_views(&self) -> &[RefreshableView] {
-        &self.refreshable_views
+        &self.metadata.refreshable_views
     }
 
     pub fn graph_tables(&self) -> &[GraphTable] {
-        &self.graph_tables
+        &self.metadata.graph_tables
     }
 
     pub fn versioned_tables(&self) -> impl Iterator<Item = &Table> {
-        self.auxiliary_tables
+        self.metadata
+            .auxiliary_tables
             .iter()
             .filter(|table| table.versioned)
             .map(|table| &table.table)
-            .chain(&self.tables)
+            .chain(self.tables())
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
-        self.auxiliary_tables
+        self.metadata
+            .auxiliary_tables
             .iter()
             .map(|table| table.table.name.as_str())
-            .chain(self.tables.iter().map(|table| table.name.as_str()))
+            .chain(self.tables().iter().map(|table| table.name.as_str()))
     }
-    pub fn tables(&self) -> &[Table] {
-        &self.tables
-    }
-
-    pub fn table(&self, name: &str) -> Option<&Table> {
-        self.tables.iter().find(|table| table.name == name)
-    }
-
     pub fn joins(&self) -> &[MaterializedJoin] {
-        &self.joins
+        &self.metadata.joins
     }
 
     pub fn writers(&self, table: &str) -> Option<&BTreeSet<String>> {
-        self.writers.get(table)
+        self.metadata.writers.get(table)
     }
 
     pub fn edge_routes(&self) -> &[EdgeRoute] {
-        &self.edge_routes
+        &self.metadata.edge_routes
     }
 
     pub fn relationship_tables(&self, kind: &str) -> Option<&BTreeSet<String>> {
-        self.relationship_tables.get(kind)
+        self.metadata.relationship_tables.get(kind)
     }
 }

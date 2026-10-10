@@ -28,6 +28,15 @@ primary keys, and secondary indexes.
 ### Storage catalogs
 
 Each backend owns its storage catalog under `query-data-model/src/implementations/`.
+Both use `Storage<Relational<Backend>>` with shared table, column, and key structures.
+`StorageModel` selects schema and mapping types, so `Storage<T>` does not require tables or columns.
+`RelationalBackend` supplies physical types, table options, column options, and backend metadata.
+ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
+DuckDB uses the same relational structures with its local type facts.
+`DataModel<T, A>` owns the graph, storage, and an independent policy value. It can be built from parts without an ontology.
+The ontology adapter derives a storage schema once, then builds its query mapping from that schema.
+The existing compiler uses `OrbitQueryModel`, which combines relational mapping with GitLab policy and ontology access.
+Those requirements belong to the Orbit adapter; document storage can use the core model without implementing them.
 The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
 It also resolves the source bindings for declared joined tables and records which entities write each table.
 Query mappings, DDL rendering, migration scope, and cleanup consume these facts.

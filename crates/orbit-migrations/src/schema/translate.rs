@@ -105,6 +105,7 @@ fn table_from_catalog(table: &storage::Table) -> Table {
         name: table.name.clone(),
         columns: table.columns.iter().map(column_from_catalog).collect(),
         indexes: table
+            .options
             .indexes
             .iter()
             .map(|index| Index {
@@ -116,6 +117,7 @@ fn table_from_catalog(table: &storage::Table) -> Table {
             })
             .collect(),
         projections: table
+            .options
             .projections
             .iter()
             .map(|projection| {
@@ -141,12 +143,12 @@ fn table_from_catalog(table: &storage::Table) -> Table {
                 }
             })
             .collect(),
-        engine: engine_from_catalog(&table.engine),
+        engine: engine_from_catalog(&table.options.engine),
         partition_by: vec![],
         order_by: table.sort_key.clone(),
         primary_key: table.primary_key.clone(),
-        settings: table.settings.clone(),
-        ttl: table.ttl.clone(),
+        settings: table.options.settings.clone(),
+        ttl: table.options.ttl.clone(),
     }
 }
 
@@ -155,7 +157,7 @@ fn column_from_catalog(column: &storage::Column) -> Column {
         name: column.name.clone(),
         column_type: column.storage_type.clone(),
         default: column.default.clone(),
-        codec: (!column.codecs.is_empty()).then(|| column.codecs.clone()),
+        codec: (!column.options.codecs.is_empty()).then(|| column.options.codecs.clone()),
     }
 }
 

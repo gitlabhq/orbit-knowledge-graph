@@ -1,12 +1,12 @@
-mod mapping;
+pub(crate) mod mapping;
 pub mod storage;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::PropertyBackendFacts;
 use crate::{
-    DataModelError, DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn,
-    PropertyId, PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
+    PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -118,10 +118,6 @@ impl ClickHouseCatalog {
 }
 
 impl QueryBackendCatalog for ClickHouseCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        mapping::derive(ontology, graph)
-    }
-
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }

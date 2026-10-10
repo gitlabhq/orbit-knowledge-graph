@@ -9,6 +9,38 @@ mod tests {
     use ontology::FieldSource;
 
     #[test]
+    fn constructs_a_document_model_without_relational_or_gitlab_contracts() {
+        use crate::{DataModel, GraphCatalog, Storage, StorageModel};
+        use std::collections::HashMap;
+
+        struct Documents;
+        impl StorageModel for Documents {
+            type Schema = Vec<String>;
+            type Mapping = HashMap<crate::PropertyId, Vec<String>>;
+        }
+
+        let mut graph = GraphCatalog::new();
+        let entity = graph.add_entity("Record".into()).unwrap();
+        let key = graph
+            .add_property(entity, "key".into(), ontology::DataType::Uuid)
+            .unwrap();
+        let related = graph
+            .add_relationship("RELATED".into(), &[(entity, entity)])
+            .unwrap();
+        let storage = Storage::<Documents>::new(
+            vec!["records".into()],
+            HashMap::from([(key, vec!["metadata".into(), "key".into()])]),
+        );
+        let model = DataModel::new(graph, storage, ());
+
+        assert_eq!(model.storage().schema, ["records"]);
+        assert_eq!(model.backend()[&key], ["metadata", "key"]);
+        assert!(model.graph().property_id(entity, "id").is_none());
+        assert!(model.graph().variant_id(related, entity, entity).is_some());
+        assert!(model.graph().property_id(entity, "key").is_some());
+    }
+
+    #[test]
     fn derives_remote_and_local_models_from_the_same_ontology() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();

@@ -8,11 +8,11 @@ use crate::{
     PropertyRealization, TraversalPathLookup,
 };
 
-pub(super) fn derive(
+pub(crate) fn derive(
     ontology: &ontology::Ontology,
     graph: &GraphCatalog,
+    storage: &StorageCatalog,
 ) -> Result<ClickHouseCatalog, DataModelError> {
-    let storage = StorageCatalog::derive(ontology)?;
     let mut entities = std::iter::repeat_with(|| None)
         .take(graph.entities().count())
         .collect::<Vec<_>>();

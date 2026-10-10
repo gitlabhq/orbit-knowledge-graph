@@ -22,17 +22,19 @@ impl StorageCatalog {
                     })
                     .chain(system_types())
                     .collect(),
-                indexes: node.storage.indexes.iter().flat_map(index).collect(),
-                projections: node.storage.projections.iter().map(projection).collect(),
-                engine: Engine::replacing(node.storage.version_only_engine),
-                ttl: None,
                 sort_key: node.sort_key.clone(),
                 primary_key: node.storage.primary_key.clone(),
-                settings: settings(
-                    Some(1024),
-                    !node.storage.projections.is_empty(),
-                    &node.storage.settings,
-                ),
+                options: TableOptions {
+                    indexes: node.storage.indexes.iter().flat_map(index).collect(),
+                    projections: node.storage.projections.iter().map(projection).collect(),
+                    engine: Engine::replacing(node.storage.version_only_engine),
+                    ttl: None,
+                    settings: settings(
+                        Some(1024),
+                        !node.storage.projections.is_empty(),
+                        &node.storage.settings,
+                    ),
+                },
             });
         }
         for name in ontology.edge_tables() {
@@ -53,23 +55,25 @@ impl StorageCatalog {
                     .map(|column| (column.name.trim_matches('`').to_string(), column.data_type))
                     .chain(system_types())
                     .collect(),
-                indexes: edge
-                    .storage
-                    .indexes
-                    .iter()
-                    .chain(&edge.storage.denormalized_indexes)
-                    .flat_map(index)
-                    .collect(),
-                projections: edge.storage.projections.iter().map(projection).collect(),
-                engine: Engine::replacing(false),
-                ttl: None,
                 sort_key: edge.sort_key.clone(),
                 primary_key: edge.storage.primary_key.clone(),
-                settings: settings(
-                    Some(edge.storage.index_granularity.unwrap_or(1024)),
-                    !edge.storage.projections.is_empty(),
-                    &edge.storage.settings,
-                ),
+                options: TableOptions {
+                    indexes: edge
+                        .storage
+                        .indexes
+                        .iter()
+                        .chain(&edge.storage.denormalized_indexes)
+                        .flat_map(index)
+                        .collect(),
+                    projections: edge.storage.projections.iter().map(projection).collect(),
+                    engine: Engine::replacing(false),
+                    ttl: None,
+                    settings: settings(
+                        Some(edge.storage.index_granularity.unwrap_or(1024)),
+                        !edge.storage.projections.is_empty(),
+                        &edge.storage.settings,
+                    ),
+                },
             });
         }
         let mut joins = Vec::new();
@@ -99,7 +103,7 @@ impl StorageCatalog {
                         .get(name)
                         .map(|column| (column.clone(), *data_type))
                 }));
-                indexes.extend(layout.indexes.iter().filter_map(|index| {
+                indexes.extend(layout.options.indexes.iter().filter_map(|index| {
                     bindings.get(&index.column).map(|column| Index {
                         name: match index.name.strip_prefix("idx_") {
                             Some(name) => format!("idx_t{occurrence}_{name}"),
@@ -111,6 +115,7 @@ impl StorageCatalog {
                 }));
                 explicit_settings.extend(
                     layout
+                        .options
                         .settings
                         .iter()
                         .filter(|(key, _)| {
@@ -148,13 +153,15 @@ impl StorageCatalog {
                 name: declaration.table.clone(),
                 columns: join_columns,
                 column_types,
-                indexes,
-                projections: vec![],
-                engine: Engine::replacing(false),
-                ttl: None,
                 sort_key: declaration.sort_key(),
                 primary_key: None,
-                settings: settings(Some(1024), false, &explicit_settings),
+                options: TableOptions {
+                    indexes,
+                    projections: vec![],
+                    engine: Engine::replacing(false),
+                    ttl: None,
+                    settings: settings(Some(1024), false, &explicit_settings),
+                },
             });
             joins.push(MaterializedJoin {
                 table: declaration.table.clone(),
@@ -206,54 +213,56 @@ impl StorageCatalog {
             }
         }
         Ok(Self {
-            auxiliary_tables: ontology
-                .auxiliary_tables()
-                .iter()
-                .map(auxiliary::table)
-                .collect(),
-            dictionaries: ontology
-                .auxiliary_dictionaries()
-                .iter()
-                .map(auxiliary::dictionary)
-                .collect(),
-            views: ontology
-                .materialized_views()
-                .iter()
-                .map(auxiliary::view)
-                .collect(),
-            refreshable_views: ontology
-                .refreshable_materialized_views()
-                .iter()
-                .map(|view| RefreshableView {
-                    name: view.name.clone(),
-                    versioned: view.versioned,
-                    select_query: view.select_query.clone(),
-                    append_to: view.append_to.clone(),
-                    refresh: view.refresh.clone(),
-                })
-                .collect(),
-            graph_tables: ontology
-                .nodes()
-                .map(|node| GraphTable {
-                    name: node.destination_table.clone(),
-                    global: node.global,
-                    has_traversal_path: node.has_traversal_path,
-                })
-                .chain(ontology.edge_tables().into_iter().map(|name| {
-                    GraphTable {
-                        name: name.into(),
-                        global: false,
-                        has_traversal_path: ontology
-                            .edge_table_config(name)
-                            .is_some_and(ontology::EdgeTableConfig::has_traversal_path),
-                    }
-                }))
-                .collect(),
             tables,
-            joins,
-            writers,
-            edge_routes,
-            relationship_tables,
+            metadata: Metadata {
+                auxiliary_tables: ontology
+                    .auxiliary_tables()
+                    .iter()
+                    .map(auxiliary::table)
+                    .collect(),
+                dictionaries: ontology
+                    .auxiliary_dictionaries()
+                    .iter()
+                    .map(auxiliary::dictionary)
+                    .collect(),
+                views: ontology
+                    .materialized_views()
+                    .iter()
+                    .map(auxiliary::view)
+                    .collect(),
+                refreshable_views: ontology
+                    .refreshable_materialized_views()
+                    .iter()
+                    .map(|view| RefreshableView {
+                        name: view.name.clone(),
+                        versioned: view.versioned,
+                        select_query: view.select_query.clone(),
+                        append_to: view.append_to.clone(),
+                        refresh: view.refresh.clone(),
+                    })
+                    .collect(),
+                graph_tables: ontology
+                    .nodes()
+                    .map(|node| GraphTable {
+                        name: node.destination_table.clone(),
+                        global: node.global,
+                        has_traversal_path: node.has_traversal_path,
+                    })
+                    .chain(ontology.edge_tables().into_iter().map(|name| {
+                        GraphTable {
+                            name: name.into(),
+                            global: false,
+                            has_traversal_path: ontology
+                                .edge_table_config(name)
+                                .is_some_and(ontology::EdgeTableConfig::has_traversal_path),
+                        }
+                    }))
+                    .collect(),
+                joins,
+                writers,
+                edge_routes,
+                relationship_tables,
+            },
         })
     }
 }
@@ -277,7 +286,9 @@ fn column(source: &StorageColumn) -> Column {
         name: source.name.clone(),
         storage_type: source.ch_type.clone(),
         default: source.default.clone(),
-        codecs: source.codec.clone().unwrap_or_default(),
+        options: ColumnOptions {
+            codecs: source.codec.clone().unwrap_or_default(),
+        },
     }
 }
 

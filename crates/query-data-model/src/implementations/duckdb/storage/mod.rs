@@ -1,30 +1,43 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct Table {
-    pub name: String,
-    pub columns: HashSet<String>,
-    pub column_types: HashMap<String, ontology::DataType>,
-    pub sort_key: Vec<String>,
+#[derive(Debug, Clone)]
+pub struct DuckDb;
+
+impl crate::RelationalBackend for DuckDb {
+    type StorageType = ontology::DataType;
+    type TableOptions = ();
+    type ColumnOptions = ();
+    type Metadata = Metadata;
+    type Mapping = super::DuckDbCatalog;
 }
 
+pub type StorageCatalog = crate::storage::relational::Schema<DuckDb>;
+pub type Table = crate::storage::relational::Table<DuckDb>;
+pub type Column = crate::storage::relational::Column<DuckDb>;
+
 #[derive(Debug)]
-pub struct StorageCatalog {
-    pub edge: Table,
-    pub nodes: HashMap<String, Table>,
+pub struct Metadata {
+    pub edge_table: String,
+    pub entity_tables: HashMap<String, String>,
 }
 
 impl StorageCatalog {
     pub fn derive(ontology: &ontology::Ontology) -> Self {
-        let name = ontology
+        let edge_table = ontology
             .local_edge_table_name()
             .unwrap_or_else(|| ontology.edge_table())
             .to_string();
         let edge = Table {
+            name: edge_table.clone(),
             columns: ontology
                 .local_edge_columns()
                 .iter()
-                .map(|column| column.name.clone())
+                .map(|column| Column {
+                    name: column.name.clone(),
+                    storage_type: column.data_type,
+                    default: None,
+                    options: (),
+                })
                 .collect(),
             column_types: ontology
                 .local_edge_columns()
@@ -32,38 +45,63 @@ impl StorageCatalog {
                 .map(|column| (column.name.clone(), column.data_type))
                 .collect(),
             sort_key: ontology
-                .sort_key_for_table(&name)
+                .sort_key_for_table(&edge_table)
                 .unwrap_or_else(|| ontology.edge_sort_key())
                 .to_vec(),
-            name,
+            primary_key: None,
+            options: (),
         };
+        let mut tables = vec![edge];
+        let mut entity_tables = HashMap::new();
         let local_entities = ontology.local_entity_names();
         let names: Vec<_> = if local_entities.is_empty() {
             ontology.node_names().collect()
         } else {
             local_entities
         };
-        let nodes = names
-            .into_iter()
-            .filter_map(|entity| {
-                let node = ontology.get_node(entity)?;
-                let fields = ontology
-                    .local_entity_fields(entity)
-                    .unwrap_or_else(|| node.fields.iter().collect());
-                Some((
-                    entity.to_string(),
-                    Table {
-                        name: node.destination_table.clone(),
-                        columns: fields.iter().map(|field| field.name.clone()).collect(),
-                        column_types: fields
-                            .iter()
-                            .map(|field| (field.name.clone(), field.data_type))
-                            .collect(),
-                        sort_key: node.sort_key.clone(),
-                    },
-                ))
-            })
-            .collect();
-        Self { edge, nodes }
+        for entity in names {
+            let Some(node) = ontology.get_node(entity) else {
+                continue;
+            };
+            let fields = ontology
+                .local_entity_fields(entity)
+                .unwrap_or_else(|| node.fields.iter().collect());
+            entity_tables.insert(entity.to_string(), node.destination_table.clone());
+            tables.push(Table {
+                name: node.destination_table.clone(),
+                columns: fields
+                    .iter()
+                    .map(|field| Column {
+                        name: field.name.clone(),
+                        storage_type: field.data_type,
+                        default: None,
+                        options: (),
+                    })
+                    .collect(),
+                column_types: fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.data_type))
+                    .collect(),
+                sort_key: node.sort_key.clone(),
+                primary_key: None,
+                options: (),
+            });
+        }
+        Self {
+            tables,
+            metadata: Metadata {
+                edge_table,
+                entity_tables,
+            },
+        }
+    }
+
+    pub fn edge(&self) -> &Table {
+        self.table(&self.metadata.edge_table)
+            .expect("derived local edge table")
+    }
+
+    pub fn entity_table(&self, entity: &str) -> Option<&Table> {
+        self.table(self.metadata.entity_tables.get(entity)?)
     }
 }

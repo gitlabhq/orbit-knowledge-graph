@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    AuxiliaryTable, Column, Dictionary, Engine, MaterializedView, Table, derive, system_columns,
+    AuxiliaryTable, Column, ColumnOptions, Dictionary, Engine, MaterializedView, Table,
+    TableOptions, derive, system_columns,
 };
 
 pub(super) fn table(source: &ontology::AuxiliaryTable) -> AuxiliaryTable {
@@ -29,20 +30,22 @@ pub(super) fn table(source: &ontology::AuxiliaryTable) -> AuxiliaryTable {
             name: source.name.clone(),
             columns,
             column_types,
-            indexes: vec![],
-            projections: source.projections.iter().map(derive::projection).collect(),
-            engine: source
-                .engine
-                .as_ref()
-                .map(|name| Engine {
-                    name: name.clone(),
-                    arguments: vec![],
-                })
-                .unwrap_or_else(|| Engine::replacing(source.version_only_engine)),
             sort_key: source.order_by.clone(),
             primary_key: None,
-            settings: derive::settings(None, !source.projections.is_empty(), &BTreeMap::new()),
-            ttl: source.ttl.clone(),
+            options: TableOptions {
+                indexes: vec![],
+                projections: source.projections.iter().map(derive::projection).collect(),
+                engine: source
+                    .engine
+                    .as_ref()
+                    .map(|name| Engine {
+                        name: name.clone(),
+                        arguments: vec![],
+                    })
+                    .unwrap_or_else(|| Engine::replacing(source.version_only_engine)),
+                settings: derive::settings(None, !source.projections.is_empty(), &BTreeMap::new()),
+                ttl: source.ttl.clone(),
+            },
         },
     }
 }
@@ -55,7 +58,7 @@ pub(super) fn dictionary(source: &ontology::AuxiliaryDictionary) -> Dictionary {
             false,
         ),
         default: None,
-        codecs: vec![],
+        options: ColumnOptions::default(),
     }];
     attributes.extend(source.attributes.iter().map(column));
     Dictionary {
@@ -90,7 +93,9 @@ fn column(source: &ontology::AuxiliaryColumn) -> Column {
         name: source.name.clone(),
         storage_type: storage_type(&source.data_type, source.nullable),
         default: source.default.clone(),
-        codecs: source.codec.clone().unwrap_or_default(),
+        options: ColumnOptions {
+            codecs: source.codec.clone().unwrap_or_default(),
+        },
     }
 }
 

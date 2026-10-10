@@ -2,11 +2,11 @@ use super::{DuckDbCatalog, DuckDbEntityLayout, storage::StorageCatalog};
 use crate::implementations::derive_property_backend_facts;
 use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, PropertyRealization};
 
-pub(super) fn derive(
+pub(crate) fn derive(
     ontology: &ontology::Ontology,
     graph: &GraphCatalog,
+    storage: &StorageCatalog,
 ) -> Result<DuckDbCatalog, DataModelError> {
-    let storage = StorageCatalog::derive(ontology);
     let mut entities = std::iter::repeat_with(|| None)
         .take(graph.entities().count())
         .collect::<Vec<_>>();
@@ -35,10 +35,13 @@ pub(super) fn derive(
         let local_fields = ontology
             .local_entity_fields(entity_name)
             .unwrap_or_else(|| node.fields.iter().collect());
-        let table = &storage.nodes[entity_name];
+        let table = storage
+            .entity_table(entity_name)
+            .expect("derived local entity table");
         let has_traversal_path = table
             .columns
-            .contains(ontology::constants::TRAVERSAL_PATH_COLUMN);
+            .iter()
+            .any(|column| column.name == ontology::constants::TRAVERSAL_PATH_COLUMN);
         for field in local_fields {
             let Some(property) = graph.property_id(entity_id, &field.name) else {
                 continue;
@@ -61,10 +64,18 @@ pub(super) fn derive(
     }
     let relationships = graph
         .relationships()
-        .map(|_| storage.edge.name.clone())
+        .map(|_| storage.edge().name.clone())
         .collect();
     Ok(DuckDbCatalog {
-        storage,
+        edge_columns: storage
+            .edge()
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect(),
+        edge_table: storage.edge().name.clone(),
+        edge_sort_key: storage.edge().sort_key.clone(),
+        edge_column_types: storage.edge().column_types.clone(),
         entities,
         property_facts,
         relationships,

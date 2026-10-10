@@ -38,7 +38,7 @@ pub struct Relationship {
     pub variants: Vec<RelationshipVariantId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GraphCatalog {
     entities: Vec<Entity>,
     properties: Vec<Property>,
@@ -51,6 +51,107 @@ pub struct GraphCatalog {
 }
 
 impl GraphCatalog {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_entity(&mut self, name: String) -> Result<EntityId, DataModelError> {
+        if self.entity_ids.contains_key(&name) {
+            return Err(DataModelError::Duplicate {
+                kind: "entity",
+                name,
+            });
+        }
+        let id = EntityId(self.entities.len());
+        self.entity_ids.insert(name.clone(), id);
+        self.property_ids.push(HashMap::new());
+        self.entities.push(Entity {
+            id,
+            name,
+            properties: Vec::new(),
+        });
+        Ok(id)
+    }
+
+    pub fn add_property(
+        &mut self,
+        entity: EntityId,
+        name: String,
+        data_type: DataType,
+    ) -> Result<PropertyId, DataModelError> {
+        let Some(owner) = self.entities.get_mut(entity.index()) else {
+            return Err(DataModelError::UnknownReference {
+                kind: "entity",
+                name: entity.index().to_string(),
+            });
+        };
+        let names = &mut self.property_ids[entity.index()];
+        if names.contains_key(&name) {
+            return Err(DataModelError::Duplicate {
+                kind: "property",
+                name,
+            });
+        }
+        let id = PropertyId(self.properties.len());
+        names.insert(name.clone(), id);
+        owner.properties.push(id);
+        self.properties.push(Property {
+            id,
+            entity,
+            name,
+            data_type,
+            enum_values: None,
+            enum_type: EnumType::default(),
+        });
+        Ok(id)
+    }
+
+    pub fn add_relationship(
+        &mut self,
+        name: String,
+        endpoints: &[(EntityId, EntityId)],
+    ) -> Result<RelationshipId, DataModelError> {
+        if self.relationship_ids.contains_key(&name) {
+            return Err(DataModelError::Duplicate {
+                kind: "relationship",
+                name,
+            });
+        }
+        let mut seen = std::collections::HashSet::new();
+        for &(source, target) in endpoints {
+            if source.index() >= self.entities.len() || target.index() >= self.entities.len() {
+                return Err(DataModelError::UnknownReference {
+                    kind: "relationship endpoint",
+                    name,
+                });
+            }
+            if !seen.insert((source, target)) {
+                return Err(DataModelError::Duplicate {
+                    kind: "relationship variant",
+                    name,
+                });
+            }
+        }
+        let id = RelationshipId(self.relationships.len());
+        let variants = endpoints
+            .iter()
+            .map(|&(source, target)| {
+                let variant = RelationshipVariantId(self.variants.len());
+                self.variants.push(RelationshipVariant {
+                    id: variant,
+                    relationship: id,
+                    source,
+                    target,
+                });
+                self.variant_ids.insert((id, source, target), variant);
+                variant
+            })
+            .collect();
+        self.relationship_ids.insert(name.clone(), id);
+        self.relationships.push(Relationship { id, name, variants });
+        Ok(id)
+    }
+
     pub(crate) fn derive(ontology: &Ontology) -> Result<Self, DataModelError> {
         let mut entities = Vec::new();
         let mut properties = Vec::new();

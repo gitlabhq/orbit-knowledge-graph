@@ -7,6 +7,17 @@ use crate::{
     RelationshipVariantId,
 };
 
+pub trait GitLabPolicy: Send + Sync {
+    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
+    fn is_admin_only(&self, property: PropertyId) -> bool;
+    fn is_filterable(&self, property: PropertyId) -> bool;
+    fn is_like_allowed(&self, property: PropertyId) -> bool;
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
+    fn required_access_level(&self, entity: EntityId) -> Option<u32>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityAuthConfig {
     pub resource_type: String,
@@ -69,10 +80,6 @@ impl GitLabAuthzCatalog {
 }
 
 impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        Self::from_ontology(ontology, graph)
-    }
-
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
     }
@@ -112,7 +119,7 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
 }
 
 impl GitLabAuthzCatalog {
-    fn from_ontology(
+    pub(crate) fn from_ontology(
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
     ) -> Result<Self, DataModelError> {
@@ -216,13 +223,18 @@ pub struct TrustedLocalCatalog {
     properties: Vec<PropertyPolicy>,
 }
 
-impl QueryAuthorizationCatalog for TrustedLocalCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
+impl TrustedLocalCatalog {
+    pub(crate) fn from_ontology(
+        ontology: &ontology::Ontology,
+        graph: &GraphCatalog,
+    ) -> Result<Self, DataModelError> {
         Ok(Self {
             properties: derive_property_policy(ontology, graph)?,
         })
     }
+}
 
+impl QueryAuthorizationCatalog for TrustedLocalCatalog {
     fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         None
     }
