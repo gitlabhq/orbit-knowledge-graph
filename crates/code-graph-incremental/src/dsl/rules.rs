@@ -124,6 +124,8 @@ struct ConfigSection {
     #[serde(default)]
     stdlib: Vec<Library>,
     #[serde(default)]
+    frameworks: Vec<Framework>,
+    #[serde(default)]
     link: Option<LinkSection>,
     #[serde(default)]
     resolve: Option<ResolveSettingsSection>,
@@ -157,6 +159,13 @@ struct Library {
     symbols: Vec<String>,
     availability: Option<LibraryAvailability>,
     precedence: Option<LibraryPrecedence>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Framework {
+    name: String,
+    providers: Vec<Library>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
@@ -217,7 +226,20 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
     };
     let mut external = Vec::new();
     let mut stdlib = Vec::new();
-    for library in &section.stdlib {
+    let mut frameworks = rustc_hash::FxHashSet::default();
+    for framework in &section.frameworks {
+        if framework.name.trim().is_empty() || !frameworks.insert(&framework.name) {
+            return Err(LoadError(
+                "framework names must be nonempty and unique".into(),
+            ));
+        }
+    }
+    for library in section.stdlib.iter().chain(
+        section
+            .frameworks
+            .iter()
+            .flat_map(|framework| &framework.providers),
+    ) {
         let implicit = library.availability.unwrap_or_default() == LibraryAvailability::Implicit;
         if library
             .module

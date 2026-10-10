@@ -1,0 +1,116 @@
+name: Ruby literal dispatch preserves receivers and evaluated arguments
+fixtures:
+  - path: dispatch.rb
+    content: |
+      class Target
+        def save(value); end
+      end
+      class Caller
+        def save(value); end
+        def argument; end
+        def block_body; end
+        def implicit
+          send(:save, argument)
+        end
+        def explicit
+          target = Target.new
+          target.public_send("save", argument)
+        end
+        def self_call
+          self.__send__(:save, argument)
+        end
+        def chained
+          Target.new.send(:save, argument) { block_body }
+        end
+        def block_dispatch
+          public_send(:save) { argument }
+        end
+        def dynamic(name)
+          send(name, :save)
+          send("#{name}save")
+        end
+      end
+      class CustomDispatch
+        def send(name, value); end
+        def argument; end
+        def block_body; end
+        def dynamic(name)
+          send(name, argument) { block_body }
+        end
+      end
+tests:
+  - name: Implicit and self dispatch retain their argument calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn IN ['Caller::implicit', 'Caller::self_call']
+      RETURN caller.name AS caller, target.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: implicit, target: 'Caller::save' } }
+      - { row: { caller: implicit, target: 'Caller::argument' } }
+      - { row: { caller: self_call, target: 'Caller::save' } }
+      - { row: { caller: self_call, target: 'Caller::argument' } }
+  - name: Explicit dispatch uses the receiver rather than the enclosing class
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Caller::explicit'
+      RETURN target.fqn AS target
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: target, values: [Target, 'Target::save', 'Caller::argument'] } }
+  - name: Dynamic dispatch does not use later arguments or partial strings as names
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Caller::dynamic'
+      RETURN target.fqn
+    assert:
+      - { empty: true }
+  - name: Dispatch on a constructor result keeps receiver and argument calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Caller::chained'
+      RETURN target.fqn AS target
+    assert:
+      - { row_count: 4 }
+      - { column_values: { field: target, values: [Target, 'Target::save', 'Caller::argument', 'Caller::block_body'] } }
+  - name: Dispatch preserves block bodies
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Caller::block_dispatch'
+      RETURN target.fqn AS target
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: target, values: ['Caller::save', 'Caller::argument'] } }
+  - name: Nonliteral dispatch preserves the original call and evaluated arguments
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'CustomDispatch::dynamic'
+      RETURN target.fqn AS target
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: target, values: ['CustomDispatch::send', 'CustomDispatch::argument', 'CustomDispatch::block_body'] } }
+steps:
+  - name: Replace literal dispatch with dynamic dispatch after snapshot loading
+    snapshot: true
+    modify:
+      - path: dispatch.rb
+        content: |
+          class Target
+            def save(value); end
+          end
+          class Caller
+            def argument; end
+            def explicit(name)
+              target = Target.new
+              target.public_send(name, argument)
+            end
+          end
+    tests:
+      - name: Dynamic dispatch removes the old literal target and retains argument calls
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.fqn = 'Caller::explicit'
+          RETURN target.fqn AS target
+        assert:
+          - { row_count: 2 }
+          - { column_values: { field: target, values: [Target, 'Caller::argument'] } }
