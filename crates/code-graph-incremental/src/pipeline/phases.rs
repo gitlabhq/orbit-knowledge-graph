@@ -330,12 +330,26 @@ impl ItemPhase<Rewritten> for Canonicalize {
 
     fn run(
         &self,
-        _env: &Env,
+        env: &Env,
         _run: &Sentinel,
         Rewritten(mut tree): Rewritten,
     ) -> Result<Canonical, Killed> {
         tree.prune();
         tree.compact();
+        let key = crate::tags::ReservedTags::new(&env.lang).original_source_path;
+        let imports: Vec<_> = tree
+            .root()
+            .descendants()
+            .filter_map(|node| {
+                Some((
+                    node.index(),
+                    node.child_sym(crate::canonical::Canonical::SourcePath)?,
+                ))
+            })
+            .collect();
+        for (node, path) in imports {
+            tree.set_tag(node, key, path);
+        }
         tree.source = std::sync::Arc::from("");
         Ok(Canonical(tree))
     }
@@ -474,9 +488,8 @@ impl Phase<DirtyGraph> for Resolve {
             &env.lang,
             &dirty,
             env.lang_id,
-            &walk.prefixes,
+            &walk.lookup,
             &env.resolve.config,
-            &walk.aliases,
             &walk.entrypoints,
             env,
             &context.run,

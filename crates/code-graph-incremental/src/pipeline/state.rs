@@ -271,7 +271,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 14;
+pub const SNAPSHOT_VERSION: u32 = 15;
 
 type Error = rkyv::rancor::BoxedError;
 
@@ -364,6 +364,7 @@ impl State {
         state
             .resolver
             .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
+        state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
 }
