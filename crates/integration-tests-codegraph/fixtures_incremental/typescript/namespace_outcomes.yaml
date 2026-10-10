@@ -1,0 +1,97 @@
+name: "Namespace misses differ from external and unknown values"
+fixtures:
+  - path: dynamic.js
+    content: |
+      function privateHelper() {}
+      module.exports = loadExports();
+  - path: local.ts
+    content: |
+      export function existing() {}
+      export const unknown = runtimeValue();
+  - path: barrel.ts
+    content: |
+      export * from 'external-sdk';
+  - path: renamed.ts
+    content: |
+      function implementation() {}
+      export { implementation as renamed };
+      export { implementation as default };
+  - path: main.ts
+    content: |
+      import * as local from './local';
+      import * as external from 'external-sdk';
+      import * as barrel from './barrel';
+      import * as renamed from './renamed';
+      import * as dynamic from './dynamic';
+      import renamedDefault, { renamed as alias } from './renamed';
+      export function missing() { local.missing(); }
+      export function known() { local.existing(); }
+      export function uncertain() { local.unknown(); }
+      export function remote() { external.missing(); }
+      export function reexported() { barrel.missing(); }
+      export function localExport() { renamed.renamed(); }
+      export function dynamicExport() { dynamic.available(); }
+      export function aliasExport() { alias(); }
+      export function defaultExport() { renamedDefault(); }
+tests:
+  - name: "external and unknown-valued targets retain fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.file_path = 'main.ts' AND caller.name <> 'missing'
+      RETURN caller.name AS caller
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: uncertain } }
+      - { row: { caller: remote } }
+      - { row: { caller: reexported } }
+      - { row: { caller: dynamicExport } }
+  - name: "known missing exports do not become external calls"
+    # Deferred: suppressing fallback requires proof that the module's exports are complete.
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      WHERE caller.file_path = 'main.ts' AND caller.name = 'missing'
+      RETURN symbol.import_path
+    assert:
+      - { empty: true }
+  - name: "existing members still resolve"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.file_path = 'main.ts'
+      RETURN caller.name AS caller, target.name AS target, target.file_path AS file
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: known, target: existing, file: 'local.ts' } }
+      - { row: { caller: localExport, target: implementation, file: 'renamed.ts' } }
+      - { row: { caller: aliasExport, target: implementation, file: 'renamed.ts' } }
+      - { row: { caller: defaultExport, target: implementation, file: 'renamed.ts' } }
+steps:
+  - name: add missing member after snapshot loading
+    snapshot: true
+    modify:
+      - path: local.ts
+        content: |
+          export function existing() {}
+          export function missing() {}
+          export const unknown = runtimeValue();
+    tests:
+      - name: "the unchanged consumer resolves a newly added export"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.file_path = 'main.ts' AND caller.name = 'missing'
+          RETURN target.name AS target
+        assert:
+          - { row_count: 1 }
+          - { row: { target: missing } }
+  - name: remove the namespace target
+    snapshot: true
+    remove: [local.ts]
+    tests:
+      - name: "unknown module restores fallback"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+          WHERE caller.file_path = 'main.ts' AND caller.name = 'missing'
+          RETURN symbol.import_path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { path: './local' } }

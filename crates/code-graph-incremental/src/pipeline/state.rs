@@ -8,6 +8,7 @@ use lasso::Key;
 use smallvec::SmallVec;
 
 use crate::env::Env;
+use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::sentinel::Limits;
@@ -34,6 +35,22 @@ pub struct State {
 }
 
 impl State {
+    pub(crate) fn project_tree(&self, env: &Env) -> WalkResult {
+        let paths: Vec<_> = self
+            .trees
+            .iter()
+            .map(|tree| tree.label.as_str())
+            .chain(self.configs.iter().map(|file| file.path.as_str()))
+            .collect();
+        ProjectTree::build(
+            &env.lang,
+            &env.resolve.config,
+            &env.resolve.stages,
+            &paths,
+            Some(&self.configs),
+        )
+    }
+
     pub fn new(env: &Env) -> Self {
         Self {
             trees: Vec::new(),
@@ -104,6 +121,7 @@ const NONE: u32 = u32::MAX;
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct SnapshotNode {
+    pub id: u32,
     pub kind: u16,
     pub field: u16,
     pub sym: u32,
@@ -127,19 +145,12 @@ pub struct TreeSnapshot {
 
 impl From<&Tree<Compact>> for TreeSnapshot {
     fn from(tree: &Tree<Compact>) -> Self {
-        let ids: Vec<_> = std::iter::once(tree.root())
-            .chain(tree.root().descendants())
-            .collect();
-        let id_to_pos: rustc_hash::FxHashMap<u32, u32> = ids
-            .iter()
-            .enumerate()
-            .map(|(i, id)| (id.index(), i as u32))
-            .collect();
-        let mut nodes = Vec::with_capacity(ids.len());
-        for &id in &ids {
+        let mut nodes = Vec::with_capacity(tree.len() as usize);
+        for id in std::iter::once(tree.root()).chain(tree.root().descendants()) {
             let n = &tree.arena[id.index() as usize].node;
-            let parent = id.parent().map_or(NONE, |p| id_to_pos[&p.index()]);
+            let parent = id.parent().map_or(NONE, |p| p.index());
             nodes.push(SnapshotNode {
+                id: id.index(),
                 kind: n.kind,
                 field: n.field,
                 sym: n.sym,
@@ -172,10 +183,19 @@ impl From<TreeSnapshot> for Tree<Compact> {
         if snap.nodes.is_empty() {
             return Tree::new(Node::default()).into();
         }
-        let mut arena = Vec::with_capacity(snap.nodes.len());
-        for sn in snap.nodes {
-            let id = arena.len() as u32;
-            arena.push(CompactNode::new(
+        let slots = snap
+            .nodes
+            .iter()
+            .map(|node| node.id as usize)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let root = snap.nodes[0].id;
+        let mut arena: Vec<_> = (0..slots)
+            .map(|id| CompactNode::new(Node::default(), id as u32))
+            .collect();
+        for sn in &snap.nodes {
+            arena[sn.id as usize] = CompactNode::new(
                 Node {
                     kind: sn.kind,
                     field: sn.field,
@@ -190,14 +210,16 @@ impl From<TreeSnapshot> for Tree<Compact> {
                     named: sn.named,
                 },
                 sn.parent,
-            ));
+            );
+        }
+        for sn in snap.nodes {
             if sn.parent != NONE {
-                CompactNode::link(&mut arena, sn.parent, id);
+                CompactNode::link(&mut arena, sn.parent, sn.id);
             }
         }
         Self {
             arena,
-            root: 0,
+            root,
             label: snap.label,
             tags: snap
                 .tags
@@ -251,7 +273,7 @@ struct Header {
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 4;
+pub const SNAPSHOT_VERSION: u32 = 14;
 
 type Error = rkyv::rancor::BoxedError;
 
@@ -334,12 +356,16 @@ impl State {
             let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;
             trees.push(tree.into());
         }
-        let state = State {
+        let mut state = State {
             trees,
             edges: header.edges,
             resolver: Resolver::from_snapshot(header.resolver, &env.lang),
             configs: header.configs.into_iter().map(Into::into).collect(),
         };
+        let walk = state.project_tree(&env);
+        state
+            .resolver
+            .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
         Ok((env, state))
     }
 }

@@ -48,19 +48,18 @@ tests:
       - { row: { name: "UserId", type: "TypeAlias" } }
       - { row: { name: "makeStatus", type: "Function" } }
 
-  - name: Type-only imports are preserved distinctly from runtime imports
-    skip: true
+  - name: Type-only and runtime imports retain definition relationships
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'
-      RETURN i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target
       ORDER BY name
     assert:
       - { row_count: 4 }
-      - { row: { name: "Status", is_type_only: false, target: "Status" } }
-      - { row: { name: "User", is_type_only: true, target: "User" } }
-      - { row: { name: "UserId", is_type_only: true, target: "UserId" } }
-      - { row: { name: "makeStatus", is_type_only: false, target: "makeStatus" } }
+      - { row: { name: "Status", target: "Status" } }
+      - { row: { name: "User", target: "User" } }
+      - { row: { name: "UserId", target: "UserId" } }
+      - { row: { name: "makeStatus", target: "makeStatus" } }
 
   - name: Type-only imports do not fabricate runtime call edges
     query: |

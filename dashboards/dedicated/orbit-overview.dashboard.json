@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "GKG webserver",
+      "title": "Webserver",
       "type": "row"
     },
     {
@@ -334,7 +334,7 @@
       },
       "id": 8,
       "panels": [],
-      "title": "GKG indexer",
+      "title": "Indexer",
       "type": "row"
     },
     {
@@ -682,7 +682,7 @@
       },
       "id": 17,
       "panels": [],
-      "title": "Rails → KG",
+      "title": "Rails → Orbit",
       "type": "row"
     },
     {
@@ -690,7 +690,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Rails → GKG gRPC requests per minute.",
+      "description": "Rails → Orbit gRPC requests per minute.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",

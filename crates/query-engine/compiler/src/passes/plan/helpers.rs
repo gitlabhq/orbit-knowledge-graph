@@ -98,16 +98,21 @@ pub fn has_non_denorm_filters(
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
     filters.iter().any(|(_, filter)| {
-        let Some(property) = filter.property else {
-            return true;
-        };
         [DenormalizedDirection::Source, DenormalizedDirection::Target]
             .into_iter()
-            .all(|direction| {
-                !denormalized.contains_key(&DenormalizedKey {
-                    property,
-                    direction,
-                })
-            })
+            .all(|direction| lowerable_denorm(filter, direction, denormalized).is_none())
     })
+}
+
+pub fn lowerable_denorm<'a>(
+    filter: &BoundFilter,
+    direction: DenormalizedDirection,
+    denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Option<&'a DenormalizedProperty> {
+    denormalized
+        .get(&DenormalizedKey {
+            property: filter.property?,
+            direction,
+        })
+        .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.filter).is_some())
 }

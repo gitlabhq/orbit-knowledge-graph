@@ -128,8 +128,12 @@ impl<'t> Fold<'t> {
             self.handle_inline_imports(c);
             self.handle_call(c);
         } else if k == C::Member {
-            let is_callee = c.parent().is_some_and(|p| p.kind() == C::Callee);
-            if !is_callee {
+            let in_chain = c.parent().is_some_and(|parent| {
+                parent.is(C::Callee)
+                    || parent.is(C::Object)
+                        && parent.parent().is_some_and(|owner| owner.is(C::Member))
+            });
+            if !in_chain {
                 self.handle_standalone_member(c);
             }
         } else if k == C::Binding {
@@ -219,6 +223,11 @@ impl<'t> Fold<'t> {
                 .child_sym(C::Alias)
                 .or(n.child_sym(C::SsaHint))
                 .unwrap_or(sym);
+            if c.is(C::ImportType) || n.has_tag(self.tags.type_only) {
+                let binding = self.declare_binding(n, local);
+                self.ssa.write_variable(binding, self.cur, Value::Opaque);
+                continue;
+            }
             if let Some(module) = module
                 && self.bind_from_def(module, n, local)
             {
@@ -301,6 +310,9 @@ impl<'t> Fold<'t> {
             return;
         };
         let idx = c.index();
+        if c.has(C::ImplBlock) {
+            self.link_reference(c.child(C::DefName).unwrap());
+        }
         self.register_def(c);
         for supertype in c.children_of(C::SuperType) {
             self.handle_inline_imports(supertype);
@@ -388,6 +400,40 @@ impl<'t> Fold<'t> {
         }
         let from = self.enclosing();
         let first = self.edges.len();
+        if let Some(member) = callee.child(C::Member) {
+            if member
+                .child(C::Dispatch)
+                .is_some_and(|dispatch| !dispatch.has(C::Object))
+            {
+                for reference in member
+                    .children()
+                    .filter(|node| node.is(C::Object) || node.is(C::Dispatch))
+                {
+                    self.link_reference(reference);
+                }
+                return;
+            }
+            if let Some(receiver) = member
+                .child(C::Dispatch)
+                .and_then(|dispatch| dispatch.child(C::Object))
+            {
+                for value in self.lookup(receiver.sym()) {
+                    if let Value::Call(node) = value {
+                        self.edges.push(Edge {
+                            site: Some(c.index()),
+                            ..Edge::local(from, node, EdgeKind::TypeFlow)
+                        });
+                    }
+                }
+                if member.child(C::Object).is_some_and(|object| {
+                    self.lookup(object.sym()).iter().any(|value| {
+                        matches!(value, Value::LocalDef(node) if self.tree.cursor(*node).is_dispatch_contract())
+                    })
+                }) {
+                    return;
+                }
+            }
+        }
         let value = self
             .field_slot(callee)
             .map(|slot| self.read_value(slot))
@@ -442,7 +488,24 @@ impl<'t> Fold<'t> {
             return;
         }
         if let Some(obj) = c.child(C::Object) {
+            let first = self.edges.len();
             self.resolve_obj(obj, c.sym(), self.enclosing());
+            for edge in &mut self.edges[first..] {
+                edge.call_resolution = crate::tree::CallResolution::Reference;
+            }
+        }
+    }
+
+    fn link_reference(&mut self, reference: Cursor<'t>) {
+        self.handle_inline_imports(reference);
+        if let [Value::LocalDef(target) | Value::ImportRef(target)] =
+            self.lookup_chain(reference).as_slice()
+            && *target != reference.parent().map_or(reference.index(), Cursor::index)
+        {
+            self.edges.push(Edge {
+                call_resolution: crate::tree::CallResolution::Reference,
+                ..Edge::local(reference.index(), *target, EdgeKind::Imports)
+            });
         }
     }
 
@@ -477,7 +540,17 @@ impl<'t> Fold<'t> {
             self.handle_branch(branch, Some(lhs));
         } else {
             if let Some(rhs) = rhs {
+                let first = self.edges.len();
                 self.walk_children(rhs);
+                for edge in &mut self.edges[first..] {
+                    if rhs.child(C::Member).is_some()
+                        && edge.kind == EdgeKind::Imports
+                        && edge.site.is_none()
+                        && edge.call_resolution == crate::tree::CallResolution::Reference
+                    {
+                        edge.site = Some(c.index());
+                    }
+                }
             }
             let tail = rhs.map(Cursor::tail_expr);
             let mut val = if c.has(C::SsaTyped)
@@ -487,11 +560,16 @@ impl<'t> Fold<'t> {
             } else {
                 tail.map_or(Value::Opaque, |tail| self.classify_tail(tail))
             };
-            if let Some(rhs) = rhs.filter(|rhs| rhs.children().next().is_none()) {
+            if let Some(rhs) = c.bare_rhs() {
                 for value in self.lookup(rhs.sym()) {
                     match value {
-                        Value::ImportRef(_) => {
+                        Value::ImportRef(node) => {
                             val = Value::Call(c.index());
+                            self.edges.push(Edge {
+                                site: Some(c.index()),
+                                call_resolution: crate::tree::CallResolution::Reference,
+                                ..Edge::local(self.enclosing(), node, EdgeKind::Imports)
+                            });
                             self.edges.push(Edge {
                                 site: Some(c.index()),
                                 ..Edge::local(self.enclosing(), c.index(), EdgeKind::TypeFlow)

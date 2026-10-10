@@ -20,10 +20,12 @@ Use mise for all tasks.
 `docs-locale/` is generated. Never read, edit, or reference it.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
-Commits title to skip unnecessary merge request pipelines while iterating. When
-ready for CI, remove `[skip ci]` and push a commit. Editing the title alone
-starts no pipeline, and a manually triggered one can still be skipped. The merge
-ref keeps the old title until it is regenerated, which a push guarantees.
+Commits title and keep it there through review. Editing the title starts no
+pipeline, and the merge ref keeps the old title until a push with a new SHA.
+
+When ready for CI, remove `[skip ci]` from the title, then run
+`git commit --amend --no-edit --allow-empty` and push with `--force-with-lease`.
+Check that the new MR head pipeline is not skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 

@@ -1,4 +1,4 @@
-// External-service metrics: HTTP autoinstrumentation, Siphon, NATS, Rails KG.
+// External-service metrics: HTTP autoinstrumentation, Siphon, NATS, Rails Orbit.
 // These are emitted by other services so they can't live in the Rust catalog;
 // kind / labels / description are spelled out here.
 
@@ -39,8 +39,8 @@
   ],
 
   RAILS_KG_REQUEST: [
-    { name: 'gitlab_knowledge_graph_grpc_duration_seconds', kind: 'histogram', labels: ['method', 'status'], description: 'Rails → GKG gRPC call latency.' },
-    { name: 'gitlab_knowledge_graph_grpc_errors_total', kind: 'counter', labels: ['method', 'code'], description: 'Rails → GKG gRPC error count.' },
+    { name: 'gitlab_knowledge_graph_grpc_duration_seconds', kind: 'histogram', labels: ['method', 'status'], description: 'Rails → Orbit gRPC call latency.' },
+    { name: 'gitlab_knowledge_graph_grpc_errors_total', kind: 'counter', labels: ['method', 'code'], description: 'Rails → Orbit gRPC error count.' },
     { name: 'gitlab_knowledge_graph_redaction_duration_seconds', kind: 'histogram', labels: [], description: 'Rails-side redaction time.' },
     { name: 'gitlab_knowledge_graph_redaction_batch_size', kind: 'histogram', labels: [], description: 'Rails-side redaction batch size.' },
     { name: 'gitlab_knowledge_graph_redaction_filtered_count', kind: 'histogram', labels: [], description: 'Rows filtered by redaction per request.' },

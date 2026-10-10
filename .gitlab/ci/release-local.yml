@@ -1,11 +1,11 @@
-# Build and publish the `orbit` local CLI on tag releases.
+# Build and publish the `orbit` local CLI.
 #
 # "Local CLI" distinguishes this binary (the user-facing `orbit` command for
 # code indexing on a developer machine) from the gkg-server image we ship
 # elsewhere in this pipeline.
 #
-# Both build and publish run only on tag pipelines (`vX.Y.Z`) on the canonical
-# project.
+# Build and publish run on tag pipelines (`vX.Y.Z`) on the canonical project.
+# Linux builds and smoke tests also run on main when their inputs change.
 
 .local-cli-release-rules:
   rules:
@@ -13,11 +13,23 @@
       when: never
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
+.local-cli-linux-rules:
+  rules:
+    - !reference [.local-cli-release-rules, rules]
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - scripts/build-local-cli.sh
+        - scripts/ci/smoke-local-cli.sh
+        - .gitlab/ci/release-local.yml
+        - crates/duckdb-client/**/*
+        - rust-toolchain.toml
+
 .local-cli-build-linux:
   extends:
     - .job-template
     - .sccache-template
-    - .local-cli-release-rules
+    - .no-cargo-home-cache
+    - .local-cli-linux-rules
   stage: build
   needs: []
   variables:
@@ -65,10 +77,41 @@ local-cli-build-linux-musl-arm64:
     ARCH: aarch64
     LIBC: musl
 
+.local-cli-smoke-linux:
+  extends: .local-cli-linux-rules
+  stage: build
+  image: oraclelinux:8
+  before_script:
+    - dnf install -y -q git-core gzip tar
+  script:
+    - ./scripts/ci/smoke-local-cli.sh "orbit-cli-linux-${ARCH}.tar.gz"
+    - ./scripts/ci/smoke-local-cli.sh "orbit-cli-linux-musl-${ARCH}.tar.gz"
+
+local-cli-smoke-linux-amd64:
+  extends: .local-cli-smoke-linux
+  tags:
+    - saas-linux-small-amd64
+  needs:
+    - local-cli-build-linux-amd64
+    - local-cli-build-linux-musl-amd64
+  variables:
+    ARCH: x86_64
+
+local-cli-smoke-linux-arm64:
+  extends: .local-cli-smoke-linux
+  tags:
+    - saas-linux-small-arm64
+  needs:
+    - local-cli-build-linux-arm64
+    - local-cli-build-linux-musl-arm64
+  variables:
+    ARCH: aarch64
+
 local-cli-build-windows-amd64:
   extends:
     - .job-template
     - .sccache-template
+    - .no-cargo-home-cache
     - .local-cli-release-rules
   stage: build
   needs: []
@@ -169,6 +212,8 @@ local-cli-publish:
     - local-cli-build-linux-arm64
     - local-cli-build-linux-musl-amd64
     - local-cli-build-linux-musl-arm64
+    - local-cli-smoke-linux-amd64
+    - local-cli-smoke-linux-arm64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils
@@ -190,6 +235,8 @@ local-cli-publish-npm:
   needs:
     - local-cli-build-linux-musl-amd64
     - local-cli-build-linux-musl-arm64
+    - local-cli-smoke-linux-amd64
+    - local-cli-smoke-linux-arm64
     - local-cli-code-sign
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip

@@ -4,8 +4,8 @@ YAML-driven integration tests for the v2 code-graph pipeline. Each fixture defin
 
 ## Running
 
-```bash
-cargo nextest run -p integration-tests-codegraph
+```shell
+mise exec -- cargo nextest run -p integration-tests-codegraph
 ```
 
 ## Fixture structure
@@ -114,7 +114,7 @@ Inverts any assertion. The check must fail for the assertion to pass.
 
 ## Fixture directories
 
-```
+```plaintext
 fixtures/
   containment.yaml          # definition nesting (class > method > inner class)
   structural.yaml           # file/directory structure, edge kinds, imports

@@ -154,14 +154,18 @@ impl<N: Clone> Storage<N> for Compact {
     }
 }
 
-impl<N: Clone> From<Tree<Mutable, N>> for Tree<Compact, N> {
+impl<N: Clone + Default> From<Tree<Mutable, N>> for Tree<Compact, N> {
     fn from(tree: Tree<Mutable, N>) -> Self {
         let arena = tree
             .arena
             .iter()
             .enumerate()
             .map(|(index, entry)| CompactNode {
-                node: entry.get().clone(),
+                node: if entry.is_removed() {
+                    N::default()
+                } else {
+                    entry.get().clone()
+                },
                 parent: if entry.is_removed() {
                     index as u32
                 } else {

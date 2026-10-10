@@ -24,6 +24,8 @@ config:
 stages:
   - name: normalize
     rules:
+      - match: '(foreign_mod_item body: (declaration_list $$$ITEMS:function_signature_item))'
+        replace: '(foreign_declarations $$$ITEMS->foreign_function)'
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(return_expression $$$VALS)'
@@ -100,13 +102,14 @@ stages:
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
         replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
-      # <Service as Runner>::construct() is Service::construct()
-      - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T)) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
+      - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
       - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
+      - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
+        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch @$P (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
         replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
@@ -285,10 +288,10 @@ stages:
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type? @$R) $$$P)'
         tag: { flavor: self_method }
       - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type? @$R) $$$P)'
 
       # Functions — self variant first, then generic
       - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
@@ -348,6 +351,8 @@ stages:
 
   - name: scoped-supertypes
     rules:
+      - match: '(__object $T:scoped_type_identifier)'
+        replace: '(__object (__member @$T|field("name") (__object @$T|field("path"))))'
       # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
       # a path in supertype position is a scoped import of its last segment
       - match: '(__supertype "/::/")'

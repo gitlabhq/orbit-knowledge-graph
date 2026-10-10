@@ -55,6 +55,18 @@ pub struct Node {
     pub(crate) named: bool,
 }
 
+#[repr(u8)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub enum CallResolution {
+    #[default]
+    Unknown,
+    Callable,
+    NonCallable,
+    Reference,
+}
+
 #[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Edge {
     pub from_tree: u32,
@@ -63,6 +75,7 @@ pub struct Edge {
     pub to_node: u32,
     pub kind: EdgeKind,
     pub site: Option<u32>,
+    pub call_resolution: CallResolution,
 }
 
 impl Edge {
@@ -74,6 +87,7 @@ impl Edge {
             to_node,
             kind,
             site: None,
+            call_resolution: CallResolution::Unknown,
         }
     }
     pub fn from_fi(&self) -> usize {
@@ -100,6 +114,7 @@ impl Edge {
             to_node: to,
             kind,
             site: None,
+            call_resolution: CallResolution::Unknown,
         }
     }
 }

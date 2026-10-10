@@ -1,4 +1,4 @@
-// Orbit — GKG indexer.
+// Orbit — Indexer.
 //
 // Layout is story-shaped, not catalog-shaped:
 //   1. Health — four headline ratios for at-a-glance status.
@@ -558,10 +558,10 @@ local annotations = [
 ];
 
 o.dashboard(
-  'orbit-gkg-indexer',
-  'Orbit — GKG indexer',
-  ['gkg', 'indexer'],
-  'GKG indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.',
+  'orbit-indexer',
+  'Orbit — Indexer',
+  ['indexer'],
+  'Orbit indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.',
   items,
   annotations,
 )

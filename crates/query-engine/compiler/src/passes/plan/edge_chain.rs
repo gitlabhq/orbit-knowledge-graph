@@ -657,9 +657,6 @@ fn filter_covered_by_denorm(
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
-    let Some(property) = filter.property else {
-        return false;
-    };
     hops.iter().any(|hop| {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
             return false;
@@ -676,16 +673,13 @@ fn filter_covered_by_denorm(
                 } else {
                     DenormalizedDirection::Target
                 };
-                denormalized
-                    .get(&DenormalizedKey {
-                        property,
-                        direction,
-                    })
-                    .is_some_and(|facts| {
+                super::helpers::lowerable_denorm(filter, direction, denormalized).is_some_and(
+                    |facts| {
                         hop.relationships
                             .iter()
                             .any(|relationship| facts.relationships.contains(relationship))
-                    })
+                    },
+                )
             })
     })
 }

@@ -1,6 +1,6 @@
 name: list_commands
-version: 1.4.0
-variables: [commands, catalog]
+version: 1.6.0
+variables: [commands, catalog, relationships]
 description: >-
   Orbit is the GitLab Knowledge Graph. It answers code-structure and
   cross-entity questions: callers, definitions, imports, blast radius,
@@ -16,7 +16,14 @@ description: >-
 
   Available commands:
 
-  {{ catalog }}{% else %}Call this before invoke_command to get each command's
+  {{ catalog }}{% if relationships %}
+
+
+  Graph relationships, as (Source)-[:EDGE]->(Target|Target). A target list
+  names the possible labels; a query uses one label per node:
+
+
+  {{ relationships }}{% endif %}{% else %}Call this before invoke_command to get each command's
   input schema.
 
 

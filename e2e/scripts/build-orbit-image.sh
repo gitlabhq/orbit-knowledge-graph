@@ -5,11 +5,12 @@
 
 E2E_BUILD_PID=""
 if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
-  # Reuse multi-arch dev image published by docker-manifest.
+  # Reuse the amd64 dev image from docker-build-amd64. The e2e cluster is
+  # amd64-only, so e2e does not wait for the multi-arch docker-manifest.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
-  export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+  export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
   docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1 \
-    || { echo "${E2E_GKG_IMAGE}:${E2E_GKG_TAG} is not in the registry; the docker-manifest job for this commit has not published it"; exit 1; }
+    || { echo "${E2E_GKG_IMAGE}:${E2E_GKG_TAG} is not in the registry; docker-build-amd64 for this commit has not published it"; exit 1; }
 else
   # MR: build a debug image inline for faster iteration.
   export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"

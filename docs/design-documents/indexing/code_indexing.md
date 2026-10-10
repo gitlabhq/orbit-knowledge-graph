@@ -268,6 +268,18 @@ interner or snapshots. Class values retain declaration node IDs through joins.
 Leaving a block removes its name mappings without restoring values. Assignments
 to outer bindings therefore survive block exit.
 
+Incremental snapshots store live tree nodes in traversal order, with their arena
+IDs and parent IDs. Loading preserves those IDs and sibling order, including when
+nodes were added or removed after linking. Edges, tags, and cached resolver
+locations therefore keep their targets. Removed slots have no serialized node
+payload. Snapshot version 14 requires a fresh index for older saved graphs.
+Loading rebuilds the file index from saved trees and manifests before edits apply.
+
+Import discovery scans retained files only when the file index gains keys.
+Existing imports are checked separately for changed targets. Dirty files and
+redirected imports seed one reverse-dependency traversal with a shared visited set.
+Each affected file resolves once, including when dependency paths overlap or cycle.
+
 An empty `__declaration` marker introduces a binding after its initializer.
 A named marker selects a matching scope label. The linker registers these names
 before walking that scope, so reads before assignment cannot fall back to outer

@@ -7,7 +7,7 @@
           "uid": "$ORBIT_DS"
         },
         "enable": true,
-        "expr": "label_replace(group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}) unless group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
+        "expr": "label_replace(group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}) unless group by (image_spec, cluster) (kube_pod_container_info{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"} offset $__interval), \"version\", \"$1\", \"image_spec\", \".*:(.*)\")",
         "hide": false,
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Deploys",
@@ -17,7 +17,7 @@
       }
     ]
   },
-  "description": "GKG webserver dashboard. Top rows tell the latency story: a Rails request lands on GKG over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
+  "description": "Orbit webserver dashboard. Top rows tell the latency story: a Rails request lands on Orbit over gRPC, the pipeline runs (authorize → compile → execute → hydrate), and Rails redacts before the response goes out. Bottom rows are reliability, resources, and the per-domain catalog reference (collapsed by default).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -51,9 +51,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "p95 of the user-facing Rails-side gRPC call to GKG over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.",
+      "description": "p95 of the user-facing Rails-side gRPC call to Orbit over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -71,7 +71,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_bucket%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_bucket%7Benv%3D~\\%22$rails_env\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -91,9 +91,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))) or vector(0)",
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))) or vector(0)",
           "legendFormat": "Rails: gRPC p95 (5m)",
           "refId": "A"
         }
@@ -106,7 +106,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "p95 of overall pipeline duration on the GKG webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
+      "description": "p95 of overall pipeline duration on the Orbit webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -124,7 +124,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_query_pipeline_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_query_pipeline_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -146,7 +146,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))) or vector(0)",
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))) or vector(0)",
           "legendFormat": "Pipeline: p95 (5m)",
           "refId": "A"
         }
@@ -177,7 +177,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20status%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -199,7 +199,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[1h])) > 0)) or vector(0)",
+          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h])) > 0)) or vector(0)",
           "legendFormat": "Compiler error rate (1h)",
           "refId": "A"
         }
@@ -230,7 +230,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!~\\%22ok%7Ccompile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20status!~\\%22ok%7Ccompile_error\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20status!%3D\\%22compile_error\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -252,7 +252,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"ok|compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"compile_error\"}[1h])) > 0)) or vector(0)",
+          "expr": "((sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"ok|compile_error\"}[1h]))) / (sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"compile_error\"}[1h])) > 0)) or vector(0)",
           "legendFormat": "Pipeline failure rate (1h)",
           "refId": "A"
         }
@@ -296,7 +296,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20status%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -318,7 +318,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[$__range]))) or vector(0)",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[$__range]))) or vector(0)",
           "legendFormat": "Successful queries",
           "refId": "A"
         }
@@ -349,7 +349,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20status!%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_queries_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20status!%3D\\%22ok\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -371,7 +371,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"ok\"}[$__range]))) or vector(0)",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"ok\"}[$__range]))) or vector(0)",
           "legendFormat": "Failed queries",
           "refId": "A"
         }
@@ -418,7 +418,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\"}[$__rate_interval]))",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\"}[$__rate_interval]))",
           "legendFormat": "rate",
           "refId": "A"
         }
@@ -465,7 +465,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!=\"ok\"}[$__rate_interval]))",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!=\"ok\"}[$__rate_interval]))",
           "legendFormat": "rate",
           "refId": "A"
         }
@@ -476,9 +476,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails-side gRPC calls into GKG in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.",
+      "description": "Rails-side gRPC calls into Orbit in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -496,7 +496,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_count%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_grpc_duration_seconds_count%7Benv%3D~\\%22$rails_env\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -516,9 +516,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "(sum(increase(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[$__range]))) or vector(0)",
+          "expr": "(sum(increase(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[$__range]))) or vector(0)",
           "legendFormat": "gRPC calls (Rails)",
           "refId": "A"
         }
@@ -529,7 +529,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side redaction passes in the dashboard window. Roughly one per successful query.",
       "fieldConfig": {
@@ -549,7 +549,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_redaction_duration_seconds_count%7Benv%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gitlab_knowledge_graph_redaction_duration_seconds_count%7Benv%3D~\\%22$rails_env\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -569,9 +569,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "(sum(increase(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[$__range]))) or vector(0)",
+          "expr": "(sum(increase(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[$__range]))) or vector(0)",
           "legendFormat": "Redactions (Rails)",
           "refId": "A"
         }
@@ -602,7 +602,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_ch_read_rows_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_query_pipeline_ch_read_rows_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -624,7 +624,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range]))) or vector(0)",
+          "expr": "(sum(increase(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
           "legendFormat": "CH row reads",
           "refId": "A"
         }
@@ -635,7 +635,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
       "fieldConfig": {
@@ -669,9 +669,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[$__rate_interval]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[$__rate_interval]))",
           "legendFormat": "rate",
           "refId": "A"
         }
@@ -682,7 +682,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
       "fieldConfig": {
@@ -716,9 +716,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[$__rate_interval]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[$__rate_interval]))",
           "legendFormat": "rate",
           "refId": "A"
         }
@@ -765,7 +765,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__rate_interval]))",
+          "expr": "sum(rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[$__rate_interval]))",
           "legendFormat": "rate",
           "refId": "A"
         }
@@ -789,9 +789,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "p95 of the Rails-side gRPC call to GKG, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.",
+      "description": "p95 of the Rails-side gRPC call to Orbit, broken down by RPC method. This is the user-visible latency. Use it as the ceiling — every other panel in this row should sit underneath it.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -827,9 +827,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (method, le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (method, le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "{{method}}",
           "refId": "A"
         }
@@ -842,7 +842,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "GKG-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
+      "description": "Orbit-side query pipeline duration percentiles. The gap between this and the Rails p95 above is wire time + JWT/auth-context build + redaction.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -880,7 +880,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -889,7 +889,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -898,7 +898,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -949,7 +949,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "compile",
           "refId": "A"
         },
@@ -958,7 +958,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "authorization",
           "refId": "B"
         },
@@ -967,7 +967,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "execute",
           "refId": "C"
         },
@@ -976,7 +976,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "hydration",
           "refId": "D"
         }
@@ -1027,7 +1027,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -1036,7 +1036,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -1045,7 +1045,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -1096,7 +1096,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -1105,7 +1105,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -1114,7 +1114,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -1125,9 +1125,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "p50/p95/p99 of redaction time on the Rails side, after GKG returns. Adds onto the server pipeline duration to make the total the user sees.",
+      "description": "p50/p95/p99 of redaction time on the Rails side, after Orbit returns. Adds onto the server pipeline duration to make the total the user sees.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1163,27 +1163,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -1194,7 +1194,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "p95 of how many rows redaction sees per request, and how many it filters out. Big batch + low filtered count is fine; small batch + everything filtered is the worst case for the user (lots of work, nothing returned).",
       "fieldConfig": {
@@ -1232,18 +1232,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "batch p95",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "filtered p95",
           "refId": "B"
         }
@@ -1254,7 +1254,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-observed gRPC p95 plotted next to the server pipeline p95. The gap is the round-trip wire time plus JWT, auth-context, and redaction. A growing gap with stable server p95 means the slowdown is on the Rails side.",
       "fieldConfig": {
@@ -1292,9 +1292,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "rails total p95",
           "refId": "A"
         },
@@ -1303,7 +1303,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "server pipeline p95",
           "refId": "B"
         }
@@ -1354,7 +1354,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_ch_read_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum(rate(gkg_query_pipeline_ch_read_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "bytes/s",
           "refId": "A"
         },
@@ -1363,7 +1363,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum(rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "rows/s",
           "refId": "B"
         }
@@ -1414,7 +1414,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -1423,7 +1423,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -1432,7 +1432,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -1443,9 +1443,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not GKG.",
+      "description": "Time spent on Rails preparing the JWT and the auth-context to attach to the gRPC call. Climbs here mean the Rails-side request setup is the bottleneck, not Orbit.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1481,18 +1481,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "jwt p95",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "auth_ctx p95",
           "refId": "B"
         }
@@ -1543,7 +1543,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -1552,7 +1552,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -1561,7 +1561,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -1625,7 +1625,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (failure_reason) (increase(gkg_query_pipeline_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[1h]))",
+          "expr": "sum by (failure_reason) (increase(gkg_query_pipeline_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h]))",
           "legendFormat": "{{failure_reason}}",
           "refId": "A"
         },
@@ -1645,7 +1645,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side gRPC error counts in rolling 1h windows, by gRPC status code. Auth or unavailable spikes here often line up with the server reliability panel on the left.",
       "fieldConfig": {
@@ -1683,9 +1683,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum by (code) (increase(gitlab_knowledge_graph_grpc_errors_total{env=~\".*\"}[1h]))",
+          "expr": "sum by (code) (increase(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[1h]))",
           "legendFormat": "{{code}}",
           "refId": "A"
         }
@@ -1736,7 +1736,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (failure_reason) (increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[1h]))",
+          "expr": "sum by (failure_reason) (increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h]))",
           "legendFormat": "{{failure_reason}}",
           "refId": "A"
         },
@@ -1758,7 +1758,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Current count of active gRPC requests on the GKG webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.",
+      "description": "Current count of active gRPC requests on the Orbit webserver, summed across pods. A flat ceiling here is the saturation signal for the gRPC server.",
       "fieldConfig": {
         "defaults": {
           "noValue": "—",
@@ -1776,7 +1776,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28rpc_server_active_requests%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rpc_server_active_requests%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -1798,7 +1798,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(rpc_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})) or vector(0)",
+          "expr": "(sum(rpc_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})) or vector(0)",
           "legendFormat": "Server: in-flight gRPC requests",
           "refId": "A"
         }
@@ -1822,7 +1822,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Number of traversal IDs Rails attaches to each gRPC call (pre-compaction). p95 climbing means Rails is sending bigger authorization payloads.",
       "fieldConfig": {
@@ -1860,18 +1860,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         }
@@ -1882,7 +1882,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Ratio of compacted size to original. Lower is better — 0.1 means the compaction reduced the payload to 10% of original. Watch for sustained 1.0 (no benefit).",
       "fieldConfig": {
@@ -1920,18 +1920,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         }
@@ -1942,7 +1942,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rate of requests where compaction fell back to the uncompressed form (left) or where the traversal ID list exceeded the threshold (right). Rising fallback often precedes a tail-latency event on the Rails side.",
       "fieldConfig": {
@@ -1980,18 +1980,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\".*\"}[5m])) * 60",
+          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m])) * 60",
           "legendFormat": "fallback/min",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\".*\"}[5m])) * 60",
+          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m])) * 60",
           "legendFormat": "threshold-exceeded/min",
           "refId": "B"
         }
@@ -2055,7 +2055,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -2064,7 +2064,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -2073,7 +2073,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -2124,7 +2124,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
@@ -2133,7 +2133,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
@@ -2142,7 +2142,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -2193,7 +2193,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_content_gitaly_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum(rate(gkg_content_gitaly_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -2257,7 +2257,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (state) (gkg_webserver_schema_state{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (state) (gkg_webserver_schema_state{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "{{state}}",
           "refId": "A"
         }
@@ -2301,7 +2301,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2323,7 +2323,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", namespace=\"gkg\", resource=\"cpu\"}) > 0)) or vector(0)",
+          "expr": "((sum(rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"}) > 0)) or vector(0)",
           "legendFormat": "CPU: usage / limit (5m)",
           "refId": "A"
         }
@@ -2354,7 +2354,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2376,7 +2376,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", namespace=\"gkg\", resource=\"memory\"}) > 0)) or vector(0)",
+          "expr": "((sum(container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"}) > 0)) or vector(0)",
           "legendFormat": "Memory: working set / limit",
           "refId": "A"
         }
@@ -2407,7 +2407,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28increase%28container_oom_events_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28container_oom_events_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2429,7 +2429,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(container_oom_events_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[1h]))) or vector(0)",
+          "expr": "(sum(increase(container_oom_events_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h]))) or vector(0)",
           "legendFormat": "OOM events (1h)",
           "refId": "A"
         }
@@ -2460,7 +2460,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20namespace%3D\\%22gkg\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2482,7 +2482,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", namespace=\"gkg\"}[1h]))) or vector(0)",
+          "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\"}[1h]))) or vector(0)",
           "legendFormat": "Restarts (1h)",
           "refId": "A"
         }
@@ -2533,7 +2533,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", cpu=\"total\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         },
@@ -2542,7 +2542,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", namespace=\"gkg\", resource=\"cpu\"})",
+          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"})",
           "legendFormat": "limit",
           "refId": "B"
         }
@@ -2593,7 +2593,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])) > 0)",
+          "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])) > 0)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -2644,7 +2644,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "{{pod}}",
           "refId": "A"
         },
@@ -2653,7 +2653,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", namespace=\"gkg\", resource=\"memory\"})",
+          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"})",
           "legendFormat": "limit",
           "refId": "B"
         }
@@ -2704,7 +2704,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_rss{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (pod) (container_memory_rss{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "rss / {{pod}}",
           "refId": "A"
         },
@@ -2713,7 +2713,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_memory_cache{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (pod) (container_memory_cache{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "cache / {{pod}}",
           "refId": "B"
         }
@@ -2764,7 +2764,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_fs_reads_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_fs_reads_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "read / {{pod}}",
           "refId": "A"
         },
@@ -2773,7 +2773,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_fs_writes_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_fs_writes_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "write / {{pod}}",
           "refId": "B"
         }
@@ -2824,7 +2824,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_pressure_io_waiting_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_pressure_io_waiting_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "io / {{pod}}",
           "refId": "A"
         },
@@ -2833,7 +2833,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "mem / {{pod}}",
           "refId": "B"
         }
@@ -2884,7 +2884,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_threads{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (pod) (container_threads{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "threads / {{pod}}",
           "refId": "A"
         },
@@ -2893,7 +2893,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (pod) (container_sockets{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (pod) (container_sockets{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "sockets / {{pod}}",
           "refId": "B"
         }
@@ -2957,7 +2957,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
           "refId": "A"
         },
@@ -2966,7 +2966,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
           "refId": "B"
         },
@@ -2975,7 +2975,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
           "refId": "C"
         }
@@ -3026,7 +3026,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
           "refId": "A"
         }
@@ -3077,7 +3077,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (http_route, http_request_method) (http_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (http_route, http_request_method) (http_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "{{http_route}} / {{http_request_method}}",
           "refId": "A"
         }
@@ -3128,7 +3128,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{http_route}}",
           "refId": "A"
         },
@@ -3137,7 +3137,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{http_route}}",
           "refId": "B"
         },
@@ -3146,7 +3146,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{http_route}}",
           "refId": "C"
         }
@@ -3197,7 +3197,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (http_route) (rate(http_server_request_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (http_route) (rate(http_server_request_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{http_route}}",
           "refId": "A"
         }
@@ -3248,7 +3248,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{http_route}}",
           "refId": "A"
         },
@@ -3257,7 +3257,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{http_route}}",
           "refId": "B"
         },
@@ -3266,7 +3266,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{http_route}}",
           "refId": "C"
         }
@@ -3317,7 +3317,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (http_route) (rate(http_server_response_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (http_route) (rate(http_server_response_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{http_route}}",
           "refId": "A"
         }
@@ -3381,7 +3381,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{rpc_service}} / {{rpc_method}} / {{rpc_grpc_status_code}}",
           "refId": "A"
         },
@@ -3390,7 +3390,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{rpc_service}} / {{rpc_method}} / {{rpc_grpc_status_code}}",
           "refId": "B"
         },
@@ -3399,7 +3399,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{rpc_service}} / {{rpc_method}} / {{rpc_grpc_status_code}}",
           "refId": "C"
         }
@@ -3450,7 +3450,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (rpc_service, rpc_method, rpc_grpc_status_code) (rate(rpc_server_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{rpc_service}} / {{rpc_method}} / {{rpc_grpc_status_code}}",
           "refId": "A"
         }
@@ -3501,7 +3501,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (rpc_service, rpc_method) (rpc_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+          "expr": "sum by (rpc_service, rpc_method) (rpc_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
           "legendFormat": "{{rpc_service}} / {{rpc_method}}",
           "refId": "A"
         }
@@ -3552,7 +3552,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{rpc_service}} / {{rpc_method}}",
           "refId": "A"
         },
@@ -3561,7 +3561,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{rpc_service}} / {{rpc_method}}",
           "refId": "B"
         },
@@ -3570,7 +3570,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{rpc_service}} / {{rpc_method}}",
           "refId": "C"
         }
@@ -3621,7 +3621,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (rpc_service, rpc_method) (rate(rpc_server_requests_per_rpc_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{rpc_service}} / {{rpc_method}}",
           "refId": "A"
         }
@@ -3672,7 +3672,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p50 {{rpc_service}} / {{rpc_method}}",
           "refId": "A"
         },
@@ -3681,7 +3681,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p95 {{rpc_service}} / {{rpc_method}}",
           "refId": "B"
         },
@@ -3690,7 +3690,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
           "legendFormat": "p99 {{rpc_service}} / {{rpc_method}}",
           "refId": "C"
         }
@@ -3741,7 +3741,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+          "expr": "sum by (rpc_service, rpc_method) (rate(rpc_server_responses_per_rpc_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
           "legendFormat": "{{rpc_service}} / {{rpc_method}}",
           "refId": "A"
         }
@@ -3802,7 +3802,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -3811,7 +3811,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -3820,7 +3820,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -3871,7 +3871,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_authorization_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -3922,7 +3922,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -3931,7 +3931,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -3940,7 +3940,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_batches_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -3991,7 +3991,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_batches_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_batches_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -4042,7 +4042,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}} / {{label}}",
               "refId": "A"
             },
@@ -4051,7 +4051,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}} / {{label}}",
               "refId": "B"
             },
@@ -4060,7 +4060,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}} / {{label}}",
               "refId": "C"
             }
@@ -4111,7 +4111,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_memory_usage_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}} / {{label}}",
               "refId": "A"
             }
@@ -4162,7 +4162,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_read_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_read_bytes_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}} / {{label}}",
               "refId": "A"
             }
@@ -4213,7 +4213,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type, label) (rate(gkg_query_pipeline_ch_read_rows_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}} / {{label}}",
               "refId": "A"
             }
@@ -4264,7 +4264,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -4273,7 +4273,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -4282,7 +4282,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_compile_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -4333,7 +4333,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_compile_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_compile_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -4384,7 +4384,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}} / {{status}}",
               "refId": "A"
             },
@@ -4393,7 +4393,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}} / {{status}}",
               "refId": "B"
             },
@@ -4402,7 +4402,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, status) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}} / {{status}}",
               "refId": "C"
             }
@@ -4453,7 +4453,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}} / {{status}}",
               "refId": "A"
             }
@@ -4504,7 +4504,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -4513,7 +4513,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -4522,7 +4522,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_execute_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -4573,7 +4573,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_execute_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_execute_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -4624,7 +4624,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (failure_reason) (rate(gkg_query_pipeline_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (failure_reason) (rate(gkg_query_pipeline_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{failure_reason}}",
               "refId": "A"
             }
@@ -4675,7 +4675,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -4684,7 +4684,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -4693,7 +4693,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -4744,7 +4744,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_hydration_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -4795,7 +4795,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type, status) (rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}} / {{status}}",
               "refId": "A"
             }
@@ -4846,7 +4846,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -4855,7 +4855,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -4864,7 +4864,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_redactions_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -4915,7 +4915,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_redactions_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_redactions_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -4966,7 +4966,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{query_type}}",
               "refId": "A"
             },
@@ -4975,7 +4975,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{query_type}}",
               "refId": "B"
             },
@@ -4984,7 +4984,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(gkg_query_pipeline_result_set_rows_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{query_type}}",
               "refId": "C"
             }
@@ -5035,7 +5035,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (query_type) (rate(gkg_query_pipeline_result_set_rows_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (query_type) (rate(gkg_query_pipeline_result_set_rows_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{query_type}}",
               "refId": "A"
             }
@@ -5100,7 +5100,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (failure_reason) (rate(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (failure_reason) (rate(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{failure_reason}}",
               "refId": "A"
             }
@@ -5165,7 +5165,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 overall",
               "refId": "A"
             },
@@ -5174,7 +5174,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 overall",
               "refId": "B"
             },
@@ -5183,7 +5183,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_blob_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 overall",
               "refId": "C"
             }
@@ -5234,7 +5234,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_content_blob_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_content_blob_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "count",
               "refId": "A"
             }
@@ -5285,7 +5285,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_content_gitaly_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_content_gitaly_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -5336,7 +5336,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (endpoint) (rate(gkg_content_mr_diff_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (endpoint) (rate(gkg_content_mr_diff_calls_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{endpoint}}",
               "refId": "A"
             }
@@ -5387,7 +5387,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (outcome) (rate(gkg_content_resolve_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (outcome) (rate(gkg_content_resolve_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -5438,7 +5438,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 overall",
               "refId": "A"
             },
@@ -5447,7 +5447,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 overall",
               "refId": "B"
             },
@@ -5456,7 +5456,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_content_resolve_batch_size_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 overall",
               "refId": "C"
             }
@@ -5507,7 +5507,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_content_resolve_batch_size_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_content_resolve_batch_size_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "count",
               "refId": "A"
             }
@@ -5558,7 +5558,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{outcome}}",
               "refId": "A"
             },
@@ -5567,7 +5567,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{outcome}}",
               "refId": "B"
             },
@@ -5576,7 +5576,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_content_resolve_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{outcome}}",
               "refId": "C"
             }
@@ -5627,7 +5627,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (outcome) (rate(gkg_content_resolve_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (outcome) (rate(gkg_content_resolve_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -5692,7 +5692,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (state) (gkg_webserver_schema_state{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+              "expr": "sum by (state) (gkg_webserver_schema_state{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
               "legendFormat": "{{state}}",
               "refId": "A"
             }
@@ -5757,7 +5757,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_billing_events_delivered_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_billing_events_delivered_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -5808,7 +5808,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (reason) (rate(gkg_billing_events_delivery_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (reason) (rate(gkg_billing_events_delivery_failed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{reason}}",
               "refId": "A"
             }
@@ -5859,7 +5859,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (reason) (rate(gkg_billing_events_dropped_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (reason) (rate(gkg_billing_events_dropped_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{reason}}",
               "refId": "A"
             }
@@ -5910,7 +5910,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_billing_events_emitted_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_billing_events_emitted_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -5961,7 +5961,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(rate(gkg_billing_events_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum(rate(gkg_billing_events_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -6026,7 +6026,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (source_type) (rate(gkg_billing_quota_bypassed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (source_type) (rate(gkg_billing_quota_bypassed_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{source_type}}",
               "refId": "A"
             }
@@ -6077,7 +6077,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum(gkg_billing_quota_cache_entries{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
+              "expr": "sum(gkg_billing_quota_cache_entries{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -6090,7 +6090,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+          "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6128,7 +6128,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p50 {{outcome}}",
               "refId": "A"
             },
@@ -6137,7 +6137,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p95 {{outcome}}",
               "refId": "B"
             },
@@ -6146,7 +6146,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m])))",
               "legendFormat": "p99 {{outcome}}",
               "refId": "C"
             }
@@ -6159,7 +6159,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+          "description": "Latency of upstream CustomersDot GET requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6197,7 +6197,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (outcome) (rate(gkg_billing_quota_cdot_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (outcome) (rate(gkg_billing_quota_cdot_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{outcome}}",
               "refId": "A"
             }
@@ -6210,7 +6210,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+          "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6248,7 +6248,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (decision, cache, source_type) (rate(gkg_billing_quota_decisions_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (decision, cache, source_type) (rate(gkg_billing_quota_decisions_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{decision}} / {{cache}} / {{source_type}}",
               "refId": "A"
             }
@@ -6313,7 +6313,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (service, outcome) (rate(gkg_circuit_breaker_calls_total{container=~\"(gkg|orbit)-.*\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (service, outcome) (rate(gkg_circuit_breaker_calls_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{service}} / {{outcome}}",
               "refId": "A"
             }
@@ -6364,7 +6364,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (service) (rate(gkg_circuit_breaker_calls_rejected_total{container=~\"(gkg|orbit)-.*\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (service) (rate(gkg_circuit_breaker_calls_rejected_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -6415,7 +6415,7 @@
                 "type": "prometheus",
                 "uid": "$ORBIT_DS"
               },
-              "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"(gkg|orbit)-.*\", cluster=~\".*\"}[5m]))",
+              "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"(gkg|orbit)-.*\", cluster=~\"$cluster\"}[5m]))",
               "legendFormat": "{{service}} / {{from}} / {{to}}",
               "refId": "A"
             }
@@ -6437,15 +6437,15 @@
       },
       "id": 126,
       "panels": [],
-      "title": "Rails KG — request (reference)",
+      "title": "Rails Orbit — request (reference)",
       "type": "row"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -6481,27 +6481,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 {{method}} / {{status}}",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 {{method}} / {{status}}",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 {{method}} / {{status}}",
           "refId": "C"
         }
@@ -6512,9 +6512,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC call latency.",
+      "description": "Rails → Orbit gRPC call latency.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -6550,9 +6550,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\".*\"}[5m]))",
+          "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{method}} / {{status}}",
           "refId": "A"
         }
@@ -6563,9 +6563,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
-      "description": "Rails → GKG gRPC error count.",
+      "description": "Rails → Orbit gRPC error count.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -6601,9 +6601,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\".*\"}[5m]))",
+          "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{method}} / {{code}}",
           "refId": "A"
         }
@@ -6614,7 +6614,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side redaction time.",
       "fieldConfig": {
@@ -6652,27 +6652,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -6683,7 +6683,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side redaction time.",
       "fieldConfig": {
@@ -6721,9 +6721,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -6734,7 +6734,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side redaction batch size.",
       "fieldConfig": {
@@ -6772,27 +6772,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -6803,7 +6803,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rails-side redaction batch size.",
       "fieldConfig": {
@@ -6841,9 +6841,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -6854,7 +6854,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rows filtered by redaction per request.",
       "fieldConfig": {
@@ -6892,27 +6892,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -6923,7 +6923,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Rows filtered by redaction per request.",
       "fieldConfig": {
@@ -6961,9 +6961,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -6974,7 +6974,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "JWT assembly latency on Rails side.",
       "fieldConfig": {
@@ -7012,27 +7012,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -7043,7 +7043,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "JWT assembly latency on Rails side.",
       "fieldConfig": {
@@ -7081,9 +7081,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -7094,7 +7094,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Auth-context build latency on Rails side.",
       "fieldConfig": {
@@ -7132,27 +7132,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -7163,7 +7163,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Auth-context build latency on Rails side.",
       "fieldConfig": {
@@ -7201,9 +7201,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -7221,13 +7221,13 @@
       },
       "id": 140,
       "panels": [],
-      "title": "Rails KG — traversal (reference)",
+      "title": "Rails Orbit — traversal (reference)",
       "type": "row"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Traversal IDs per request (pre-compaction).",
       "fieldConfig": {
@@ -7265,27 +7265,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -7296,7 +7296,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Traversal IDs per request (pre-compaction).",
       "fieldConfig": {
@@ -7334,9 +7334,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -7347,7 +7347,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Compaction ratio of traversal IDs.",
       "fieldConfig": {
@@ -7385,27 +7385,27 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p50 overall",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p95 overall",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\".*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
           "legendFormat": "p99 overall",
           "refId": "C"
         }
@@ -7416,7 +7416,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Compaction ratio of traversal IDs.",
       "fieldConfig": {
@@ -7454,9 +7454,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "count",
           "refId": "A"
         }
@@ -7467,7 +7467,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Traversal compaction fell back to uncompressed form.",
       "fieldConfig": {
@@ -7505,9 +7505,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -7518,7 +7518,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$ORBIT_DS"
+        "uid": "mimir-gitlab-${rails_env}"
       },
       "description": "Requests with too many traversal IDs.",
       "fieldConfig": {
@@ -7556,9 +7556,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$ORBIT_DS"
+            "uid": "mimir-gitlab-${rails_env}"
           },
-          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\".*\"}[5m]))",
+          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -7572,18 +7572,78 @@
   "tags": [
     "orbit",
     "protected",
-    "gkg",
     "webserver"
   ],
   "templating": {
     "list": [
       {
+        "current": {
+          "text": "Mimir - Analytics Eventsdot",
+          "value": "mimir-analytics-eventsdot"
+        },
         "hide": 0,
-        "label": "Prometheus datasource",
+        "label": "Orbit datasource (analytics-eventsdot tenant)",
         "name": "ORBIT_DS",
         "query": "prometheus",
         "refresh": 1,
+        "regex": "/Analytics Eventsdot/",
         "type": "datasource"
+      },
+      {
+        "current": {
+          "text": "orbit-prd",
+          "value": "orbit-prd"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Orbit cluster",
+        "multi": false,
+        "name": "cluster",
+        "options": [
+          {
+            "selected": true,
+            "text": "orbit-prd",
+            "value": "orbit-prd"
+          },
+          {
+            "selected": false,
+            "text": "orbit-stg",
+            "value": "orbit-stg"
+          },
+          {
+            "selected": false,
+            "text": "all",
+            "value": "orbit-.*"
+          }
+        ],
+        "query": "orbit-prd,orbit-stg,orbit-.*",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "text": "gprd",
+          "value": "gprd"
+        },
+        "description": "Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Rails env",
+        "multi": false,
+        "name": "rails_env",
+        "options": [
+          {
+            "selected": true,
+            "text": "gprd",
+            "value": "gprd"
+          },
+          {
+            "selected": false,
+            "text": "gstg",
+            "value": "gstg"
+          }
+        ],
+        "query": "gprd,gstg",
+        "type": "custom"
       }
     ]
   },
@@ -7592,7 +7652,7 @@
     "to": "now"
   },
   "timezone": "utc",
-  "title": "Orbit — GKG webserver",
-  "uid": "orbit-gkg-webserver",
+  "title": "Orbit — Webserver",
+  "uid": "orbit-webserver",
   "version": 1
 }

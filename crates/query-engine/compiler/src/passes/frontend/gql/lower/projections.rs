@@ -106,11 +106,8 @@ impl Lowering {
                     if property_set.len() != columns.len() {
                         return Err(invalid(span, "duplicate or overlapping node projection"));
                     }
-                    if !aggregate && alias.is_some() {
-                        return Err(invalid(
-                            span,
-                            "traversal node projections cannot be renamed",
-                        ));
+                    if !aggregate {
+                        self.alias(span, alias.clone(), None)?;
                     }
                     let node = self
                         .input
@@ -148,12 +145,17 @@ impl Lowering {
                                 alias,
                             });
                     } else {
-                        if alias.is_some() || self.input.query_type == QueryType::PathFinding {
+                        if self.input.query_type == QueryType::PathFinding {
                             return Err(invalid(
                                 span,
-                                "property projections require traversal or neighbors and cannot be renamed",
+                                "property projections require traversal or neighbors",
                             ));
                         }
+                        let target = PropertyRef {
+                            node: node.clone(),
+                            property: property.clone(),
+                        };
+                        self.alias(span, alias, Some(target))?;
                         let input_node = self
                             .input
                             .nodes
@@ -268,11 +270,22 @@ impl Lowering {
                 node: variable,
                 alias,
             });
-        } else if alias.is_some() {
-            return Err(invalid(
-                span,
-                "traversal node projections cannot be renamed",
-            ));
+        } else {
+            self.alias(span, alias, None)?;
+        }
+        Ok(())
+    }
+
+    fn alias(
+        &mut self,
+        span: pest::Span<'_>,
+        alias: Option<String>,
+        target: Option<PropertyRef>,
+    ) -> Result<()> {
+        if let Some(alias) = alias
+            && self.aliases.insert(alias, target).is_some()
+        {
+            return Err(invalid(span, "duplicate alias"));
         }
         Ok(())
     }
@@ -309,16 +322,24 @@ impl Lowering {
                 });
             }
             QueryType::Traversal => {
-                let key = match sort.key {
-                    Target::Property(key) => key,
-                    Target::Variable(name) => {
-                        return Err(invalid(
-                            name.span,
-                            "traversal ORDER BY requires node.property",
-                        ));
-                    }
+                let PropertyRef { node, property } = match sort.key {
+                    Target::Property(key) => key.into(),
+                    Target::Variable(name) => match self.aliases.get(&name.value) {
+                        Some(Some(target)) => target.clone(),
+                        Some(None) => {
+                            return Err(invalid(
+                                name.span,
+                                "ORDER BY a property alias, not a node alias",
+                            ));
+                        }
+                        None => {
+                            return Err(invalid(
+                                name.span,
+                                "traversal ORDER BY requires node.property or a property alias",
+                            ));
+                        }
+                    },
                 };
-                let PropertyRef { node, property } = key.into();
                 self.input.order_by = Some(InputOrderBy {
                     node,
                     property,

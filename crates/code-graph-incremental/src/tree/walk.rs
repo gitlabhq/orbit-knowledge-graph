@@ -291,6 +291,10 @@ impl<'a, S: Storage<Node>> Cursor<'a, S> {
             .any(|child| CLASS_LIKE.iter().any(|&kind| child.kind() == kind))
     }
 
+    pub fn is_dispatch_contract(self) -> bool {
+        self.has(C::Trait) || self.has(C::Interface)
+    }
+
     pub fn reference(self) -> Self {
         self.child(C::Call)
             .filter(|c| c.has(C::Property))
@@ -325,6 +329,11 @@ impl<'a, S: Storage<Node>> Cursor<'a, S> {
 
     pub fn rhs_callee(self) -> Option<u32> {
         self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+    }
+
+    pub fn bare_rhs(self) -> Option<Self> {
+        self.child(C::Rhs)
+            .filter(|rhs| rhs.children().next().is_none())
     }
 
     pub fn initializer(self) -> Option<Self> {
