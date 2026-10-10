@@ -14,7 +14,13 @@ config:
       '@intFromEnum', '@intFromError', '@intFromFloat', '@intFromPtr', '@max',
       '@memcpy', '@memset', '@min', '@offsetOf', '@panic', '@popCount',
       '@ptrCast', '@ptrFromInt', '@sizeOf', '@src', '@tagName', '@This',
-      '@trap', '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector']
+      '@trap', '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector',
+      '@abs', '@addWithOverflow', '@atomicLoad', '@atomicRmw', '@atomicStore',
+      '@bitReverse', '@ceil', '@cmpxchgStrong', '@cmpxchgWeak', '@cos', '@divExact',
+      '@divFloor', '@divTrunc', '@exp', '@exp2', '@floor', '@log',
+      '@log2', '@log10', '@mod', '@mulAdd', '@mulWithOverflow', '@reduce', '@rem',
+      '@round', '@select', '@shlExact', '@shlWithOverflow', '@shrExact', '@shuffle',
+      '@sin', '@splat', '@sqrt', '@subWithOverflow', '@tan', '@trunc']
   resolve:
     external: [std, builtin]
     lookup_from:

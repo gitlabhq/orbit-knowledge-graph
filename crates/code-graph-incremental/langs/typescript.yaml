@@ -16,6 +16,24 @@ config:
       parseInt, queueMicrotask, require, setImmediate, setInterval,
       setTimeout, structuredClone]
   resolve:
+    stdlib: [
+      { module: util, precedence: runtime, symbols: [callbackify, debuglog,
+          deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
+          parseArgs, promisify, stripVTControlCharacters, styleText] },
+      { module: 'node:util', precedence: runtime, symbols: [callbackify, debuglog,
+          deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
+          parseArgs, promisify, stripVTControlCharacters, styleText] },
+      { module: fs, precedence: runtime, symbols: [access, appendFile, chmod,
+          chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
+          mkdtemp, open, read, readdir, readFile, readFileSync, readlink,
+          realpath, rename, rm, rmdir, stat, symlink, truncate, unlink,
+          watch, watchFile, write, writeFile, writeFileSync] },
+      { module: 'node:fs', precedence: runtime, symbols: [access, appendFile, chmod,
+          chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
+          mkdtemp, open, read, readdir, readFile, readFileSync, readlink,
+          realpath, rename, rm, rmdir, stat, symlink, truncate, unlink,
+          watch, watchFile, write, writeFile, writeFileSync] }
+    ]
     external: [assert, async_hooks, buffer, child_process, cluster, console,
       constants, crypto, dgram, diagnostics_channel, dns, domain, events, fs,
       http, http2, https, inspector, module, net, os, path, perf_hooks, process,

@@ -4,16 +4,19 @@
 # init, self./super. calls, control flow.
 
 config:
-  link:
-    builtins: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
+  resolve:
+    external: []
+    stdlib: [
+      { module: Swift, implicit: true, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
       getVaList, isKnownUniquelyReferenced, max, min, numericCast, precondition,
       preconditionFailure, print, readLine, repeatElement, sequence, stride,
       swap, type, unsafeBitCast, unsafeDowncast, withExtendedLifetime,
       withUnsafeBytes, withUnsafeMutableBytes, withUnsafeMutablePointer,
-      withUnsafePointer, withVaList, withoutActuallyEscaping, zip]
-  resolve:
-    external: [Swift]
-    stdlib: [Foundation, Dispatch, Darwin, Glibc, ObjectiveC, Combine,
+      withUnsafePointer, withVaList, withoutActuallyEscaping, zip] },
+      { module: Foundation, symbols: [NSLog, NSStringFromClass, NSClassFromString,
+          NSStringFromSelector, NSSelectorFromString, NSHomeDirectory,
+          NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains] },
+      Dispatch, Darwin, Glibc, ObjectiveC, Combine,
       SwiftUI, UIKit, AppKit, XCTest]
     lookup_from:
       - __source_root

@@ -159,6 +159,8 @@ enum Library {
         #[serde(default)]
         symbols: Vec<String>,
         #[serde(default)]
+        implicit: bool,
+        #[serde(default)]
         precedence: LibraryPrecedence,
     },
 }
@@ -224,6 +226,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             Library::Provider {
                 module,
                 symbols,
+                implicit,
                 precedence,
             } => {
                 match precedence {
@@ -231,6 +234,10 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
                     LibraryPrecedence::Runtime => external.push(module.clone()),
                 }
                 if !symbols.is_empty() {
+                    if *implicit {
+                        link.builtins
+                            .extend(symbols.iter().map(|name| lang.syms.intern(name)));
+                    }
                     link.providers.push((
                         lang.syms.intern(module),
                         symbols.iter().map(|name| lang.syms.intern(name)).collect(),

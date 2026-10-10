@@ -23,6 +23,10 @@ config:
         symbols: [printf, puts]
       - module: time
         precedence: runtime
+      - module: builtins
+        precedence: runtime
+        implicit: true
+        symbols: [len, print]
       - json
 ```
 
@@ -31,14 +35,21 @@ names suppress speculative wildcard-call fallback for that provider, while concr
 project definitions still resolve. A spelling such as `printf` is not implicitly
 builtin merely because one standard header supplies it.
 
+`implicit: true` makes the provider's symbols available without an import. The
+compiler adds them to the existing builtin lookup set. Reserved operations without
+an importable provider remain in `link.builtins`, such as Bash commands and Zig
+`@` functions. PHP global functions and JavaScript globals also retain their direct
+lists; they do not all belong to one importable module.
+
 `precedence: runtime` gives the module the same lookup precedence as `external`.
 Explicit project aliases are applied before either module classification. The
 default, `precedence: project`, retains exact and declared-root project lookup.
 Provider lists are compiled once when language rules load. They do not add a
 new resolution pass or inspect language-specific syntax in the shared engine.
 
-Both module lists match the first slash-separated component of the canonical
-import path. They are not regexes or arbitrary string prefixes. Language YAML
+Both module lists match a canonical module path and its slash-separated children.
+For example, `java/lang` matches `java/lang/Math`, but not `java/language`.
+Symbol associations match the exact provider path. Language YAML
 normalizes namespace separators before this check. The original canonical path
 is retained across resolution and snapshots, even when the resolved path changes.
 
@@ -56,17 +67,17 @@ links to language references for maintaining them.
 | C | No implicit library functions; symbols belong to header providers | Standard headers use `stdlib`; project headers remain eligible | [C library](https://en.cppreference.com/w/c/header.html) |
 | C++ | No implicit library functions; symbols belong to header providers | Standard headers use `stdlib` | [C++ headers](https://en.cppreference.com/w/cpp/header.html) |
 | C# | Empty: no implicit global standard functions | `System` uses `stdlib` | [Namespaces](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/namespace) |
-| Elixir | Kernel functions and guards | Core module roots use `stdlib` | [Kernel](https://hexdocs.pm/elixir/Kernel.html) |
-| Go | Predeclared functions and conversion types | Standard package roots use `external` | [Builtins](https://pkg.go.dev/builtin), [packages](https://pkg.go.dev/std) |
-| Java | Implicit `java.lang` constructors | `java` is external; `javax` and `jdk` use `stdlib` | [java.lang](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/package-summary.html) |
-| Kotlin | Default-imported functions, factories, and constructors | `kotlin` and `java` are external; `javax` and `jdk` use `stdlib` | [Default imports](https://kotlinlang.org/docs/packages.html#default-imports) |
+| Elixir | Implicit Kernel provider | Core roots plus Bitwise and Enum symbol providers | [Kernel](https://hexdocs.pm/elixir/Kernel.html) |
+| Go | Implicit `builtin` provider | Runtime package roots plus fmt/errors symbol providers | [Builtins](https://pkg.go.dev/builtin), [packages](https://pkg.go.dev/std) |
+| Java | Implicit `java/lang` provider | Math and Objects static providers; `java` is external | [java.lang](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/package-summary.html) |
+| Kotlin | Implicit kotlin, io, collections, and sequences providers | Explicit math provider; runtime kotlin/java roots | [Default imports](https://kotlinlang.org/docs/packages.html#default-imports) |
 | Lua | Global base-library functions | Normally preloaded modules use runtime precedence | [Libraries](https://www.lua.org/manual/5.4/manual.html#6) |
 | PHP | Common core and extension functions | `BcMath`, `Dom`, and `Random` use `stdlib` | [Function reference](https://www.php.net/manual/en/funcref.php) |
 | Python | Builtin functions, types, and exceptions | `builtins`, `sys`, and `time` use runtime precedence; filesystem libraries use project precedence | [Builtins](https://docs.python.org/3/library/functions.html), [library index](https://docs.python.org/3/library/index.html) |
-| Ruby | Kernel functions | Bundled library roots use `stdlib` | [Kernel](https://docs.ruby-lang.org/en/master/Kernel.html) |
-| Rust | Prelude constructors, functions, and existing builtin macro names | `std`, `core`, `alloc`, `proc_macro`, and `test` use `stdlib` | [Prelude](https://doc.rust-lang.org/std/prelude/index.html) |
-| Scala | Predef functions | `java` is external; `scala`, `javax`, and `jdk` use `stdlib` | [Predef](https://www.scala-lang.org/api/current/scala/Predef$.html) |
-| Swift | Global standard functions | `Swift` is external; platform frameworks use `stdlib` | [Standard library](https://developer.apple.com/documentation/swift) |
+| Ruby | Implicit Kernel provider | Bundled roots plus pp symbol provider | [Kernel](https://docs.ruby-lang.org/en/master/Kernel.html) |
+| Rust | Prelude names; Rc and Arc require imports | mem, cmp, and iter symbol providers under std/core roots | [Prelude](https://doc.rust-lang.org/std/prelude/index.html) |
+| Scala | Implicit Predef provider | Explicit math provider; scala/java module policy | [Predef](https://www.scala-lang.org/api/current/scala/Predef$.html) |
+| Swift | Implicit Swift provider | Foundation symbols; platform framework roots | [Standard library](https://developer.apple.com/documentation/swift) |
 | TypeScript / JavaScript | ECMAScript constructors/global functions and common Node globals | Node module roots use `external`, including explicit `node:` spellings | [Node modules](https://nodejs.org/api/modules.html#built-in-modules) |
 | Zig | Reserved `@` builtin functions | `std` and `builtin` are external | [Builtins](https://ziglang.org/documentation/master/#Builtin-Functions) |
 

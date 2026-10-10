@@ -39,8 +39,16 @@ config:
           strncat, strncmp, strncpy, strpbrk, strrchr, strspn, strstr, strtok, strxfrm] },
       { module: time.h, symbols: [asctime, clock, ctime, difftime, gmtime,
           localtime, mktime, strftime, time, timespec_get, timespec_getres] },
-      complex.h, errno.h, fenv.h, float.h, inttypes.h, iso646.h, limits.h,
-      locale.h, setjmp.h, signal.h, stdalign.h, stdarg.h, stdatomic.h, stdbit.h,
+      { module: fenv.h, symbols: [feclearexcept, fegetexceptflag, feraiseexcept,
+          fesetexceptflag, fetestexcept, fegetround, fesetround, fegetenv,
+          feholdexcept, fesetenv, feupdateenv] },
+      { module: locale.h, symbols: [localeconv, setlocale] },
+      { module: setjmp.h, symbols: [setjmp, longjmp] },
+      { module: signal.h, symbols: [signal, raise] },
+      { module: inttypes.h, symbols: [imaxabs, imaxdiv, strtoimax, strtoumax,
+          wcstoimax, wcstoumax] },
+      complex.h, errno.h, float.h, iso646.h, limits.h,
+      stdalign.h, stdarg.h, stdatomic.h, stdbit.h,
       stdbool.h, stdckdint.h, stddef.h, stdint.h, stdnoreturn.h, tgmath.h,
       threads.h, uchar.h, wchar.h, wctype.h
     ]

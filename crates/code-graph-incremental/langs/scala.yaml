@@ -4,12 +4,17 @@
 # typing, new, member and this-calls, control flow.
 
 config:
-  link:
-    builtins: [assert, assume, classOf, identity, implicitly, locally, print,
-      printf, println, require, summon, synchronized, valueOf]
   resolve:
     external: [java]
-    stdlib: [scala, javax, jdk]
+    stdlib: [scala, javax, jdk,
+      { module: scala/Predef, implicit: true, symbols: [assert, assume, classOf,
+          identity, implicitly, locally, print, printf, println, require,
+          summon, synchronized, valueOf] },
+      { module: scala/math, symbols: [abs, acos, asin, atan, atan2, cbrt, ceil,
+          cos, cosh, exp, expm1, floor, hypot, log, log10, log1p, max, min,
+          pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh,
+          toDegrees, toRadians, ulp] }
+    ]
     lookup_from:
       - __source_root
 

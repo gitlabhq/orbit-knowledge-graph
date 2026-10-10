@@ -14,11 +14,16 @@ config:
       { module: coroutine, precedence: runtime },
       { module: debug, precedence: runtime },
       { module: io, precedence: runtime },
-      { module: math, precedence: runtime },
+      { module: math, precedence: runtime, symbols: [abs, acos, asin, atan,
+          ceil, cos, deg, exp, floor, fmod, log, max, min, modf, rad,
+          random, randomseed, sin, sqrt, tan, tointeger, type, ult] },
       { module: os, precedence: runtime },
       { module: package, precedence: runtime },
-      { module: string, precedence: runtime },
-      { module: table, precedence: runtime },
+      { module: string, precedence: runtime, symbols: [byte, char, dump, find,
+          format, gmatch, gsub, len, lower, match, pack, packsize, rep,
+          reverse, sub, unpack, upper] },
+      { module: table, precedence: runtime, symbols: [concat, insert, move,
+          pack, remove, sort, unpack] },
       { module: utf8, precedence: runtime }
     ]
     lookup_from:

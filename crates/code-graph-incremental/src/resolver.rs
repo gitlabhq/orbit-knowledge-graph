@@ -1851,9 +1851,12 @@ fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> 
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
-    external
-        .iter()
-        .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
+    external.iter().any(|module| {
+        source_str == module
+            || source_str
+                .strip_prefix(module.as_str())
+                .is_some_and(|suffix| suffix.starts_with(PATH_SEP))
+    })
 }
 
 fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<Loc> {

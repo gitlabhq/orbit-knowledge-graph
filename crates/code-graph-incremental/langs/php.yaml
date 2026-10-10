@@ -32,7 +32,12 @@ config:
       time, trim, uniqid, unserialize, var_dump]
   resolve:
     external: []
-    stdlib: [BcMath, Dom, Random]
+    stdlib: [
+      { module: BcMath, symbols: [Number] },
+      { module: Dom, symbols: [HTMLDocument, XMLDocument] },
+      { module: Random, symbols: [Randomizer, RandomError, BrokenRandomEngineError] },
+      { module: Random/Engine, symbols: [Mt19937, PcgOneseq128XslRr64, Xoshiro256StarStar, Secure] }
+    ]
     lookup_from:
       - __source_root
 

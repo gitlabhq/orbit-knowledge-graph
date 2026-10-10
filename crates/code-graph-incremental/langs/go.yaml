@@ -11,15 +11,26 @@
 #   __def plus an SSA __binding.
 
 config:
-  link:
-    builtins: [
-      append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
-      new, panic, print, println, real, recover, bool, byte, complex64, complex128,
-      float32, float64, int, int8, int16, int32, int64, rune, string, uint,
-      uint8, uint16, uint32, uint64, uintptr
-    ]
-
   resolve:
+    stdlib:
+      - module: builtin
+        implicit: true
+        precedence: runtime
+        symbols: [
+          append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
+          new, panic, print, println, real, recover, bool, byte, complex64, complex128,
+          float32, float64, int, int8, int16, int32, int64, rune, string, uint,
+          uint8, uint16, uint32, uint64, uintptr
+        ]
+      - module: fmt
+        precedence: runtime
+        symbols: [Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln,
+          Fscan, Fscanf, Fscanln, Print, Printf, Println, Scan, Scanf, Scanln,
+          Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
+      - module: errors
+        precedence: runtime
+        symbols: [As, Is, Join, New, Unwrap]
+
     external: [
       archive, bufio, builtin, bytes, cmp, compress, container, context, crypto,
       database, debug, embed, encoding, errors, expvar, flag, fmt, go, hash, html,
