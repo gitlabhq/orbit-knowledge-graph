@@ -1399,7 +1399,7 @@ fn grep_lists_matching_lines_with_their_definitions() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains(
-            "src/utils.py-3-» Function read_file:3-4 ←run\nsrc/utils.py:4:    return open(path).read()\n"
+            "  src/utils.py │ Function read_file:3-4 ←run :4     return open(path).read()\n"
         ),
         "{stdout}"
     );
@@ -1424,7 +1424,7 @@ fn grep_lists_matching_lines_with_their_definitions() {
         (
             "grep",
             "App|read_file|READ_FILE",
-            "src/utils.py-3-» Function read_file:3-4 ←run\nsrc/utils.py:3:def read_file(path):\n",
+            "  src/utils.py │ Function read_file:3-4 ←run :3 def read_file(path):\n",
         ),
         ("grep", "App|missing_symbol", " (App 1, missing_symbol 0)\n"),
         ("context", "src/utils.py:3-4", "3|def read_file(path):"),
