@@ -1,6 +1,6 @@
 ---
-stage: Analytics
-group: Knowledge Graph
+stage: Orbit
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.
 title: Set up GitLab Orbit
@@ -362,7 +362,6 @@ indexing, because both pass long before the first index finishes.
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../indexed-data.md)
-- [Schema reference](../remote/schema.md)
-- [Cookbook](../remote/cookbook.md)
-- [Query language](../remote/queries/_index.md)
+- [What GitLab Orbit indexes](../schema.md)
+- [Use cases](../use-cases.md)
+- [Queries](../queries/_index.md)

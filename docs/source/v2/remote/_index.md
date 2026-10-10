@@ -1,64 +1,13 @@
 ---
-stage: Orbit
-group: Context Systems
-info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab Orbit running on GitLab-hosted infrastructure
-title: GitLab Orbit Remote
+redirect_to: '../_index.md'
+remove_date: '2027-01-10'
 ---
 
-{{< details >}}
+<!-- markdownlint-disable -->
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
-- Status: Beta
+This document was moved to [another location](../_index.md).
 
-{{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-
-{{< /history >}}
-
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
-
-GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a ClickHouse property graph.
-
-- Indexes: Full SDLC + code graph
-- Storage: ClickHouse (managed, no setup required)
-
-[Get started with GitLab Orbit Remote](getting-started.md)
-
-## In this section
-
-| Page | Description |
-|---|---|
-| [Get started](getting-started.md) | Enable GitLab Orbit and run your first query |
-| [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
-| [What GitLab Orbit indexes](../indexed-data.md) | SDLC coverage, language support, indexing scope |
-| [Security](security.md) | Roles required to query, the authorization model, programmatic access, and service accounts |
-| [Schema reference](schema.md) | All 28 node types across 6 domains |
-| [Cookbook](cookbook.md) | Copy-paste queries for common use cases |
-| [Query language](queries/) | Full query DSL reference |
-
-## Access methods
-
-| Method | Description |
-|---|---|
-| [GitLab Duo Agent Platform](access/duo.md) | Natural language questions via the GitLab UI |
-| [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agents |
-| [The GitLab CLI (`glab`)](access/glab.md) | `glab orbit` for scripting and discovery (available in `glab` 1.117 or later) |
-| [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
-
-## Billing
-
-During the beta, GitLab Orbit queries do not consume GitLab Credits.
-
-When GitLab Orbit is generally available, queries consume GitLab Credits. Credit
-rates are published in
-[GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
-before charging begins.
+<!-- This redirect file can be deleted after <2027-01-10>. -->
+<!-- Redirects that point to other docs in the same project expire in three months. -->
+<!-- Redirects that point to docs in a different project or site (for example, link is not relative and starts with `https:`) expire in one year. -->
+<!-- Before deletion, see: https://docs.gitlab.com/development/documentation/redirects -->
