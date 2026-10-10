@@ -4,7 +4,13 @@
 # class-like definitions, calls, locals, control flow.
 
 config:
+  link:
+    builtins: [assert, collectgarbage, dofile, error, getmetatable, ipairs, load,
+      loadfile, next, pairs, pcall, print, rawequal, rawget, rawlen, rawset,
+      require, select, setmetatable, tonumber, tostring, type, warn, xpcall]
   resolve:
+    external: []
+    stdlib: [coroutine, debug, io, math, os, package, string, table, utf8]
     lookup_from:
       - __source_root
 

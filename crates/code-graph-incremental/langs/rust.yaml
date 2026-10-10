@@ -14,6 +14,8 @@ config:
       drop
     ]
   resolve:
+    external: []
+    stdlib: [std, core, alloc, proc_macro, test]
     parse_files:
       - name: "Cargo.toml"
         format: toml

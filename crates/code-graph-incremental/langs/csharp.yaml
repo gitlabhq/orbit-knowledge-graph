@@ -9,7 +9,11 @@
 # - Same-namespace siblings without a using need a namespace scope.
 
 config:
+  link:
+    builtins: []
   resolve:
+    external: []
+    stdlib: [System]
     lookup_from:
       - __source_root
     merge_same_named_types: true

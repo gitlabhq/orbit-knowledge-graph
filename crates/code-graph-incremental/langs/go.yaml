@@ -14,7 +14,18 @@ config:
   link:
     builtins: [
       append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
-      new, panic, print, println, real, recover
+      new, panic, print, println, real, recover, bool, byte, complex64, complex128,
+      float32, float64, int, int8, int16, int32, int64, rune, string, uint,
+      uint8, uint16, uint32, uint64, uintptr
+    ]
+
+  resolve:
+    external: [
+      archive, bufio, builtin, bytes, cmp, compress, container, context, crypto,
+      database, debug, embed, encoding, errors, expvar, flag, fmt, go, hash, html,
+      image, index, io, iter, log, maps, math, mime, net, os, path, plugin,
+      reflect, regexp, runtime, slices, sort, strconv, strings, structs, sync,
+      syscall, testing, text, time, unicode, unique, unsafe, weak
     ]
 
 stages:

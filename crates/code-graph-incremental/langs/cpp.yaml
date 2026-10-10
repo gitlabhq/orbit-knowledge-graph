@@ -12,7 +12,41 @@
 #   Namespace or Concept kind.
 
 config:
+  link:
+    builtins: [
+      abort, abs, acos, asin, atan, atan2, atexit, atof, atoi, atol, atoll,
+      bsearch, calloc, ceil, clearerr, clock, cos, cosh, difftime, div, exit,
+      exp, fabs, fclose, feof, ferror, fflush, fgetc, fgetpos, fgets, floor,
+      fmod, fopen, fprintf, fputc, fputs, fread, free, freopen, fscanf, fseek,
+      fsetpos, ftell, fwrite, getc, getchar, getenv, gmtime, isalnum,
+      isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct,
+      isspace, isupper, isxdigit, labs, ldexp, ldiv, llabs, lldiv, localtime,
+      log, log10, malloc, memchr, memcmp, memcpy, memmove, memset, mktime,
+      modf, perror, pow, printf, putc, putchar, puts, qsort, rand, realloc,
+      remove, rename, rewind, scanf, setbuf, setvbuf, sin, sinh, snprintf,
+      sprintf, sqrt, srand, sscanf, strcat, strchr, strcmp, strcoll, strcpy,
+      strcspn, strerror, strftime, strlen, strncat, strncmp, strncpy, strpbrk,
+      strrchr, strspn, strstr, strtod, strtok, strtol, strtoll, strtoul,
+      strtoull, strxfrm, system, tan, tanh, time, tmpfile, tmpnam, tolower,
+      toupper, ungetc, vfprintf, vprintf, vsnprintf, vsprintf
+    ]
   resolve:
+    external: []
+    stdlib: [
+      algorithm, any, array, atomic, barrier, bit, bitset, cassert, cctype, cerrno,
+      cfenv, cfloat, charconv, chrono, cinttypes, climits, clocale, cmath, codecvt,
+      compare, complex, concepts, condition_variable, coroutine, csetjmp, csignal,
+      cstdarg, cstddef, cstdint, cstdio, cstdlib, cstring, ctime, cuchar, cwchar,
+      cwctype, deque, exception, execution, expected, filesystem, format,
+      forward_list, fstream, functional, future, initializer_list, iomanip, ios,
+      iosfwd, iostream, istream, iterator, latch, limits, list, locale, map,
+      memory, memory_resource, mutex, new, numbers, numeric, optional, ostream,
+      print, queue, random, ranges, ratio, regex, scoped_allocator, semaphore,
+      set, shared_mutex, source_location, span, sstream, stack, stacktrace,
+      stdexcept, stop_token, streambuf, string, string_view, syncstream,
+      system_error, thread, tuple, type_traits, typeindex, typeinfo,
+      unordered_map, unordered_set, utility, valarray, variant, vector, version
+    ]
     lookup_from:
       - __source_root
 

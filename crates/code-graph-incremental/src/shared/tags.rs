@@ -12,6 +12,7 @@ pub struct ReservedTags {
     pub hoisted: u32,
     pub exports: u32,
     pub resolved_source: u32,
+    pub original_source_path: u32,
     pub visible_from: u32,
     pub implicit_self: u32,
 }
@@ -27,6 +28,7 @@ impl ReservedTags {
             hoisted: k("hoisted"),
             exports: k("exports"),
             resolved_source: k("resolved_source"),
+            original_source_path: k("original_source_path"),
             visible_from: k("visible_from"),
             implicit_self: k("implicit_self"),
         }

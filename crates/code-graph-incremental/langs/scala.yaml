@@ -4,7 +4,12 @@
 # typing, new, member and this-calls, control flow.
 
 config:
+  link:
+    builtins: [assert, assume, classOf, identity, implicitly, locally, print,
+      printf, println, require, summon, synchronized, valueOf]
   resolve:
+    external: [java]
+    stdlib: [scala, javax, jdk]
     lookup_from:
       - __source_root
 

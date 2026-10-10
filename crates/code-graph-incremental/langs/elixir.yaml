@@ -5,9 +5,21 @@
 
 config:
   link:
+    builtins: [abs, apply, binary_part, bit_size, byte_size, ceil, div, elem, exit, floor,
+      hd, inspect, is_atom, is_binary, is_boolean, is_float, is_function, is_integer,
+      is_list, is_map, is_nil, is_number, is_pid, is_tuple, length, make_ref,
+      map_size, max, min, node, put_elem, raise, rem, round, self, send, spawn,
+      spawn_link, spawn_monitor, struct, struct!, throw, tl, trunc, tuple_size]
     inline_modules: true
     imports_shadow_locals: false
   resolve:
+    external: []
+    stdlib: [Access, Agent, Application, Atom, Base, Bitwise, Calendar, Code, Date,
+      DateTime, DynamicSupervisor, Enum, Exception, File, Float, Function, GenServer,
+      IO, Integer, Kernel, Keyword, List, Logger, Macro, Map, MapSet, Module,
+      NaiveDateTime, Node, OptionParser, Path, Port, Process, Protocol, Range,
+      Record, Regex, Registry, Stream, String, StringIO, Supervisor, System,
+      Task, Time, Tuple, URI, Version]
     lookup_from:
       - __source_root
 

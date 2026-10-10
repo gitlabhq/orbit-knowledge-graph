@@ -78,8 +78,9 @@ impl Default for LinkConfig {
 
 #[derive(Default)]
 pub struct ResolveConfig {
-    /// Module roots that never resolve to project files (a stdlib list).
+    /// Module roots that take precedence over repository lookup.
     pub external: Vec<String>,
+    pub stdlib: Vec<String>,
     /// Directory-tree marker kinds that import paths are looked up from.
     pub lookup_from: Vec<u16>,
     /// Manifest files parsed into the directory tree before resolve stages run.
@@ -91,6 +92,11 @@ pub struct ResolveConfig {
 
 impl ResolveConfig {
     pub fn merge(&mut self, other: &Self) {
+        for name in &other.stdlib {
+            if !self.stdlib.contains(name) {
+                self.stdlib.push(name.clone());
+            }
+        }
         for e in &other.external {
             if !self.external.contains(e) {
                 self.external.push(e.clone());
@@ -132,6 +138,8 @@ struct LinkSection {
 struct ResolveSettingsSection {
     #[serde(default)]
     external: Vec<String>,
+    #[serde(default)]
+    stdlib: Vec<String>,
     #[serde(default)]
     lookup_from: Vec<String>,
     #[serde(default)]
@@ -186,6 +194,7 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
     };
     let resolve = ResolveConfig {
         external: r.external.clone(),
+        stdlib: r.stdlib.clone(),
         lookup_from: r
             .lookup_from
             .iter()

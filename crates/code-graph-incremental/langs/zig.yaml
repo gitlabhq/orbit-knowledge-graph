@@ -4,7 +4,19 @@
 # initializer calls, control flow.
 
 config:
+  link:
+    builtins: ['@as', '@alignCast', '@alignOf', '@bitCast', '@bitOffsetOf',
+      '@bitSizeOf', '@byteSwap', '@call', '@cDefine', '@cImport', '@cInclude',
+      '@cUndef', '@clz', '@compileError', '@compileLog', '@ctz', '@embedFile',
+      '@enumFromInt', '@errorFromInt', '@errorName', '@errorReturnTrace',
+      '@field', '@fieldParentPtr', '@floatCast', '@floatFromInt', '@hasDecl',
+      '@hasField', '@import', '@inComptime', '@intCast', '@intFromBool',
+      '@intFromEnum', '@intFromError', '@intFromFloat', '@intFromPtr', '@max',
+      '@memcpy', '@memset', '@min', '@offsetOf', '@panic', '@popCount',
+      '@ptrCast', '@ptrFromInt', '@sizeOf', '@src', '@tagName', '@This',
+      '@trap', '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector']
   resolve:
+    external: [std, builtin]
     lookup_from:
       - __source_root
 

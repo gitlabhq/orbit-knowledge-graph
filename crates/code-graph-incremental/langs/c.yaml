@@ -8,7 +8,33 @@
 #   include receives unresolved calls.
 
 config:
+  link:
+    builtins: [
+      abort, abs, acos, asin, atan, atan2, atexit, atof, atoi, atol, atoll,
+      bsearch, calloc, ceil, clearerr, clock, cos, cosh, difftime, div, exit,
+      exp, fabs, fclose, feof, ferror, fflush, fgetc, fgetpos, fgets, floor,
+      fmod, fopen, fprintf, fputc, fputs, fread, free, freopen, fscanf, fseek,
+      fsetpos, ftell, fwrite, getc, getchar, getenv, gets, gmtime, isalnum,
+      isalpha, isblank, iscntrl, isdigit, isgraph, islower, isprint, ispunct,
+      isspace, isupper, isxdigit, labs, ldexp, ldiv, llabs, lldiv, localtime,
+      log, log10, malloc, memchr, memcmp, memcpy, memmove, memset, mktime,
+      modf, perror, pow, printf, putc, putchar, puts, qsort, rand, realloc,
+      remove, rename, rewind, scanf, setbuf, setvbuf, sin, sinh, snprintf,
+      sprintf, sqrt, srand, sscanf, strcat, strchr, strcmp, strcoll, strcpy,
+      strcspn, strerror, strftime, strlen, strncat, strncmp, strncpy, strpbrk,
+      strrchr, strspn, strstr, strtod, strtok, strtol, strtoll, strtoul,
+      strtoull, strxfrm, system, tan, tanh, time, tmpfile, tmpnam, tolower,
+      toupper, ungetc, vfprintf, vprintf, vsnprintf, vsprintf
+    ]
   resolve:
+    external: []
+    stdlib: [
+      assert.h, complex.h, ctype.h, errno.h, fenv.h, float.h, inttypes.h, iso646.h,
+      limits.h, locale.h, math.h, setjmp.h, signal.h, stdalign.h, stdarg.h,
+      stdatomic.h, stdbit.h, stdbool.h, stdckdint.h, stddef.h, stdint.h, stdio.h,
+      stdlib.h, stdnoreturn.h, string.h, tgmath.h, threads.h, time.h, uchar.h,
+      wchar.h, wctype.h
+    ]
     lookup_from:
       - __source_root
 

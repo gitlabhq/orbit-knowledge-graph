@@ -16,7 +16,23 @@
 #   file; functions and constants usually live in helper files.
 
 config:
+  link:
+    builtins: [abs, array_filter, array_keys, array_map, array_merge, array_pop,
+      array_push, array_reduce, array_reverse, array_search, array_shift,
+      array_slice, array_unique, array_values, boolval, call_user_func,
+      call_user_func_array, ceil, class_exists, count, date, defined, dirname,
+      explode, extension_loaded, file_exists, file_get_contents, file_put_contents,
+      floatval, floor, fopen, fclose, fread, fwrite, function_exists, get_class,
+      gettype, hash, htmlspecialchars, implode, in_array, intval, is_array,
+      is_bool, is_callable, is_float, is_int, is_null, is_numeric, is_object,
+      is_string, json_decode, json_encode, ltrim, max, method_exists, microtime,
+      min, number_format, preg_match, preg_replace, print_r, printf, round,
+      rtrim, serialize, sort, sprintf, str_contains, str_ends_with, str_replace,
+      str_starts_with, strlen, strpos, strtolower, strtoupper, strval, substr,
+      time, trim, uniqid, unserialize, var_dump]
   resolve:
+    external: []
+    stdlib: [BcMath, Dom, Random]
     lookup_from:
       - __source_root
 

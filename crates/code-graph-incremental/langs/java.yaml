@@ -13,7 +13,18 @@
 #   only files and index files.
 
 config:
+  link:
+    builtins: [
+      AssertionError, Boolean, Byte, Character, Class, ClassCastException,
+      ClassNotFoundException, Double, Enum, Error, Exception, Float,
+      IllegalArgumentException, IllegalStateException, IndexOutOfBoundsException,
+      Integer, Long, NullPointerException, Number, Object, RuntimeException,
+      Short, String, StringBuffer, StringBuilder, Thread, Throwable,
+      UnsupportedOperationException
+    ]
   resolve:
+    external: [java]
+    stdlib: [javax, jdk]
     lookup_from:
       - __source_root
 

@@ -15,9 +15,18 @@ config:
     builtins: [
       println, print, readLine, require, requireNotNull, check, checkNotNull, error,
       TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
-      mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
+      mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap, assert, arrayOfNulls,
+      booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,
+      intArrayOf, longArrayOf, shortArrayOf, sequenceOf, emptySequence,
+      setOfNotNull, listOfNotNull, linkedMapOf, linkedSetOf, hashMapOf, hashSetOf,
+      buildList, buildMap, buildSet, readln, readlnOrNull, runCatching,
+      synchronized, Pair, Triple, Result, Unit, Any, String, Boolean, Byte,
+      Char, Double, Float, Int, Long, Short, Array, BooleanArray, ByteArray,
+      CharArray, DoubleArray, FloatArray, IntArray, LongArray, ShortArray
     ]
   resolve:
+    external: [kotlin, java]
+    stdlib: [javax, jdk]
     lookup_from:
       - __source_root
 

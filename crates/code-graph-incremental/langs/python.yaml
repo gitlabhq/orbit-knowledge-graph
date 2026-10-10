@@ -10,10 +10,26 @@ config:
       hasattr, hash, help, hex, id, input, int, isinstance, issubclass, iter, len,
       list, locals, map, max, memoryview, min, next, object, oct, open, ord, pow,
       print, property, range, repr, reversed, round, set, setattr, slice, sorted,
-      staticmethod, str, sum, super, tuple, type, vars, zip
+      staticmethod, str, sum, super, tuple, type, vars, zip,
+      BaseException, BaseExceptionGroup, Exception, ExceptionGroup, ArithmeticError,
+      AssertionError, AttributeError, BlockingIOError, BrokenPipeError, BufferError,
+      ChildProcessError, ConnectionAbortedError, ConnectionError,
+      ConnectionRefusedError, ConnectionResetError, EOFError, FileExistsError,
+      FileNotFoundError, FloatingPointError, GeneratorExit, ImportError,
+      IndentationError, IndexError, InterruptedError, IsADirectoryError, KeyError,
+      KeyboardInterrupt, LookupError, MemoryError, ModuleNotFoundError, NameError,
+      NotADirectoryError, NotImplementedError, OSError, OverflowError,
+      PermissionError, ProcessLookupError, RecursionError, ReferenceError,
+      RuntimeError, StopAsyncIteration, StopIteration, SyntaxError, SystemError,
+      SystemExit, TabError, TimeoutError, TypeError, UnboundLocalError,
+      UnicodeDecodeError, UnicodeEncodeError, UnicodeError, UnicodeTranslateError,
+      ValueError, ZeroDivisionError, Warning, UserWarning, DeprecationWarning,
+      PendingDeprecationWarning, SyntaxWarning, RuntimeWarning, FutureWarning,
+      ImportWarning, UnicodeWarning, BytesWarning, ResourceWarning, EncodingWarning
     ]
   resolve:
-    external: [
+    external: [builtins, sys]
+    stdlib: [
       abc, argparse, ast, asyncio, base64, bisect, builtins, calendar, collections,
       concurrent, configparser, contextlib, contextvars, copy, csv, ctypes, dataclasses,
       datetime, decimal, difflib, email, enum, errno, fnmatch, fractions, ftplib,

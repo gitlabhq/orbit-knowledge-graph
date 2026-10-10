@@ -1,0 +1,29 @@
+name: C standard functions do not hide repository definitions
+fixtures:
+  - path: local.h
+    content: |
+      void printf(const char *text) {}
+  - path: main.c
+    content: |
+      #include "local.h"
+      void run() { printf("local"); }
+  - path: external.c
+    content: |
+      #include <stdio.h>
+      void external_call() { printf("standard"); puts("standard"); }
+tests:
+  - name: Included project function wins over standard function spelling
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.name AS name, target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { name: printf, file: local.h } }
+  - name: Standard calls do not become speculative header calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'external_call'
+      RETURN target.import_path
+    assert:
+      - { empty: true }

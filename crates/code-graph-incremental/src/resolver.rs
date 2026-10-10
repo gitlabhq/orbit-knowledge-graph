@@ -208,7 +208,7 @@ impl Resolver {
                 &env.lang,
                 &self.file_index,
                 lookup_prefixes,
-                &env.resolve.config.external,
+                &env.resolve.config,
                 &discovery_files,
                 aliases,
             );
@@ -335,7 +335,7 @@ impl Resolver {
             lang,
             &self.file_index,
             lookup_prefixes,
-            &config.external,
+            config,
             dirty_fis,
             aliases,
         );
@@ -781,11 +781,27 @@ fn gather_imports_for(
     lang: &Lang,
     file_index: &FileIndex,
     lookup_prefixes: &[String],
-    external: &[String],
+    config: &ResolveConfig,
     dirty_fis: &FxHashSet<u32>,
     aliases: &[(String, String)],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let resolved_tag_key = ReservedTags::new(lang).resolved_source;
+    let tags = ReservedTags::new(lang);
+    let resolved_tag_key = tags.resolved_source;
+    let root_relative = lang.syms.lookup("source_root_rel");
+    let declared_roots: FxHashSet<_> = trees
+        .iter()
+        .filter_map(|tree| {
+            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+            tree.label
+                .strip_suffix(relative)
+                .map(|root| root.trim_end_matches(PATH_SEP))
+        })
+        .collect();
+    let stdlib_prefixes: Vec<_> = lookup_prefixes
+        .iter()
+        .filter(|prefix| declared_roots.contains(prefix.as_str()))
+        .cloned()
+        .collect();
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -796,11 +812,14 @@ fn gather_imports_for(
                     if cur.kind() != C::Import && cur.kind() != C::ImportType {
                         return;
                     }
-                    let Some(source_sym) = cur.child_sym(C::SourcePath) else {
+                    let Some(source_sym) = cur
+                        .tag(tags.original_source_path)
+                        .or_else(|| cur.child_sym(C::SourcePath))
+                    else {
                         return;
                     };
                     let source_str = lang.syms.resolve(source_sym);
-                    if is_external(source_str, external) {
+                    if is_external(source_str, &config.external) {
                         return;
                     }
                     let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
@@ -809,8 +828,17 @@ fn gather_imports_for(
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let target_path = apply_aliases(raw_path, aliases);
                     let node_idx = cur.index();
-                    let mut direct = resolve_glob(&target_path, file_index, lookup_prefixes);
+                    let stdlib = is_external(source_str, &config.stdlib);
+                    let prefixes = if stdlib {
+                        &stdlib_prefixes
+                    } else {
+                        lookup_prefixes
+                    };
+                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
+                    if direct.is_empty() && stdlib {
+                        return;
+                    }
                     let candidates = match direct.is_empty() {
                         false => Either::Left(
                             direct
