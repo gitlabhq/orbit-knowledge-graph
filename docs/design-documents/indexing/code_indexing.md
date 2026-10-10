@@ -246,6 +246,22 @@ that append or replace nodes convert one file at a time to mutable storage and b
 Incremental indexing builds new trees for changed files and retains compact trees
 for unchanged files. Snapshot loading builds compact storage directly.
 
+An optional `Env.tree_store` spills linked trees and local edges into an anonymous
+scratch file. Single-node files without local edges stay resident. Resolution tasks
+acquire trees through a fallible session and release their pins when the task ends.
+Root tags and resolved symbol updates stay in file metadata and apply on acquisition.
+Storage failures abort the run; file deadlines remain skipped-file outcomes, while
+the total deadline aborts the run. Deadline checks surround synchronous I/O and
+decoding; they cannot interrupt an active system call.
+
+This experimental path still retains resolver indexes and the global edge array.
+The public state tree vector holds file placeholders while disk storage is active;
+export and snapshot saving acquire the actual trees. Reindexing currently restores
+all trees before applying edits. Display appends updated records, and old records
+remain until the store drops. Acquisition counters measure node and edge capacity,
+not tags, decoding buffers, or total RSS. Task pins have no hard byte limit.
+The integration runner enables this path with `GKG_TEST_TREE_DISK=1`.
+
 The incremental engine distinguishes an undefined name from a local value whose
 target is unknown. Unknown locals block fallback to same-named imports or functions.
 Rust identifier initializers use ordinary bindings. Unit struct declarations have

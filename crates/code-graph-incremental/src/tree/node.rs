@@ -10,7 +10,7 @@ pub struct Tag {
     pub val: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Node {
     pub(crate) kind: u16,
     pub(crate) field: u16,

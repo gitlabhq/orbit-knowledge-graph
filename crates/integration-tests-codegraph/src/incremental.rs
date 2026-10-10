@@ -51,7 +51,11 @@ pub fn run_incremental_suite(yaml: &str) {
         .collect();
     let lang_id = detect_lang(&suite, &paths);
     let ontology = Arc::new(Ontology::load_embedded().expect("embedded ontology"));
-    let env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
+    let mut env = Env::with_limits(lang_id, Limits::UNLIMITED).expect("rules compile");
+    if std::env::var_os("GKG_TEST_TREE_DISK").is_some() {
+        env.tree_store =
+            Some(code_graph_incremental::tree::TreeStore::new().expect("scratch store"));
+    }
 
     let inventory = inventory::walk(repo.path())
         .expect("walk fixtures")
@@ -65,7 +69,9 @@ pub fn run_incremental_suite(yaml: &str) {
         if step.snapshot {
             let snapshot = repo.path().join("graph.bin");
             state.save(&env, &snapshot).expect("save snapshot");
+            let store = env.tree_store.clone();
             (env, state) = State::load(&snapshot, lang_id).expect("load snapshot");
+            env.tree_store = store;
             std::fs::remove_file(&snapshot).ok();
         }
         for removed in &step.remove {

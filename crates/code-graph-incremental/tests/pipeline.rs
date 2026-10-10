@@ -161,7 +161,7 @@ impl ItemPhase<u32> for AddOne {
     fn name(&self) -> Cow<'static, str> {
         "add_one".into()
     }
-    fn run(&self, _: &Env, run: &Sentinel, n: u32) -> Result<u32, Killed> {
+    fn run(&self, _: &Env, run: &Sentinel, n: u32) -> Result<u32, Error> {
         run.check()?;
         Ok(n + 1)
     }
@@ -177,11 +177,47 @@ fn item_phases_pipe_into_one_named_pass() {
     let killed = chain
         .run(&env, &Sentinel::new("run", "", 0), 1)
         .unwrap_err();
-    assert_eq!(killed.label, "run");
+    assert!(matches!(killed, Error::Killed(killed) if killed.label == "run"));
 }
 
 #[test]
 fn limits_load_from_the_shipped_config() {
     let env = Env::for_lang(SupportLang::Python).unwrap();
     assert!(env.limits.total_ms >= env.limits.file_rewrite_ms);
+}
+
+#[test]
+fn disk_backed_resolution_reports_file_deadlines_without_aborting_the_run() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(repo.path().join("main.py"), "def run():\n    unknown()\n").unwrap();
+    let mut env = Env::with_limits(
+        SupportLang::Python,
+        Limits {
+            file_resolve_ms: 0,
+            ..Limits::UNLIMITED
+        },
+    )
+    .unwrap();
+    env.tree_store = Some(code_graph_incremental::tree::TreeStore::new().unwrap());
+    let entries = code_graph_incremental::inventory::walk(repo.path())
+        .unwrap()
+        .into_inner();
+    let graph =
+        code_graph_incremental::templates::index(Context::new(&env), repo.path(), entries).unwrap();
+    assert!(
+        graph
+            .context()
+            .report
+            .skipped
+            .iter()
+            .any(|killed| killed.label == "resolve" && killed.path == "main.py")
+    );
+    assert_eq!(
+        env.tree_store
+            .as_ref()
+            .unwrap()
+            .counters()
+            .pinned_node_edge_bytes,
+        0
+    );
 }

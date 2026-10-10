@@ -6,7 +6,7 @@ use crate::tree::{Node, Tree};
 #[derive(Clone)]
 pub struct Compact<N = Node>(pub(crate) Vec<Entry<N>>);
 
-#[derive(Clone)]
+#[derive(Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub(crate) struct Entry<N> {
     pub(crate) node: N,
     // A self-parent marks a removed slot without changing other node IDs.

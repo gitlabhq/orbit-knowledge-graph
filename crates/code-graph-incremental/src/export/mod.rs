@@ -16,7 +16,7 @@ use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::pipeline::State;
-use crate::tree::{CallResolution, Compact};
+use crate::tree::{CallResolution, Compact, TreeRead, TreeRepository};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
@@ -104,7 +104,7 @@ impl<'a> Envelope<'a> {
 /// with each file's root standing in for its `__file` node so ancestry
 /// continues from a definition to its file to its directories.
 struct Forest<'a> {
-    trees: &'a [Tree],
+    trees: TreeRepository<'a>,
     project: Tree,
     /// For each file tree, the project-tree node its root stands in for.
     stand_in: Vec<Option<u32>>,
@@ -113,8 +113,8 @@ struct Forest<'a> {
 const PROJECT: u32 = u32::MAX;
 
 impl<'a> Forest<'a> {
-    fn new(trees: &'a [Tree], lang: &Lang) -> Self {
-        let labels: Vec<&str> = trees.iter().map(|t| t.label.as_str()).collect();
+    fn new(trees: TreeRepository<'a>, lang: &Lang) -> Self {
+        let labels: Vec<&str> = (0..trees.len()).map(|fi| trees.label(fi)).collect();
         let project = ProjectTree::directory_tree(lang, &labels);
         let path = Tf::TreePath("/".into());
         let mut by_path: FxHashMap<&str, u32> = FxHashMap::default();
@@ -132,24 +132,21 @@ impl<'a> Forest<'a> {
         }
     }
 
-    fn tree(&self, tree: u32) -> &Tree {
+    fn tree(&self, tree: u32) -> Result<TreeRead<'_>, Error> {
         if tree == PROJECT {
-            &self.project
+            Ok(TreeRead::Resident(&self.project))
         } else {
-            &self.trees[tree as usize]
+            self.trees.acquire(tree as usize)
         }
     }
 
-    fn cursor(&self, tree: u32, node: u32) -> Cursor<'_> {
-        self.tree(tree).cursor(node)
-    }
-
     /// Ancestors of `(tree, node)`, crossing from a file root into the project tree.
-    fn ancestors(&self, tree: u32, node: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
-        let own = self
-            .cursor(tree, node)
-            .ancestors()
-            .map(move |a| (tree, a.index()));
+    fn ancestors<'b>(
+        &'b self,
+        tree: u32,
+        node: Cursor<'b>,
+    ) -> impl Iterator<Item = (u32, u32)> + 'b {
+        let own = node.ancestors().map(move |a| (tree, a.index()));
         let above = if tree == PROJECT {
             None
         } else {
@@ -157,17 +154,18 @@ impl<'a> Forest<'a> {
         };
         let project = above
             .into_iter()
-            .flat_map(move |file| self.cursor(PROJECT, file).ancestors())
+            .flat_map(move |file| self.project.cursor(file).ancestors())
             .map(|a| (PROJECT, a.index()));
         own.chain(project)
     }
 
-    fn all(&self) -> impl Iterator<Item = (u32, &Tree)> {
-        self.trees
-            .iter()
-            .enumerate()
-            .map(|(i, t)| (i as u32, t))
-            .chain(std::iter::once((PROJECT, &self.project)))
+    fn all(&self) -> impl Iterator<Item = Result<(u32, TreeRead<'_>), Error>> {
+        (0..self.trees.len())
+            .map(|fi| Ok((fi as u32, self.trees.acquire(fi)?)))
+            .chain(std::iter::once(Ok((
+                PROJECT,
+                TreeRead::Resident(&self.project),
+            ))))
     }
 }
 
@@ -249,16 +247,27 @@ pub fn export(
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     let plan = ExportPlan::load(ontology, lang)?;
     envelope.check(&plan)?;
-    let forest = Forest::new(&state.trees, lang);
+    let forest = Forest::new(state.repository(), lang);
     let mut ids: FxHashMap<(u32, u32), (i64, usize)> = FxHashMap::default();
-    let mut tables = Vec::new();
-    for (index, entity) in plan.entities.iter().enumerate() {
-        let mut b = BatchBuilder::new(&entity.specs, 0)?;
-        write_entity(
-            &mut b, &plan, entity, index, &forest, lang, envelope, &mut ids,
-        )?;
-        tables.push((entity.table.clone(), b.finish()?));
+    let mut builders = plan
+        .entities
+        .iter()
+        .map(|entity| BatchBuilder::new(&entity.specs, 0))
+        .collect::<Result<Vec<_>, _>>()?;
+    for entry in forest.all() {
+        let (ti, tree) = entry?;
+        for (index, (entity, builder)) in plan.entities.iter().zip(&mut builders).enumerate() {
+            write_entity(
+                builder, &plan, entity, index, ti, &tree, lang, envelope, &mut ids,
+            )?;
+        }
     }
+    let mut tables = plan
+        .entities
+        .iter()
+        .zip(builders)
+        .map(|(entity, builder)| Ok((entity.table.clone(), builder.finish()?)))
+        .collect::<Result<Vec<_>, Error>>()?;
     tables.push((
         plan.edge_table.clone(),
         write_edges(&plan, state, &forest, &ids)?,
@@ -272,69 +281,68 @@ fn write_entity(
     plan: &ExportPlan,
     entity: &EntityPlan,
     index: usize,
-    forest: &Forest,
+    ti: u32,
+    tree: &Tree,
     lang: &Lang,
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize)>,
 ) -> Result<(), Error> {
-    for (ti, tree) in forest.all() {
-        let root = tree.root();
-        let nodes = std::iter::once(root)
-            .chain(root.descendants())
-            .filter(|c| entity.source_kinds.contains(&c.kind()))
-            .filter(|c| {
-                entity
-                    .exclude_parent
-                    .is_none_or(|ep| !c.parent().is_some_and(|p| p.kind() == ep))
-            });
-        for node in nodes {
-            let mut expansions: Vec<Cursor> = match entity.expand {
-                Some(kind) => node
-                    .children()
-                    .filter(|ch| ch.kind() == kind && ch.sym() != 0)
-                    .collect(),
-                None => Vec::new(),
+    let root = tree.root();
+    let nodes = std::iter::once(root)
+        .chain(root.descendants())
+        .filter(|c| entity.source_kinds.contains(&c.kind()))
+        .filter(|c| {
+            entity
+                .exclude_parent
+                .is_none_or(|ep| !c.parent().is_some_and(|p| p.kind() == ep))
+        });
+    for node in nodes {
+        let mut expansions: Vec<Cursor> = match entity.expand {
+            Some(kind) => node
+                .children()
+                .filter(|ch| ch.kind() == kind && ch.sym() != 0)
+                .collect(),
+            None => Vec::new(),
+        };
+        if expansions.is_empty() {
+            expansions.push(node);
+        }
+        for expanded in expansions {
+            let row = Row {
+                tree,
+                node,
+                expanded,
             };
-            if expansions.is_empty() {
-                expansions.push(node);
-            }
-            for expanded in expansions {
-                let row = Row {
-                    tree,
-                    node,
-                    expanded,
+            let parts: Vec<String> = entity
+                .id_parts
+                .iter()
+                .map(|part| match part {
+                    IdPart::Span => row.span(),
+                    IdPart::Column(i) => row.value(&entity.columns[*i], lang).id_part(),
+                })
+                .collect();
+            let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+            let id = envelope.id(plan, &entity.id_seed, &parts);
+            for column in &plan.header {
+                let value = match &column.source {
+                    HeaderSource::RowId => Scalar::Int(id),
+                    HeaderSource::Envelope(name) => envelope
+                        .get(name)
+                        .expect("Envelope::check ran before any row was written"),
+                    HeaderSource::Const(v) => Scalar::Str(v),
                 };
-                let parts: Vec<String> = entity
-                    .id_parts
-                    .iter()
-                    .map(|part| match part {
-                        IdPart::Span => row.span(),
-                        IdPart::Column(i) => row.value(&entity.columns[*i], lang).id_part(),
-                    })
-                    .collect();
-                let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
-                let id = envelope.id(plan, &entity.id_seed, &parts);
-                for column in &plan.header {
-                    let value = match &column.source {
-                        HeaderSource::RowId => Scalar::Int(id),
-                        HeaderSource::Envelope(name) => envelope
-                            .get(name)
-                            .expect("Envelope::check ran before any row was written"),
-                        HeaderSource::Const(v) => Scalar::Str(v),
-                    };
-                    match value {
-                        Scalar::Int(n) => b.col(&column.name)?.push_int(n)?,
-                        Scalar::Str(s) => b.col(&column.name)?.push_str(s)?,
-                    }
+                match value {
+                    Scalar::Int(n) => b.col(&column.name)?.push_int(n)?,
+                    Scalar::Str(s) => b.col(&column.name)?.push_str(s)?,
                 }
-                for column in &entity.columns {
-                    match row.value(column, lang) {
-                        Value::Int(n) => b.col(&column.name)?.push_int(n)?,
-                        Value::Str(s) => b.col(&column.name)?.push_str(s)?,
-                    }
-                }
-                ids.insert((ti, expanded.index()), (id, index));
             }
+            for column in &entity.columns {
+                match row.value(column, lang) {
+                    Value::Int(n) => b.col(&column.name)?.push_int(n)?,
+                    Value::Str(s) => b.col(&column.name)?.push_str(s)?,
+                }
+            }
+            ids.insert((ti, expanded.index()), (id, index));
         }
     }
     Ok(())
@@ -353,21 +361,41 @@ fn write_edges(
     ids: &FxHashMap<(u32, u32), (i64, usize)>,
 ) -> Result<RecordBatch, Error> {
     let entity_name = |index: usize| plan.entities[index].name.as_str();
-    let mut rows: Vec<EdgeRow> = Vec::new();
+    let mut builder = BatchBuilder::new(&plan.edge_specs, 0)?;
+    let mut write_row = |row: EdgeRow<'_>| -> Result<(), Error> {
+        for column in &plan.edge_columns {
+            match &column.source {
+                EdgeSource::SourceId => builder.col(&column.name)?.push_int(row.source.0)?,
+                EdgeSource::SourceEntity => builder.col(&column.name)?.push_str(row.source.1)?,
+                EdgeSource::Kind => builder.col(&column.name)?.push_str(row.kind)?,
+                EdgeSource::TargetId => builder.col(&column.name)?.push_int(row.target.0)?,
+                EdgeSource::TargetEntity => builder.col(&column.name)?.push_str(row.target.1)?,
+                EdgeSource::Const(v) => builder.col(&column.name)?.push_str(v)?,
+            }
+        }
+        Ok(())
+    };
 
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
-    for (&(tree, node), &(id, entity)) in located {
-        for rule in plan.containment.iter().filter(|c| c.to == entity) {
-            let enclosing = forest
-                .ancestors(tree, node)
-                .find_map(|loc| ids.get(&loc).filter(|(_, e)| *e == rule.from));
-            if let Some(&(from_id, _)) = enclosing {
-                rows.push(EdgeRow {
-                    source: (from_id, entity_name(rule.from)),
-                    kind: &rule.kind,
-                    target: (id, entity_name(entity)),
-                });
+    let mut located = located.into_iter().peekable();
+    while let Some(&(&(tree, _), _)) = located.peek() {
+        let acquired = forest.tree(tree)?;
+        while located.peek().is_some_and(|entry| entry.0.0 == tree) {
+            let Some((&(_, node), &(id, entity))) = located.next() else {
+                break;
+            };
+            for rule in plan.containment.iter().filter(|c| c.to == entity) {
+                let enclosing = forest
+                    .ancestors(tree, acquired.cursor(node))
+                    .find_map(|loc| ids.get(&loc).filter(|(_, e)| *e == rule.from));
+                if let Some(&(from_id, _)) = enclosing {
+                    write_row(EdgeRow {
+                        source: (from_id, entity_name(rule.from)),
+                        kind: &rule.kind,
+                        target: (id, entity_name(entity)),
+                    })?;
+                }
             }
         }
     }
@@ -394,28 +422,14 @@ fn write_edges(
         if e.from_tree != e.to_tree && !seen_cross_file.insert((from, to, kind)) {
             continue;
         }
-        rows.push(EdgeRow {
+        write_row(EdgeRow {
             source: (from, entity_name(from_entity)),
             kind,
             target: (to, entity_name(to_entity)),
-        });
+        })?;
     }
 
-    Ok(
-        BatchBuilder::new(&plan.edge_specs, rows.len())?.build(&rows, |row, b| {
-            for column in &plan.edge_columns {
-                match &column.source {
-                    EdgeSource::SourceId => b.col(&column.name)?.push_int(row.source.0)?,
-                    EdgeSource::SourceEntity => b.col(&column.name)?.push_str(row.source.1)?,
-                    EdgeSource::Kind => b.col(&column.name)?.push_str(row.kind)?,
-                    EdgeSource::TargetId => b.col(&column.name)?.push_int(row.target.0)?,
-                    EdgeSource::TargetEntity => b.col(&column.name)?.push_str(row.target.1)?,
-                    EdgeSource::Const(v) => b.col(&column.name)?.push_str(v)?,
-                }
-            }
-            Ok(())
-        })?,
-    )
+    Ok(builder.finish()?)
 }
 
 #[cfg(test)]

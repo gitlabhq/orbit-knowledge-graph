@@ -12,7 +12,7 @@ use crate::file_tree::{ProjectTree, WalkResult};
 use crate::intern::{Interner, Lang};
 use crate::resolver::{ImportReq, Loc, Resolver};
 use crate::sentinel::Limits;
-use crate::tree::{Compact, CompactNode, Edge, Node, Tag, Tree};
+use crate::tree::{Compact, CompactNode, Edge, FileRecord, Node, Tag, Tree, TreeRepository};
 use crate::treesitter::SupportLang;
 
 pub struct SourceFile {
@@ -32,9 +32,26 @@ pub struct State {
     pub resolver: Resolver,
     /// Manifest files (`parse_files`) the resolver reads for module roots.
     pub configs: Vec<SourceFile>,
+    pub(crate) stored: Option<Vec<FileRecord>>,
 }
 
 impl State {
+    pub(crate) fn repository(&self) -> TreeRepository<'_> {
+        match &self.stored {
+            Some(files) => TreeRepository::Stored(files, None),
+            None => TreeRepository::Resident(&self.trees),
+        }
+    }
+
+    pub(crate) fn materialize(&mut self, run: &crate::Sentinel) -> Result<(), crate::Error> {
+        if let Some(files) = self.stored.take() {
+            self.trees = files
+                .iter()
+                .map(|file| Ok(file.acquire(&[run])?.into_parts().0))
+                .collect::<Result<_, crate::Error>>()?;
+        }
+        Ok(())
+    }
     pub(crate) fn project_tree(&self, env: &Env) -> WalkResult {
         let paths: Vec<_> = self
             .trees
@@ -57,6 +74,7 @@ impl State {
             edges: Vec::new(),
             resolver: Resolver::new(&env.lang),
             configs: Vec::new(),
+            stored: None,
         }
     }
 }
@@ -323,8 +341,9 @@ impl State {
         let mut enc = zstd::Encoder::new(std::fs::File::create(path)?, 3)?;
         enc.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
         write_frame(&mut enc, &header)?;
-        for tree in &self.trees {
-            write_frame(&mut enc, &TreeSnapshot::from(tree))?;
+        for fi in 0..self.trees.len() {
+            let tree = self.repository().acquire(fi).map_err(io::Error::other)?;
+            write_frame(&mut enc, &TreeSnapshot::from(&*tree))?;
         }
         enc.finish()?;
         Ok(())
@@ -361,11 +380,17 @@ impl State {
             edges: header.edges,
             resolver: Resolver::from_snapshot(header.resolver, &env.lang),
             configs: header.configs.into_iter().map(Into::into).collect(),
+            stored: None,
         };
         let walk = state.project_tree(&env);
         state
             .resolver
-            .rebuild_file_index(&state.trees, &env, &walk.entrypoints);
+            .rebuild_file_index(
+                crate::tree::TreeRepository::Resident(&state.trees),
+                &env,
+                &walk.entrypoints,
+            )
+            .map_err(io::Error::other)?;
         Ok((env, state))
     }
 }

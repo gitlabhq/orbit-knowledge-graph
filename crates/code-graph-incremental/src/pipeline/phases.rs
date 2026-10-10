@@ -21,7 +21,7 @@ use crate::export::{self, Envelope};
 use crate::inventory::{FileFault, FileReason};
 use crate::linker;
 use crate::pattern::{self, EdgeCtx, EdgeIndex};
-use crate::sentinel::{Killed, Sentinel};
+use crate::sentinel::Sentinel;
 use crate::tree::{Edge, Storage, Tag, Tree};
 use crate::treesitter::{self, SupportLang};
 
@@ -123,6 +123,7 @@ impl Phase<ReindexInput> for Remap {
             changes,
         } = input;
         let old_labels: Vec<String> = state.trees.iter().map(|t| t.label.clone()).collect();
+        state.materialize(&context.run)?;
         let dirty_labels: FxHashSet<&str> = changes
             .removed
             .iter()
@@ -241,7 +242,8 @@ where
         for outcome in outcomes {
             match outcome {
                 Ok(v) => items.push(v),
-                Err(k) => context.skip(k),
+                Err(Error::Killed(k)) => context.skip(k),
+                Err(error) => return Err(error),
             }
         }
         Ok(Workset {
@@ -287,9 +289,14 @@ impl ItemPhase<SourceFile> for Parse {
         "parse".into()
     }
 
-    fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Killed> {
+    fn run(&self, env: &Env, _run: &Sentinel, file: SourceFile) -> Result<Parsed, Error> {
         let grammar = SupportLang::from_path(&file.path).unwrap_or(env.lang_id);
-        treesitter::parse(&file.content, grammar, &env.lang, &file.path).map(Parsed)
+        Ok(Parsed(treesitter::parse(
+            &file.content,
+            grammar,
+            &env.lang,
+            &file.path,
+        )?))
     }
 }
 
@@ -303,12 +310,7 @@ impl ItemPhase<Parsed> for Rewrite {
         "rewrite".into()
     }
 
-    fn run(
-        &self,
-        env: &Env,
-        run: &Sentinel,
-        Parsed(mut tree): Parsed,
-    ) -> Result<Rewritten, Killed> {
+    fn run(&self, env: &Env, run: &Sentinel, Parsed(mut tree): Parsed) -> Result<Rewritten, Error> {
         let budget = Sentinel::new("rewrite", &tree.label, env.limits.file_rewrite_ms);
         for stage in &env.rules_for(&tree.label).rewrite_stages {
             pattern::apply_rewrites(&mut tree, &env.lang, stage, &[run, &budget])?;
@@ -333,7 +335,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
         env: &Env,
         _run: &Sentinel,
         Rewritten(mut tree): Rewritten,
-    ) -> Result<Canonical, Killed> {
+    ) -> Result<Canonical, Error> {
         tree.prune();
         for id in tree.preorder() {
             let sym = tree.sym_of(id, &env.lang);
@@ -358,9 +360,21 @@ impl ItemPhase<Canonical> for Link {
         env: &Env,
         run: &Sentinel,
         Canonical(tree): Canonical,
-    ) -> Result<LinkedFile, Killed> {
+    ) -> Result<LinkedFile, Error> {
         let edges = linker::link(&tree, env, run)?;
-        Ok(LinkedFile { tree, edges })
+        let mut file = LinkedFile {
+            tree,
+            edges,
+            stored: None,
+        };
+        if let Some(store) = &env.tree_store {
+            let mut placeholder: Tree<crate::tree::Compact> =
+                Tree::new(crate::tree::Node::default()).into();
+            placeholder.label = file.tree.label.clone();
+            let tree = std::mem::replace(&mut file.tree, placeholder);
+            file.stored = Some(store.insert(tree, file.edges.clone(), &[run])?);
+        }
+        Ok(file)
     }
 }
 
@@ -387,10 +401,26 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             mut dirty,
             listed,
         } = input;
+        let mut stored = Vec::new();
+        if let Some(store) = &context.env.tree_store {
+            for tree in &mut state.trees {
+                let mut placeholder: Tree<crate::tree::Compact> =
+                    Tree::new(crate::tree::Node::default()).into();
+                placeholder.label = tree.label.clone();
+                stored.push(store.insert(
+                    std::mem::replace(tree, placeholder),
+                    Vec::new(),
+                    &[&context.run],
+                )?);
+            }
+        }
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
             state.trees.push(file.tree);
+            if let Some(record) = file.stored {
+                stored.push(record);
+            }
             state.edges.extend(file.edges.into_iter().map(|mut e| {
                 e.from_tree = fi;
                 e.to_tree = fi;
@@ -429,6 +459,19 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 .trees
                 .push(Tree::unparsed(lang, &path, size, &reason.to_string()).into());
         }
+        if let Some(store) = &context.env.tree_store {
+            for tree in &mut state.trees[stored.len()..] {
+                let mut placeholder: Tree<crate::tree::Compact> =
+                    Tree::new(crate::tree::Node::default()).into();
+                placeholder.label = tree.label.clone();
+                stored.push(store.insert(
+                    std::mem::replace(tree, placeholder),
+                    Vec::new(),
+                    &[&context.run],
+                )?);
+            }
+            state.stored = Some(stored);
+        }
         Ok(DirtyGraph { state, dirty })
     }
 }
@@ -463,13 +506,34 @@ impl Phase<DirtyGraph> for Resolve {
         for tree in &mut state.trees {
             tree.clear_tags(0, &walk.tag_keys);
         }
+        if let Some(files) = &mut state.stored {
+            for file in files {
+                file.root_tags
+                    .retain(|tag| !walk.tag_keys.contains(&tag.key));
+            }
+        }
         for (i, tags) in file_tags {
             for tag in tags {
                 state.trees[i].set_tag(0, tag.key, tag.val);
+                if let Some(files) = &mut state.stored {
+                    if let Some(existing) = files[i]
+                        .root_tags
+                        .iter_mut()
+                        .find(|existing| existing.key == tag.key)
+                    {
+                        existing.val = tag.val;
+                    } else {
+                        files[i].root_tags.push(*tag);
+                    }
+                }
             }
         }
+        let repository = match &state.stored {
+            Some(files) => crate::tree::TreeRepository::Stored(files, Some(&context.run)),
+            None => crate::tree::TreeRepository::Resident(&state.trees),
+        };
         let result = state.resolver.resolve(
-            &state.trees,
+            repository,
             &mut state.edges,
             &env.lang,
             &dirty,
@@ -482,7 +546,13 @@ impl Phase<DirtyGraph> for Resolve {
             &context.run,
         )?;
         for rsp in &result.resolved_source_paths {
-            state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
+            if let Some(files) = &mut state.stored {
+                files[rsp.fi as usize]
+                    .symbol_updates
+                    .insert(rsp.node, rsp.sym);
+            } else {
+                state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
+            }
         }
         state.edges.extend(result.cross_edges);
         context.run.check()?;
@@ -523,6 +593,20 @@ impl Phase<Resolved> for Display {
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
+        if let Some(files) = &mut state.stored {
+            for (fi, file) in files.iter_mut().enumerate() {
+                context.run.check()?;
+                let (tree, local) = file.acquire(&[&context.run])?.into_parts();
+                let rules = &env.rules_for(&file.label).display_rules;
+                let ctx = EdgeCtx {
+                    tree_index: fi as u32,
+                    edges: &edges,
+                };
+                let tree = pattern::apply_display(tree, &env.lang, rules, &ctx);
+                *file = file.replace(tree, local, &[&context.run])?;
+            }
+            return Ok(Displayed { state });
+        }
         state.trees = std::mem::take(&mut state.trees)
             .into_iter()
             .enumerate()

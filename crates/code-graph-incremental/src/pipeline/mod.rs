@@ -15,7 +15,7 @@ mod state;
 
 pub use artifacts::*;
 pub use phases::*;
-pub use state::{SNAPSHOT_VERSION, SourceFile, State};
+pub use state::{SNAPSHOT_VERSION, SourceFile, State, TreeSnapshot};
 
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
@@ -74,7 +74,7 @@ pub trait ItemPhase<I> {
 
     fn name(&self) -> Cow<'static, str>;
 
-    fn run(&self, env: &Env, run: &Sentinel, input: I) -> Result<Self::Output, Killed>;
+    fn run(&self, env: &Env, run: &Sentinel, input: I) -> Result<Self::Output, Error>;
 
     fn pipe<B: ItemPhase<Self::Output>>(self, next: B) -> Chain<Self, B>
     where
@@ -93,7 +93,7 @@ impl<I, A: ItemPhase<I>, B: ItemPhase<A::Output>> ItemPhase<I> for Chain<A, B> {
         format!("{}+{}", self.0.name(), self.1.name()).into()
     }
 
-    fn run(&self, env: &Env, run: &Sentinel, input: I) -> Result<Self::Output, Killed> {
+    fn run(&self, env: &Env, run: &Sentinel, input: I) -> Result<Self::Output, Error> {
         self.1.run(env, run, self.0.run(env, run, input)?)
     }
 }

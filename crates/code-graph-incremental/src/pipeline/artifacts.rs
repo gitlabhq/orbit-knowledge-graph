@@ -66,6 +66,7 @@ pub struct Canonical(pub Tree<Compact>);
 pub struct LinkedFile {
     pub tree: Tree<Compact>,
     pub edges: Vec<Edge>,
+    pub(crate) stored: Option<crate::tree::FileRecord>,
 }
 
 pub struct DirtyGraph {

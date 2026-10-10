@@ -10,6 +10,7 @@ pub enum Step<R> {
 
 pub struct Cursor<'a, S: Storage = Mutable> {
     trees: &'a [Tree<S>],
+    tree: &'a Tree<S>,
     fi: u32,
     id: u32,
 }
@@ -23,10 +24,15 @@ impl<S: Storage> Clone for Cursor<'_, S> {
 
 impl<'a, S: Storage> Cursor<'a, S> {
     pub fn new(trees: &'a [Tree<S>], fi: u32, id: u32) -> Self {
-        Self { trees, fi, id }
+        Self {
+            trees,
+            tree: &trees[fi as usize],
+            fi,
+            id,
+        }
     }
     fn tree(self) -> &'a Tree<S> {
-        &self.trees[self.fi as usize]
+        self.tree
     }
     pub fn node(self) -> &'a S::Node {
         self.tree().storage.node(self.id)
@@ -81,8 +87,21 @@ impl<'a, S: Storage> Cursor<'a, S> {
         }
     }
     pub fn jump(self, fi: u32, id: u32) -> Self {
+        if fi == self.fi {
+            return Self { id, ..self };
+        }
         Self {
             trees: self.trees,
+            tree: &self.trees[fi as usize],
+            fi,
+            id,
+        }
+    }
+
+    pub(crate) fn acquired(tree: &'a Tree<S>, fi: u32, id: u32) -> Self {
+        Self {
+            trees: &[],
+            tree,
             fi,
             id,
         }

@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 arrow = { workspace = true }
 either = { workspace = true }
+elsa = "1.11.2"
 indexmap = { workspace = true, features = ["serde"] }
 indextree = "4.9"
 itertools = "0.14"
@@ -30,6 +31,7 @@ smallvec = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
 termtree = "1.0"
+tempfile = { workspace = true }
 toml = { workspace = true }
 zstd = "0.13"
 tree-sitter = "0.26.3"

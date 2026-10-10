@@ -33,6 +33,7 @@ impl From<regex::Error> for LoadError {
 /// Anything a pipeline run can fail with.
 #[derive(Debug)]
 pub enum Error {
+    Storage(std::io::Error),
     Load(LoadError),
     Killed(Killed),
     Export(arrow::error::ArrowError),
@@ -41,6 +42,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Storage(error) => write!(f, "tree storage: {error}"),
             Self::Load(e) => write!(f, "load: {e}"),
             Self::Killed(k) => write!(f, "budget: {k}"),
             Self::Export(e) => write!(f, "export: {e}"),
@@ -49,6 +51,12 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Storage(error)
+    }
+}
 
 impl From<LoadError> for Error {
     fn from(e: LoadError) -> Self {

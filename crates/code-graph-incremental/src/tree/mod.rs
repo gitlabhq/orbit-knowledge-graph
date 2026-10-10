@@ -3,6 +3,7 @@ mod node;
 mod print;
 mod semantic;
 mod storage;
+mod store;
 
 use indextree::Arena;
 use rustc_hash::FxHashMap;
@@ -15,6 +16,8 @@ pub use print::pretty_print;
 pub use semantic::{find_method_in, infer_return_type, members_by_level, reachable};
 pub(crate) use storage::Entry as CompactNode;
 pub use storage::{Compact, Mutable, Storage};
+pub use store::{AcquiredTree, FileRecord, TreeSession, TreeStore};
+pub(crate) use store::{TreeRead, TreeRepository, TreeScan};
 
 #[derive(Clone)]
 pub struct Tree<S: Storage = Mutable> {
