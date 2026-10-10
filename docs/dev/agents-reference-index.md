@@ -9,7 +9,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Indexer crate guide (handlers, reuse-infra checklist) | **`crates/indexer/AGENTS.md`** |
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
-| FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/checks/check-fips-graph.sh`, `scripts/checks/check-fips-binary.sh`; design in `docs/design-documents/security.md` |
+| FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/checks/fips/check-graph.sh`, `scripts/checks/fips/check-binary.sh`; design in `docs/design-documents/security.md` |
 | Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; design in `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |

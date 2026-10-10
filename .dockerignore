@@ -8,4 +8,4 @@ docs/
 e2e/
 fixtures/
 scripts/
-!scripts/checks/check-fips-binary.sh
+!scripts/checks/fips/check-binary.sh

@@ -556,9 +556,9 @@ fips-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - ./scripts/checks/check-fips-graph.sh
+    - ./scripts/checks/fips/check-graph.sh
     - cargo build -p orbit-server --locked
-    - ./scripts/checks/check-fips-binary.sh target/debug/gkg-server
+    - ./scripts/checks/fips/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
 
 cargo-audit:
