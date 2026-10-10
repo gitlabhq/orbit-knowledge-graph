@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{ColumnSelection, FilterOp, InputFilter};
-use query_data_model::QueryBackendCatalog;
+use query_data_model::RelationalMapping;
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
@@ -12,7 +12,7 @@ pub enum FilterOwner<'a> {
 pub fn ordered_filters(
     filters: &HashMap<String, Vec<InputFilter>>,
     owner: FilterOwner<'_>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);

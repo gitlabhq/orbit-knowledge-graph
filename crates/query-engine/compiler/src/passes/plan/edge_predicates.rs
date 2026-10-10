@@ -8,9 +8,9 @@ use super::requirements::{
 
 use super::context::PlanningContext;
 use super::{DenormalizedKey, Hop};
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
-impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub(super) fn filtered_edge_predicates(
         &self,
         alias: &str,

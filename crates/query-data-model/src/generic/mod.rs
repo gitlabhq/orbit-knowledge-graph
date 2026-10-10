@@ -1,13 +1,8 @@
 mod catalog;
 mod ids;
-pub mod relational;
 
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
 pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
-pub use relational::{
-    DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
-    ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
-};
 
 use crate::{Storage, StorageModel};
 

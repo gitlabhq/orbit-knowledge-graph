@@ -1,10 +1,45 @@
+use crate::implementations::{clickhouse, duckdb};
+use crate::{
+    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog,
+    Storage, TrustedLocalCatalog,
+};
+use std::sync::Arc;
+
+impl ClickHouseDataModel {
+    pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
+        let graph = GraphCatalog::derive(&ontology)?;
+        let schema = clickhouse::storage::StorageCatalog::derive(&ontology)?;
+        let mapping = clickhouse::mapping::derive(&ontology, &graph, &schema)?;
+        let authorization = GitLabAuthzCatalog::from_ontology(&ontology, &graph)?;
+        Ok(Self::new(
+            graph,
+            Storage::new(schema, mapping),
+            authorization,
+        ))
+    }
+}
+
+impl DuckDbDataModel {
+    pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
+        let graph = GraphCatalog::derive(&ontology)?;
+        let schema = duckdb::storage::StorageCatalog::derive(&ontology);
+        let mapping = duckdb::mapping::derive(&ontology, &graph, &schema)?;
+        let authorization = TrustedLocalCatalog::from_ontology(&ontology, &graph)?;
+        Ok(Self::new(
+            graph,
+            Storage::new(schema, mapping),
+            authorization,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use crate::{
-        ClickHouseDataModel, DuckDbDataModel, PropertyRealization, QueryBackendCatalog,
-        QueryDataModel,
+        ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel, PropertyRealization,
+        RelationalMapping,
     };
     use ontology::FieldSource;
 
@@ -86,15 +121,13 @@ mod tests {
 
     #[test]
     fn keeps_extraction_sources_separate_from_query_columns() {
-        let model =
-            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
-                .unwrap();
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = ClickHouseDataModel::derive(ontology.clone()).unwrap();
         let entity = model.graph().entity_id("MergeRequest").unwrap();
         let property = model.graph().property_id(entity, "project_id").unwrap();
         let table = model.backend().table_for_entity(entity).unwrap();
 
-        let source = &model
-            .ontology()
+        let source = &ontology
             .get_node("MergeRequest")
             .unwrap()
             .fields

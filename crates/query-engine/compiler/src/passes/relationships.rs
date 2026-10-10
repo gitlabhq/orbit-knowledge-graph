@@ -3,7 +3,7 @@ use crate::{Input, QueryError, Result};
 
 pub fn validate_relationships(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     input
         .relationships
@@ -14,7 +14,7 @@ pub fn validate_relationships(
 fn check_direction(
     input: &Input,
     edge: &InputRelationship,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let entity = |id: &str| {
         input

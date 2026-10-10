@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use super::PropertyBackendFacts;
 use crate::{
     DenormalizedCatalog, EntityId, ForeignKey, GraphCatalog, PathColumn, PropertyId,
-    PropertyRealization, QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    PropertyRealization, RelationalMapping, RelationshipId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -79,7 +79,7 @@ impl ClickHouseCatalog {
     }
 
     pub fn property_column(&self, id: PropertyId) -> Option<&str> {
-        QueryBackendCatalog::property_column(self, id)
+        RelationalMapping::property_column(self, id)
     }
 
     pub fn table(&self, name: &str) -> Option<&TableLayout> {
@@ -117,7 +117,7 @@ impl ClickHouseCatalog {
     }
 }
 
-impl QueryBackendCatalog for ClickHouseCatalog {
+impl RelationalMapping for ClickHouseCatalog {
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }

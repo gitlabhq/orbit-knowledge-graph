@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::{
-    DataModelError, EntityId, GraphCatalog, PropertyId, QueryAuthorizationCatalog,
-    RelationshipVariantId,
-};
+use crate::{DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
 
 pub trait GitLabPolicy: Send + Sync {
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
@@ -79,7 +76,7 @@ impl GitLabAuthzCatalog {
     }
 }
 
-impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
+impl GitLabPolicy for GitLabAuthzCatalog {
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
     }
@@ -234,7 +231,7 @@ impl TrustedLocalCatalog {
     }
 }
 
-impl QueryAuthorizationCatalog for TrustedLocalCatalog {
+impl GitLabPolicy for TrustedLocalCatalog {
     fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         None
     }

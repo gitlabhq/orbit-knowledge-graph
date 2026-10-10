@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{Entity, EntityId, GraphCatalog, Property, PropertyId, Relationship, RelationshipId};
+use crate::{Entity, EntityId, GraphCatalog, Property, PropertyId, Relationship, RelationshipId};
 
 #[derive(Debug, Clone)]
 pub enum PropertyRealization {
@@ -137,11 +137,30 @@ pub trait RelationalMapping: Send + Sync {
 
 use crate::GitLabPolicy;
 
+impl<B, A> OrbitQueryModel for crate::DataModel<crate::Relational<B>, A>
+where
+    B: crate::RelationalBackend,
+    B::Mapping: RelationalMapping,
+    A: GitLabPolicy,
+{
+    type BackendCatalog = B::Mapping;
+    type AuthorizationCatalog = A;
+
+    fn graph(&self) -> &GraphCatalog {
+        self.graph()
+    }
+    fn query_backend(&self) -> &B::Mapping {
+        self.backend()
+    }
+    fn query_authorization(&self) -> &A {
+        self.authorization()
+    }
+}
+
 pub trait OrbitQueryModel {
     type BackendCatalog: RelationalMapping;
     type AuthorizationCatalog: GitLabPolicy;
 
-    fn ontology(&self) -> &ontology::Ontology;
     fn graph(&self) -> &GraphCatalog;
     fn query_backend(&self) -> &Self::BackendCatalog;
     fn query_authorization(&self) -> &Self::AuthorizationCatalog;

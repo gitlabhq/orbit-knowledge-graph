@@ -1,4 +1,4 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
@@ -12,7 +12,7 @@ use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
 use super::{Hop, HydrationStrategy, NodePlan};
 
-pub(super) fn star<M: QueryDataModel + ?Sized>(
+pub(super) fn star<M: OrbitQueryModel + ?Sized>(
     context: &PlanningContext<'_, M>,
     center: &str,
 ) -> Result<ExecutionPlan> {
@@ -152,7 +152,7 @@ pub(super) fn star<M: QueryDataModel + ?Sized>(
     Ok(plan)
 }
 
-pub(super) fn chain<M: QueryDataModel + ?Sized>(
+pub(super) fn chain<M: OrbitQueryModel + ?Sized>(
     context: &PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
     let root = &context

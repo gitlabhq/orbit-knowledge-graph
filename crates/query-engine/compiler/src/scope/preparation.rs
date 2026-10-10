@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use super::{QueryScope, ScopeProof, is_scope_only};
 use crate::input::{Direction, Input, InputNode, InputRelationship, QueryType};
@@ -8,7 +8,7 @@ use crate::input::{Direction, Input, InputNode, InputRelationship, QueryType};
 pub fn prepare(
     input: &mut Input,
     proofs: HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> QueryScope {
     let mut scope = QueryScope {
         relationships: input
@@ -82,7 +82,7 @@ fn container_target_scope(
     relationship: &InputRelationship,
     anchor: &InputNode,
     proofs: &HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Option<(usize, ScopeProof)> {
     let target = if relationship.from == anchor.id {
         &relationship.to
@@ -127,7 +127,7 @@ fn container_target_scope(
 fn scope_only_container(
     input: &Input,
     node: &InputNode,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> bool {
     node.entity
         .as_deref()
@@ -163,7 +163,7 @@ fn relationship_proof(
     input: &Input,
     relationship: &InputRelationship,
     proofs: &HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Option<ScopeProof> {
     let from_proof = proofs.get(&relationship.from);
     let to_proof = proofs.get(&relationship.to);

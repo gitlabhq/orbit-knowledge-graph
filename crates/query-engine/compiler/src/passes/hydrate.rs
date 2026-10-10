@@ -102,7 +102,7 @@ pub struct VirtualColumnRequest {
 pub fn generate_hydration_plan(
     input: &Input,
     emitted: &Node,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> HydrationPlan {
     match input.query_type {
@@ -130,7 +130,7 @@ pub fn generate_hydration_plan(
 fn build_static_templates(
     input: &Input,
     emitted: &Node,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<HydrationTemplate> {
     let projected = |alias: &str| matches!(emitted, Node::Query(q) if q.selects_alias(alias));
     input
@@ -213,7 +213,7 @@ fn build_static_templates(
 /// rather than from `node.columns` that `RestrictPass` pruned.
 fn build_dynamic_specs(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Vec<DynamicEntityColumns> {
     model
@@ -290,7 +290,7 @@ fn build_dynamic_specs(
 fn inject_model_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: query_data_model::EntityId,
 ) -> Vec<String> {
     let mut injected = Vec::new();
@@ -314,7 +314,7 @@ fn inject_model_virtual_dependencies(
 
 fn split_model_columns(
     requested: &[String],
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: query_data_model::EntityId,
 ) -> (Vec<String>, Vec<VirtualColumnRequest>) {
     let mut columns = Vec::new();
@@ -350,7 +350,7 @@ fn split_model_columns(
 }
 
 fn virtual_request(
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: query_data_model::EntityId,
     property: &str,
 ) -> Option<VirtualColumnRequest> {

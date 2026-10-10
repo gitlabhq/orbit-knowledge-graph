@@ -11,7 +11,7 @@ use super::{
     Aggregation, BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty,
     QueryPlan, Traversal,
 };
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 pub struct Hop {
     pub input_index: usize,
@@ -79,7 +79,7 @@ pub struct NodePlan {
 impl NodePlan {
     pub(super) fn from_input<M>(node: &InputNode, model: &M, strip_virtuals: bool) -> Option<Self>
     where
-        M: QueryDataModel + ?Sized,
+        M: OrbitQueryModel + ?Sized,
     {
         let entity = node.entity.as_deref()?;
         let entity_id = model.graph().entity_id(entity)?;
@@ -189,7 +189,7 @@ pub(super) fn plan<M>(
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let input = context.input;
     let model = context.model;
@@ -278,7 +278,7 @@ where
 
 fn build_hops<M>(input: &Input, model: &M) -> Vec<Hop>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let entities: HashMap<&str, &str> = input
         .nodes
@@ -372,7 +372,7 @@ where
 
 fn build_node_plans<M>(input: &Input, model: &M) -> HashMap<String, NodePlan>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     input
         .nodes
@@ -386,7 +386,7 @@ fn elide_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> (Vec<Hop>, Vec<(String, String, String)>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();

@@ -27,7 +27,6 @@ use crate::passes::{
     response_policy, restrict, security, settings, validate,
 };
 use crate::types::SecurityContext;
-use query_data_model::QueryDataModel;
 
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
@@ -194,7 +193,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 
 fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     let raw = require(ctx.take_raw(), "raw")?;
-    let (input, query_hash) = frontend::json_dsl::parse(&raw, ctx.data_model().ontology())?;
+    let (input, query_hash) = frontend::json_dsl::parse(&raw, ctx.data_model())?;
     ctx.set_input(input);
     ctx.set_pagination(PaginationContext {
         query_hash,
@@ -264,7 +263,7 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut input = require(ctx.take_input(), "input")?;
@@ -346,7 +345,7 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn enforce<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
@@ -363,7 +362,7 @@ where
 fn enforce_local<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
@@ -379,7 +378,7 @@ where
 fn security<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let security_ctx = ctx.security_ctx().clone();
     let mut node = require(ctx.take_node(), "node")?;
@@ -403,7 +402,7 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn check<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let node = require(ctx.node().clone(), "node")?;
     check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
@@ -412,7 +411,7 @@ where
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
-    C::Model: query_data_model::QueryDataModel,
+    C::Model: query_data_model::OrbitQueryModel,
 {
     let input = require(ctx.input().as_ref(), "input")?;
     let emitted = require(ctx.node().as_ref(), "node")?;

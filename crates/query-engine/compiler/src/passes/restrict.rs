@@ -27,7 +27,7 @@ fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
 
 fn enforce_aggregation_scope(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let is_scoped = |entity: &str| model.entity_has_traversal_path(entity);
 
@@ -86,7 +86,7 @@ fn enforce_aggregation_scope(
 
 fn enforce_traversal_path_filters(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
@@ -198,13 +198,13 @@ fn validate_traversal_path_within_scope(
 /// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
 fn stamp_edge_scope_proofs(
     input: &Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
     crate::scope::derive_scope_proofs(input, model)
 }
 
 fn admin_only(
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: &str,
     property: &str,
 ) -> bool {
@@ -213,7 +213,7 @@ fn admin_only(
 
 pub fn restrict(
     input: &mut Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
     enforce_traversal_path_filters(input, model, security_ctx)?;

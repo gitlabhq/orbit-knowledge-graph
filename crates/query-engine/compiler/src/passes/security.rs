@@ -42,7 +42,7 @@ static GRAPH_TABLE_PATTERN: OnceLock<Regex> = OnceLock::new();
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -69,7 +69,7 @@ pub fn apply_security_context(
 fn apply_to_query(
     q: &mut Query,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
@@ -133,7 +133,7 @@ fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
 
 pub(crate) fn collect_node_aliases(
     table_ref: &TableRef,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<String> {
     collect_aliased_tables(table_ref, model)
         .into_iter()
@@ -146,7 +146,7 @@ pub(crate) fn collect_node_aliases(
 /// minimum role before building the `startsWith(...)` predicate.
 pub(crate) fn collect_aliased_tables(
     table_ref: &TableRef,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<(String, String)> {
     let mut aliases = Vec::new();
     visit_relations(table_ref, &mut |relation| {
@@ -163,7 +163,7 @@ pub(crate) fn collect_aliased_tables(
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
 fn should_apply_security_filter(
     table: &str,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> bool {
     let graph_table_pattern = GRAPH_TABLE_PATTERN.get_or_init(|| {
         Regex::new(&format!(

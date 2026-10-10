@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use super::PropertyBackendFacts;
 use crate::{
     DenormalizedCatalog, EntityId, GraphCatalog, PropertyId, PropertyRealization,
-    QueryBackendCatalog, RelationshipId, TraversalPathLookup,
+    RelationalMapping, RelationshipId, TraversalPathLookup,
 };
 
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ pub struct DuckDbCatalog {
     denormalized: DenormalizedCatalog,
 }
 
-impl QueryBackendCatalog for DuckDbCatalog {
+impl RelationalMapping for DuckDbCatalog {
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
