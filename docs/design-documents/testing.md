@@ -11,13 +11,11 @@ Orbit has tests at every layer of the stack.
 5. End-to-end (e2e) tests deploy GitLab and every Orbit component on Kubernetes. Then they drive the stack the way a user does.
 6. Performance tests and production rollouts measure speed and scale.
 
-Most coverage is data, not Rust. A contributor adds a YAML file, and the harness turns it into a test. This keeps tests short and lets one harness check many cases.
-
-This document starts with the principles that every new test follows. Then it describes each layer, what it proves, how to run it, and where it runs in CI. This document covers this repository. The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
+The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
 
 ## Testing principles
 
-- Prefer integration, YAML, and e2e tests over unit tests. A test that runs the real pipeline against real infrastructure proves more than a test of one function. Use a unit test for pure logic that a higher-level test cannot reach.
+- Prefer integration, YAML, and e2e tests over unit tests. Use a unit test for pure logic that a higher-level test cannot reach.
 - Write new correctness tests as YAML suites, not as Rust modules. Query scenarios, indexer scenarios, code-graph suites, and plan-shape fixtures cover most changes. If a case does not fit, extend the harness.
 - Every bug fix gets a test that fails before the fix. Write it at the level where a user can see the bug.
 - Test against real infrastructure for behavior that Orbit owns. Mock only the systems that Orbit does not own, such as Rails authorization and Gitaly.
@@ -70,7 +68,7 @@ e2e --> perf
 | Performance | `code-indexing-benchmark.yaml`, `crates/query-engine/profiler/` | `mise query:profile` |
 | Fuzzing | `crates/fuzz/` | `mise fuzz:<target>` |
 
-The Rust test jobs run on every MR and every main commit, and none of them is allowed to fail. The e2e and performance jobs have their own rules, which the sections below describe.
+The Rust test jobs run on every MR and every main commit, and none of them is allowed to fail.
 
 ## Build scripts
 
@@ -108,7 +106,7 @@ The `local` test binary in `crates/integration-tests` checks the query compiler 
 
 The [plan-shape harness](../../crates/integration-tests/tests/compiler/plan_shape/README.md) checks the plan that the compiler picks, not the rows that the query returns. Each YAML fixture in `plan_shape/fixtures/` gives a query and the expected plan. Examples are which edge table the plan scans, where it narrows, and how it hydrates. Run them with `mise test:plan-shape`.
 
-Plan-shape fixtures do not measure latency, and they do not replace query scenarios. A plan can be correct and still return the wrong rows.
+Plan-shape fixtures do not measure latency, and they do not replace query scenarios.
 
 ## Code-graph suites
 
@@ -178,9 +176,9 @@ The format reference is in the [`integration-testkit` README](../../crates/integ
 
 ### Indexer scenarios
 
-Most indexer coverage is also YAML. Each file in [`indexer/scenarios`](../../crates/integration-tests/tests/indexer/scenarios) gives the source rows to seed, the handlers to run, and the nodes, edges, or messages to expect. There are scenarios for SDLC indexing and for dispatch.
+Each file in [`indexer/scenarios`](../../crates/integration-tests/tests/indexer/scenarios) gives the source rows to seed, the handlers to run, and the nodes, edges, or messages to expect. There are scenarios for SDLC indexing and for dispatch.
 
-The `indexer-scenario-schema-validate` job checks every file against [`indexer_scenario.schema.json`](../../config/schemas/indexer_scenario.schema.json). To add indexer coverage, you usually add one YAML file.
+The `indexer-scenario-schema-validate` job checks every file against [`indexer_scenario.schema.json`](../../config/schemas/indexer_scenario.schema.json).
 
 ### NATS
 
@@ -207,7 +205,7 @@ The `corpus-smoke-test` job runs a large set of queries through the production q
 - The named queries in `config/named_queries`, each in JSON and GQL.
 - Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
 
-The third family keeps the documentation correct. The test runs every marked query example in the root Markdown files, `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too. If a schema change breaks a published example, CI fails.
+The test runs every marked query example in the root Markdown files, `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
 
 Other jobs check the docs prose. `check_docs_markdown` runs Vale, markdownlint, and a link check on MRs. `lint:prose` checks sentence length and wording in prompts, skills, agent guides, `docs/dev`, and `docs/design-documents`. `query-language-docs-check` regenerates the generated parts of the query-language reference and fails if they differ.
 
@@ -262,13 +260,13 @@ For setup, debugging, and the list of key files, see [E2E testing harness](../de
 
 ### Indexing benchmarks
 
-[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR. A reviewer reads the comment.
+[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR.
 
 ### Synthetic query load
 
 The `orbit-perf` job deploys GitLab and Orbit, then loads a synthetic graph that `xtask` generates from a simulator configuration. Then `xtask loadtest` sends the performance scenarios in `server/performance/scenarios` over gRPC, with many concurrent requests. A container test also compiles each scenario, so a scenario that does not compile fails CI.
 
-The job runs on every main commit. On an MR, the `orbit-perf:mr` job runs automatically when the query path changes and posts the report as a comment. Otherwise it is manual. It is allowed to fail, so it reports a change but does not block it.
+The job runs on every main commit. On an MR, the `orbit-perf:mr` job runs automatically when the query path changes and posts the report as a comment. Otherwise it is manual. It is allowed to fail.
 
 ### Profiling tools
 
@@ -287,7 +285,7 @@ A schema change that rebuilds the graph re-indexes every eligible project in pro
 
 The rollout reports in the [production rollout issue](https://gitlab.com/gitlab-com/gl-infra/production/-/work_items/21860) record these measurements for each migration. Compare a new rollout with the last report to find a regression.
 
-Some failures only occur at production scale. Examples are evictions on the temporary volume, ClickHouse merge backpressure, JOIN memory limits, and NATS lock and queue growth. When a rollout report finds one, the team fixes it, and the next migration checks the fix.
+Some failures only occur at production scale. Examples are evictions on the temporary volume, ClickHouse merge backpressure, JOIN memory limits, and NATS lock and queue growth.
 
 ## Fuzzing
 
@@ -309,7 +307,7 @@ Next to the tests, CI runs checks on each MR:
 
 ### Local hooks
 
-[`lefthook.yml`](../../lefthook.yml) runs commitlint on each commit message and Clippy before each push. It also runs pre-commit checks, including a Gitleaks secret scan. Most of them mirror a CI check. CI turns lefthook off, so CI stays the final check.
+[`lefthook.yml`](../../lefthook.yml) runs commitlint on each commit message and Clippy before each push. It also runs pre-commit checks, including a Gitleaks secret scan. CI turns lefthook off.
 
 ### Review automation
 
