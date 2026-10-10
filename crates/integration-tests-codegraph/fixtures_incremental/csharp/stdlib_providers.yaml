@@ -1,0 +1,16 @@
+name: CSharp static standard provider is scoped to its import
+fixtures:
+  - path: Main.cs
+    content: |
+      using static System.Math;
+      class Main {
+        double Run(double x) { return Sqrt(x); }
+      }
+tests:
+  - name: Static standard symbol is not a speculative wildcard call
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'Run'
+      RETURN target.import_path
+    assert:
+      - { empty: true }

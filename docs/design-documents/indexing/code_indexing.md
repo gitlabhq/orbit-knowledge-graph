@@ -258,7 +258,10 @@ Incremental snapshots store live tree nodes in traversal order, with their arena
 IDs and parent IDs. Loading preserves those IDs and sibling order, including when
 nodes were added or removed after linking. Edges, tags, and cached resolver
 locations therefore keep their targets. Removed slots have no serialized node
-payload. Snapshot version 14 requires a fresh index for older saved graphs.
+payload. Snapshot version 15 requires a fresh index for older saved graphs.
+Snapshots also retain original import paths so resolved paths cannot change
+standard-library classification on reindex. Language YAML distinguishes builtin
+callable names, external module roots, and shadowable standard-library roots.
 Loading rebuilds the file index from saved trees and manifests before edits apply.
 
 Import discovery scans retained files only when the file index gains keys.

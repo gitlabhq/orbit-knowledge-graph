@@ -1,0 +1,53 @@
+name: Python standard names preserve explicit project bindings
+fixtures:
+  - path: helpers.py
+    content: |
+      def len(value): return 42
+  - path: json.py
+    content: |
+      def dumps(value): return "local"
+  - path: main.py
+    content: |
+      from helpers import *
+      import json
+      def run():
+          len([])
+          json.dumps({})
+  - path: builtin_user.py
+    content: |
+      from unknown_package import *
+      def run_builtin():
+          len([])
+          print("hello")
+  - path: src/csv.py
+    content: |
+      def reader(value): return value
+  - path: src/consumer.py
+    content: |
+      from csv import reader
+      def read_local(): return reader([])
+tests:
+  - name: Local wildcard definitions and local standard-name modules resolve
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path AS file, target.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { file: helpers.py, name: len } }
+      - { row: { file: json.py, name: dumps } }
+  - name: Builtins do not produce unknown wildcard calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'run_builtin'
+      RETURN target.import_path
+    assert:
+      - { empty: true }
+  - name: Declared source roots can shadow standard modules
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'read_local'
+      RETURN target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: src/csv.py } }

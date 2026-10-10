@@ -10,14 +10,27 @@ use crate::tree::{Cursor, Node, Step, Tag, Tree};
 
 pub struct WalkResult {
     pub entrypoints: Vec<(String, String)>,
-    pub prefixes: Vec<String>,
-    pub aliases: Vec<(String, String)>,
+    pub lookup: LookupConfig,
     /// Per file: the tags rules put on it and on its ancestor directories,
     /// nearest first, plus `source_root_rel`, its path below the nearest source root.
     pub file_tags: Vec<(String, Vec<Tag>)>,
     /// Every key a file tag can carry, so a reused tree can drop the ones
     /// that no longer apply before this run's are set.
     pub tag_keys: Vec<u32>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct LookupConfig {
+    pub prefixes: Vec<String>,
+    pub aliases: Vec<ImportAlias>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImportAlias {
+    pub pattern: String,
+    pub replacement: String,
+    pub if_exists: bool,
+    pub scope: Option<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -28,7 +41,7 @@ pub struct ProjectTree<'a> {
     files: Option<&'a [SourceFile]>,
     tree: Tree,
     prefixes: Vec<String>,
-    aliases: Vec<(String, String)>,
+    aliases: Vec<ImportAlias>,
 }
 
 impl<'a> ProjectTree<'a> {
@@ -80,8 +93,7 @@ impl<'a> ProjectTree<'a> {
         if stages.is_empty() && config.lookup_from.is_empty() && config.parse_files.is_empty() {
             return WalkResult {
                 entrypoints: vec![],
-                prefixes: vec![],
-                aliases: vec![],
+                lookup: LookupConfig::default(),
                 file_tags: vec![],
                 tag_keys,
             };
@@ -103,8 +115,10 @@ impl<'a> ProjectTree<'a> {
             .collect();
         WalkResult {
             entrypoints,
-            prefixes: pt.prefixes,
-            aliases: pt.aliases,
+            lookup: LookupConfig {
+                prefixes: pt.prefixes,
+                aliases: pt.aliases,
+            },
             file_tags,
             tag_keys,
         }
@@ -264,17 +278,35 @@ impl<'a> ProjectTree<'a> {
             .tree
             .root()
             .fold_tree(Vec::new(), |aliases, cursor, _w| {
-                if !cursor.is(C::Alias) || cursor.sym() == 0 {
-                    return;
-                }
-                if let Some(val) = cursor.children().find(|c| c.is(C::Str) && c.sym() != 0) {
-                    aliases.push((
-                        self.lang.syms.resolve(cursor.sym()).to_string(),
-                        self.lang.syms.resolve(val.sym()).to_string(),
-                    ));
+                if cursor.is(C::Alias) && cursor.sym() != 0 {
+                    if let Some(val) = cursor.child_sym(C::Str) {
+                        aliases.push(ImportAlias {
+                            pattern: self.lang.syms.resolve(cursor.sym()).to_owned(),
+                            replacement: self.lang.syms.resolve(val).to_owned(),
+                            if_exists: false,
+                            scope: cursor.child_sym(C::Scope),
+                        });
+                    }
+                } else if self.config.lookup_from.contains(&cursor.kind())
+                    && cursor.sym_opt().is_some()
+                    && let Some(file) = cursor.parent().filter(|node| node.is(C::File))
+                    && let Some(directory) = file.parent()
+                {
+                    aliases.push(ImportAlias {
+                        pattern: "*".into(),
+                        replacement: format!(
+                            "{}/{}/*",
+                            self.node_path(directory),
+                            self.lang.syms.resolve(cursor.sym())
+                        )
+                        .trim_start_matches('/')
+                        .to_owned(),
+                        if_exists: true,
+                        scope: cursor.child_sym(C::Scope),
+                    });
                 }
             });
-        aliases.sort_by_key(|(key, _)| std::cmp::Reverse(key.len()));
+        aliases.sort_by_key(|alias| (alias.if_exists, std::cmp::Reverse(alias.pattern.len())));
         self.aliases = aliases;
     }
 

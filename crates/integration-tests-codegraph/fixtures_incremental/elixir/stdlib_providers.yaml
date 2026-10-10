@@ -1,0 +1,17 @@
+name: Elixir imported provider and implicit Kernel names
+fixtures:
+  - path: main.ex
+    content: |
+      defmodule Main do
+        import Bitwise
+        def run(), do: band(1, 2)
+        def implicit_call(), do: length([])
+      end
+tests:
+  - name: Standard calls avoid wildcard fallback
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['run', 'implicit_call']
+      RETURN target.import_path
+    assert:
+      - { empty: true }
