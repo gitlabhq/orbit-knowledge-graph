@@ -280,3 +280,4 @@ tmp-local-cli-distro-matrix:
     - ldd --version 2>&1 | head -1 || true
     - if ! command -v apk >/dev/null; then ./scripts/smoke-local-cli.sh "orbit-cli-linux-${ARCH}.tar.gz"; fi
     - ./scripts/smoke-local-cli.sh "orbit-cli-linux-musl-${ARCH}.tar.gz"
+    - tar -xzf "orbit-cli-linux-${ARCH}.tar.gz" orbit && ./orbit version
