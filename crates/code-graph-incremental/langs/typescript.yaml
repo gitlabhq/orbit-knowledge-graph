@@ -407,6 +407,10 @@ stages:
 
   - name: resolve-paths
     rules:
+      - match: '(__import (__source_path "/^[^./:][^:]*$/"))'
+        tag: { alias_scope: bare_import }
+      - match: '(__import_type (__source_path "/^[^./:][^:]*$/"))'
+        tag: { alias_scope: bare_import }
       - match: '(__import)'
         tag:
           resolved_source: '@$ROOT|child_sym("__source_path")'
@@ -432,7 +436,7 @@ resolve:
           replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
         - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
-          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./") (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 
     - name: aliases
       rules:

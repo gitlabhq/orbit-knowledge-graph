@@ -30,6 +30,7 @@ pub struct ImportAlias {
     pub pattern: String,
     pub replacement: String,
     pub if_exists: bool,
+    pub scope: Option<u32>,
 }
 
 pub struct ProjectTree<'a> {
@@ -283,6 +284,7 @@ impl<'a> ProjectTree<'a> {
                             pattern: self.lang.syms.resolve(cursor.sym()).to_owned(),
                             replacement: self.lang.syms.resolve(val).to_owned(),
                             if_exists: false,
+                            scope: cursor.child_sym(C::Scope),
                         });
                     }
                 } else if self.config.lookup_from.contains(&cursor.kind())
@@ -300,6 +302,7 @@ impl<'a> ProjectTree<'a> {
                         .trim_start_matches('/')
                         .to_owned(),
                         if_exists: true,
+                        scope: cursor.child_sym(C::Scope),
                     });
                 }
             });

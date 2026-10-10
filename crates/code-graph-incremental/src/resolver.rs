@@ -812,21 +812,10 @@ fn gather_imports_for(
                     };
                     let raw_path = lang.syms.resolve(resolved_sym);
                     let mapped = lookup.aliases.iter().find_map(|alias| {
-                        if alias.if_exists
-                            && (source_str.starts_with(['.', '/']) || source_str.contains(':'))
-                        {
+                        if alias.scope.is_some() && alias.scope != cur.tag(tags.alias_scope) {
                             return None;
                         }
-                        let path = apply_alias(
-                            if alias.if_exists {
-                                source_str
-                            } else {
-                                raw_path
-                            },
-                            &alias.pattern,
-                            &alias.replacement,
-                        )?;
-                        let path = path.strip_prefix("./").unwrap_or(&path).to_owned();
+                        let path = apply_alias(source_str, &alias.pattern, &alias.replacement)?;
                         (!alias.if_exists || !resolve_glob(&path, file_index, &[]).is_empty())
                             .then_some(path)
                     });
