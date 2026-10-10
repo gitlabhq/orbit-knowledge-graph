@@ -40,6 +40,10 @@ fn extract_enum_options<'a>(
         ValidationErrorKind::Enum { options } => Some((error.instance().to_string(), options)),
         ValidationErrorKind::PropertyNames { error: inner } => match inner.kind() {
             ValidationErrorKind::Enum { options } => Some((inner.instance().to_string(), options)),
+            ValidationErrorKind::AnyOf { context } => {
+                let options = find_inner_enum_options(context)?;
+                Some((inner.instance().to_string(), options))
+            }
             _ => None,
         },
         ValidationErrorKind::OneOfNotValid { context } => {
@@ -69,8 +73,9 @@ fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str
 
 /// Filter operators nest a `oneOf` inside the property-filter `oneOf`, so the
 /// search must recurse. Every `oneOf` the ontology derives today (`columns`,
-/// relationship `type`, filter `op`) carries exactly one allowlist enum, so
-/// returning the first enum found is unambiguous.
+/// relationship `type`, filter `op`) carries one allowlist enum, or an `anyOf`
+/// of the listed enum followed by the hidden-field enum, so the first enum
+/// found is the one to show.
 fn find_inner_enum_options<'a>(
     context: &'a [Vec<jsonschema::ValidationError<'a>>],
 ) -> Option<&'a serde_json::Value> {

@@ -14,6 +14,7 @@ pub struct Property {
     pub data_type: DataType,
     pub enum_values: Option<BTreeMap<i64, String>>,
     pub enum_type: EnumType,
+    pub hidden: bool,
 }
 
 #[derive(Debug)]
@@ -87,6 +88,7 @@ impl GraphCatalog {
                     data_type: field.data_type,
                     enum_values: field.enum_values.clone(),
                     enum_type: field.enum_type,
+                    hidden: field.hidden,
                 });
             }
             if !node.fields.iter().any(|field| field.name == "id") {
@@ -100,6 +102,7 @@ impl GraphCatalog {
                     data_type: DataType::Int,
                     enum_values: None,
                     enum_type: EnumType::default(),
+                    hidden: false,
                 });
             }
 

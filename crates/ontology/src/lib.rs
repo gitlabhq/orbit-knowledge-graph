@@ -1254,6 +1254,20 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn local_hidden_columns(&self) -> Vec<(&str, &str)> {
+        self.local_entities
+            .keys()
+            .filter_map(|name| Some((self.nodes.get(name)?, self.local_entity_fields(name)?)))
+            .flat_map(|(node, fields)| {
+                fields
+                    .into_iter()
+                    .filter(|field| field.hidden)
+                    .map(move |field| (node.destination_table.as_str(), field.name.as_str()))
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn local_edge_table_name(&self) -> Option<&str> {
         self.local_edge_table_name.as_deref()
     }
