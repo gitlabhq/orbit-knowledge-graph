@@ -13,7 +13,19 @@ Orbit has tests at every layer of the stack.
 
 Most coverage is data, not Rust. A contributor adds a YAML file, and the harness turns it into a test. This keeps tests short and lets one harness check many cases.
 
-This document describes each layer, what it proves, how to run it, and where it runs in CI. Then it gives the principles that every new test follows. This document covers this repository. The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
+This document starts with the principles that every new test follows. Then it describes each layer, what it proves, how to run it, and where it runs in CI. This document covers this repository. The Rails side of Orbit has its own tests in [`gitlab-org/gitlab`](https://gitlab.com/gitlab-org/gitlab).
+
+## Testing principles
+
+- Prefer integration, YAML, and e2e tests over unit tests. A test that runs the real pipeline against real infrastructure proves more than a test of one function. Use a unit test for pure logic that a higher-level test cannot reach.
+- Write new correctness tests as YAML suites, not as Rust modules. Query scenarios, indexer scenarios, code-graph suites, and plan-shape fixtures cover most changes. If a case does not fit, extend the harness.
+- Every bug fix gets a test that fails before the fix. Write it at the level where a user can see the bug.
+- Test against real infrastructure for behavior that Orbit owns. Mock only the systems that Orbit does not own, such as Rails authorization and Gitaly.
+- Do not delete a Rust test until a YAML suite checks every one of its assertions.
+- Keep tests deterministic. In a test that gates CI, measure performance with deterministic numbers, such as rows or bytes read, not wall-clock time.
+- Do not add a test that depends on another test's state.
+- Mark every query example in the docs as `json orbit-query` or `gql orbit-query`, so CI runs it.
+- Put a new test in a target that a CI job runs. A file under a crate's `tests/` directory does not run in CI unless a job selects it.
 
 ## Terms
 
@@ -76,7 +88,7 @@ To find a check, read the `build.rs` file of the crate that owns the input.
 
 ## Unit tests
 
-Unit tests live in `#[cfg(test)]` modules next to the code they test. They need no Docker and no external services.
+Unit tests live in `#[cfg(test)]` modules next to the code they test. They need no Docker and no external services. Use them for pure logic, such as parsing and name mapping, and test behavior at a higher layer.
 
 `mise test:fast` runs them through cargo-nextest. The script is [`scripts/run-unit-tests.sh`](../../scripts/run-unit-tests.sh). It runs the library targets of the workspace and skips the crates that have their own jobs.
 
@@ -308,15 +320,3 @@ Next to the tests, CI runs checks on each MR:
 ### Billing boundary
 
 Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../dev/sox-billing-boundary.md).
-
-## Testing principles
-
-- Use the cheapest layer that can prove the behavior. Move up a layer only when the lower layer cannot show the bug.
-- Every bug fix gets a test that fails before the fix.
-- Write new correctness tests as YAML suites, not as Rust modules. Query scenarios, indexer scenarios, code-graph suites, and plan-shape fixtures cover most changes. If a case does not fit, extend the harness.
-- Do not delete a Rust test until a YAML suite checks every one of its assertions.
-- Test against real infrastructure for behavior that Orbit owns. Mock only the systems that Orbit does not own, such as Rails authorization and Gitaly.
-- Keep tests deterministic. In a test that gates CI, measure performance with deterministic numbers, such as rows or bytes read, not wall-clock time.
-- Do not add a test that depends on another test's state.
-- Mark every query example in the docs as `json orbit-query` or `gql orbit-query`, so CI runs it.
-- Put a new test in a target that a CI job runs. A file under a crate's `tests/` directory does not run in CI unless a job selects it.
