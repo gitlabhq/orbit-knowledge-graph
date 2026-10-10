@@ -12,23 +12,31 @@
 config:
   link:
     imports_shadow_locals: false
-  resolve:
-    external: []
-    stdlib: [
-      { module: kernel, implicit: true, symbols: [abort, at_exit, autoload, binding, 'block_given?', caller,
+  stdlib: [
+      { module: kernel, availability: implicit, symbols: [abort, at_exit, autoload, binding, 'block_given?', caller,
       caller_locations, catch, chomp, chop, eval, exec, exit, exit!, fail, fork,
        format, gets, global_variables, 'iterator?', lambda, load, local_variables,
       loop, open, p, print, printf, proc, putc, puts, raise, rand, readline,
       readlines, require, require_relative, select, sleep, spawn, sprintf, srand,
       syscall, system, test, throw, trace_var, trap, untrace_var, warn] },
       { module: pp, symbols: [pp, pretty_inspect] },
-      abbrev, base64, benchmark, bigdecimal, bundler, cgi, csv, date,
-      delegate, digest, drb, erb, etc, fcntl, fiddle, fileutils, find, forwardable,
-      getoptlong, io, ipaddr, irb, json, logger, monitor, mutex_m, net, nkf,
-      objspace, observer, open-uri, open3, openssl, optparse, ostruct, pathname,
-      prettyprint, pstore, psych, racc, rdoc, readline, resolv, ripper,
-      securerandom, set, shellwords, singleton, socket, stringio, strscan,
-      syslog, tempfile, time, timeout, tmpdir, tsort, un, uri, weakref, yaml, zlib]
+      { module: abbrev }, { module: base64 }, { module: benchmark }, { module: bigdecimal },
+      { module: bundler }, { module: cgi }, { module: csv }, { module: date },
+      { module: delegate }, { module: digest }, { module: drb }, { module: erb },
+      { module: etc }, { module: fcntl }, { module: fiddle }, { module: fileutils },
+      { module: find }, { module: forwardable }, { module: getoptlong }, { module: io },
+      { module: ipaddr }, { module: irb }, { module: json }, { module: logger },
+      { module: monitor }, { module: mutex_m }, { module: net }, { module: nkf },
+      { module: objspace }, { module: observer }, { module: open-uri }, { module: open3 },
+      { module: openssl }, { module: optparse }, { module: ostruct }, { module: pathname },
+      { module: prettyprint }, { module: pstore }, { module: psych }, { module: racc },
+      { module: rdoc }, { module: readline }, { module: resolv }, { module: ripper },
+      { module: securerandom }, { module: set }, { module: shellwords },
+      { module: singleton }, { module: socket }, { module: stringio }, { module: strscan },
+      { module: syslog }, { module: tempfile }, { module: time }, { module: timeout },
+      { module: tmpdir }, { module: tsort }, { module: un }, { module: uri },
+      { module: weakref }, { module: yaml }, { module: zlib }]
+  resolve:
     lookup_from:
       - __source_root
 

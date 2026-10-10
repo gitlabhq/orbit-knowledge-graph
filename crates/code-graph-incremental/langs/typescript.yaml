@@ -3,8 +3,8 @@
 # member access, calls, this.x, control flow, bindings.
 
 config:
-  link:
-    builtins: [AggregateError, Array, ArrayBuffer, BigInt, BigInt64Array,
+  stdlib: [
+    { availability: implicit, symbols: [AggregateError, Array, ArrayBuffer, BigInt, BigInt64Array,
       BigUint64Array, Boolean, DataView, Date, Error, EvalError,
       FinalizationRegistry, Float32Array, Float64Array, Function, Int8Array,
       Int16Array, Int32Array, Map, Number, Object, Promise, Proxy, RangeError,
@@ -14,9 +14,7 @@ config:
       clearImmediate, clearInterval, clearTimeout, decodeURI, decodeURIComponent,
       encodeURI, encodeURIComponent, eval, isFinite, isNaN, parseFloat,
       parseInt, queueMicrotask, require, setImmediate, setInterval,
-      setTimeout, structuredClone]
-  resolve:
-    stdlib: [
+      setTimeout, structuredClone] },
       { module: util, precedence: runtime, symbols: [callbackify, debuglog,
           deprecate, format, formatWithOptions, inspect, isDeepStrictEqual,
           parseArgs, promisify, stripVTControlCharacters, styleText] },
@@ -32,23 +30,51 @@ config:
           chown, close, copyFile, cp, existsSync, fstat, link, lstat, mkdir,
           mkdtemp, open, read, readdir, readFile, readFileSync, readlink,
           realpath, rename, rm, rmdir, stat, symlink, truncate, unlink,
-          watch, watchFile, write, writeFile, writeFileSync] }
-    ]
-    external: [assert, async_hooks, buffer, child_process, cluster, console,
-      constants, crypto, dgram, diagnostics_channel, dns, domain, events, fs,
-      http, http2, https, inspector, module, net, os, path, perf_hooks, process,
-      punycode, querystring, readline, repl, stream, string_decoder, sys, timers,
-      tls, trace_events, tty, url, util, v8, vm, wasi, worker_threads, zlib,
-      'node:assert', 'node:async_hooks', 'node:buffer', 'node:child_process',
-      'node:cluster', 'node:console', 'node:constants', 'node:crypto', 'node:dgram',
-      'node:diagnostics_channel', 'node:dns', 'node:domain', 'node:events',
-      'node:fs', 'node:http', 'node:http2', 'node:https', 'node:inspector',
-      'node:ffi', 'node:module', 'node:net', 'node:os', 'node:path', 'node:perf_hooks',
-      'node:process', 'node:punycode', 'node:querystring', 'node:readline',
-      'node:repl', 'node:sea', 'node:sqlite', 'node:stream', 'node:string_decoder',
-      'node:sys', 'node:test', 'node:timers', 'node:tls', 'node:trace_events',
-      'node:tty', 'node:url', 'node:util', 'node:v8', 'node:vm', 'node:wasi',
-      'node:worker_threads', 'node:zlib']
+          watch, watchFile, write, writeFile, writeFileSync] },
+      { module: assert, precedence: runtime }, { module: async_hooks, precedence: runtime },
+      { module: buffer, precedence: runtime }, { module: child_process, precedence: runtime },
+      { module: cluster, precedence: runtime }, { module: console, precedence: runtime },
+      { module: constants, precedence: runtime }, { module: crypto, precedence: runtime },
+      { module: dgram, precedence: runtime }, { module: diagnostics_channel, precedence: runtime },
+      { module: dns, precedence: runtime }, { module: domain, precedence: runtime },
+      { module: events, precedence: runtime }, { module: http, precedence: runtime },
+      { module: http2, precedence: runtime }, { module: https, precedence: runtime },
+      { module: inspector, precedence: runtime }, { module: module, precedence: runtime },
+      { module: net, precedence: runtime }, { module: os, precedence: runtime },
+      { module: path, precedence: runtime }, { module: perf_hooks, precedence: runtime },
+      { module: process, precedence: runtime }, { module: punycode, precedence: runtime },
+      { module: querystring, precedence: runtime }, { module: readline, precedence: runtime },
+      { module: repl, precedence: runtime }, { module: stream, precedence: runtime },
+      { module: string_decoder, precedence: runtime }, { module: sys, precedence: runtime },
+      { module: timers, precedence: runtime }, { module: tls, precedence: runtime },
+      { module: trace_events, precedence: runtime }, { module: tty, precedence: runtime },
+      { module: url, precedence: runtime }, { module: v8, precedence: runtime },
+      { module: vm, precedence: runtime }, { module: wasi, precedence: runtime },
+      { module: worker_threads, precedence: runtime }, { module: zlib, precedence: runtime },
+      { module: 'node:assert', precedence: runtime }, { module: 'node:async_hooks', precedence: runtime },
+      { module: 'node:buffer', precedence: runtime }, { module: 'node:child_process', precedence: runtime },
+      { module: 'node:cluster', precedence: runtime }, { module: 'node:console', precedence: runtime },
+      { module: 'node:constants', precedence: runtime }, { module: 'node:crypto', precedence: runtime },
+      { module: 'node:dgram', precedence: runtime }, { module: 'node:diagnostics_channel', precedence: runtime },
+      { module: 'node:dns', precedence: runtime }, { module: 'node:domain', precedence: runtime },
+      { module: 'node:events', precedence: runtime }, { module: 'node:http', precedence: runtime },
+      { module: 'node:http2', precedence: runtime }, { module: 'node:https', precedence: runtime },
+      { module: 'node:inspector', precedence: runtime }, { module: 'node:ffi', precedence: runtime },
+      { module: 'node:module', precedence: runtime }, { module: 'node:net', precedence: runtime },
+      { module: 'node:os', precedence: runtime }, { module: 'node:path', precedence: runtime },
+      { module: 'node:perf_hooks', precedence: runtime }, { module: 'node:process', precedence: runtime },
+      { module: 'node:punycode', precedence: runtime }, { module: 'node:querystring', precedence: runtime },
+      { module: 'node:readline', precedence: runtime }, { module: 'node:repl', precedence: runtime },
+      { module: 'node:sea', precedence: runtime }, { module: 'node:sqlite', precedence: runtime },
+      { module: 'node:stream', precedence: runtime }, { module: 'node:string_decoder', precedence: runtime },
+      { module: 'node:sys', precedence: runtime }, { module: 'node:test', precedence: runtime },
+      { module: 'node:timers', precedence: runtime }, { module: 'node:tls', precedence: runtime },
+      { module: 'node:trace_events', precedence: runtime }, { module: 'node:tty', precedence: runtime },
+      { module: 'node:url', precedence: runtime }, { module: 'node:v8', precedence: runtime },
+      { module: 'node:vm', precedence: runtime }, { module: 'node:wasi', precedence: runtime },
+      { module: 'node:worker_threads', precedence: runtime }, { module: 'node:zlib', precedence: runtime }
+  ]
+  resolve:
     parse_files:
       - name: "tsconfig.json"
         format: json

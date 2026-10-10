@@ -5,17 +5,16 @@
 config:
   link:
     inline_modules: true
-    builtins: [
+  stdlib: [
+    { availability: implicit, symbols: [
       println, print, eprintln, eprint, format, write, writeln, vec, panic, assert, assert_eq,
       assert_ne, debug_assert, todo, unimplemented, unreachable, matches, dbg, include_str,
       env, concat, stringify, line, file, column, cfg,
       Vec, String, Box, Option, Some, None, Result, Ok, Err, Default, Clone, Copy,
       Iterator, IntoIterator, ToString, From, Into, Drop, Send, Sync, Sized, Fn, FnMut, FnOnce,
       drop
-    ]
-  resolve:
-    external: []
-    stdlib: [std, core, alloc, proc_macro, test,
+    ] },
+      { module: std }, { module: core }, { module: alloc }, { module: proc_macro }, { module: test },
       { module: std/mem, symbols: [align_of, align_of_val, discriminant, drop,
           forget, needs_drop, replace, size_of, size_of_val, swap, take,
           transmute, transmute_copy, zeroed] },
@@ -26,6 +25,7 @@ config:
       { module: std/iter, symbols: [empty, from_fn, once, once_with, repeat,
           repeat_n, repeat_with, successors, zip] }
     ]
+  resolve:
     parse_files:
       - name: "Cargo.toml"
         format: toml

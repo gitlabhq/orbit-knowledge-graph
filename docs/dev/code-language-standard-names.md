@@ -5,29 +5,23 @@ They describe lookup policy, not a complete API inventory or a runtime emulator.
 
 ## Configuration
 
-- `link.builtins`: callable names supplied by the language or runtime. Local
-  bindings and concrete imported definitions still resolve. A matching name does
-  not create a speculative call to an unresolved wildcard import.
-- `resolve.external`: module roots that take precedence over repository lookup.
-  Node's `fs` and `node:fs` belong here. Relative `./fs` is a different identity.
-- `resolve.stdlib`: module names or provider entries with optional symbols and precedence.
-  Plain module names use project precedence.
-  Exact paths and declared source roots are checked first. Heuristic fallback
-  roots and guessed submodules cannot capture these imports.
+`config.stdlib` is a list of provider objects consumed by linking and resolution.
+Each entry has an optional module, symbol list, availability, and module precedence.
 
 ```yaml
 config:
-  resolve:
-    stdlib:
-      - module: stdio.h
-        symbols: [printf, puts]
-      - module: time
-        precedence: runtime
-      - module: builtins
-        precedence: runtime
-        implicit: true
-        symbols: [len, print]
-      - json
+  stdlib:
+    - module: stdio.h
+      symbols: [printf, puts]
+    - module: time
+      precedence: runtime
+    - module: builtins
+      precedence: runtime
+      availability: implicit
+      symbols: [len, print]
+    - module: json
+    - symbols: ['@sizeOf', '@TypeOf']
+      availability: implicit
 ```
 
 `symbols` applies only to an import of that exact canonical module path. These
@@ -35,19 +29,17 @@ names suppress speculative wildcard-call fallback for that provider, while concr
 project definitions still resolve. A spelling such as `printf` is not implicitly
 builtin merely because one standard header supplies it.
 
-`implicit: true` makes the provider's symbols available without an import. The
-compiler adds them to the existing builtin lookup set. Reserved operations without
-an importable provider remain in `link.builtins`, such as Bash commands and Zig
-`@` functions. PHP global functions and JavaScript globals also retain their direct
-lists; they do not all belong to one importable module.
+`availability: implicit` makes symbols available without an import. The default
+is `imported`. Implicit symbols without a module describe reserved operations or
+globals, including Bash commands, Zig `@` functions, and PHP/JavaScript globals.
 
-`precedence: runtime` gives the module the same lookup precedence as `external`.
+`precedence: runtime` selects the runtime module before ordinary project lookup.
 Explicit project aliases are applied before either module classification. The
 default, `precedence: project`, retains exact and declared-root project lookup.
 Provider lists are compiled once when language rules load. They do not add a
 new resolution pass or inspect language-specific syntax in the shared engine.
 
-Both module lists match a canonical module path and its slash-separated children.
+Module entries match a canonical module path and its slash-separated children.
 For example, `java/lang` matches `java/lang/Math`, but not `java/language`.
 Symbol associations match the exact provider path. Language YAML
 normalizes namespace separators before this check. The original canonical path
@@ -55,6 +47,11 @@ is retained across resolution and snapshots, even when the resolved path changes
 
 Snapshot version 15 requires a fresh index for older snapshots, which lack that
 original-path metadata.
+
+Every entry needs a module or nonempty implicit symbols. Availability requires
+symbols; precedence requires a module. Empty names, unknown fields, unknown policy
+values, and bare-string entries are rejected. The old `link.builtins`,
+`resolve.external`, and `resolve.stdlib` fields are no longer accepted.
 
 ## Per-language coverage
 
@@ -78,7 +75,7 @@ links to language references for maintaining them.
 | Rust | Prelude names; Rc and Arc require imports | mem, cmp, and iter symbol providers under std/core roots | [Prelude](https://doc.rust-lang.org/std/prelude/index.html) |
 | Scala | Implicit Predef provider | Explicit math provider; scala/java module policy | [Predef](https://www.scala-lang.org/api/current/scala/Predef$.html) |
 | Swift | Implicit Swift provider | Foundation symbols; platform framework roots | [Standard library](https://developer.apple.com/documentation/swift) |
-| TypeScript / JavaScript | ECMAScript constructors/global functions and common Node globals | Node module roots use `external`, including explicit `node:` spellings | [Node modules](https://nodejs.org/api/modules.html#built-in-modules) |
+| TypeScript / JavaScript | ECMAScript constructors/global functions and common Node globals | Node module roots use runtime precedence, including explicit `node:` spellings | [Node modules](https://nodejs.org/api/modules.html#built-in-modules) |
 | Zig | Reserved `@` builtin functions | `std` and `builtin` are external | [Builtins](https://ziglang.org/documentation/master/#Builtin-Functions) |
 
 Qualified library methods are not flattened into global builtin names. For

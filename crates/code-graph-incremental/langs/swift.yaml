@@ -4,10 +4,8 @@
 # init, self./super. calls, control flow.
 
 config:
-  resolve:
-    external: []
-    stdlib: [
-      { module: Swift, implicit: true, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
+  stdlib: [
+      { module: Swift, availability: implicit, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
       getVaList, isKnownUniquelyReferenced, max, min, numericCast, precondition,
       preconditionFailure, print, readLine, repeatElement, sequence, stride,
       swap, type, unsafeBitCast, unsafeDowncast, withExtendedLifetime,
@@ -16,8 +14,9 @@ config:
       { module: Foundation, symbols: [NSLog, NSStringFromClass, NSClassFromString,
           NSStringFromSelector, NSSelectorFromString, NSHomeDirectory,
           NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains] },
-      Dispatch, Darwin, Glibc, ObjectiveC, Combine,
-      SwiftUI, UIKit, AppKit, XCTest]
+      { module: Dispatch }, { module: Darwin }, { module: Glibc }, { module: ObjectiveC },
+      { module: Combine }, { module: SwiftUI }, { module: UIKit }, { module: AppKit }, { module: XCTest }]
+  resolve:
     lookup_from:
       - __source_root
 

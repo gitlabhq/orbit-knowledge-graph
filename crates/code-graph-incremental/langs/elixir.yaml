@@ -7,10 +7,8 @@ config:
   link:
     inline_modules: true
     imports_shadow_locals: false
-  resolve:
-    external: []
-    stdlib: [
-      { module: Kernel, implicit: true, symbols: [abs, apply, binary_part,
+  stdlib: [
+      { module: Kernel, availability: implicit, symbols: [abs, apply, binary_part,
           bit_size, byte_size, ceil, div, elem, exit, floor, hd, inspect,
           is_atom, is_binary, is_bitstring, is_boolean, is_float, is_function,
           is_integer, is_list, is_map, is_map_key, is_nil, is_number, is_pid,
@@ -23,12 +21,19 @@ config:
           find_index, flat_map, frequencies, group_by, into, join, map, max,
           min, reduce, reject, reverse, sort, sort_by, split, sum, take,
           to_list, uniq, uniq_by, unzip, with_index, zip] },
-      Access, Agent, Application, Atom, Base, Calendar, Code, Date,
-      DateTime, DynamicSupervisor, Exception, File, Float, Function, GenServer,
-      IO, Integer, Keyword, List, Logger, Macro, Map, MapSet, Module,
-      NaiveDateTime, Node, OptionParser, Path, Port, Process, Protocol, Range,
-      Record, Regex, Registry, Stream, String, StringIO, Supervisor, System,
-      Task, Time, Tuple, URI, Version]
+      { module: Access }, { module: Agent }, { module: Application }, { module: Atom },
+      { module: Base }, { module: Calendar }, { module: Code }, { module: Date },
+      { module: DateTime }, { module: DynamicSupervisor }, { module: Exception },
+      { module: File }, { module: Float }, { module: Function }, { module: GenServer },
+      { module: IO }, { module: Integer }, { module: Keyword }, { module: List },
+      { module: Logger }, { module: Macro }, { module: Map }, { module: MapSet },
+      { module: Module }, { module: NaiveDateTime }, { module: Node },
+      { module: OptionParser }, { module: Path }, { module: Port }, { module: Process },
+      { module: Protocol }, { module: Range }, { module: Record }, { module: Regex },
+      { module: Registry }, { module: Stream }, { module: String }, { module: StringIO },
+      { module: Supervisor }, { module: System }, { module: Task }, { module: Time },
+      { module: Tuple }, { module: URI }, { module: Version }]
+  resolve:
     lookup_from:
       - __source_root
 

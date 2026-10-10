@@ -12,11 +12,7 @@
 #   Namespace or Concept kind.
 
 config:
-  link:
-    builtins: []
-  resolve:
-    external: []
-    stdlib: [
+  stdlib: [
       { module: cstdio, symbols: [clearerr, fclose, feof, ferror, fflush, fgetc,
           fgetpos, fgets, fopen, fprintf, fputc, fputs, fread, freopen, fscanf,
           fseek, fsetpos, ftell, fwrite, getc, getchar, perror, printf, putc,
@@ -37,20 +33,35 @@ config:
           log1p, log2, modf, pow, remainder, round, sin, sinh, sqrt, tan, tanh, trunc] },
       { module: cctype, symbols: [isalnum, isalpha, isblank, iscntrl, isdigit,
           isgraph, islower, isprint, ispunct, isspace, isupper, isxdigit, tolower, toupper] },
-      algorithm, any, array, atomic, barrier, bit, bitset, cerrno,
-      cfenv, cfloat, charconv, chrono, cinttypes, climits, clocale, codecvt,
-      compare, complex, concepts, condition_variable, coroutine, csetjmp, csignal,
-      cstdarg, cstddef, cstdint, ctime, cuchar, cwchar,
-      cwctype, deque, exception, execution, expected, filesystem, format,
-      forward_list, fstream, functional, future, initializer_list, iomanip, ios,
-      iosfwd, iostream, istream, iterator, latch, limits, list, locale, map,
-      memory, memory_resource, mutex, new, numbers, numeric, optional, ostream,
-      print, queue, random, ranges, ratio, regex, scoped_allocator, semaphore,
-      set, shared_mutex, source_location, span, sstream, stack, stacktrace,
-      stdexcept, stop_token, streambuf, string, string_view, syncstream,
-      system_error, thread, tuple, type_traits, typeindex, typeinfo,
-      unordered_map, unordered_set, utility, valarray, variant, vector, version
+      { module: algorithm }, { module: any }, { module: array }, { module: atomic },
+      { module: barrier }, { module: bit }, { module: bitset }, { module: cerrno },
+      { module: cfenv }, { module: cfloat }, { module: charconv }, { module: chrono },
+      { module: cinttypes }, { module: climits }, { module: clocale }, { module: codecvt },
+      { module: compare }, { module: complex }, { module: concepts },
+      { module: condition_variable }, { module: coroutine }, { module: csetjmp },
+      { module: csignal }, { module: cstdarg }, { module: cstddef }, { module: cstdint },
+      { module: ctime }, { module: cuchar }, { module: cwchar }, { module: cwctype },
+      { module: deque }, { module: exception }, { module: execution }, { module: expected },
+      { module: filesystem }, { module: format }, { module: forward_list },
+      { module: fstream }, { module: functional }, { module: future },
+      { module: initializer_list }, { module: iomanip }, { module: ios },
+      { module: iosfwd }, { module: iostream }, { module: istream }, { module: iterator },
+      { module: latch }, { module: limits }, { module: list }, { module: locale },
+      { module: map }, { module: memory }, { module: memory_resource },
+      { module: mutex }, { module: new }, { module: numbers }, { module: numeric },
+      { module: optional }, { module: ostream }, { module: print }, { module: queue },
+      { module: random }, { module: ranges }, { module: ratio }, { module: regex },
+      { module: scoped_allocator }, { module: semaphore }, { module: set },
+      { module: shared_mutex }, { module: source_location }, { module: span },
+      { module: sstream }, { module: stack }, { module: stacktrace }, { module: stdexcept },
+      { module: stop_token }, { module: streambuf }, { module: string },
+      { module: string_view }, { module: syncstream }, { module: system_error },
+      { module: thread }, { module: tuple }, { module: type_traits }, { module: typeindex },
+      { module: typeinfo }, { module: unordered_map }, { module: unordered_set },
+      { module: utility }, { module: valarray }, { module: variant },
+      { module: vector }, { module: version }
     ]
+  resolve:
     lookup_from:
       - __source_root
 

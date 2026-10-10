@@ -11,10 +11,9 @@
 #   __def plus an SSA __binding.
 
 config:
-  resolve:
-    stdlib:
+  stdlib:
       - module: builtin
-        implicit: true
+        availability: implicit
         precedence: runtime
         symbols: [
           append, cap, clear, close, complex, copy, delete, imag, len, make, max, min,
@@ -31,13 +30,52 @@ config:
         precedence: runtime
         symbols: [As, Is, Join, New, Unwrap]
 
-    external: [
-      archive, bufio, builtin, bytes, cmp, compress, container, context, crypto,
-      database, debug, embed, encoding, errors, expvar, flag, fmt, go, hash, html,
-      image, index, io, iter, log, maps, math, mime, net, os, path, plugin,
-      reflect, regexp, runtime, slices, sort, strconv, strings, structs, sync,
-      syscall, testing, text, time, unicode, unique, unsafe, weak
-    ]
+      - { module: archive, precedence: runtime }
+      - { module: bufio, precedence: runtime }
+      - { module: bytes, precedence: runtime }
+      - { module: cmp, precedence: runtime }
+      - { module: compress, precedence: runtime }
+      - { module: container, precedence: runtime }
+      - { module: context, precedence: runtime }
+      - { module: crypto, precedence: runtime }
+      - { module: database, precedence: runtime }
+      - { module: debug, precedence: runtime }
+      - { module: embed, precedence: runtime }
+      - { module: encoding, precedence: runtime }
+      - { module: expvar, precedence: runtime }
+      - { module: flag, precedence: runtime }
+      - { module: go, precedence: runtime }
+      - { module: hash, precedence: runtime }
+      - { module: html, precedence: runtime }
+      - { module: image, precedence: runtime }
+      - { module: index, precedence: runtime }
+      - { module: io, precedence: runtime }
+      - { module: iter, precedence: runtime }
+      - { module: log, precedence: runtime }
+      - { module: maps, precedence: runtime }
+      - { module: math, precedence: runtime }
+      - { module: mime, precedence: runtime }
+      - { module: net, precedence: runtime }
+      - { module: os, precedence: runtime }
+      - { module: path, precedence: runtime }
+      - { module: plugin, precedence: runtime }
+      - { module: reflect, precedence: runtime }
+      - { module: regexp, precedence: runtime }
+      - { module: runtime, precedence: runtime }
+      - { module: slices, precedence: runtime }
+      - { module: sort, precedence: runtime }
+      - { module: strconv, precedence: runtime }
+      - { module: strings, precedence: runtime }
+      - { module: structs, precedence: runtime }
+      - { module: sync, precedence: runtime }
+      - { module: syscall, precedence: runtime }
+      - { module: testing, precedence: runtime }
+      - { module: text, precedence: runtime }
+      - { module: time, precedence: runtime }
+      - { module: unicode, precedence: runtime }
+      - { module: unique, precedence: runtime }
+      - { module: unsafe, precedence: runtime }
+      - { module: weak, precedence: runtime }
 
 stages:
   - name: normalize

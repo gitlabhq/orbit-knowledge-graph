@@ -9,11 +9,7 @@
 # - Same-namespace siblings without a using need a namespace scope.
 
 config:
-  link:
-    builtins: []
-  resolve:
-    external: []
-    stdlib: [System,
+  stdlib: [{ module: System },
       { module: System/Math, symbols: [Abs, Acos, Acosh, Asin, Asinh, Atan,
           Atan2, Atanh, BigMul, Cbrt, Ceiling, Clamp, CopySign, Cos, Cosh,
           DivRem, Exp, Floor, IEEERemainder, Log, Log10, Log2, Max, Min,
@@ -23,6 +19,7 @@ config:
           ResetColor, SetBufferSize, SetCursorPosition, SetError, SetIn,
           SetOut, SetWindowPosition, SetWindowSize, Write, WriteLine] }
     ]
+  resolve:
     lookup_from:
       - __source_root
     merge_same_named_types: true

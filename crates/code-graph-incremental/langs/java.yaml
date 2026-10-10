@@ -13,9 +13,9 @@
 #   only files and index files.
 
 config:
-  resolve:
-    stdlib: [
-      { module: java/lang, implicit: true, precedence: runtime, symbols: [
+  stdlib: [
+      { module: java, precedence: runtime },
+      { module: java/lang, availability: implicit, precedence: runtime, symbols: [
       AssertionError, Boolean, Byte, Character, Class, ClassCastException,
       ClassNotFoundException, Double, Enum, Error, Exception, Float,
       IllegalArgumentException, IllegalStateException, IndexOutOfBoundsException,
@@ -28,7 +28,7 @@ config:
       StackTraceElement, ThreadGroup, ThreadLocal, InheritableThreadLocal,
       ProcessBuilder, RuntimePermission
       ] },
-      javax, jdk,
+      { module: javax }, { module: jdk },
       { module: java/lang/Math, symbols: [abs, acos, asin, atan, atan2, cbrt,
           ceil, copySign, cos, cosh, exp, expm1, floor, floorDiv, floorMod, hypot,
           log, log10, log1p, max, min, multiplyExact, nextAfter, nextDown, nextUp,
@@ -38,7 +38,7 @@ config:
           checkIndex, compare, deepEquals, equals, hash, hashCode, isNull,
           nonNull, requireNonNull, requireNonNullElse, requireNonNullElseGet, toString] }
     ]
-    external: [java]
+  resolve:
     lookup_from:
       - __source_root
 

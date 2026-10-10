@@ -119,7 +119,10 @@ impl ResolveConfig {
 }
 
 #[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct ConfigSection {
+    #[serde(default)]
+    stdlib: Vec<Library>,
     #[serde(default)]
     link: Option<LinkSection>,
     #[serde(default)]
@@ -127,21 +130,17 @@ struct ConfigSection {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LinkSection {
-    #[serde(default)]
-    builtins: Vec<String>,
     #[serde(default = "default_true")]
     imports_shadow_locals: bool,
     #[serde(default)]
     inline_modules: bool,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ResolveSettingsSection {
-    #[serde(default)]
-    external: Vec<String>,
-    #[serde(default)]
-    stdlib: Vec<Library>,
     #[serde(default)]
     lookup_from: Vec<String>,
     #[serde(default)]
@@ -151,21 +150,24 @@ struct ResolveSettingsSection {
 }
 
 #[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum Library {
-    Module(String),
-    Provider {
-        module: String,
-        #[serde(default)]
-        symbols: Vec<String>,
-        #[serde(default)]
-        implicit: bool,
-        #[serde(default)]
-        precedence: LibraryPrecedence,
-    },
+#[serde(deny_unknown_fields)]
+struct Library {
+    module: Option<String>,
+    #[serde(default)]
+    symbols: Vec<String>,
+    availability: Option<LibraryAvailability>,
+    precedence: Option<LibraryPrecedence>,
 }
 
-#[derive(Default, serde::Deserialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LibraryAvailability {
+    #[default]
+    Imported,
+    Implicit,
+}
+
+#[derive(Clone, Copy, Default, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LibraryPrecedence {
     #[default]
@@ -185,17 +187,12 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
         .link
         .as_ref()
         .map_or_else(LinkConfig::default, |l| LinkConfig {
-            builtins: l.builtins.iter().map(|b| lang.syms.intern(b)).collect(),
-            providers: Vec::new(),
             imports_shadow_locals: l.imports_shadow_locals,
             inline_modules: l.inline_modules,
+            ..LinkConfig::default()
         });
-    let Some(r) = section.resolve.as_ref() else {
-        return Ok(Config {
-            link,
-            resolve: ResolveConfig::default(),
-        });
-    };
+    let default_resolve = ResolveSettingsSection::default();
+    let r = section.resolve.as_ref().unwrap_or(&default_resolve);
     let parse_file = |pf: &ParseFileEntry| -> Result<ParseFileSpec, LoadError> {
         let format = match pf.format.as_str() {
             "json" => ParseFormat::Json,
@@ -218,31 +215,46 @@ fn compile_config(section: Option<&ConfigSection>, lang: &Lang) -> Result<Config
             format,
         })
     };
-    let mut external = r.external.clone();
+    let mut external = Vec::new();
     let mut stdlib = Vec::new();
-    for library in &r.stdlib {
-        match library {
-            Library::Module(module) => stdlib.push(module.clone()),
-            Library::Provider {
-                module,
-                symbols,
-                implicit,
-                precedence,
-            } => {
-                match precedence {
-                    LibraryPrecedence::Project => stdlib.push(module.clone()),
-                    LibraryPrecedence::Runtime => external.push(module.clone()),
-                }
-                if !symbols.is_empty() {
-                    if *implicit {
-                        link.builtins
-                            .extend(symbols.iter().map(|name| lang.syms.intern(name)));
-                    }
-                    link.providers.push((
-                        lang.syms.intern(module),
-                        symbols.iter().map(|name| lang.syms.intern(name)).collect(),
-                    ));
-                }
+    for library in &section.stdlib {
+        let implicit = library.availability.unwrap_or_default() == LibraryAvailability::Implicit;
+        if library
+            .module
+            .as_ref()
+            .is_some_and(|module| module.trim().is_empty())
+            || library
+                .symbols
+                .iter()
+                .any(|symbol| symbol.trim().is_empty())
+        {
+            return Err(LoadError(
+                "stdlib module and symbol names must be nonempty".into(),
+            ));
+        }
+        if library.module.is_none()
+            && (!implicit || library.symbols.is_empty() || library.precedence.is_some())
+        {
+            return Err(LoadError("stdlib entries without a module require implicit symbols and cannot set precedence".into()));
+        }
+        if library.availability.is_some() && library.symbols.is_empty() {
+            return Err(LoadError("stdlib availability requires symbols".into()));
+        }
+        let symbols = library
+            .symbols
+            .iter()
+            .map(|name| lang.syms.intern(name))
+            .collect::<rustc_hash::FxHashSet<_>>();
+        if implicit {
+            link.builtins.extend(&symbols);
+        }
+        if let Some(module) = &library.module {
+            match library.precedence.unwrap_or_default() {
+                LibraryPrecedence::Project => stdlib.push(module.clone()),
+                LibraryPrecedence::Runtime => external.push(module.clone()),
+            }
+            if !symbols.is_empty() {
+                link.providers.push((lang.syms.intern(module), symbols));
             }
         }
     }

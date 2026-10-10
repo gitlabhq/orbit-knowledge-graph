@@ -8,11 +8,7 @@
 #   include receives unresolved calls.
 
 config:
-  link:
-    builtins: []
-  resolve:
-    external: []
-    stdlib: [
+  stdlib: [
       { module: assert.h, symbols: [assert] },
       { module: ctype.h, symbols: [isalnum, isalpha, isblank, iscntrl, isdigit,
           isgraph, islower, isprint, ispunct, isspace, isupper, isxdigit, tolower, toupper] },
@@ -47,11 +43,14 @@ config:
       { module: signal.h, symbols: [signal, raise] },
       { module: inttypes.h, symbols: [imaxabs, imaxdiv, strtoimax, strtoumax,
           wcstoimax, wcstoumax] },
-      complex.h, errno.h, float.h, iso646.h, limits.h,
-      stdalign.h, stdarg.h, stdatomic.h, stdbit.h,
-      stdbool.h, stdckdint.h, stddef.h, stdint.h, stdnoreturn.h, tgmath.h,
-      threads.h, uchar.h, wchar.h, wctype.h
+      { module: complex.h }, { module: errno.h }, { module: float.h },
+      { module: iso646.h }, { module: limits.h }, { module: stdalign.h },
+      { module: stdarg.h }, { module: stdatomic.h }, { module: stdbit.h },
+      { module: stdbool.h }, { module: stdckdint.h }, { module: stddef.h },
+      { module: stdint.h }, { module: stdnoreturn.h }, { module: tgmath.h },
+      { module: threads.h }, { module: uchar.h }, { module: wchar.h }, { module: wctype.h }
     ]
+  resolve:
     lookup_from:
       - __source_root
 

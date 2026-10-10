@@ -4,10 +4,8 @@
 # typing, new, member and this-calls, control flow.
 
 config:
-  resolve:
-    external: [java]
-    stdlib: [scala, javax, jdk,
-      { module: scala/Predef, implicit: true, symbols: [assert, assume, classOf,
+  stdlib: [{ module: java, precedence: runtime }, { module: scala }, { module: javax }, { module: jdk },
+      { module: scala/Predef, availability: implicit, symbols: [assert, assume, classOf,
           identity, implicitly, locally, print, printf, println, require,
           summon, synchronized, valueOf] },
       { module: scala/math, symbols: [abs, acos, asin, atan, atan2, cbrt, ceil,
@@ -15,6 +13,7 @@ config:
           pow, random, rint, round, signum, sin, sinh, sqrt, tan, tanh,
           toDegrees, toRadians, ulp] }
     ]
+  resolve:
     lookup_from:
       - __source_root
 
