@@ -8,67 +8,44 @@ exists to break the dependency cycle: it depends on `orbit-server`, `compiler`, 
 
 ```plaintext
 tests/
-  local.rs                   # Non-Docker test binary: compiler + querying pipeline (auto-discovered)
-  containers.rs              # Docker-based server test binary (auto-discovered)
-  common/
-    mod.rs                   # Shared helpers: MockRedactionService, test fixtures, DummyClaims
-  compiler/
-    mod.rs                   # Module declarations
-    setup.rs                 # Shared test helpers (test_ctx, test_ontology, compile_to_ast)
-    queries.rs               # Compiler tests with hand-built ontology
-    ontology.rs              # Compiler tests with embedded production ontology
-  canary/
-    setup_test.rs            # Infrastructure canary (validates TestContext, macros, isolation)
-  indexer/                   # Indexer integration tests (NATS, ClickHouse, SDLC, code, dispatcher)
-  server/
-    data_correctness/        # YAML-driven query correctness scenarios (preferred)
-      scenarios/             # YAML fixtures organized by category
-        aggregation/
-        dedup/
-        edge_cases/
-        neighbors/
-        pagination/
-        path_finding/
-        search/
-        security/
-        traversal/
-        traversal_scoping/
-        work_items/
-      presets/               # Shared security, redaction, and seed presets
-      helpers.rs             # Legacy Rust pipeline helpers (deprecated)
-      mod.rs                 # Orchestrators: data_correctness + data_correctness_scenarios
-      *.rs                   # Legacy Rust test modules (deprecated)
-    querying_pipeline/       # Virtual column dispatch tests
-    graph_formatter.rs       # Graph formatter end-to-end tests
-    health.rs                # Health/readiness endpoint tests
-    hydration.rs             # Hydration pipeline tests (compile -> execute -> hydrate -> format)
-    redaction.rs             # Redaction pipeline tests (fail-closed, path finding, search, etc.)
+  local.rs              # local binary (no Docker)
+  containers.rs         # containers binary (ClickHouse and NATS testcontainers)
+  cli.rs                # cli binary (the orbit binary as a subprocess)
+  billing_boundary.rs   # billing_boundary binary (orbit-billing dependents)
+  common/               # shared helpers
+  canary/               # TestContext canary
+  compiler/             # compiler, dialect, named query, and plan-shape tests
+  indexer/              # indexer tests; indexer scenarios in indexer/scenarios/
+  server/               # server tests; query scenarios in server/data_correctness/scenarios/
+  fixtures/             # CLI fixtures
 ```
 
-> **Deprecation:** The Rust test modules in `data_correctness/` (`search.rs`,
-> `traversal.rs`, etc.) are deprecated and will be removed. New data correctness
-> tests must be YAML scenarios under `data_correctness/scenarios/`.
+| Binary | Tests | CI job |
+|---|---|---|
+| `local` | compiler and querying pipeline, no Docker | `compiler-integration-test` |
+| `containers` | ClickHouse and NATS testcontainers | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
+| `cli` | the `orbit` CLI | `cli-integration-test` |
+| `billing_boundary` | only `orbit-server` depends on `orbit-billing` | `billing-boundary-check` |
 
-Test targets are auto-discovered by Cargo from `tests/*.rs` files. Shared helpers
-live in `tests/common/` (subdirectory, ignored by auto-discovery).
+The three `containers` lanes run each container test one time.
+`integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
 
-Tests are split across two binaries:
-
-- **`local`** — Compiler and querying pipeline tests (no Docker). Runs as part of `unit-test` in CI.
-- **`containers`** — Server tests requiring ClickHouse via testcontainers. Each orchestrator
-  test starts one container, seeds data once, and runs subtests in parallel.
+New correctness tests are YAML suites. See
+[Where to add a test](../../docs/design-documents/testing.md#where-to-add-a-test).
 
 ## Running
 
-All tasks are defined in `mise.toml` at the repo root:
+On macOS, start the Colima profile that the mise tasks use:
 
 ```shell
-mise test:local                                     # compiler + querying pipeline (no Docker)
-mise colima:start                                   # start Docker runtime (12 GB RAM)
-mise test:integration                               # run all server integration tests
-mise test:integration:server                        # correctness, hydration, redaction, graph formatter
-mise colima:stop                                    # stop when done
+colima start gkg --memory 12
+mise test:local
+mise test:integration
+colima stop gkg
 ```
+
+For the other `mise test:integration:*` tasks, see
+[Container tests](../../docs/design-documents/testing.md#container-tests).
 
 To run specific suites or tests directly:
 
@@ -78,9 +55,9 @@ cargo nextest run --test local                                           # all l
 cargo nextest run --test local -E 'test(compiler::)'                     # compiler only
 cargo nextest run --test local -E 'test(querying_pipeline::)'            # querying pipeline only
 
-# Docker-based server tests
+# Container tests
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --test containers                                      # all server tests
+cargo nextest run --test containers                                      # all container tests
 cargo nextest run --test containers -E 'test(data_correctness)'          # one suite
 cargo nextest run --test containers -E 'test(infra_canary)'              # canary
 

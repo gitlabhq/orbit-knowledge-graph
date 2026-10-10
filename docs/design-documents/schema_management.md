@@ -408,8 +408,8 @@ single project failure must not hold a schema migration open indefinitely.
 Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
 pipeline ran and committed for that scope. It does not validate that the output tables contain
 the expected number of rows. This is the standard pattern for CDC/ETL systems. Silent data-loss
-bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
-data correctness validation is deferred to staging E2E tests.
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Container tests check row counts after a clone on small
+fixtures, but no production check compares row counts. See [Testing: known gaps](testing.md#known-gaps).
 
 ### Status transitions on completion
 

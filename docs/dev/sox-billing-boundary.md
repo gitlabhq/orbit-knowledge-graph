@@ -31,14 +31,19 @@ other files in `orbit-server` invoke those conversions at the call site
 define what data crosses into a billing event. That logic lives only
 in `billing_adapter.rs`.
 
-The existing hard gate around this boundary is **CODEOWNERS**
-(`.gitlab/CODEOWNERS`). It routes `/crates/orbit-billing/`,
-`/crates/orbit-server/src/billing_adapter.rs`, and a small set of related
-paths to the SOX-billing approver group. Changes to those paths require
-explicit SOX approval to merge.
+Two hard gates protect this boundary:
 
-This document defines the additional content-level rules that the
-path-based CODEOWNERS gate cannot see. AI agents should respect them at
+- **CODEOWNERS** (`.gitlab/CODEOWNERS`). The `[SOX Billing]` section routes
+  `/crates/orbit-billing/`, `/crates/orbit-server/src/billing_adapter.rs`, and
+  a small set of related paths to `@gitlab-org/orbit/team`. Changes to those
+  paths require explicit SOX approval to merge.
+- **The `billing-boundary-check` CI job.** It runs
+  `crates/integration-tests/tests/billing_boundary.rs`. The test fails when a
+  crate other than `orbit-server` depends on `orbit-billing`. This enforces
+  the crate-level part of R1.
+
+This document defines the additional content-level rules that these gates
+cannot see. AI agents should respect them at
 authoring time.
 
 ## Rules

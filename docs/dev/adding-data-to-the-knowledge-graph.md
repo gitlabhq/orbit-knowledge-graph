@@ -265,11 +265,8 @@ edges:
 ### 5.4 Bump the schema version + regenerate DDL
 
 ```bash
-# bump the `schema:` pin in:
-config/versions.yaml         # e.g. schema: 64 -> schema: 65
-
-# regenerate (do NOT hand-edit graph.sql):
-mise run schema:generate:ddl
+mise schema:bump              # bumps the `schema:` pin in config/versions.yaml, adds a ledger entry, re-snapshots fingerprints
+mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
 ```
 
 This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
@@ -286,7 +283,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 ### 5.5 Test fixtures + SDLC scenario
 
 - **`fixtures/siphon.sql`**: add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
-- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. These moved from Rust to **YAML**; add a `.yaml` scenario, not a Rust function. Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
+- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../design-documents/testing.md#where-to-add-a-test)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
 
   ```yaml
   description: ...
@@ -313,17 +310,14 @@ relationship diagram, the `IN_PROJECT` source list, and a new relationship-types
 ```bash
 # The repo pins rustc via rust-toolchain.toml; a BARE `cargo` may pick up an older
 # toolchain on PATH. Use mise's env or an explicit +version.
-cargo +<pinned> test -p ontology                          # ~128 tests: load, constants, references
-cargo +<pinned> test -p integration-tests scenario_indexing   # end-to-end siphon->graph (needs Docker ClickHouse)
+cargo +<pinned> test -p ontology                           # load, constants, references
+mise test:integration:indexer:sdlc:scenario <domain>/      # SDLC scenarios on a ClickHouse testcontainer
 ```
 
 - Find the pinned version in `rust-toolchain.toml` (e.g. `1.98.1`). Running via
   `mise run …` uses the right toolchain automatically.
 - `integration-tests` pulls in heavy code-graph deps that require the **newer**
   rustc. A bare `cargo test` on an older toolchain fails at dependency resolution.
-- Local hooks may reference CI-only env vars (e.g. `CI_MERGE_REQUEST_DIFF_BASE_SHA`)
-  and crash on commit; `git commit --no-verify` is acceptable here since the real
-  checks run in CI. Note it in your summary.
 
 ---
 
@@ -357,11 +351,11 @@ knowledge-graph:
 - [ ] Node YAML (every property has `description`; nullable matches source).
 - [ ] Edge YAML (join FKs handled).
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
-- [ ] `schema` pin in `config/versions.yaml` bumped; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
+- [ ] `mise schema:bump` run; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
 - [ ] `data_model.md` updated.
-- [ ] `cargo test -p ontology` + `scenario_indexing` green (correct toolchain).
+- [ ] `cargo test -p ontology` + `mise test:integration:indexer:sdlc:scenario <domain>/` green (correct toolchain).
 
 ---
 
@@ -375,7 +369,6 @@ knowledge-graph:
 | Siphon spec: `reconcile`/sharding mismatch | `expression_key_columns` ≠ `db/docs/<table>.yml` `sharding_key` | Align them; usually `[project_id]`. |
 | `bundle exec rails …` can't find a gem | Local bundle behind `master` | `bundle install`. |
 | `cargo test -p integration-tests` fails at dep resolution (rustc too old) | Bare `cargo` used an older PATH toolchain | Use `mise run` or `cargo +<pinned>`. |
-| `git commit` aborts on an unbound `CI_*` var | Local hook expects CI env | `git commit --no-verify`; note it. |
 | `glab mr` returns `401` | `glab` token expired | `glab auth login`, or let the human drive MRs. |
 
 ---
