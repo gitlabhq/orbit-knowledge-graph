@@ -44,17 +44,30 @@ impl Lowering {
                     return Err(invalid(span, &format!("undefined variable {alias}")));
                 }
             }
+            let filter = InputFilter {
+                op: Some(op),
+                rhs_column: Some((rhs_node.clone(), rhs_prop)),
+                ..Default::default()
+            };
+            if lhs_node == rhs_node {
+                self.input
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == lhs_node)
+                    .expect("resolved node")
+                    .filters
+                    .entry(lhs_prop)
+                    .or_default()
+                    .push(filter);
+                return Ok(());
+            }
             self.input
                 .predicates
                 .push(crate::input::BooleanExpression::Leaf(
                     crate::input::PropertyPredicate {
                         target: crate::input::PredicateTarget::Node(lhs_node),
                         property: lhs_prop,
-                        filter: InputFilter {
-                            op: Some(op),
-                            rhs_column: Some((rhs_node, rhs_prop)),
-                            ..Default::default()
-                        },
+                        filter,
                     },
                 ));
             return Ok(());

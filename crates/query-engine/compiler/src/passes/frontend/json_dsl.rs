@@ -21,7 +21,6 @@ pub fn parse(json: &str, ontology: &Ontology) -> Result<(Input, u64)> {
         other => other,
     })?;
     let query_hash = cursor::canonical_hash(&value);
-    let mut input: Input = serde_json::from_value(value)?;
-    input.collect_predicates();
+    let input: Input = serde_json::from_value(value)?;
     Ok((input, query_hash))
 }

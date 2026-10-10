@@ -219,7 +219,6 @@ pub fn restrict(
     security_ctx: &SecurityContext,
 ) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
     enforce_traversal_path_filters(input, model, security_ctx)?;
-    input.extract_scan_filters();
     let scope_proofs = stamp_edge_scope_proofs(input, model);
 
     if security_ctx.admin {

@@ -129,61 +129,6 @@ pub struct PropertyPredicate {
 }
 
 impl Input {
-    pub fn collect_predicates(&mut self) {
-        for node in &mut self.nodes {
-            self.predicates.extend(filter_expressions(
-                PredicateTarget::Node(node.id.clone()),
-                std::mem::take(&mut node.filters),
-            ));
-        }
-        for (index, relationship) in self.relationships.iter_mut().enumerate() {
-            self.predicates.extend(filter_expressions(
-                PredicateTarget::Relationship(index),
-                std::mem::take(&mut relationship.filters),
-            ));
-        }
-    }
-
-    pub fn extract_scan_filters(&mut self) {
-        let expressions = std::mem::take(&mut self.predicates);
-        for expression in expressions {
-            let BooleanExpression::Leaf(leaf) = expression else {
-                self.predicates.push(expression);
-                continue;
-            };
-            if leaf
-                .filter
-                .rhs_column
-                .as_ref()
-                .is_some_and(|(alias, _)| leaf.target != PredicateTarget::Node(alias.clone()))
-            {
-                self.predicates.push(BooleanExpression::Leaf(leaf));
-                continue;
-            }
-            let filters = match &leaf.target {
-                PredicateTarget::Node(alias) => {
-                    &mut self
-                        .nodes
-                        .iter_mut()
-                        .find(|node| &node.id == alias)
-                        .expect("validated node")
-                        .filters
-                }
-                PredicateTarget::Relationship(index) => &mut self.relationships[*index].filters,
-            };
-            filters.entry(leaf.property).or_default().push(leaf.filter);
-        }
-    }
-
-    pub fn positive_predicates(&self) -> impl Iterator<Item = &PropertyPredicate> {
-        self.predicates
-            .iter()
-            .filter_map(|expression| match expression {
-                BooleanExpression::Leaf(leaf) => Some(leaf),
-                _ => None,
-            })
-    }
-
     pub fn node_filters<'a>(
         &'a self,
         node: &'a InputNode,
@@ -253,24 +198,6 @@ impl Default for Input {
             predicates: Vec::new(),
         }
     }
-}
-
-fn filter_expressions(
-    target: PredicateTarget,
-    filters: HashMap<String, Vec<InputFilter>>,
-) -> impl Iterator<Item = BooleanExpression<PropertyPredicate>> {
-    let mut properties: Vec<_> = filters.into_iter().collect();
-    properties.sort_by(|(left, _), (right, _)| left.cmp(right));
-    properties.into_iter().flat_map(move |(property, filters)| {
-        let target = target.clone();
-        filters.into_iter().map(move |filter| {
-            BooleanExpression::Leaf(PropertyPredicate {
-                target: target.clone(),
-                property: property.clone(),
-                filter,
-            })
-        })
-    })
 }
 
 fn default_limit() -> u32 {
