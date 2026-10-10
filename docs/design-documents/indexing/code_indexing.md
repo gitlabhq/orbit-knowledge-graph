@@ -262,8 +262,6 @@ payload. Snapshot version 15 requires a fresh index for older saved graphs.
 Snapshots also retain original import paths so resolved paths cannot change
 standard-library classification on reindex. Language YAML distinguishes builtin
 callable names, external module roots, and shadowable standard-library roots.
-See [standard names](../../dev/code-language-standard-names.md) for lookup policy
-and the per-language inventory.
 Loading rebuilds the file index from saved trees and manifests before edits apply.
 
 Import discovery scans retained files only when the file index gains keys.
