@@ -13,8 +13,8 @@ query_dsl: 12.1.14
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 5.0.4
 
-# Response envelope of the GOON formatter.
-goon_output_format: 4.0.5
+# Response envelope of the TOON formatter (format=llm query results).
+toon_output_format: 1.0.0
 
 # Response envelope of the GQL table formatter.
 gql_output_format: 1.0.1

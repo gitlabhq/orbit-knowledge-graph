@@ -245,7 +245,6 @@ fn apply_metrics(
 
     q.query_dsl_version = VERSIONS.query_dsl.parse().ok();
     q.raw_output_format_version = VERSIONS.raw_output_format.parse().ok();
-    q.goon_output_format_version = VERSIONS.goon_output_format.parse().ok();
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
