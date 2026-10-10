@@ -265,6 +265,21 @@ function. Copies retain the current field values; whole-value replacement clears
 old fields. Calls through fields or loop joins retain their reaching values until
 the linker seals the loop back-edges.
 
+Language YAML groups external framework providers under `config.frameworks`.
+Each group has a unique `name` and a `providers` list using the same schema as
+`config.stdlib`. Both lists compile into the existing provider lookup tables.
+Ruby declares Rails library roots with runtime precedence to prevent unrelated
+repository paths from capturing framework imports. Explicit aliases and relative
+imports retain their existing behavior. Framework methods are not implicit globals;
+application methods with names such as `find`, `create`, and `render` still resolve.
+Framework groups are configured by the language rules, not detected from manifests.
+
+Ruby rules rewrite `send`, `public_send`, and `__send__` when the first argument
+is a literal symbol or a string without interpolation. The resulting call keeps
+its receiver, remaining arguments, and block. Dynamic names keep the original
+dispatch call. These rules assume the standard Ruby dispatch methods; they do
+not detect custom overrides of those methods.
+
 Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
 to declaration identities, which also identify SSA variables and field slots.
 The linker allocates these keys per file; they do not enter the shared symbol
