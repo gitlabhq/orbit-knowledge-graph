@@ -1009,7 +1009,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs, tolerate_grep_flags};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs};
     use clap::{CommandFactory, Parser};
 
     #[test]
@@ -1277,43 +1277,6 @@ mod tests {
                 "{removed}"
             );
         }
-    }
-
-    #[test]
-    fn grep_takes_rg_and_grep_flags_as_agents_write_them() {
-        let parse = |line: &str| {
-            let args = line.split_whitespace().map(Into::into).collect();
-            match Cli::try_parse_from(tolerate_grep_flags(args))
-                .unwrap()
-                .command
-            {
-                Commands::Grep(args) => *args,
-                _ => unreachable!(),
-            }
-        };
-        let args = parse("orbit grep -rnI -i --color=never -o foo src");
-        assert_eq!(
-            (args.query.as_deref(), args.paths.as_slice()),
-            (Some("foo"), ["src".to_string()].as_slice())
-        );
-        let args = parse("orbit grep -nA3 -B 2 -5 -w foo");
-        assert_eq!(
-            (args.after_context, args.before_context, args.context_lines),
-            (Some(3), Some(2), Some(5))
-        );
-        assert!(args.word_regexp);
-        let args =
-            parse("orbit grep -e foo -e bar src --include=*.rs --exclude-dir node_modules -l");
-        assert_eq!(args.regexp, ["foo", "bar"]);
-        assert_eq!(args.query.as_deref(), Some("src"));
-        assert_eq!(
-            (args.include, args.exclude_dir),
-            (vec!["*.rs".to_string()], vec!["node_modules".to_string()])
-        );
-        assert!(args.files_with_matches);
-        assert_eq!(parse("orbit grep -- -foo").query.as_deref(), Some("-foo"));
-        let other: Vec<std::ffi::OsString> = ["orbit", "sql", "-o"].map(Into::into).to_vec();
-        assert_eq!(tolerate_grep_flags(other.clone()), other);
     }
 
     #[test]

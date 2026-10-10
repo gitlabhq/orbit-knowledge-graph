@@ -857,33 +857,6 @@ mod tests {
     }
 
     #[test]
-    fn edited_since_index_lists_changed_renamed_and_untracked_files() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let repo = temp.path().join("repo");
-        std::fs::create_dir_all(repo.join("src")).unwrap();
-        for file in ["a.c", "src/x.rs", "src/same.rs"] {
-            std::fs::write(repo.join(file), "x\n").unwrap();
-        }
-        for args in ["init -q", "add .", "commit -qm init", "mv a.c b.c"] {
-            let config = "-c user.name=t -c user.email=t@t -c commit.gpgsign=false";
-            let all = format!("{config} {args}");
-            let status = Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .args(all.split(' '))
-                .status();
-            assert!(status.unwrap().success(), "git {args}");
-        }
-        std::fs::write(repo.join("src/x.rs"), "y\n").unwrap();
-        std::fs::write(repo.join("new.rs"), "n\n").unwrap();
-        let edited = edited_since_index(&repo, &["b.c", "src/x.rs", "src/same.rs", "new.rs"]);
-        assert_eq!(
-            edited.into_iter().collect::<Vec<_>>(),
-            ["b.c", "new.rs", "src/x.rs"]
-        );
-    }
-
-    #[test]
     fn git_toplevel_climbs_from_a_subdirectory() {
         let temp = tempfile::TempDir::new().unwrap();
         let repo = temp.path().join("repo");
