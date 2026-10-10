@@ -6,6 +6,7 @@ use pest_consume::{Error, match_nodes};
 use serde_json::{Number, Value};
 
 use super::ast::*;
+use super::lower::is_type_shaped;
 use super::{QueryParser, Rule};
 use crate::input::{Direction, FilterOp, OrderDirection, TruncateUnit};
 
@@ -52,7 +53,7 @@ impl QueryParser {
         Ok(Statement::SchemaCall { node })
     }
 
-    fn Matches(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+    fn Matches(input: Node) -> Result<(Pattern, Vec<Predicate>)> {
         let node = input.clone();
         let mut matches: Vec<_> = match_nodes!(input.into_children();
             [Match(matches)..] => matches.collect(),
@@ -72,7 +73,7 @@ impl QueryParser {
         Ok((Pattern::Elements(elements), predicates))
     }
 
-    fn Match(input: Node) -> Result<(Pattern, Vec<Comparison>)> {
+    fn Match(input: Node) -> Result<(Pattern, Vec<Predicate>)> {
         Ok(match_nodes!(input.into_children();
             [Pattern(pattern)] => (pattern, Vec::new()),
             [Pattern(pattern), Where(predicates)] => (pattern, predicates),
@@ -221,44 +222,89 @@ impl QueryParser {
         Ok(())
     }
 
-    fn Where(input: Node) -> Result<Vec<Comparison>> {
+    fn Where(input: Node) -> Result<Vec<Predicate>> {
         Ok(match_nodes!(input.into_children();
             [AndExpression(predicates)] => predicates,
         ))
     }
 
-    fn AndExpression(input: Node) -> Result<Vec<Comparison>> {
+    fn AndExpression(input: Node) -> Result<Vec<Predicate>> {
         Ok(match_nodes!(input.into_children();
             [predicate(predicates)..] => predicates.flatten().collect(),
         ))
     }
 
     #[alias(predicate)]
-    fn ParenthesizedExpression(input: Node) -> Result<Vec<Comparison>> {
+    fn ParenthesizedExpression(input: Node) -> Result<Vec<Predicate>> {
         Ok(match_nodes!(input.into_children();
             [AndExpression(predicates)] => predicates,
         ))
     }
 
     #[alias(predicate)]
-    fn ComparisonExpression(input: Node) -> Result<Vec<Comparison>> {
+    fn ComparisonExpression(input: Node) -> Result<Vec<Predicate>> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [PropertyExpression(property), operator(op)] => vec![Comparison {
+            [PropertyExpression(property), operator(op)] => vec![Predicate::Comparison(Box::new(Comparison {
                 span, property, op, value: None, rhs_property: None,
-            }],
-            [PropertyExpression(property), operator(op), value(value)] => vec![Comparison {
+            }))],
+            [PropertyExpression(property), operator(op), value(value)] => vec![Predicate::Comparison(Box::new(Comparison {
                 span, property, op, value: Some(value), rhs_property: None,
-            }],
-            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Comparison {
+            }))],
+            [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => vec![Predicate::Comparison(Box::new(Comparison {
                 span, property: lhs, op, value: None, rhs_property: Some(rhs),
-            }],
+            }))],
             [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         ))
     }
 
     #[alias(predicate)]
-    fn FunctionPredicate(input: Node) -> Result<Vec<Comparison>> {
+    fn TypePredicate(input: Node) -> Result<Vec<Predicate>> {
+        let span = input.as_span();
+        let (variable, op, value) = match_nodes!(input.into_children();
+            [RelationshipType(variable), operator(op)] => (variable, op, None),
+            [RelationshipType(variable), operator(op), value(value)] => (variable, op, Some(value)),
+            [RelationshipType(variable), operator(op), PropertyExpression(_)] => (variable, op, None),
+            [RelationshipType(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
+        );
+        let names = match (op, value) {
+            (FilterOp::Eq, Some(name @ Value::String(_))) => vec![name],
+            (FilterOp::In, Some(Value::Array(names))) => names,
+            _ => Vec::new(),
+        };
+        let types: Option<Vec<String>> = names
+            .into_iter()
+            .map(|name| match name {
+                Value::String(name)
+                    if is_type_shaped(&name)
+                        && crate::passes::validate::validate_identifier(&name).is_ok() =>
+                {
+                    Some(name)
+                }
+                _ => None,
+            })
+            .collect();
+        match types {
+            Some(types) if !types.is_empty() => Ok(vec![Predicate::RelationshipType {
+                span,
+                variable,
+                types,
+            }]),
+            _ => Err(error_at(
+                span,
+                "type(r) supports = or IN with relationship type names, such as type(r) = 'AUTHORED' or type(r) IN ['AUTHORED', 'MENTIONS']",
+            )),
+        }
+    }
+
+    fn RelationshipType(input: Node) -> Result<Name> {
+        Ok(match_nodes!(input.into_children();
+            [Variable(variable)] => variable,
+        ))
+    }
+
+    #[alias(predicate)]
+    fn FunctionPredicate(input: Node) -> Result<Vec<Predicate>> {
         let call = input.children().next().ok_or_else(|| mismatch(&input))?;
         Err(unsupported_function(&call))
     }
@@ -268,12 +314,12 @@ impl QueryParser {
     }
 
     #[alias(predicate)]
-    fn TokenPredicate(input: Node) -> Result<Vec<Comparison>> {
+    fn TokenPredicate(input: Node) -> Result<Vec<Predicate>> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Comparison {
+            [TokenFunction(op), PropertyExpression(property), value(value)] => vec![Predicate::Comparison(Box::new(Comparison {
                 span, property, op, value: Some(value), rhs_property: None,
-            }],
+            }))],
         ))
     }
 
@@ -356,10 +402,12 @@ impl QueryParser {
     }
 
     fn ProjectionExpression(input: Node) -> Result<Expression> {
+        let span = input.as_span();
         Ok(match_nodes!(input.into_children();
             [Aggregate(expression)] => expression,
             [DateTrunc(expression)] => expression,
             [AllProperties(expression)] => expression,
+            [RelationshipType(variable)] => Expression::RelationshipType { span, variable },
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [NodeProjection(expression)] => expression,
             [PropertyExpression(property)] => Expression::Property(property),
@@ -606,12 +654,12 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
     let name = call.children().next().map_or("", |node| node.as_str());
     let hint = match name.to_ascii_lowercase().as_str() {
         "type" => {
-            "match a typed relationship such as -[r:CLOSES]->; each edge type is listed under @edges in the response"
+            "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], and RETURN type(r)"
         }
         "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
         | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
         _ => {
-            "RETURN supports count, sum, avg, min, max, date_trunc, and properties; WHERE supports token_match, all_tokens, and any_tokens"
+            "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
     };
     call.error(format!("function {name}() is not supported: {hint}"))

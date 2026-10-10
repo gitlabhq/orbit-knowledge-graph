@@ -1,0 +1,9 @@
+description: type(r) compared with a value that is not an uppercase relationship type name rejects without echoing it
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN ['AUTHORED', 'private_query_literal'] RETURN u LIMIT 10
+
+expect:
+  compile_error: "type(r) supports = or IN with relationship type names"
+  compile_error_not_contains: ["private_query_literal"]

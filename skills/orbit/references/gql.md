@@ -57,6 +57,9 @@ center node, and a shortest path needs both endpoints bounded.
   `branch`. The server folds ASCII letters only, so `STARTS WITH 'ÄRG'` does
   not match `ärger` there. Local queries fold Unicode and do match.
 - Nulls: `IS NULL`, `IS NOT NULL`.
+- Relationship types: `type(r) = 'CLOSES'` or `type(r) IN ['CLOSES', 'MENTIONS']`
+  on a one-hop relationship variable. It matches like `-[r:CLOSES|MENTIONS]->`.
+  For a variable-length hop, list the types in the pattern instead.
 
 Values are literals. There are no query parameters, so never splice untrusted
 text into a query.
@@ -87,6 +90,8 @@ LIMIT 10
 - `RETURN mr.iid, mr.title` selects properties.
 - `RETURN mr` selects the node's default columns; `properties(mr)` selects all.
 - The response always includes node identity and relationship metadata.
+- `RETURN type(r)` and `RETURN r` add no column. Each edge's type is already
+  listed under `@edges`. Aggregations cannot group by `type(r)` yet.
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
   become group keys. Alias a metric to sort by it:
   `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
@@ -108,9 +113,8 @@ window is incomplete. Do not report the returned rows as a complete list.
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
 subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
-Other function calls, such as `type(r)` or `collect(x)`, reject with an error
-that names the function. For relationship types, match a typed relationship
-such as `-[r:CLOSES]->`. The response lists each edge type under `@edges`.
+Other function calls, such as `collect(x)` or `labels(n)`, reject with an error
+that names the function.
 
 ## Recipes
 

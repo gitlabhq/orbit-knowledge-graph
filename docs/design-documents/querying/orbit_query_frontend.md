@@ -195,6 +195,9 @@ The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST
 `ANY` and `SHORTEST` are reserved.
 
 Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
+`type(r) = 'T'` and `type(r) IN [...]` on a one-hop relationship variable lower to the relationship's types, the same as `-[r:T]->`, so the relationship validation applies unchanged.
+Types declared in both places intersect, and an empty intersection rejects. Other operators, a node or path argument, and a variable-length relationship reject.
+`RETURN type(r)` and `RETURN r` add no column in traversal, path finding, and neighbors, because the response lists each edge's type. Aggregation rejects both as group keys.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
 
 ID forms preserve the compiler's distinct selector and filter representations:

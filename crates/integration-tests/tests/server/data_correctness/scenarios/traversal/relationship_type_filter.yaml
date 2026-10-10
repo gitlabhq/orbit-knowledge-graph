@@ -1,0 +1,27 @@
+description: WHERE type(r) IN [...] on an untyped relationship returns the same edges as -[:AUTHORED|APPROVED]->
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+      ],
+      "relationships": [{"type": ["AUTHORED", "APPROVED"], "from": "u", "to": "mr"}],
+      "limit": 50
+    }
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN u, mr.title, type(r) LIMIT 50
+
+expect:
+  node_count: 4
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+    APPROVED: [[1, 2002]]

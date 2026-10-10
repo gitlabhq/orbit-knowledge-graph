@@ -1,0 +1,8 @@
+description: RETURN type(r) as an aggregation group key rejects until relationship-type grouping exists
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN type(r), count(mr) AS n
+
+expect:
+  compile_error: "grouping by relationship type is not supported yet"

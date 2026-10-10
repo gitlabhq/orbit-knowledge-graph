@@ -1,0 +1,13 @@
+description: >
+  type(r) cannot bypass the admin-only restriction. A non-admin who
+  types the relationship with type(r) and filters on an admin-only
+  field must still be rejected.
+
+query:
+  gql: |
+    MATCH (u:User)-[r]->(g:Group {id: 100})
+    WHERE type(r) = 'MEMBER_OF' AND u.is_admin = true
+    RETURN u.username LIMIT 10
+
+expect:
+  compile_error: "administrator"

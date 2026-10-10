@@ -10,7 +10,7 @@ pub(super) enum Statement<'i> {
 
 pub(super) struct Query<'i> {
     pub pattern: Pattern<'i>,
-    pub predicates: Vec<Comparison<'i>>,
+    pub predicates: Vec<Predicate<'i>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
     pub limit: Option<Limit<'i>>,
@@ -91,6 +91,15 @@ pub(super) struct Range<'i> {
     pub end: Option<u32>,
 }
 
+pub(super) enum Predicate<'i> {
+    Comparison(Box<Comparison<'i>>),
+    RelationshipType {
+        span: Span<'i>,
+        variable: Name<'i>,
+        types: Vec<String>,
+    },
+}
+
 pub(super) struct Comparison<'i> {
     pub span: Span<'i>,
     pub property: Property<'i>,
@@ -123,6 +132,10 @@ pub(super) enum Expression<'i> {
         property: Property<'i>,
     },
     AllProperties {
+        span: Span<'i>,
+        variable: Name<'i>,
+    },
+    RelationshipType {
         span: Span<'i>,
         variable: Name<'i>,
     },

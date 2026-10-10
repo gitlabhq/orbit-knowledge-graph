@@ -1,0 +1,20 @@
+description: >
+  type(r) does not expose admin-only fields. Non-admin neighbors typed
+  with WHERE type(r) = 'MEMBER_OF' and returning properties(n) strip
+  admin-only fields, like the typed pattern form.
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, properties(n), type(r)
+
+expect:
+  node_count: 4
+  nodes:
+    Group:
+      ids: [100]
+    User:
+      ids: [1, 2, 6]
+      prop_present: [username]
+      prop_absent: [is_admin, is_auditor]
+  edges:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]

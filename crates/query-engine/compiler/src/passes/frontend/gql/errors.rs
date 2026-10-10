@@ -75,7 +75,11 @@ fn rule_label(rule: &Rule) -> String {
         Rule::ProjectionItems | Rule::ProjectionItem | Rule::ProjectionExpression => {
             "a RETURN item"
         }
-        Rule::AndExpression | Rule::ComparisonExpression | Rule::TokenPredicate => "a condition",
+        Rule::AndExpression
+        | Rule::ComparisonExpression
+        | Rule::TokenPredicate
+        | Rule::TypePredicate => "a condition",
+        Rule::RelationshipType => "type(r)",
         Rule::ComparisonOperator => "a comparison operator",
         Rule::StringOperator => "STARTS WITH, ENDS WITH, or CONTAINS",
         Rule::InOperator => "IN",

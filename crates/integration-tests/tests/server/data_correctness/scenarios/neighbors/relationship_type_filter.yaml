@@ -1,0 +1,21 @@
+description: Neighbors with WHERE type(r) = 'MEMBER_OF' returns the same edges as <-[:MEMBER_OF]-
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+      "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
+    }
+  gql: |
+    MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, n, type(r)
+
+expect:
+  node_count: 4
+  nodes:
+    Group:
+      ids: [100]
+    User:
+      ids: [1, 2, 6]
+  edges:
+    MEMBER_OF: [[1, 100], [2, 100], [6, 100]]

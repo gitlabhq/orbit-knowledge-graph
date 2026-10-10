@@ -4,7 +4,7 @@ use crate::input::{FilterOp, InputFilter, InputIdRange};
 use crate::{QueryError, Result};
 use serde_json::Value;
 
-use super::super::ast::{Comparison, MapEntry};
+use super::super::ast::{Comparison, MapEntry, Name, Predicate};
 use super::super::errors::invalid;
 use super::Lowering;
 
@@ -25,7 +25,49 @@ impl Lowering {
         }
     }
 
-    pub(super) fn predicate(&mut self, comparison: Comparison<'_>) -> Result<()> {
+    pub(super) fn predicate(&mut self, predicate: Predicate<'_>) -> Result<()> {
+        match predicate {
+            Predicate::Comparison(comparison) => self.comparison(*comparison),
+            Predicate::RelationshipType {
+                span,
+                variable,
+                types,
+            } => self.relationship_type(span, &variable, types),
+        }
+    }
+
+    fn relationship_type(
+        &mut self,
+        span: pest::Span<'_>,
+        variable: &Name<'_>,
+        types: Vec<String>,
+    ) -> Result<()> {
+        let index = self.relationship_index(span, variable)?;
+        let edge = &mut self.input.relationships[index];
+        if edge.hops.max != 1 {
+            return Err(invalid(
+                span,
+                "a variable-length relationship binds a list; list its types in the pattern, such as -[r:CLOSES|MENTIONS*1..3]->",
+            ));
+        }
+        if edge.types == ["*"] {
+            edge.types = types;
+        } else {
+            edge.types.retain(|kind| types.contains(kind));
+        }
+        if edge.types.is_empty() {
+            return Err(invalid(
+                span,
+                &format!(
+                    "type({}) excludes every relationship type the pattern allows for it",
+                    variable.value
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn comparison(&mut self, comparison: Comparison<'_>) -> Result<()> {
         let Comparison {
             span,
             property,

@@ -198,6 +198,24 @@ impl Lowering {
                 Expression::AllProperties { span, variable } => {
                     self.graph_projection(span, variable, true, alias, aggregate, &mut selected)?;
                 }
+                Expression::RelationshipType { span, variable } => {
+                    self.relationship_index(span, &variable)?;
+                    if aggregate {
+                        return Err(invalid(
+                            span,
+                            "grouping by relationship type is not supported yet",
+                        ));
+                    }
+                    if alias.is_some() {
+                        return Err(invalid(
+                            span,
+                            &format!(
+                                "type({}) cannot be renamed; each edge type is listed under @edges in the response",
+                                variable.value
+                            ),
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -215,10 +233,14 @@ impl Lowering {
         let variable = variable.value;
         let dynamic =
             self.path.as_ref() == Some(&variable) || self.neighbor.as_ref() == Some(&variable);
-        if dynamic
-            || (self.input.query_type == QueryType::Neighbors
-                && (all || self.edges.contains_key(&variable)))
-        {
+        let relationship = self.edges.contains_key(&variable);
+        if dynamic || relationship || (self.input.query_type == QueryType::Neighbors && all) {
+            if aggregate && relationship {
+                return Err(invalid(
+                    span,
+                    "grouping by a relationship variable is not supported yet",
+                ));
+            }
             if aggregate {
                 return Err(invalid(span, "aggregation cannot return the path variable"));
             }

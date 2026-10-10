@@ -1,0 +1,21 @@
+description: WHERE type(r) on a one-hop shortest path restricts it like -[r:MEMBER_OF*1]->
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "User", "node_ids": [1]},
+        {"id": "end", "entity": "Group", "node_ids": [100]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
+               "rel_types": ["MEMBER_OF"]}
+    }
+  gql: |
+    MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p
+
+expect:
+  referential_integrity: true
+  path_count: 1
+  path_edges:
+    - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 100 }]
