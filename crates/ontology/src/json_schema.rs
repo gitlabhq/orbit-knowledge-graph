@@ -109,17 +109,12 @@ impl Ontology {
 
 fn field_name_allowlist<'a>(fields: impl Iterator<Item = &'a Field>) -> Value {
     let (hidden, listed): (Vec<&Field>, Vec<&Field>) = fields.partition(|f| f.hidden);
-    let listed: Vec<Value> = NODE_RESERVED_COLUMNS
+    let names = |fields: Vec<&'a Field>| fields.into_iter().map(|f| f.name.as_str());
+    let listed: Vec<&str> = NODE_RESERVED_COLUMNS
         .iter()
-        .map(|s| Value::String((*s).to_string()))
-        .chain(listed.into_iter().map(|f| Value::String(f.name.clone())))
+        .copied()
+        .chain(names(listed))
         .collect();
-    if hidden.is_empty() {
-        return serde_json::json!({ "enum": listed });
-    }
-    let hidden: Vec<Value> = hidden
-        .into_iter()
-        .map(|f| Value::String(f.name.clone()))
-        .collect();
+    let hidden: Vec<&str> = names(hidden).collect();
     serde_json::json!({ "anyOf": [{ "enum": listed }, { "enum": hidden }] })
 }
