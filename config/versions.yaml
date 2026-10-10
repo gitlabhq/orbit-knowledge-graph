@@ -14,7 +14,7 @@ query_dsl: 12.1.14
 raw_output_format: 5.0.4
 
 # Response envelope of the TOON formatter (format=llm query results).
-toon_output_format: 1.0.0
+toon_output_format: 2.0.0
 
 # Response envelope of the GQL table formatter.
 gql_output_format: 1.0.1
