@@ -1,10 +1,8 @@
-mod authz;
 pub mod clickhouse;
 pub mod duckdb;
 
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
-pub use authz::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy, TrustedLocalCatalog};
 pub use clickhouse::{ClickHouseCatalog, EntityLayout, TableLayout};
 pub use duckdb::DuckDbCatalog;
 

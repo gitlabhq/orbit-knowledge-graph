@@ -36,7 +36,8 @@ DuckDB uses the same relational structures with its local type facts.
 `DataModel<T, A>` owns the graph, storage, and an independent policy value. It can be built from parts without an ontology.
 Constructors in `derive.rs` derive a storage schema once, then build its query mapping from that schema.
 The model does not retain the ontology. JSON frontend validation reads the graph and policy catalogs directly.
-The existing compiler uses `OrbitQueryModel` in `orbit.rs`, which combines relational mapping with GitLab policy.
+The existing compiler uses `OrbitQueryModel` in `models/orbit.rs`, which combines relational mapping with GitLab policy.
+Backend implementations remain under `implementations/`; authorization policies live under `authz/`.
 Document storage can use the core model without implementing that Orbit contract.
 The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
 It also resolves the source bindings for declared joined tables and records which entities write each table.

@@ -1,5 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
+pub type ClickHouseDataModel = crate::DataModel<
+    crate::Relational<crate::implementations::clickhouse::storage::ClickHouse>,
+    crate::GitLabAuthzCatalog,
+>;
+pub type DuckDbDataModel = crate::DataModel<
+    crate::Relational<crate::implementations::duckdb::storage::DuckDb>,
+    crate::TrustedLocalCatalog,
+>;
+
 use crate::storage::relational::{
     DenormalizedCatalog, ForeignKey, PropertyRealization, RelationalMapping, RelationshipRoute,
 };
