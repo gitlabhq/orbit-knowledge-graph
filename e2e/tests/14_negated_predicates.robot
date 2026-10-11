@@ -1,15 +1,17 @@
 *** Settings ***
-Documentation       NOT predicates end to end through Rails. Seeds one top-level group with a public
+Documentation       NOT predicates end to end through Rails. Seeds a top-level group with a public
 ...                 project (open, closed, and confidential issues, plus one vulnerability) and a
-...                 private project (one open issue). The admin bot is the control. A Reporter, a
-...                 Guest, and a Security Manager on the public project and a non-member each run
-...                 the same NOT queries in raw, llm, and gql formats. No user may see an issue that
-...                 the GitLab REST API hides from that user, the Reporter sees exactly the open
-...                 issues that REST shows, NOT must not
-...                 reopen the vulnerability aggregation oracle from issue #347, and the rejected
-...                 forms (OR, administrator-only fields, traversal_path under NOT) must fail with
-...                 the same message whether or not hidden data exists. MCP is not covered here
-...                 because it needs an OAuth token (see 09_api_surface).
+...                 second top-level group with a private project (one open issue). The admin bot
+...                 is the control. A Reporter, a Guest, and a Security Manager on the first group
+...                 and a non-member each run the same NOT queries in raw, llm, and gql formats.
+...                 Orbit derives its authorized paths from Reporter+ group memberships, so the
+...                 roles are group memberships, as in 05_role_scoped_authz. No user may see an
+...                 issue that the GitLab REST API hides from that user, the Reporter sees exactly
+...                 the open issues that REST shows, NOT must not reopen the vulnerability
+...                 aggregation oracle from issue #347, and the rejected forms (OR,
+...                 administrator-only fields, traversal_path under NOT) must fail with the same
+...                 message whether or not hidden data exists. MCP is not covered here because it
+...                 needs an OAuth token (see 09_api_surface).
 
 Resource            gitlab.resource
 Resource            orbit.resource
@@ -138,9 +140,11 @@ Seed Negated Predicate Fixture
     ${suffix}=    Random Suffix
     Start Indexing Budget    600
     ${group}=    Create Group    e2e-neg-${suffix}
+    ${private_group}=    Create Group    e2e-neg-priv-group-${suffix}
     Enable Orbit    ${group["id"]}
+    Enable Orbit    ${private_group["id"]}
     ${public}=    Create Project    e2e-neg-pub-${suffix}    ${group["id"]}    readme=${True}
-    ${private}=    Create Project    e2e-neg-priv-${suffix}    ${group["id"]}    visibility=private
+    ${private}=    Create Project    e2e-neg-priv-${suffix}    ${private_group["id"]}    visibility=private
     ${open}=    Create Issue    ${public["id"]}    e2e-neg-open-${suffix}
     ${closed}=    Create Issue    ${public["id"]}    e2e-neg-closed-${suffix}
     ${confidential}=    Create Issue    ${public["id"]}    e2e-neg-conf-${suffix}    confidential=${True}
@@ -156,7 +160,7 @@ Seed Negated Predicate Fixture
         ${token}=    Issue PAT For User    ${root_headers}    ${account["id"]}
         Add Group Member    ${SHARED_NAMESPACE_ID}    ${account["id"]}    20
         IF    $level is not None
-            Add Project Member    ${public["id"]}    ${account["id"]}    ${level}
+            Add Group Member    ${group["id"]}    ${account["id"]}    ${level}
         END
         Set To Dictionary    ${tokens}    ${user}    ${token}
         IF    $user == "reporter"

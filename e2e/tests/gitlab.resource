@@ -288,15 +288,6 @@ Add Group Member
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
 
-Add Project Member
-    [Documentation]    Add ${user_id} to ${project_id} at the given built-in ${access_level}.
-    [Arguments]    ${project_id}    ${user_id}    ${access_level}
-    ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    user_id=${user_id}    access_level=${access_level}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/members
-    ...    headers=${headers}    json=${body}    expected_status=201
-    RETURN    ${resp.json()}
-
 Create Vulnerability
     [Documentation]    Create a manually-reported Vulnerability via the GraphQL `vulnerabilityCreate`
     ...                mutation. Requires Ultimate license (e2e/scripts/activate-license.sh) and
