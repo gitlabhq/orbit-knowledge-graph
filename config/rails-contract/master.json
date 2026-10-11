@@ -1951,7 +1951,6 @@
   "source": {
     "declarative_policy": "2.2.0",
     "exporter": 1,
-    "gitlab_revision": "55bfaf7fe32",
     "gitlab_version": "19.5.0-pre"
   }
 }

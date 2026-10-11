@@ -101,7 +101,6 @@ snapshot = {
   "source" => {
     "declarative_policy" => Gem.loaded_specs["declarative_policy"]&.version.to_s,
     "exporter" => EXPORTER_VERSION,
-    "gitlab_revision" => Gitlab.revision,
     "gitlab_version" => Gitlab::VERSION
   }
 }
