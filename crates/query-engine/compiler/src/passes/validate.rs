@@ -178,7 +178,6 @@ fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
 
 /// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
 /// Queries where no node is selective tend to produce full-table scans.
-
 fn node_has_selectivity(node: &InputNode) -> bool {
     if !node.node_ids.is_empty() {
         return true;
