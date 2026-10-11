@@ -2,6 +2,7 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+mod duckdb;
 mod format;
 
 use std::path::Path;
@@ -26,6 +27,7 @@ use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
 
+pub use duckdb::run_duckdb_dir;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
     SecurityOverride,
@@ -52,16 +54,19 @@ pub fn validate_parse(root: &str) {
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
-    let path = Path::new(presets_dir).join("seed.yaml");
+    let seed = seed_preset(Path::new(presets_dir), name);
+    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+    crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
+}
+
+fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
+    let path = presets_dir.join("seed.yaml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
-    let map: std::collections::BTreeMap<String, Seed> =
+    let mut map: std::collections::BTreeMap<String, Seed> =
         orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("invalid seed presets: {e}"));
-    let seed = map
-        .get(name)
-        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"));
-    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
-    crate::scenario::seed::apply_seed(ctx, seed, &Default::default(), &columns, name).await;
+    map.remove(name)
+        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"))
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {

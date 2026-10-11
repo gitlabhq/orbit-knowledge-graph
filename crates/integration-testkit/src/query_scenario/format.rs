@@ -29,6 +29,8 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
+    #[serde(default)]
+    pub duckdb: bool,
 }
 
 /// Either a preset name (string) or an inline value.

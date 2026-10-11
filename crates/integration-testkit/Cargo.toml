@@ -7,6 +7,7 @@ edition = "2024"
 arrow = { workspace = true }
 async-trait = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+duckdb-client = { path = "../duckdb-client" }
 orbit-server-config = { path = "../orbit-server-config" }
 gitalisk-core = { workspace = true }
 orbit-utils = { path = "../utils" }
@@ -22,6 +23,7 @@ rustls = { workspace = true }
 sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 testcontainers = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
