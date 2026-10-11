@@ -603,29 +603,26 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         cancel: CancellationToken,
     ) -> Result<(IndexingReport, Arc<ProjectCommit>, Arc<AtomicU64>), HandlerError> {
-        let mut limits = code_graph_incremental::Limits::load()
+        let defaults = code_graph_incremental::Limits::load()
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
         let config = &self.pipeline_config;
-        if config.max_files != 0 {
-            limits.max_files = limits.max_files.min(config.max_files);
-        }
-        if config.cross_file_resolve_timeout_ms != 0 {
-            limits.cross_file_resolve_ms = limits
-                .cross_file_resolve_ms
-                .min(config.cross_file_resolve_timeout_ms);
-        }
-        for (limit, configured) in [
-            (&mut limits.file_parse_ms, config.per_file_parse_timeout_ms),
-            (&mut limits.file_rewrite_ms, config.per_file_walk_timeout_ms),
-            (&mut limits.file_link_ms, config.per_file_ssa_timeout_ms),
-            (&mut limits.file_resolve_ms, config.per_file_timeout_ms),
-        ] {
-            *limit = if configured == 0 {
-                u64::MAX
+        let timeout = |configured, default| if configured == 0 { default } else { configured };
+        let limits = code_graph_incremental::Limits {
+            max_files: if config.max_files == 0 {
+                defaults.max_files
             } else {
-                configured
-            };
-        }
+                config.max_files
+            },
+            file_parse_ms: timeout(config.per_file_parse_timeout_ms, defaults.file_parse_ms),
+            file_rewrite_ms: timeout(config.per_file_walk_timeout_ms, defaults.file_rewrite_ms),
+            file_link_ms: timeout(config.per_file_ssa_timeout_ms, defaults.file_link_ms),
+            file_resolve_ms: timeout(config.per_file_timeout_ms, defaults.file_resolve_ms),
+            cross_file_resolve_ms: timeout(
+                config.cross_file_resolve_timeout_ms,
+                defaults.cross_file_resolve_ms,
+            ),
+            ..defaults
+        };
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
