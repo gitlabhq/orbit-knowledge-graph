@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 pub type ClickHouseDataModel = crate::DataModel<
     crate::Relational<crate::implementations::clickhouse::layout::ClickHouse>,
-    crate::implementations::ClickHouseMapping,
+    crate::implementations::ClickHouseBindings,
     crate::GitLabAuthzCatalog,
 >;
 pub type DuckDbDataModel = crate::DataModel<
     crate::Relational<crate::implementations::duckdb::layout::DuckDb>,
-    crate::implementations::DuckDbMapping,
+    crate::implementations::DuckDbBindings,
     crate::TrustedLocalCatalog,
 >;
 

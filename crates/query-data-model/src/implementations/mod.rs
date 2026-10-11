@@ -3,8 +3,8 @@ pub mod duckdb;
 
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
-pub use clickhouse::{ClickHouseMapping, EntityLayout, TableLayout};
-pub use duckdb::DuckDbMapping;
+pub use clickhouse::{ClickHouseBindings, EntityLayout, TableLayout};
+pub use duckdb::DuckDbBindings;
 
 #[derive(Debug, Clone)]
 pub(super) struct PropertyBackendFacts {

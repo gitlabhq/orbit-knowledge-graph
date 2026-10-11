@@ -1,8 +1,8 @@
-use super::{DuckDbEntityLayout, DuckDbMapping, layout::DuckDb};
+use super::{DuckDbBindings, DuckDbEntityLayout, layout::DuckDb};
 use crate::implementations::derive_property_backend_facts;
 use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, Mapping, Relational};
 
-impl Mapping<Relational<DuckDb>> for DuckDbMapping {
+impl Mapping<Relational<DuckDb>> for DuckDbBindings {
     fn derive(graph: &GraphCatalog, storage: &Relational<DuckDb>) -> Result<Self, DataModelError> {
         let mut entities = std::iter::repeat_with(|| None)
             .take(graph.entities().count())
@@ -41,7 +41,7 @@ impl Mapping<Relational<DuckDb>> for DuckDbMapping {
             .relationships()
             .map(|_| storage.edge().name.clone())
             .collect();
-        Ok(DuckDbMapping {
+        Ok(DuckDbBindings {
             edge_columns: storage
                 .edge()
                 .columns

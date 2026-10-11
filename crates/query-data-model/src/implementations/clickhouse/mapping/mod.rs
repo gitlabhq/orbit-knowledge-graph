@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{ClickHouseMapping, EntityLayout, TableLayout, layout::ClickHouse};
+use super::{ClickHouseBindings, EntityLayout, TableLayout, layout::ClickHouse};
 use crate::implementations::derive_property_backend_facts;
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::{Mapping, Relational};
 
-impl Mapping<Relational<ClickHouse>> for ClickHouseMapping {
+impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
     fn derive(
         graph: &GraphCatalog,
         storage: &Relational<ClickHouse>,
@@ -236,7 +236,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseMapping {
             tables.insert(join.table.clone(), layout);
         }
 
-        Ok(ClickHouseMapping {
+        Ok(ClickHouseBindings {
             default_edge_table: storage.metadata.default_edge_table.clone(),
             entities,
             relationships,

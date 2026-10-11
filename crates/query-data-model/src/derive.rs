@@ -85,7 +85,7 @@ mod tests {
                 &ontology,
             )
             .unwrap();
-        let result = crate::DataModel::<_, crate::implementations::ClickHouseMapping, _>::build(
+        let result = crate::DataModel::<_, crate::implementations::ClickHouseBindings, _>::build(
             crate::GraphCatalog::new(),
             schema,
             (),
