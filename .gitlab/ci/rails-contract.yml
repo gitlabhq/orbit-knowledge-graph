@@ -1,6 +1,4 @@
-# Checks the ontology redaction config against the Rails side of the GitLab
-# that e2e pins: export the contract from the pinned CNG toolbox image, then
-# run the ontology contract test on it.
+# Check the ontology redaction config against the Rails contract of the GitLab that e2e pins; a cache hit skips the toolbox pull.
 .rails-contract-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
@@ -24,7 +22,6 @@
     paths:
       - rails-contract.json
 
-# On a cache hit the export job runs on alpine and skips the toolbox pull.
 rails-contract-image:
   stage: lint
   image: alpine:latest
