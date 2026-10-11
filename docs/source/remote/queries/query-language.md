@@ -119,7 +119,7 @@ A node selector names one entity type in the ontology.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | Local alias for the node. Relationships, aggregations, path, and neighbors refer to this alias. |
+| `id` | `string` | Local alias for the node. Relationships, aggregations, path, and neighbors refer to this alias. It cannot be `_gkg` or start with `_gkg_`. |
 | `entity` | `string` | Ontology node type, such as `Project`, `User`, `MergeRequest`, `File`, or `Definition`. |
 | `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
@@ -477,7 +477,8 @@ output column name: `{"avg": "mr.merge_duration", "as": "avg_dur"}`.
 
 Without `as`, the output column name is derived as `<function>_<node>`
 (`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`).
-Reference these names in `aggregation_sort`.
+Reference these names in `aggregation_sort`. Output column names cannot start
+with `_gkg_`, because Orbit uses this prefix for internal columns.
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
 aggregate over dates, use `min` or `max`.
