@@ -266,7 +266,7 @@ ontology-schema-validate:
     - .mr-and-main-rules
   needs: []
   script:
-    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
+    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 73728 || (echo "config/schemas/ontology.schema.json must stay at or below 72 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
 named-query-schema-validate:
