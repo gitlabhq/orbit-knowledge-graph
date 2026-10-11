@@ -69,7 +69,7 @@ client, stub-cached):
    * - ``GetGraphStatus``
      - Indexing / graph status
    * - ``GetIndexingStatus``
-     - Indexing phase per namespace and domain, for 1 to 100 paths
+     - Indexing phase and last completed time per namespace, for 1 to 100 paths
    * - ``GetItemCounts``
      - Entity counts per domain that the caller can see
 

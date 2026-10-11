@@ -1,3 +1,5 @@
+use chrono::{DateTime, SecondsFormat, Utc};
+
 use super::{DomainStatus, Phase, ProjectCoverage, ScopeStatus};
 use crate::proto::{
     DomainIndexingStatus, GetIndexingStatusResponse, IndexingPhase, NamespaceIndexingStatus,
@@ -19,7 +21,12 @@ fn build_namespace_status(status: &ScopeStatus) -> NamespaceIndexingStatus {
             .iter()
             .map(|domain| build_domain_status(domain, status))
             .collect(),
+        last_completed_at: status.last_completed_at.map(format_timestamp),
     }
+}
+
+pub fn format_timestamp(at: DateTime<Utc>) -> String {
+    at.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn build_domain_status(domain: &DomainStatus, status: &ScopeStatus) -> DomainIndexingStatus {
