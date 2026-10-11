@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::indexing_status::{DomainStatus, Phase, ScopeStatus};
+use crate::indexing_status::{DomainStatus, Phase, ScopeStatus, format_timestamp};
 use crate::proto::{
     GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus, ProjectsStatus,
     StructuredGraphStatus,
@@ -10,6 +10,7 @@ pub fn build_structured_status(
     status: &ScopeStatus,
     counts: &HashMap<String, i64>,
 ) -> StructuredGraphStatus {
+    let last_completed_at = status.last_completed_at.map(format_timestamp);
     StructuredGraphStatus {
         projects: Some(ProjectsStatus::from(status.projects)),
         domains: status
@@ -17,9 +18,14 @@ pub fn build_structured_status(
             .iter()
             .filter_map(|domain| build_visible_domain(domain, counts))
             .collect(),
-        indexing: Some(build_indexing_status(status.phase)),
-        sdlc_indexing: Some(build_indexing_status(status.sdlc_phase)),
-        code_indexing: status.code_phase.map(build_indexing_status),
+        indexing: Some(build_indexing_status(
+            status.phase,
+            last_completed_at.clone(),
+        )),
+        sdlc_indexing: Some(build_indexing_status(status.sdlc_phase, last_completed_at)),
+        code_indexing: status
+            .code_phase
+            .map(|phase| build_indexing_status(phase, None)),
     }
 }
 
@@ -51,9 +57,10 @@ fn build_visible_domain(
     })
 }
 
-fn build_indexing_status(phase: Phase) -> IndexingStatus {
+fn build_indexing_status(phase: Phase, last_completed_at: Option<String>) -> IndexingStatus {
     IndexingStatus {
         state: map_phase_to_indexing_state(phase).into(),
+        last_completed_at,
         ..Default::default()
     }
 }
