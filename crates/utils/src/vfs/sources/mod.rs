@@ -11,8 +11,3 @@ pub use directory::Directory;
 pub use memory::Memory;
 
 use super::{Loading, Put, Source, SourceError, Tag};
-
-fn is_safe_relative_path(path: &std::path::Path) -> bool {
-    path.components()
-        .all(|part| matches!(part, std::path::Component::Normal(_)))
-}

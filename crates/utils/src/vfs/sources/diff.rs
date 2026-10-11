@@ -4,11 +4,16 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use super::directory::{put, virtual_path};
-use super::{Loading, Source, SourceError, Tag, is_safe_relative_path};
+use super::{Loading, Source, SourceError, Tag};
 
 pub struct Diff<'a> {
     pub root: &'a Path,
     pub paths: Vec<String>,
+}
+
+fn is_safe_relative_path(path: &Path) -> bool {
+    path.components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
 impl Source for Diff<'_> {
