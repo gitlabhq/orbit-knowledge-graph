@@ -1409,7 +1409,6 @@ name = "code-graph-incremental"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "code-graph",
  "either",
  "indexmap 2.14.2",
  "indextree",

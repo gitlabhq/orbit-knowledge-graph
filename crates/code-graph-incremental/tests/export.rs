@@ -3,7 +3,8 @@ use std::path::Path;
 use arrow::record_batch::RecordBatch;
 use code_graph_incremental::pipeline::{Display, Emit, Export, Exported};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, inventory, templates};
+use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
+mod common;
 use ontology::Ontology;
 use orbit_utils::arrow::ArrowUtils;
 
@@ -44,8 +45,7 @@ fn envelope() -> Envelope<'static> {
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let inventory = inventory::walk(root).unwrap().into_inner();
-    templates::index(Context::new(&env), root, inventory)
+    templates::index(Context::new(&env), common::walk(root))
         .unwrap()
         .then(Display)
         .unwrap()
@@ -239,10 +239,9 @@ fn emit_hands_every_table_to_the_sink_and_keeps_the_graph() {
     );
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
-    let inventory = inventory::walk(repo.path()).unwrap().into_inner();
     let mut seen: Vec<(String, usize)> = Vec::new();
 
-    let displayed = templates::index(Context::new(&env), repo.path(), inventory)
+    let displayed = templates::index(Context::new(&env), common::walk(repo.path()))
         .unwrap()
         .then(Display)
         .unwrap()
