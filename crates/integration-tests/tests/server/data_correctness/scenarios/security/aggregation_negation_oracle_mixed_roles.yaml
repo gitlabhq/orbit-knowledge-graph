@@ -1,0 +1,20 @@
+description: With Reporter and Developer paths, a NOT on severity counts only the Developer-scoped vulnerability
+
+config:
+  security:
+    authorized_paths:
+      - { path: "1/100/", access_level: 20 }
+      - { path: "1/101/", access_level: 30 }
+
+query:
+  gql: |
+    MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT v.severity IN ['critical'] RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+
+expect:
+  groups:
+    p:
+      rows:
+        - { entity: Project, id: 1001, values: { vuln_count: 1 } }
+      absent:
+        - { entity: Project, id: 1000 }
+        - { entity: Project, id: 1004 }

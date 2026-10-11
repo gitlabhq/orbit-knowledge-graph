@@ -1,0 +1,28 @@
+description: >
+  A NOT group whose matches include a redaction-denied work item returns
+  neither that work item nor its edge.
+
+config:
+  redaction:
+    allow:
+      user: [1, 2, 3]
+      work_item: [4000, 4002, 4003, 4010]
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+    WHERE u.id IN [1, 2, 3] AND NOT (wi.state = 'opened' AND wi.weight = 3)
+    RETURN u.username, wi.title LIMIT 20
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [3]
+    WorkItem:
+      ids: [4003]
+      absent: [4001]
+  edges:
+    AUTHORED: [[3, 4003]]
+  edge_absent:
+    AUTHORED: [[2, 4001]]

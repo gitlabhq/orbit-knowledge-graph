@@ -1,0 +1,14 @@
+description: >
+  A NOT query over a project the caller cannot see returns the same empty
+  result as a NOT query over a project that does not exist.
+
+config:
+  security: { org_id: 1, paths: ["1/100/"] }
+
+query:
+  gql: |
+    MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
+
+expect:
+  skip_requirements: [node_ids, "filter:name"]
+  node_count: 0

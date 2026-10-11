@@ -1,0 +1,8 @@
+description: A NOT group cannot compare against an administrator-only field on the same node
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE NOT (u.username = u.first_name AND u.state = 'active') RETURN u.id
+
+expect:
+  compile_error: "administrator"

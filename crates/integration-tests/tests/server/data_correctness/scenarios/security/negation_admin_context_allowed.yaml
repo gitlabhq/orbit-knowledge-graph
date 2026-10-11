@@ -1,0 +1,16 @@
+description: An administrator can use administrator-only fields under NOT
+
+config:
+  security: { admin: true }
+
+query:
+  gql: |
+    MATCH (u:User)
+    WHERE u.id IN [1, 2] AND NOT (u.is_admin = true AND u.username = 'alice')
+    RETURN u.username LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    User:
+      ids: [1, 2]

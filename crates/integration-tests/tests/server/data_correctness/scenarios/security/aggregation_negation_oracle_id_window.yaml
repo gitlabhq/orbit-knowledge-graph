@@ -1,0 +1,14 @@
+description: A negated ID window is no binary-search oracle for a Reporter
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+
+query:
+  gql: |
+    MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT (v.id >= 8000 AND v.id <= 8001) RETURN p{.id, .name}, count(v) AS c LIMIT 10
+
+expect:
+  empty_aggregation: true
+  nodes:
+    Project:
+      absent: [1000]

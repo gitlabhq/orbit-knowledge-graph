@@ -1,0 +1,15 @@
+description: A property-grouped NOT on Vulnerability severity returns no rows for a Reporter
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"low"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+  gql: |
+    MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'low' RETURN v.severity, count(v) AS vuln_count LIMIT 10
+
+expect:
+  group_columns:
+    v_severity: v.severity
+  empty_aggregation: true

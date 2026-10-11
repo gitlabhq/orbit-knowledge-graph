@@ -1,0 +1,8 @@
+description: A complemented NOT cannot filter on an administrator-only field
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE NOT u.is_admin = true RETURN u.id
+
+expect:
+  compile_error: "administrator"

@@ -1,0 +1,10 @@
+description: A NOT group cannot compare a relationship column against a node field
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[m:MEMBER_OF]->(g:Group)
+    WHERE NOT (m.source_id = u.first_name AND g.id = 100)
+    RETURN g.name LIMIT 10
+
+expect:
+  compile_error: "property comparisons involving relationships are unsupported"

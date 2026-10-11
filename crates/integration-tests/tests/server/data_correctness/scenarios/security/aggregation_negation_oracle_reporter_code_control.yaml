@@ -1,0 +1,16 @@
+description: A Reporter gets the real count for the Guest code-definition NOT aggregation
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+
+query:
+  gql: |
+    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) WHERE NOT b.name IN ['missing'] RETURN a{.name}, count(b) AS calls LIMIT 10
+
+expect:
+  groups:
+    a:
+      entity: Definition
+      ids: [12000]
+      rows:
+        - { entity: Definition, id: 12000, values: { calls: 1 } }
