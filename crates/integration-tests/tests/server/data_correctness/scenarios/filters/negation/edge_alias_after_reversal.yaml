@@ -1,0 +1,15 @@
+description: >
+  After the planner reverses the hops to start at the pinned project, a NOT
+  group over the MEMBER_OF relationship reads that hop's edge alias (e1).
+
+query:
+  gql: |
+    MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
+    WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
+    RETURN u.username, g.name, p.name LIMIT 20
+
+expect:
+  compile_only: true
+  sql_contains:
+    - "(e1.relationship_kind = 'MEMBER_OF')"
+    - "(NOT ((e1.source_id = 2) AND (g.visibility_level = 'public')))"

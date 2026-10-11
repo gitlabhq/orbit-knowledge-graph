@@ -1,0 +1,14 @@
+description: >
+  A NOT on the far node of a traversal reads that node's table, and the
+  table scan carries the caller's traversal_path filter next to the NOT.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
+    WHERE NOT g.name CONTAINS 'secret'
+    RETURN g.name
+
+expect:
+  compile_only: true
+  sql_contains:
+    - "FINAL WHERE (startsWith(g.traversal_path, '1/') AND ((NOT multiSearchAny(lower(g.name), [lower('secret')]))"

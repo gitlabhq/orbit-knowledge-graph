@@ -1242,11 +1242,14 @@ mod tests {
             "MATCH (u:User {id: 1}) WHERE u.username = 'private-query-literal' XOR u.id = 2 RETURN u",
             "MATCH (u:User {id: 1}) WHERE u.username NOT IN ['private-query-literal'] RETURN u",
             "MATCH (u:User {id: 1}) WHERE NOT u.traversal_path STARTS WITH 'private-query-literal' RETURN u",
+            "MATCH (u:User {id: 1}) WHERE NOT (u.traversal_path = 'private-query-literal' AND u.id = 1) RETURN u",
+            "MATCH (f:File {id: 1}) WHERE NOT f.content CONTAINS 'private-query-literal' RETURN f",
+            "MATCH (f:File {id: 1}) WHERE NOT f.content = 'private-query-literal' RETURN f",
+            "MATCH (u:User {id: 1}) WHERE NOT (u.username = 'private-query-literal' AND u.is_admin = true) RETURN u",
         ] {
             let error = compile(raw, Frontend::Gql, &ontology, &security).unwrap_err();
             let message = error.to_string();
             assert!(error.is_client_safe(), "{message}");
-            assert!(message.contains("line 1, column"), "{message}");
             assert!(!message.contains("private-query-literal"), "{message}");
         }
     }

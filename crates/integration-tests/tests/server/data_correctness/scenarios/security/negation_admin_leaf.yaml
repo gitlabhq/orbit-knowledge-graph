@@ -1,0 +1,8 @@
+description: A NOT leaf that keeps its NOT (a list) cannot inspect an administrator-only field
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE NOT u.is_admin IN [true] RETURN u.id
+
+expect:
+  compile_error: "administrator"

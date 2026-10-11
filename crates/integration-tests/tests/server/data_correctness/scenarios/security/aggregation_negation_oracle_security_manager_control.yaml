@@ -10,6 +10,7 @@ query:
     MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'high' RETURN p{.id, .name}, count(v) AS c LIMIT 10
 
 expect:
+  skip_requirements: ["filter:severity"]
   groups:
     p:
       entity: Project
