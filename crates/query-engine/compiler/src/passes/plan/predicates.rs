@@ -47,7 +47,9 @@ pub(super) fn bind(
                         .and_then(|node| node.entity.as_deref())
                         .and_then(|entity| model.graph().entity_id(entity))
                         .ok_or_else(|| {
-                            QueryError::Lowering(format!("condition node '{alias}' has no entity"))
+                            QueryError::PipelineInvariant(format!(
+                                "condition node '{alias}' has no entity"
+                            ))
                         })?;
                     (
                         resolve(alias, &predicate.property)?,
@@ -60,7 +62,9 @@ pub(super) fn bind(
                         .enumerate()
                         .find(|(_, hop)| hop.input_index == *index)
                         .ok_or_else(|| {
-                            QueryError::Lowering("condition relationship has no edge scan".into())
+                            QueryError::PipelineInvariant(
+                                "condition relationship has no edge scan".into(),
+                            )
                         })?;
                     (
                         Column::new(format!("e{position}"), &predicate.property),
