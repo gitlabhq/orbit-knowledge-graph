@@ -76,8 +76,12 @@ pub async fn resolve_migration_scope(
     let active = read_active_version(graph).await?.unwrap_or(0);
     let ledger = MigrationLedger::load_embedded().map_err(MigrationError::Ledger)?;
     let requested_scope = ledger.resolve_scope_between(active, migrating_version);
+    let layout = query_data_model::Relational::<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >::derive(ontology)?;
     Ok(widen_scope_for_shared_table_writers(
         ontology,
+        &layout,
         &requested_scope,
     ))
 }

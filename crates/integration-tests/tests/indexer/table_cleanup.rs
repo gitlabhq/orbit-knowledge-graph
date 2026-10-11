@@ -14,6 +14,7 @@ fn build_cleanup_task(context: &TestContext) -> TableCleanup {
             .tasks
             .table_cleanup,
     )
+    .unwrap()
 }
 
 async fn seed_user(context: &TestContext, id: i64) {

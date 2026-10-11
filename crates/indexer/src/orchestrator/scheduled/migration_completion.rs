@@ -186,7 +186,8 @@ impl MigrationCompletionChecker {
             let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
                 &self.ontology,
                 self.graph.is_replicated(),
-            );
+            )
+            .map_err(TaskError::new)?;
             orbit_migrations::execute::create_unversioned_definitions(&self.graph, &schema)
                 .await
                 .map_err(|error| {
@@ -406,7 +407,8 @@ impl MigrationCompletionChecker {
         let schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
             &self.ontology,
             self.graph.is_replicated(),
-        );
+        )
+        .map_err(TaskError::new)?;
 
         let entities = orbit_migrations::garbage_collection::find_droppable_entities(
             &self.graph,

@@ -121,6 +121,7 @@ pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
 
 pub fn widen_scope_for_shared_table_writers(
     ontology: &Ontology,
+    storage: &Relational<ClickHouse>,
     requested_scope: &MigrationScope,
 ) -> MigrationScope {
     if matches!(requested_scope, MigrationScope::Full) {
@@ -129,7 +130,6 @@ pub fn widen_scope_for_shared_table_writers(
 
     let invalidated = invalidated_entities(ontology, requested_scope);
 
-    let storage = Relational::<ClickHouse>::derive(ontology).expect("validated layout catalog");
     for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
             continue;
@@ -154,16 +154,16 @@ pub fn widen_scope_for_shared_table_writers(
 
 pub fn classify_tables_for_scope(
     ontology: &Ontology,
+    storage: &Relational<ClickHouse>,
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
-    let storage = Relational::<ClickHouse>::derive(ontology).expect("validated layout catalog");
 
     storage
         .versioned_tables()
         .map(|table| table.name.clone())
         .map(|table| {
-            let action = migration_action_for_table(&storage, &table, scope, &invalidated);
+            let action = migration_action_for_table(storage, &table, scope, &invalidated);
             (table, action)
         })
         .collect()
@@ -270,7 +270,11 @@ mod tests {
 
     fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        classify_tables_for_scope(&ontology, &scope)
+        classify_tables_for_scope(
+            &ontology,
+            &Relational::<ClickHouse>::derive(&ontology).unwrap(),
+            &scope,
+        )
     }
 
     fn action(map: &BTreeMap<String, TableMigrationAction>, table: &str) -> TableMigrationAction {
@@ -281,21 +285,22 @@ mod tests {
     #[test]
     fn shared_edge_writers_force_scope_widening() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
+        let layout = Relational::<ClickHouse>::derive(&ontology).unwrap();
 
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &sdlc_scope(&["User"])),
+            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["User"])),
             sdlc_scope(&["User"]),
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &sdlc_scope(&["SystemNote"])),
+            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&["SystemNote"])),
             MigrationScope::Full,
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &sdlc_scope(&[])),
+            widen_scope_for_shared_table_writers(&ontology, &layout, &sdlc_scope(&[])),
             MigrationScope::Full,
         );
         assert_eq!(
-            widen_scope_for_shared_table_writers(&ontology, &MigrationScope::Code),
+            widen_scope_for_shared_table_writers(&ontology, &layout, &MigrationScope::Code),
             MigrationScope::Code,
         );
     }

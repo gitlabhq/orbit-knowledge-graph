@@ -1,4 +1,5 @@
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use query_data_model::DataModelError;
 
 use super::{
     Column, Dictionary, Engine, Index, Projection, RefreshableView, Table, UnversionedDefinition,
@@ -11,14 +12,14 @@ pub fn build_all_tables(storage: &Relational<ClickHouse>) -> Vec<Table> {
     storage.versioned_tables().map(table_from_catalog).collect()
 }
 
-pub fn build_views(storage: &Relational<ClickHouse>) -> Vec<View> {
+pub fn build_views(storage: &Relational<ClickHouse>) -> Result<Vec<View>, DataModelError> {
     let mut views: Vec<View> = storage.views().iter().map(view_from_catalog).collect();
 
     for join in storage.joins() {
-        views.extend(denormalized_feeding_views(join, storage));
+        views.extend(denormalized_feeding_views(join, storage)?);
     }
 
-    views
+    Ok(views)
 }
 
 pub fn build_dictionaries(storage: &Relational<ClickHouse>) -> Vec<Dictionary> {
@@ -60,7 +61,7 @@ pub fn build_unversioned_definitions(
     storage: &Relational<ClickHouse>,
     all_table_names: &[String],
     replicated: bool,
-) -> Vec<UnversionedDefinition> {
+) -> Result<Vec<UnversionedDefinition>, DataModelError> {
     let mut definitions = Vec::new();
 
     for auxiliary_table in storage
@@ -92,11 +93,11 @@ pub fn build_unversioned_definitions(
         definitions.push(UnversionedDefinition {
             entity_type: "MATERIALIZED VIEW".into(),
             name: view.name.clone(),
-            create_statement: view.to_create_sql(),
+            create_statement: view.to_create_sql()?,
         });
     }
 
-    definitions
+    Ok(definitions)
 }
 
 fn table_from_catalog(table: &layout::Table) -> Table {
@@ -182,20 +183,22 @@ fn view_from_catalog(definition: &layout::MaterializedView) -> View {
 fn denormalized_feeding_views(
     join: &MaterializedJoin,
     storage: &Relational<ClickHouse>,
-) -> Vec<View> {
-    let projection = denormalized_select_projection(join, storage);
+) -> Result<Vec<View>, DataModelError> {
+    let projection = denormalized_select_projection(join, storage)?;
     (0..join.sources.len())
-        .map(|trigger| View {
-            name: format!("{}__on_t{trigger}", join.table),
-            to_table: Some(join.table.clone()),
-            select_query: format!(
-                "SELECT {projection} {}",
-                denormalized_from_clause(join, trigger)
-            ),
-            engine: None,
-            order_by: vec![],
-            populate: false,
-            versioned: true,
+        .map(|trigger| {
+            Ok(View {
+                name: format!("{}__on_t{trigger}", join.table),
+                to_table: Some(join.table.clone()),
+                select_query: format!(
+                    "SELECT {projection} {}",
+                    denormalized_from_clause(join, trigger)?
+                ),
+                engine: None,
+                order_by: vec![],
+                populate: false,
+                versioned: true,
+            })
         })
         .collect()
 }
@@ -203,11 +206,14 @@ fn denormalized_feeding_views(
 fn denormalized_select_projection(
     join: &MaterializedJoin,
     storage: &Relational<ClickHouse>,
-) -> String {
+) -> Result<String, DataModelError> {
     let all_aliases = || (0..join.sources.len()).map(|index| format!("t{index}"));
     let mut selected_columns: Vec<_> = storage
         .table(&join.table)
-        .expect("catalog join table")
+        .ok_or_else(|| DataModelError::UnknownReference {
+            kind: "join table",
+            name: join.table.clone(),
+        })?
         .columns
         .iter()
         .filter_map(|column| {
@@ -236,10 +242,19 @@ fn denormalized_select_projection(
             .join(" OR ")
     ));
 
-    selected_columns.join(", ")
+    Ok(selected_columns.join(", "))
 }
 
-fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
+fn denormalized_from_clause(
+    join: &MaterializedJoin,
+    trigger: usize,
+) -> Result<String, DataModelError> {
+    if trigger >= join.sources.len() {
+        return Err(DataModelError::Invalid(format!(
+            "join '{}' has no source {trigger}",
+            join.table
+        )));
+    }
     let alias = |index| format!("t{index}");
 
     let table_reference = |table_index: usize, with_final: bool| {
@@ -257,17 +272,19 @@ fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
             .map(move |(column, value)| format!("{}.{column} = '{value}'", alias(table_index)))
     };
     let join_condition = |table_index: usize| {
-        let hop = join.sources[table_index]
-            .join
-            .as_ref()
-            .expect("table 0 is never joined onto");
-        format!(
+        let hop = join.sources[table_index].join.as_ref().ok_or_else(|| {
+            DataModelError::Invalid(format!(
+                "join '{}' has no condition for source {table_index}",
+                join.table
+            ))
+        })?;
+        Ok::<_, DataModelError>(format!(
             "{}.{} = {}.{}",
             alias(table_index - 1),
             hop.0,
             alias(table_index),
             hop.1
-        )
+        ))
     };
 
     let mut sql = format!("FROM {}", table_reference(trigger, false));
@@ -281,7 +298,7 @@ fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
         );
 
     for (table_index, link) in outward_joins {
-        let conditions: Vec<String> = std::iter::once(link)
+        let conditions: Vec<String> = std::iter::once(link?)
             .chain(row_filters(table_index))
             .collect();
         sql.push_str(&format!(
@@ -296,7 +313,7 @@ fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
         sql.push_str(&format!(" WHERE {}", where_conditions.join(" AND ")));
     }
 
-    sql
+    Ok(sql)
 }
 
 pub fn render_refreshable_view_select(

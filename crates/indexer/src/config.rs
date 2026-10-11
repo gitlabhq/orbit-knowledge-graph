@@ -95,6 +95,8 @@ impl From<&AppConfig> for DispatcherConfig {
 
 #[derive(Debug, Error)]
 pub enum DispatcherError {
+    #[error("invalid layout: {0}")]
+    Layout(#[from] query_data_model::DataModelError),
     #[error("ontology archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 

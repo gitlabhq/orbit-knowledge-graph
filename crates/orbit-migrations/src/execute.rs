@@ -34,6 +34,8 @@ struct CheckpointSeed {
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
+    #[error("invalid layout: {0}")]
+    Layout(#[from] query_data_model::DataModelError),
     #[error("schema version error: {0}")]
     SchemaVersion(#[from] version::SchemaVersionError),
 
@@ -71,7 +73,7 @@ pub async fn create_tables_with_selective_cloning(
     active_version: u32,
     target_version: u32,
 ) -> Result<(), MigrationError> {
-    let scope = widen_scope_for_shared_table_writers(ontology, requested_scope);
+    let scope = widen_scope_for_shared_table_writers(ontology, &schema.storage, requested_scope);
     if &scope != requested_scope {
         tracing::warn!(
             %requested_scope, %scope,
@@ -85,7 +87,7 @@ pub async fn create_tables_with_selective_cloning(
     }
 
     let active_prefix = table_prefix(active_version);
-    let table_actions = classify_tables_for_scope(ontology, &scope);
+    let table_actions = classify_tables_for_scope(ontology, &schema.storage, &scope);
     let active_entities = existing_entity_names(graph, active_version).await?;
     let target_entities = existing_entity_names(graph, target_version).await?;
     let seed = checkpoint_seed(ontology, &scope);
@@ -142,8 +144,7 @@ pub async fn replace_refreshable_views(
     let prefix = table_prefix(version);
     let storage = query_data_model::Relational::<
         query_data_model::implementations::clickhouse::layout::ClickHouse,
-    >::derive(ontology)
-    .expect("validated storage catalog");
+    >::derive(ontology)?;
     for view in storage.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
@@ -185,8 +186,7 @@ pub async fn drop_versioned_refreshable_views(
     let prefix = table_prefix(version);
     let storage = query_data_model::Relational::<
         query_data_model::implementations::clickhouse::layout::ClickHouse,
-    >::derive(ontology)
-    .expect("validated storage catalog");
+    >::derive(ontology)?;
     for view in storage
         .refreshable_views()
         .iter()
@@ -395,7 +395,7 @@ async fn create_dictionaries_and_views(
             .clone()
             .with_schema_version_prefix(version_prefix, &all_table_names);
         tracing::info!(view = %prefixed.name, "creating materialized view");
-        run_ddl(graph, &prefixed.name, prefixed.to_create_sql()).await?;
+        run_ddl(graph, &prefixed.name, prefixed.to_create_sql()?).await?;
     }
     tracing::info!(prefix = %version_prefix, "dictionaries and materialized views created");
 

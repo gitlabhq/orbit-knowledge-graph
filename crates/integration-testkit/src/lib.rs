@@ -73,7 +73,7 @@ pub fn t(table: &str) -> String {
 /// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
     let ontology = load_unprefixed_ontology();
-    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology);
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
 
     let mut stmts: Vec<String> = schema
         .tables
@@ -86,7 +86,7 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
         let prefixed = view
             .clone()
             .with_schema_version_prefix(&TABLE_PREFIX, &all_table_names);
-        stmts.push(format!("{};", prefixed.to_create_sql()));
+        stmts.push(format!("{};", prefixed.to_create_sql().unwrap()));
     }
 
     let sql = stmts.join("\n");

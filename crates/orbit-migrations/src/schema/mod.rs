@@ -3,6 +3,7 @@ pub(crate) mod translate;
 use ontology::Ontology;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use orbit_utils::clickhouse::quote_sql_literal;
+use query_data_model::DataModelError;
 
 pub use translate::render_refreshable_view_select;
 
@@ -154,19 +155,21 @@ pub struct UnversionedDefinition {
 }
 
 impl GraphSchema {
-    pub fn from_ontology(ontology: &Ontology) -> Self {
+    pub fn from_ontology(ontology: &Ontology) -> Result<Self, DataModelError> {
         Self::from_ontology_replicated(ontology, false)
     }
 
     /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
     /// self-managed cluster; a `Replicated` database replicates DDL only.
-    pub fn from_ontology_replicated(ontology: &Ontology, replicated: bool) -> Self {
+    pub fn from_ontology_replicated(
+        ontology: &Ontology,
+        replicated: bool,
+    ) -> Result<Self, DataModelError> {
         let storage = query_data_model::Relational::<
             query_data_model::implementations::clickhouse::layout::ClickHouse,
-        >::derive(ontology)
-        .expect("validated ontology storage");
+        >::derive(ontology)?;
         let mut tables = translate::build_all_tables(&storage);
-        let mut views = translate::build_views(&storage);
+        let mut views = translate::build_views(&storage)?;
         if replicated {
             for table in &mut tables {
                 table.engine = table.engine.clone().replicated();
@@ -177,7 +180,7 @@ impl GraphSchema {
         }
         let all_table_names = storage.table_names().map(String::from).collect::<Vec<_>>();
 
-        Self {
+        Ok(Self {
             views,
             dictionaries: translate::build_dictionaries(&storage),
             refreshable_views: translate::build_refreshable_views(&storage),
@@ -185,10 +188,10 @@ impl GraphSchema {
                 &storage,
                 &all_table_names,
                 replicated,
-            ),
+            )?,
             tables,
             storage,
-        }
+        })
     }
 
     pub fn table_names(&self) -> Vec<&str> {
@@ -373,18 +376,18 @@ impl View {
         self
     }
 
-    pub fn to_create_sql(&self) -> String {
+    pub fn to_create_sql(&self) -> Result<String, DataModelError> {
         let mut header = format!("CREATE MATERIALIZED VIEW IF NOT EXISTS {}", self.name);
 
         if let Some(ref to_table) = self.to_table {
             header.push_str(&format!("\nTO {to_table}"));
         } else {
-            let engine = self.engine.as_ref().unwrap_or_else(|| {
-                panic!(
+            let engine = self.engine.as_ref().ok_or_else(|| {
+                DataModelError::Invalid(format!(
                     "materialized view '{}' uses implicit storage but has no engine",
                     self.name
-                )
-            });
+                ))
+            })?;
             header.push_str(&format!("\nENGINE = {}", engine.to_engine_sql()));
             if !self.order_by.is_empty() {
                 header.push_str(&format!("\nORDER BY ({})", self.order_by.join(", ")));
@@ -395,7 +398,7 @@ impl View {
             header.push_str("\nPOPULATE");
         }
 
-        format!("{header}\nAS {}", self.select_query)
+        Ok(format!("{header}\nAS {}", self.select_query))
     }
 }
 
@@ -518,6 +521,39 @@ fn quote_identifier(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn materialized_view_requires_a_destination_or_engine() {
+        let view = super::View {
+            name: "invalid_view".into(),
+            to_table: None,
+            select_query: "SELECT 1".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+            versioned: true,
+        };
+        let error = view.to_create_sql().unwrap_err();
+        assert!(error.to_string().contains("invalid_view"));
+        assert!(error.to_string().contains("no engine"));
+    }
+
+    #[test]
+    fn joined_view_generation_rejects_missing_target_tables() {
+        let ontology = ontology::Ontology::load_embedded_with_overlay(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/seeds/overlays/denorm_approved"
+        ))
+        .unwrap();
+        let mut schema = super::GraphSchema::from_ontology(&ontology).unwrap();
+        let join_table = schema.storage.joins().first().unwrap().table.clone();
+        schema
+            .storage
+            .tables
+            .retain(|table| table.name != join_table);
+        assert!(
+            matches!(super::translate::build_views(&schema.storage), Err(DataModelError::UnknownReference { kind: "join table", name }) if name == join_table)
+        );
+    }
     use super::*;
 
     fn merge_tree_engines(schema: &GraphSchema) -> Vec<String> {
@@ -552,8 +588,8 @@ mod tests {
     #[test]
     fn replicated_schema_renders_replicated_engines_everywhere() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        let plain = GraphSchema::from_ontology(&ontology);
-        let replicated = GraphSchema::from_ontology_replicated(&ontology, true);
+        let plain = GraphSchema::from_ontology(&ontology).unwrap();
+        let replicated = GraphSchema::from_ontology_replicated(&ontology, true).unwrap();
 
         assert!(!merge_tree_engines(&plain).is_empty());
         assert!(

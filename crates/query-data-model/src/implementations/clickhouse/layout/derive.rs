@@ -38,9 +38,12 @@ impl crate::Relational<ClickHouse> {
             });
         }
         for name in ontology.edge_tables() {
-            let edge = ontology
-                .edge_table_config(name)
-                .expect("registered edge table");
+            let edge = ontology.edge_table_config(name).ok_or_else(|| {
+                DataModelError::UnknownReference {
+                    kind: "edge table",
+                    name: name.into(),
+                }
+            })?;
             tables.push(Table {
                 name: name.into(),
                 columns: columns(
@@ -78,7 +81,16 @@ impl crate::Relational<ClickHouse> {
         }
         let mut joins = Vec::new();
         for declaration in ontology.denormalized_joins() {
-            let anchor = declaration.anchor_table();
+            let anchor = declaration
+                .tables
+                .iter()
+                .position(|table| table.has_traversal_path)
+                .ok_or_else(|| {
+                    DataModelError::Invalid(format!(
+                        "join '{}' has no scoped anchor",
+                        declaration.table
+                    ))
+                })?;
             let mut sources = Vec::new();
             let mut join_columns = Vec::new();
             let mut column_types = BTreeMap::new();
@@ -139,10 +151,15 @@ impl crate::Relational<ClickHouse> {
                     }),
                 });
             }
-            let path = sources[anchor]
-                .path_column
-                .as_ref()
-                .expect("scoped join anchor");
+            let path = sources
+                .get(anchor)
+                .and_then(|source| source.path_column.as_ref())
+                .ok_or_else(|| {
+                    DataModelError::Invalid(format!(
+                        "join '{}' has no scoped anchor",
+                        declaration.table
+                    ))
+                })?;
             if let Some(position) = join_columns.iter().position(|column| &column.name == path) {
                 let column = join_columns.remove(position);
                 join_columns.insert(0, column);

@@ -11,6 +11,8 @@ table-prefix-aware migration orchestrator.
 The ontology declares storage. `Relational<ClickHouse>` resolves ClickHouse graph-table definitions and source bindings during derivation.
 The query catalog and DDL renderer consume those resolved definitions.
 Migration uses the catalog's writer map to classify graph-table rebuilds.
+Schema construction and view rendering return errors for invalid layouts. Migration classification reuses the constructed schema's layout.
+Cleanup construction and refreshable-view lifecycle operations propagate layout errors. Fingerprint generation fails on invalid view templates instead of omitting them.
 These backend-specific types contain owned data and require no compiler dependency or SQL parser.
 Query models own `Layout<Relational<ClickHouse>, ClickHouseBindings>`, which pairs the schema with its bindings.
 DDL consumes the relational schema. Shared types hold tables, columns, and keys; ClickHouse options hold physical settings.

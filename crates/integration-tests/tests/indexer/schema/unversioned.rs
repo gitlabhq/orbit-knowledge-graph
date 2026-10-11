@@ -78,7 +78,7 @@ impl NamespaceStorageSnapshotScenario {
 
     async fn create_schema(&self) {
         let client = self.context.create_client();
-        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology);
+        let schema = orbit_migrations::schema::GraphSchema::from_ontology(&self.ontology).unwrap();
         orbit_migrations::execute::create_unversioned_definitions(&client, &schema)
             .await
             .unwrap();
