@@ -15,7 +15,7 @@ pub(super) fn parse_failure(error: Error<Rule>) -> QueryError {
         LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
     };
     QueryError::Validation(format!(
-        "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, NOT, and parentheses; patterns require named nodes and bounded paths.",
+        "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); predicates support AND, NOT, and parentheses, and each comparison starts with a property such as n.name; patterns require named nodes and bounded paths.",
         expected_message(&error.variant)
     ))
 }
@@ -94,8 +94,8 @@ fn rule_label(rule: &Rule) -> String {
         Rule::StringLiteral
         | Rule::NumberLiteral
         | Rule::BooleanLiteral
-        | Rule::TemporalLiteral
-        | Rule::FunctionName => "a value",
+        | Rule::TemporalLiteral => "a value",
+        Rule::FunctionName => "a function call",
         Rule::ListLiteral => "a list",
         Rule::MapLiteral | Rule::MapEntry => "a property map such as {name: 'x'}",
         Rule::RangeLiteral => "a hop range such as *1..3",

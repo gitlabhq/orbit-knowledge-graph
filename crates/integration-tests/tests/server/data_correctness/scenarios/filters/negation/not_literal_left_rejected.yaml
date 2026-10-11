@@ -1,0 +1,9 @@
+description: A literal on the left of a comparison is rejected, even when the right side is a property
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' < wi.title RETURN wi.id
+
+expect:
+  compile_error: "each comparison starts with a property such as n.name"
+  compile_error_not_contains: ["private-query-literal"]

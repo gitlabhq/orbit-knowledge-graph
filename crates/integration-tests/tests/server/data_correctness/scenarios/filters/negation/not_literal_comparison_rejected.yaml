@@ -1,0 +1,16 @@
+description: >-
+  NOT over a comparison of two literals is rejected. A comparison must start
+  with a property of a pattern variable, and a JSON not key must be a
+  property name.
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4000}) WHERE NOT 'private-query-literal' = 'private-query-literal' RETURN wi.id
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{"1":"private-query-literal"}}],"limit":10}
+
+expect:
+  compile_error:
+    gql: "each comparison starts with a property such as n.name"
+    json: "does not match"
+  compile_error_not_contains: ["private-query-literal"]
