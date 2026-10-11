@@ -10,7 +10,7 @@ query:
   gql: |
     MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)
     WHERE NOT mr.state = 'merged' AND NOT (mr.state = 'closed' AND mr.title CONTAINS 'Org')
-    RETURN u, mr.title LIMIT 50
+    RETURN u, mr.title, mr.state LIMIT 50
 
 expect:
   node_count: 3

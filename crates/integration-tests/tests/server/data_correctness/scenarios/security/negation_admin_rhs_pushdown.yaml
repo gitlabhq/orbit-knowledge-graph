@@ -1,0 +1,8 @@
+description: A complemented NOT comparison cannot reference an administrator-only field on the same node
+
+query:
+  gql: |
+    MATCH (u:User {id: 1}) WHERE NOT u.private_profile = u.is_admin RETURN u.id
+
+expect:
+  compile_error: "administrator"
