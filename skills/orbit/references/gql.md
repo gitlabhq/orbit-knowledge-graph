@@ -43,12 +43,14 @@ RETURN projections
 Every query needs at least one node bounded by an ID or a literal property
 filter. Examples are `{id: 278964}`, `{full_path: 'gitlab-org/gitlab'}`, and a
 `WHERE` comparison with a literal value. `LIMIT` does not count, so
-`MATCH (p:Project) RETURN p LIMIT 5` rejects. A neighbors query needs a bounded
+`MATCH (p:Project) RETURN p LIMIT 5` rejects. A `NOT` over a list, a range, a
+string or token match, or a group of conditions does not count either. A neighbors query needs a bounded
 center node, and a shortest path needs both endpoints bounded.
 
 ## Predicates
 
-`WHERE` combines predicates with `AND`. Supported forms:
+`WHERE` combines predicates with `AND` and `NOT`, and parentheses group them.
+`NOT` binds tighter than `AND`. Supported forms:
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`.
 - Lists: `x.state IN ['opened', 'merged']`.
@@ -60,6 +62,30 @@ center node, and a shortest path needs both endpoints bounded.
 
 Values are literals. There are no query parameters, so never splice untrusted
 text into a query.
+
+### Negation
+
+- `NOT x.state = 'closed'` is the same filter as `x.state <> 'closed'`, and
+  `NOT x.weight IS NULL` is the same as `x.weight IS NOT NULL`.
+- Write `NOT x.state IN ['closed', 'locked']`, not `x.state NOT IN [...]`.
+- A row whose value is NULL never matches a comparison, so `NOT x.weight = 3`
+  and `NOT x.weight IN [3, 8]` drop rows with no weight. Add `x.weight IS NULL`
+  as a separate query when you need those rows.
+- `NOT (a.x = 1 AND b.y = 2)` negates the whole group. A group can mix nodes and
+  a single-hop relationship variable.
+- Shortest paths and neighbors queries accept `NOT` only on `=`, `<>`,
+  `IS NULL`, and `IS NOT NULL`.
+- `traversal_path` cannot appear under `NOT`. Orbit scopes every query to your
+  authorized paths.
+- `OR` and `XOR` reject. Use `IN [...]` to match one of several values, or run
+  one query for each alternative.
+
+```gql orbit-query
+MATCH (mr:MergeRequest {project_id: 278964})
+WHERE mr.state = 'merged' AND NOT mr.target_branch IN ['main', 'master']
+RETURN mr.iid, mr.title, mr.target_branch
+LIMIT 10
+```
 
 ### Text-token search
 
@@ -106,7 +132,7 @@ window is incomplete. Do not report the returned rows as a complete list.
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
+subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
 Other function calls, such as `type(r)` or `collect(x)`, reject with an error
 that names the function. For relationship types, match a typed relationship
@@ -259,7 +285,8 @@ column. Common causes:
 - `-[AUTHORED]->` instead of `-[:AUTHORED]->`. Without the colon the name is a variable.
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
-- Unsupported syntax: `OR`, general `NOT`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
+- Unsupported syntax: `OR`, `XOR`, `x NOT IN [...]`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
+- Only `NOT` conditions anchor a node. Add a positive ID or literal filter; the error says "NOT conditions do not count".
 - `PAGE ... AFTER` with a cursor from a different query. The cursor binds to the query text.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.

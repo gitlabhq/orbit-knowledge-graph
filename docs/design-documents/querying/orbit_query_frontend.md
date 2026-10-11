@@ -194,8 +194,18 @@ Shortest paths use the ISO GQL path search prefix, `p = ANY SHORTEST (a)-[*1..3]
 The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST k GROUP`) are rejected: the compiler returns one path per endpoint pair.
 `ANY` and `SHORTEST` are reserved.
 
-Predicates support AND, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
+Predicates support AND, NOT, parentheses, comparisons, IN, string matching, null checks, and the compiler's three token predicates.
+NOT binds tighter than AND, and the `Negation` rule requires a word boundary, so `notes` and `ORDER` stay identifiers and keywords.
 Values are literals; the frontend has no parameter binding, so callers keep untrusted values out of the query text themselves.
+
+Lowering resolves every WHERE clause into one condition tree and normalizes it.
+NOT flips the polarity of its operand. A negated `=`, `<>`, `IS NULL`, or `IS NOT NULL` becomes its exact complement, and `NOT NOT` cancels.
+Other negated leaves and negated groups stay `NOT` nodes; ranges are not complemented, and there is no De Morgan rewrite.
+Each top-level conjunct that is a plain leaf becomes an ordinary filter, as before. Cross-node comparisons and the remaining `NOT` nodes go to `Input.predicates`.
+ID promotion reads only ordinary filters, so `NOT n.id IN [...]` never becomes an ID selector.
+Before normalization, lowering rejects `traversal_path` under any `NOT`, including a double negation, at the condition's position. Validation repeats the check, and also rejects hidden and virtual properties under `NOT`.
+Shortest paths and neighbors queries reject `NOT` nodes; complemented leaves are ordinary filters there.
+The `UnsupportedBooleanOperator` rule parses `OR` and `XOR`, and its consumer rejects them with a hint to use `AND`, `NOT`, or `IN [...]`. The `NegatedInOperator` rule does the same for `x NOT IN [...]`.
 
 ID forms preserve the compiler's distinct selector and filter representations:
 
@@ -209,11 +219,12 @@ ID forms preserve the compiler's distinct selector and filter representations:
 ## Rejections and bounds
 
 The frontend rejects mutations, multiple statements, disconnected patterns, cycles between pattern variables, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
-It also rejects OR, general NOT, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
+It also rejects OR, XOR, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
+The same `schema_limits::MAX_PREDICATE_DEPTH` bounds a run of `NOT` keywords plus the depth of its operand. Validation caps condition trees at that depth and at 256 leaves, and tree leaves count toward the per-node and per-relationship filter caps.
 Existing compiler limits still apply after lowering.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
 
