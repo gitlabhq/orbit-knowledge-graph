@@ -130,6 +130,10 @@ impl NodePlan {
         })
     }
 
+    pub fn is_id_pinned_only(&self) -> bool {
+        !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
+    }
+
     pub fn uses_default_pk(&self) -> bool {
         self.redaction_id_column == DEFAULT_PRIMARY_KEY
     }

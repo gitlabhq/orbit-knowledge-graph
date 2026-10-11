@@ -12,6 +12,9 @@ query:
     RETURN p
 
 expect:
-  skip_requirements: ["filter:visibility_level"]
   path_destinations:
     Group: [100]
+  nodes:
+    Group:
+      filters:
+        visibility_level: public
