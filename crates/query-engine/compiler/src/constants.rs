@@ -29,7 +29,7 @@ internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");
 internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
 
-// _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
+// _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
     format!("{}{alias}_pk", internal_column_prefix())
 }
@@ -79,7 +79,7 @@ pub(crate) const DEPTH_COLUMN: &str = "depth";
 pub(crate) const PATH_NODES_COLUMN: &str = "path_nodes";
 
 /// Raw CTE-internal column before projection; distinct from `EDGE_KINDS_COLUMN`
-/// (`_gkg_edge_kinds`), which is the output alias.
+/// (`_orbit_edge_kinds`), which is the output alias.
 pub(crate) const FRONTIER_EDGE_KINDS_COLUMN: &str = "edge_kinds";
 
 pub(crate) const ANCHOR_ID_COLUMN: &str = "anchor_id";

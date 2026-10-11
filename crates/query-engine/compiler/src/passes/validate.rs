@@ -11,6 +11,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{
     AggFunction, ColumnSelection, FilterOp, Input, InputFilter, InputGroupByKey, InputNode,
@@ -293,6 +294,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
         for node in &input.nodes {
             validate_identifier(&node.id)?;
+            check_reserved_prefix("node id", &node.id, &format!("{}_", node.id))?;
             let entity = node
                 .entity
                 .as_deref()
@@ -1039,6 +1041,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let group_output_names = group_by_output_names(&input.aggregation.group_by);
         let mut seen_group_output_names = HashSet::new();
         for name in &group_output_names {
+            check_reserved_prefix("output column", name, name)?;
             if !seen_group_output_names.insert(name.clone()) {
                 return Err(QueryError::Validation(format!(
                     "duplicate group_by output column \"{name}\""
@@ -1049,6 +1052,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let mut seen_output_names = seen_group_output_names.clone();
         for agg in &input.aggregation.metrics {
             let alias = agg.output_name();
+            check_reserved_prefix("output column", &alias, &alias)?;
             if !seen_output_names.insert(alias.clone()) {
                 return Err(QueryError::Validation(format!(
                     "aggregation \"{alias}\" conflicts with another output column"
@@ -1346,6 +1350,16 @@ pub(crate) fn validate_identifier(identifier: &str) -> Result<()> {
             "invalid identifier {identifier:?}"
         )))
     }
+}
+
+fn check_reserved_prefix(kind: &str, name: &str, column: &str) -> Result<()> {
+    let prefix = internal_column_prefix();
+    if column.starts_with(prefix) {
+        return Err(QueryError::Validation(format!(
+            "{kind} {name:?} conflicts with reserved prefix {prefix:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn is_valid_filter_value(value: &serde_json::Value) -> bool {
