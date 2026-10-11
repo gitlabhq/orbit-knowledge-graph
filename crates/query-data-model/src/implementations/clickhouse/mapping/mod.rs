@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{ClickHouseCatalog, EntityLayout, TableLayout, storage::StorageCatalog};
+use super::{ClickHouseCatalog, EntityLayout, TableLayout, layout::LayoutCatalog};
 use crate::implementations::derive_property_backend_facts;
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
@@ -11,7 +11,7 @@ use crate::{
 pub(crate) fn derive(
     ontology: &ontology::Ontology,
     graph: &GraphCatalog,
-    storage: &StorageCatalog,
+    storage: &LayoutCatalog,
 ) -> Result<ClickHouseCatalog, DataModelError> {
     let mut entities = std::iter::repeat_with(|| None)
         .take(graph.entities().count())

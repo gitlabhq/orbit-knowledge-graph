@@ -3,9 +3,9 @@ mod derive;
 mod error;
 pub mod generic;
 pub mod implementations;
+pub mod layout;
 pub mod models;
-pub mod storage;
-pub use storage::{Relational, RelationalBackend, Storage, StorageModel};
+pub use layout::{Layout, LayoutModel, Relational, RelationalBackend};
 
 pub use authz::gitlab::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy};
 pub use authz::trusted::TrustedLocalCatalog;
@@ -15,9 +15,9 @@ pub use generic::{
     RelationshipVariant, RelationshipVariantId,
 };
 
-pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
-pub use storage::relational::RelationalMapping;
-pub use storage::relational::{
+pub use layout::relational::RelationalMapping;
+pub use layout::relational::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
 };
+pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};

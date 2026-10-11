@@ -5,7 +5,7 @@ use ontology::{DataType, Ontology, StorageColumn, StorageIndex, StorageProjectio
 use super::*;
 use crate::DataModelError;
 
-impl StorageCatalog {
+impl LayoutCatalog {
     pub fn derive(ontology: &Ontology) -> Result<Self, DataModelError> {
         let mut tables = Vec::new();
         for node in ontology.nodes() {

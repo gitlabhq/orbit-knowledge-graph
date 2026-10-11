@@ -11,9 +11,9 @@ impl crate::RelationalBackend for DuckDb {
     type Mapping = super::DuckDbCatalog;
 }
 
-pub type StorageCatalog = crate::storage::relational::Schema<DuckDb>;
-pub type Table = crate::storage::relational::Table<DuckDb>;
-pub type Column = crate::storage::relational::Column<DuckDb>;
+pub type LayoutCatalog = crate::layout::relational::Schema<DuckDb>;
+pub type Table = crate::layout::relational::Table<DuckDb>;
+pub type Column = crate::layout::relational::Column<DuckDb>;
 
 #[derive(Debug)]
 pub struct Metadata {
@@ -21,7 +21,7 @@ pub struct Metadata {
     pub entity_tables: HashMap<String, String>,
 }
 
-impl StorageCatalog {
+impl LayoutCatalog {
     pub fn derive(ontology: &ontology::Ontology) -> Self {
         let edge_table = ontology
             .local_edge_table_name()

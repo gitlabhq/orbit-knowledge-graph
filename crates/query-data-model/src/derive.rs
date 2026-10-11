@@ -1,19 +1,19 @@
 use crate::implementations::{clickhouse, duckdb};
 use crate::{
-    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog,
-    Storage, TrustedLocalCatalog,
+    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog, Layout,
+    TrustedLocalCatalog,
 };
 use std::sync::Arc;
 
 impl ClickHouseDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
         let graph = GraphCatalog::derive(&ontology)?;
-        let schema = clickhouse::storage::StorageCatalog::derive(&ontology)?;
+        let schema = clickhouse::layout::LayoutCatalog::derive(&ontology)?;
         let mapping = clickhouse::mapping::derive(&ontology, &graph, &schema)?;
         let authorization = GitLabAuthzCatalog::from_ontology(&ontology, &graph)?;
         Ok(Self::new(
             graph,
-            Storage::new(schema, mapping),
+            Layout::new(schema, mapping),
             authorization,
         ))
     }
@@ -22,12 +22,12 @@ impl ClickHouseDataModel {
 impl DuckDbDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
         let graph = GraphCatalog::derive(&ontology)?;
-        let schema = duckdb::storage::StorageCatalog::derive(&ontology);
+        let schema = duckdb::layout::LayoutCatalog::derive(&ontology);
         let mapping = duckdb::mapping::derive(&ontology, &graph, &schema)?;
         let authorization = TrustedLocalCatalog::from_ontology(&ontology, &graph)?;
         Ok(Self::new(
             graph,
-            Storage::new(schema, mapping),
+            Layout::new(schema, mapping),
             authorization,
         ))
     }
@@ -45,11 +45,11 @@ mod tests {
 
     #[test]
     fn constructs_a_document_model_without_relational_or_gitlab_contracts() {
-        use crate::{DataModel, GraphCatalog, Storage, StorageModel};
+        use crate::{DataModel, GraphCatalog, Layout, LayoutModel};
         use std::collections::HashMap;
 
         struct Documents;
-        impl StorageModel for Documents {
+        impl LayoutModel for Documents {
             type Schema = Vec<String>;
             type Mapping = HashMap<crate::PropertyId, Vec<String>>;
         }
@@ -62,13 +62,13 @@ mod tests {
         let related = graph
             .add_relationship("RELATED".into(), &[(entity, entity)])
             .unwrap();
-        let storage = Storage::<Documents>::new(
+        let layout = Layout::<Documents>::new(
             vec!["records".into()],
             HashMap::from([(key, vec!["metadata".into(), "key".into()])]),
         );
-        let model = DataModel::new(graph, storage, ());
+        let model = DataModel::new(graph, layout, ());
 
-        assert_eq!(model.storage().schema, ["records"]);
+        assert_eq!(model.layout().schema, ["records"]);
         assert_eq!(model.backend()[&key], ["metadata", "key"]);
         assert!(model.graph().property_id(entity, "id").is_none());
         assert!(model.graph().variant_id(related, entity, entity).is_some());

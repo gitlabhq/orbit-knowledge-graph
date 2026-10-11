@@ -4,15 +4,15 @@ use super::{
     Column, Dictionary, Engine, Index, Projection, RefreshableView, Table, UnversionedDefinition,
     View,
 };
-use query_data_model::implementations::clickhouse::storage::{
-    self, MaterializedJoin, StorageCatalog,
+use query_data_model::implementations::clickhouse::layout::{
+    self, LayoutCatalog, MaterializedJoin,
 };
 
-pub fn build_all_tables(storage: &StorageCatalog) -> Vec<Table> {
+pub fn build_all_tables(storage: &LayoutCatalog) -> Vec<Table> {
     storage.versioned_tables().map(table_from_catalog).collect()
 }
 
-pub fn build_views(storage: &StorageCatalog) -> Vec<View> {
+pub fn build_views(storage: &LayoutCatalog) -> Vec<View> {
     let mut views: Vec<View> = storage.views().iter().map(view_from_catalog).collect();
 
     for join in storage.joins() {
@@ -22,7 +22,7 @@ pub fn build_views(storage: &StorageCatalog) -> Vec<View> {
     views
 }
 
-pub fn build_dictionaries(storage: &StorageCatalog) -> Vec<Dictionary> {
+pub fn build_dictionaries(storage: &LayoutCatalog) -> Vec<Dictionary> {
     storage
         .dictionaries()
         .iter()
@@ -43,7 +43,7 @@ pub fn build_dictionaries(storage: &StorageCatalog) -> Vec<Dictionary> {
         .collect()
 }
 
-pub fn build_refreshable_views(storage: &StorageCatalog) -> Vec<RefreshableView> {
+pub fn build_refreshable_views(storage: &LayoutCatalog) -> Vec<RefreshableView> {
     storage
         .refreshable_views()
         .iter()
@@ -58,7 +58,7 @@ pub fn build_refreshable_views(storage: &StorageCatalog) -> Vec<RefreshableView>
 }
 
 pub fn build_unversioned_definitions(
-    storage: &StorageCatalog,
+    storage: &LayoutCatalog,
     all_table_names: &[String],
     replicated: bool,
 ) -> Vec<UnversionedDefinition> {
@@ -100,7 +100,7 @@ pub fn build_unversioned_definitions(
     definitions
 }
 
-fn table_from_catalog(table: &storage::Table) -> Table {
+fn table_from_catalog(table: &layout::Table) -> Table {
     Table {
         name: table.name.clone(),
         columns: table.columns.iter().map(column_from_catalog).collect(),
@@ -121,7 +121,7 @@ fn table_from_catalog(table: &storage::Table) -> Table {
             .projections
             .iter()
             .map(|projection| {
-                use storage::Projection as Stored;
+                use layout::Projection as Stored;
                 match projection {
                     Stored::Reorder { name, order_by } => Projection::Reorder {
                         name: name.clone(),
@@ -152,7 +152,7 @@ fn table_from_catalog(table: &storage::Table) -> Table {
     }
 }
 
-fn column_from_catalog(column: &storage::Column) -> Column {
+fn column_from_catalog(column: &layout::Column) -> Column {
     Column {
         name: column.name.clone(),
         column_type: column.storage_type.clone(),
@@ -161,14 +161,14 @@ fn column_from_catalog(column: &storage::Column) -> Column {
     }
 }
 
-fn engine_from_catalog(engine: &storage::Engine) -> Engine {
+fn engine_from_catalog(engine: &layout::Engine) -> Engine {
     Engine {
         name: engine.name.clone(),
         args: engine.arguments.clone(),
     }
 }
 
-fn view_from_catalog(definition: &storage::MaterializedView) -> View {
+fn view_from_catalog(definition: &layout::MaterializedView) -> View {
     View {
         name: definition.name.clone(),
         to_table: definition.to_table.clone(),
@@ -180,7 +180,7 @@ fn view_from_catalog(definition: &storage::MaterializedView) -> View {
     }
 }
 
-fn denormalized_feeding_views(join: &MaterializedJoin, storage: &StorageCatalog) -> Vec<View> {
+fn denormalized_feeding_views(join: &MaterializedJoin, storage: &LayoutCatalog) -> Vec<View> {
     let projection = denormalized_select_projection(join, storage);
     (0..join.sources.len())
         .map(|trigger| View {
@@ -198,7 +198,7 @@ fn denormalized_feeding_views(join: &MaterializedJoin, storage: &StorageCatalog)
         .collect()
 }
 
-fn denormalized_select_projection(join: &MaterializedJoin, storage: &StorageCatalog) -> String {
+fn denormalized_select_projection(join: &MaterializedJoin, storage: &LayoutCatalog) -> String {
     let all_aliases = || (0..join.sources.len()).map(|index| format!("t{index}"));
     let mut selected_columns: Vec<_> = storage
         .table(&join.table)
@@ -296,7 +296,7 @@ fn denormalized_from_clause(join: &MaterializedJoin, trigger: usize) -> String {
 
 pub fn render_refreshable_view_select(
     template: &str,
-    storage: &StorageCatalog,
+    storage: &LayoutCatalog,
     version: u32,
     version_prefix: &str,
 ) -> Result<String, ontology::sql_template::Error> {
@@ -320,7 +320,7 @@ struct RefreshableViewTableContext {
 }
 
 fn refreshable_view_table_contexts(
-    storage: &StorageCatalog,
+    storage: &LayoutCatalog,
     version_prefix: &str,
 ) -> Vec<RefreshableViewTableContext> {
     let mut tables: Vec<RefreshableViewTableContext> = storage

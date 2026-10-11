@@ -1,11 +1,11 @@
-use super::{DuckDbCatalog, DuckDbEntityLayout, storage::StorageCatalog};
+use super::{DuckDbCatalog, DuckDbEntityLayout, layout::LayoutCatalog};
 use crate::implementations::derive_property_backend_facts;
 use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, PropertyRealization};
 
 pub(crate) fn derive(
     ontology: &ontology::Ontology,
     graph: &GraphCatalog,
-    storage: &StorageCatalog,
+    storage: &LayoutCatalog,
 ) -> Result<DuckDbCatalog, DataModelError> {
     let mut entities = std::iter::repeat_with(|| None)
         .take(graph.entities().count())

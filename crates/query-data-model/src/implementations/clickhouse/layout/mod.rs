@@ -14,9 +14,9 @@ impl crate::RelationalBackend for ClickHouse {
     type Mapping = super::ClickHouseCatalog;
 }
 
-pub type StorageCatalog = crate::storage::relational::Schema<ClickHouse>;
-pub type Table = crate::storage::relational::Table<ClickHouse>;
-pub type Column = crate::storage::relational::Column<ClickHouse>;
+pub type LayoutCatalog = crate::layout::relational::Schema<ClickHouse>;
+pub type Table = crate::layout::relational::Table<ClickHouse>;
+pub type Column = crate::layout::relational::Column<ClickHouse>;
 
 #[derive(Debug, Clone, Default)]
 pub struct ColumnOptions {
@@ -188,7 +188,7 @@ pub struct Metadata {
     relationship_tables: BTreeMap<String, BTreeSet<String>>,
 }
 
-impl StorageCatalog {
+impl LayoutCatalog {
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.metadata.auxiliary_tables
     }

@@ -8,7 +8,7 @@ pub use mapping::{
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use super::{Storage, StorageModel};
+use super::{Layout, LayoutModel};
 
 pub trait RelationalBackend: Debug + Clone {
     type StorageType: Debug + Clone;
@@ -21,7 +21,7 @@ pub trait RelationalBackend: Debug + Clone {
 #[derive(Debug)]
 pub struct Relational<B: RelationalBackend>(PhantomData<B>);
 
-impl<B: RelationalBackend> StorageModel for Relational<B> {
+impl<B: RelationalBackend> LayoutModel for Relational<B> {
     type Schema = Schema<B>;
     type Mapping = B::Mapping;
 }
@@ -50,7 +50,7 @@ pub struct Column<B: RelationalBackend> {
     pub options: B::ColumnOptions,
 }
 
-impl<B: RelationalBackend> Storage<Relational<B>> {
+impl<B: RelationalBackend> Layout<Relational<B>> {
     pub fn tables(&self) -> &[Table<B>] {
         self.schema.tables()
     }

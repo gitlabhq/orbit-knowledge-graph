@@ -8,7 +8,7 @@ pub use translate::render_refreshable_view_select;
 
 #[derive(Debug)]
 pub struct GraphSchema {
-    pub storage: query_data_model::implementations::clickhouse::storage::StorageCatalog,
+    pub storage: query_data_model::implementations::clickhouse::layout::LayoutCatalog,
     pub tables: Vec<Table>,
     pub views: Vec<View>,
     pub dictionaries: Vec<Dictionary>,
@@ -160,10 +160,8 @@ impl GraphSchema {
     /// self-managed cluster; a `Replicated` database replicates DDL only.
     pub fn from_ontology_replicated(ontology: &Ontology, replicated: bool) -> Self {
         let storage =
-            query_data_model::implementations::clickhouse::storage::StorageCatalog::derive(
-                ontology,
-            )
-            .expect("validated ontology storage");
+            query_data_model::implementations::clickhouse::layout::LayoutCatalog::derive(ontology)
+                .expect("validated ontology storage");
         let mut tables = translate::build_all_tables(&storage);
         let mut views = translate::build_views(&storage);
         if replicated {

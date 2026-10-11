@@ -4,19 +4,19 @@ mod ids;
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
 pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
-use crate::{Storage, StorageModel};
+use crate::{Layout, LayoutModel};
 
-pub struct DataModel<T: StorageModel, A> {
+pub struct DataModel<T: LayoutModel, A> {
     graph: GraphCatalog,
-    storage: Storage<T>,
+    layout: Layout<T>,
     authorization: A,
 }
 
-impl<T: StorageModel, A> DataModel<T, A> {
-    pub fn new(graph: GraphCatalog, storage: Storage<T>, authorization: A) -> Self {
+impl<T: LayoutModel, A> DataModel<T, A> {
+    pub fn new(graph: GraphCatalog, layout: Layout<T>, authorization: A) -> Self {
         Self {
             graph,
-            storage,
+            layout,
             authorization,
         }
     }
@@ -25,12 +25,12 @@ impl<T: StorageModel, A> DataModel<T, A> {
         &self.graph
     }
 
-    pub fn storage(&self) -> &Storage<T> {
-        &self.storage
+    pub fn layout(&self) -> &Layout<T> {
+        &self.layout
     }
 
     pub fn backend(&self) -> &T::Mapping {
-        &self.storage.mapping
+        &self.layout.mapping
     }
 
     pub fn authorization(&self) -> &A {

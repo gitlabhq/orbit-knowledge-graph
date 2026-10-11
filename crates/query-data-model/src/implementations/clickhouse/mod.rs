@@ -1,5 +1,5 @@
+pub mod layout;
 pub(crate) mod mapping;
-pub mod storage;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -22,7 +22,7 @@ pub struct TableLayout {
 
 impl TableLayout {
     fn from_storage(
-        table: &storage::Table,
+        table: &layout::Table,
         entity: Option<EntityId>,
         path_columns: Vec<PathColumn>,
         path_scopable: bool,

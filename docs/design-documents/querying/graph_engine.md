@@ -28,8 +28,8 @@ primary keys, and secondary indexes.
 ### Storage catalogs
 
 Each backend owns its storage catalog under `query-data-model/src/implementations/`.
-Both use `Storage<Relational<Backend>>` with shared table, column, and key structures.
-`StorageModel` selects schema and mapping types, so `Storage<T>` does not require tables or columns.
+Both use `Layout<Relational<Backend>>` with shared table, column, and key structures.
+`LayoutModel` selects schema and mapping types, so `Layout<T>` does not require tables or columns.
 `RelationalBackend` supplies physical types, table options, column options, and backend metadata.
 ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
 DuckDB uses the same relational structures with its local type facts.
