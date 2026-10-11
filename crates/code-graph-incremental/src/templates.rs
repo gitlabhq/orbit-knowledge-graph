@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::pipeline::{
     Canonicalize, Changes, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline,
@@ -13,21 +12,10 @@ use arrow::record_batch::RecordBatch;
 use rustc_hash::FxHashSet;
 
 pub struct Options {
-    pub max_files: usize,
+    pub limits: Limits,
     pub worker_threads: usize,
-    pub parse_timeout: Option<Duration>,
-    pub rewrite_timeout: Option<Duration>,
-    pub link_timeout: Option<Duration>,
-    pub resolve_timeout: Option<Duration>,
-    pub cross_file_timeout: Option<Duration>,
     pub cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
     pub family_finished: Arc<dyn Fn() + Send + Sync>,
-}
-
-fn millis(value: Option<Duration>) -> u64 {
-    value.map_or(u64::MAX, |duration| {
-        duration.as_millis().min(u64::MAX as u128) as u64
-    })
 }
 
 pub fn index<'e>(context: Context<'e>, sources: Sources) -> Result<Pipeline<'e, Resolved>, Error> {
@@ -58,21 +46,7 @@ pub fn repository<E: std::fmt::Display>(
     export_config: &crate::export::ExportConfig,
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
 ) -> Result<Report, Error> {
-    let defaults = Limits::load()?;
-    let limits = Limits {
-        max_files: if options.max_files == 0 {
-            defaults.max_files
-        } else {
-            options.max_files.min(defaults.max_files)
-        },
-        cross_file_resolve_ms: millis(options.cross_file_timeout)
-            .min(defaults.cross_file_resolve_ms),
-        file_parse_ms: millis(options.parse_timeout),
-        file_rewrite_ms: millis(options.rewrite_timeout),
-        file_link_ms: millis(options.link_timeout),
-        file_resolve_ms: millis(options.resolve_timeout),
-        ..defaults
-    };
+    let limits = options.limits;
     let run =
         Sentinel::new("run", "", limits.total_ms).with_cancellation(options.cancelled.clone());
     run.check()?;
