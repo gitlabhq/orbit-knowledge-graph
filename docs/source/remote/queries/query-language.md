@@ -228,7 +228,8 @@ rows whose weight is outside 1 to 5. A row whose property is
 null never matches, so `not` drops it as well. `not` on `traversal_path` is
 rejected, because GitLab Orbit scopes every query to your authorized paths. A `not`
 over a list, a range, or a text match does not anchor a node, and it needs a
-traversal or aggregation query.
+traversal or aggregation query. `filters` and `not` together allow at most 10
+distinct properties on one node.
 
 ### Text-indexed properties
 
