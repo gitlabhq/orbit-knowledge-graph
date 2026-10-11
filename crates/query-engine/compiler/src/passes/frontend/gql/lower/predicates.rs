@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use crate::input::{
     BooleanExpression, Condition, FilterOp, InputFilter, InputIdRange, PredicateTarget,
-    PropertyPredicate,
 };
 use crate::{QueryError, Result};
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use serde_json::Value;
 
 use super::super::ast::{Comparison, MapEntry, Predicate};
@@ -33,36 +31,9 @@ impl Lowering {
         &mut self,
         predicates: Vec<BooleanExpression<Predicate<'_>>>,
     ) -> Result<()> {
-        if predicates.is_empty() {
-            return Ok(());
-        }
-        let expression = BooleanExpression::And(predicates);
-        if let Some(Predicate::Comparison(comparison)) =
-            expression
-                .negated_leaves()
-                .find(|predicate| match predicate {
-                    Predicate::Comparison(comparison) => std::iter::once(&comparison.property)
-                        .chain(&comparison.rhs_property)
-                        .any(|property| property.property.value == TRAVERSAL_PATH_COLUMN),
-                })
-        {
-            return Err(invalid(
-                comparison.span,
-                "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths",
-            ));
-        }
-        let expression = expression
-            .try_map(&mut |predicate| self.condition(predicate))?
-            .normalize();
-        for conjunct in expression.conjuncts() {
-            match conjunct {
-                BooleanExpression::Leaf(Condition::Property(predicate)) => {
-                    self.push_filter(predicate)
-                }
-                root => self.input.predicates.push(root),
-            }
-        }
-        Ok(())
+        let expression = BooleanExpression::And(predicates)
+            .try_map(&mut |predicate| self.condition(predicate))?;
+        self.input.absorb(expression)
     }
 
     fn condition(&self, predicate: Predicate<'_>) -> Result<Condition> {
@@ -105,7 +76,7 @@ impl Lowering {
             }
             None => None,
         };
-        Ok(Condition::Property(PropertyPredicate {
+        Ok(Condition {
             target,
             property: property.property.value,
             filter: InputFilter {
@@ -113,7 +84,7 @@ impl Lowering {
                 value,
                 rhs_column,
             },
-        }))
+        })
     }
 
     fn predicate_target(&self, alias: &str, span: pest::Span<'_>) -> Result<PredicateTarget> {
@@ -130,31 +101,6 @@ impl Lowering {
         } else {
             Err(invalid(span, &format!("undefined variable {alias}")))
         }
-    }
-
-    fn push_filter(&mut self, predicate: PropertyPredicate) {
-        if predicate.compares_aliases() {
-            self.input
-                .predicates
-                .push(BooleanExpression::Leaf(Condition::Property(predicate)));
-            return;
-        }
-        let filters = match &predicate.target {
-            PredicateTarget::Node(alias) => {
-                &mut self
-                    .input
-                    .nodes
-                    .iter_mut()
-                    .find(|node| node.id == *alias)
-                    .expect("predicate targets resolve to declared nodes")
-                    .filters
-            }
-            PredicateTarget::Relationship(index) => &mut self.input.relationships[*index].filters,
-        };
-        filters
-            .entry(predicate.property)
-            .or_default()
-            .push(predicate.filter);
     }
 
     pub(super) fn promote_ids(&mut self) -> Result<()> {

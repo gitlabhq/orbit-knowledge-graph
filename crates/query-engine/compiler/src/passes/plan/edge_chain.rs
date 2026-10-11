@@ -657,7 +657,7 @@ fn determine_hydration(
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
     let is_predicate_target = input.predicates.iter().any(|root| match root.local_node() {
         Some(node) => node == alias,
-        None => root.leaves().any(|Condition::Property(predicate)| {
+        None => root.leaves().any(|predicate| {
             predicate
                 .node_properties()
                 .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)

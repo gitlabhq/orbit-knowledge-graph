@@ -36,15 +36,11 @@ pub(super) fn bind(
     };
     let expression = expression
         .clone()
-        .try_map(&mut |condition| -> Result<Box<Predicate>> {
-            let Condition::Property(predicate) = condition;
+        .try_map(&mut |predicate| -> Result<Box<Predicate>> {
             let (column, owner) = match &predicate.target {
                 PredicateTarget::Node(alias) => {
                     let entity = input
-                        .nodes
-                        .iter()
-                        .find(|node| &node.id == alias)
-                        .and_then(|node| node.entity.as_deref())
+                        .entity_of(alias)
                         .and_then(|entity| model.graph().entity_id(entity))
                         .ok_or_else(|| {
                             QueryError::PipelineInvariant(format!(

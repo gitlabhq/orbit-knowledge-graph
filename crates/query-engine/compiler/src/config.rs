@@ -424,10 +424,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node {
         let derived = &mut config.compiler_derived;
-        derived.null_in_is_unknown = input
-            .predicates
-            .iter()
-            .any(|root| matches!(root, crate::input::BooleanExpression::Not(_)));
+        derived.null_in_is_unknown = input.has_negation();
         visit_queries(q, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
             visit_relations(&query.from, &mut |relation| {

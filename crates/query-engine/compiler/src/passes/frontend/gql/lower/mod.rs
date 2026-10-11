@@ -4,8 +4,8 @@ mod projections;
 use std::collections::{HashMap, HashSet};
 
 use crate::input::{
-    BooleanExpression, Direction, HopRange, InputCursor, InputNeighbors, InputPath,
-    InputRelationship, PathType, PropertyRef, QueryType,
+    Direction, HopRange, InputCursor, InputNeighbors, InputPath, InputRelationship, PathType,
+    PropertyRef, QueryType,
 };
 use crate::passes::cursor;
 use crate::query_limits::MAX_NODES_CAP;
@@ -298,21 +298,6 @@ impl Lowering {
                     edge.direction = Direction::Outgoing;
                 }
             }
-        }
-        let shape = match self.input.query_type {
-            QueryType::PathFinding => "shortest paths",
-            QueryType::Neighbors => "neighbors queries",
-            _ => return Ok(()),
-        };
-        if self
-            .input
-            .predicates
-            .iter()
-            .any(|root| matches!(root, BooleanExpression::Not(_)))
-        {
-            return Err(QueryError::Validation(format!(
-                "{shape} support NOT only on =, <>, IS NULL, and IS NOT NULL conditions; use a traversal for other negated conditions"
-            )));
         }
         Ok(())
     }

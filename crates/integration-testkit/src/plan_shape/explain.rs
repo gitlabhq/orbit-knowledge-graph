@@ -98,7 +98,7 @@ pub fn logical(input: &Input) -> Tree {
             .predicates
             .iter()
             .map(|expression| {
-                boolean_text(expression, &|compiler::input::Condition::Property(leaf)| {
+                boolean_text(expression, &|leaf: &compiler::input::Condition| {
                     let alias = match &leaf.target {
                         compiler::input::PredicateTarget::Node(alias) => alias.clone(),
                         compiler::input::PredicateTarget::Relationship(index) => {
@@ -606,16 +606,17 @@ fn boolean_text<T>(
     expression: &compiler::input::BooleanExpression<T>,
     leaf: &impl Fn(&T) -> String,
 ) -> String {
-    use compiler::input::BooleanExpression;
-    match expression {
-        BooleanExpression::Leaf(value) => leaf(value),
-        BooleanExpression::Not(child) => format!("NOT ({})", boolean_text(child, leaf)),
-        BooleanExpression::And(children) => children
-            .iter()
-            .map(|child| format!("({})", boolean_text(child, leaf)))
-            .collect::<Vec<_>>()
-            .join(" AND "),
-    }
+    expression.fold(
+        leaf,
+        &|children| {
+            children
+                .iter()
+                .map(|child| format!("({child})"))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        },
+        &|child| format!("NOT ({child})"),
+    )
 }
 
 fn planned_projections(values: &[Projection]) -> String {

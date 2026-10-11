@@ -1,7 +1,5 @@
 use crate::error::{QueryError, Result};
-use crate::input::{
-    ColumnSelection, Condition, Direction, Input, InputFilter, PredicateTarget, QueryType,
-};
+use crate::input::{ColumnSelection, Direction, Input, InputFilter, PredicateTarget, QueryType};
 use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
@@ -64,8 +62,7 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
         .filter_map(|node| Some((node.id.clone(), node.entity.clone()?)))
         .collect();
     for root in &mut input.predicates {
-        root.visit_mut(&mut |condition| {
-            let Condition::Property(predicate) = condition;
+        root.visit_mut(&mut |predicate| {
             if let PredicateTarget::Node(alias) = &predicate.target
                 && let Some(entity) = entities.get(alias)
             {

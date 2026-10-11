@@ -1505,9 +1505,7 @@ fn orbit_query_rejects_traversal_path_column_comparisons() {
 
 #[test]
 fn native_predicate_trees_are_bounded_before_planning() {
-    use compiler::input::{
-        BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget, PropertyPredicate,
-    };
+    use compiler::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
     let model =
         query_data_model::ClickHouseDataModel::derive(crate::compiler::setup::embedded_ontology())
             .unwrap();
@@ -1515,7 +1513,7 @@ fn native_predicate_trees_are_bounded_before_planning() {
     let mut input =
         compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
     let leaf = |target| {
-        BooleanExpression::Leaf(Condition::Property(PropertyPredicate {
+        BooleanExpression::Leaf(Condition {
             target,
             property: "id".into(),
             filter: InputFilter {
@@ -1523,7 +1521,7 @@ fn native_predicate_trees_are_bounded_before_planning() {
                 value: Some(serde_json::json!([1])),
                 ..Default::default()
             },
-        }))
+        })
     };
     let mut deep = leaf(PredicateTarget::Node("u".into()));
     for _ in 0..1024 {

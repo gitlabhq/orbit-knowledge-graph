@@ -232,7 +232,11 @@ impl QueryParser {
         for child in input.into_children() {
             match child.as_rule() {
                 Rule::NotExpression => children.push(Self::NotExpression(child)?),
-                Rule::UnsupportedBooleanOperator => Self::UnsupportedBooleanOperator(child)?,
+                Rule::UnsupportedBooleanOperator => {
+                    return Err(child.error(
+                        "OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values",
+                    ));
+                }
                 _ => return Err(mismatch(&child)),
             }
         }
@@ -241,12 +245,6 @@ impl QueryParser {
         } else {
             BooleanExpression::And(children)
         })
-    }
-
-    fn UnsupportedBooleanOperator(input: Node) -> Result<()> {
-        Err(input.error(
-            "OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values",
-        ))
     }
 
     fn NotExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
@@ -259,18 +257,10 @@ impl QueryParser {
         if children.len() + expression.depth() > super::MAX_NESTING {
             return Err(error_at(span, "expression nesting is too deep"));
         }
-        for negation in children {
-            Self::Negation(negation)?;
+        for _negation in children {
             expression = BooleanExpression::Not(Box::new(expression));
         }
         Ok(expression)
-    }
-
-    fn Negation(input: Node) -> Result<()> {
-        match input.as_rule() {
-            Rule::Negation => Ok(()),
-            _ => Err(mismatch(&input)),
-        }
     }
 
     #[alias(predicate)]

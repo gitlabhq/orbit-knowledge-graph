@@ -1,6 +1,8 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
+};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -109,20 +111,28 @@ impl<T> BooleanExpression<T> {
         }
     }
 
-    pub fn depth(&self) -> usize {
-        let mut pending = vec![(self, 0)];
-        let mut maximum = 0;
-        while let Some((expression, depth)) = pending.pop() {
-            maximum = maximum.max(depth);
-            match expression {
-                Self::Leaf(_) => {}
-                Self::And(children) => {
-                    pending.extend(children.iter().map(|child| (child, depth + 1)))
-                }
-                Self::Not(child) => pending.push((child, depth + 1)),
-            }
+    pub fn fold<R>(
+        &self,
+        leaf: &impl Fn(&T) -> R,
+        and: &impl Fn(Vec<R>) -> R,
+        not: &impl Fn(R) -> R,
+    ) -> R {
+        match self {
+            Self::Leaf(value) => leaf(value),
+            Self::And(children) => and(children
+                .iter()
+                .map(|child| child.fold(leaf, and, not))
+                .collect()),
+            Self::Not(child) => not(child.fold(leaf, and, not)),
         }
-        maximum
+    }
+
+    pub fn depth(&self) -> usize {
+        self.fold(
+            &|_| 0,
+            &|children| children.into_iter().max().unwrap_or(0) + 1,
+            &|depth| depth + 1,
+        )
     }
 
     pub fn conjuncts(self) -> Vec<Self> {
@@ -133,17 +143,20 @@ impl<T> BooleanExpression<T> {
     }
 }
 
-impl<T: Complement> BooleanExpression<T> {
+impl BooleanExpression<Condition> {
     pub fn normalize(self) -> Self {
         self.with_polarity(false)
     }
 
     fn with_polarity(self, negated: bool) -> Self {
         match self {
-            Self::Leaf(leaf) if negated => match leaf.complement() {
-                Ok(complement) => Self::Leaf(complement),
-                Err(leaf) => Self::Not(Box::new(Self::Leaf(leaf))),
-            },
+            Self::Leaf(mut leaf) if negated => {
+                if leaf.complement() {
+                    Self::Leaf(leaf)
+                } else {
+                    Self::Not(Box::new(Self::Leaf(leaf)))
+                }
+            }
             Self::Leaf(leaf) => Self::Leaf(leaf),
             Self::Not(child) => child.with_polarity(!negated),
             Self::And(mut children) if children.len() == 1 => {
@@ -166,47 +179,14 @@ impl<T: Complement> BooleanExpression<T> {
     }
 }
 
-pub trait Complement: Sized {
-    fn complement(self) -> Result<Self, Self>;
-}
-
-impl Complement for FilterOp {
-    fn complement(self) -> Result<Self, Self> {
+impl FilterOp {
+    pub fn complement(self) -> Option<Self> {
         match self {
-            Self::Eq => Ok(Self::Ne),
-            Self::Ne => Ok(Self::Eq),
-            Self::IsNull => Ok(Self::IsNotNull),
-            Self::IsNotNull => Ok(Self::IsNull),
-            other => Err(other),
-        }
-    }
-}
-
-impl Complement for InputFilter {
-    fn complement(self) -> Result<Self, Self> {
-        match self.op.unwrap_or(FilterOp::Eq).complement() {
-            Ok(op) => Ok(Self {
-                op: Some(op),
-                ..self
-            }),
-            Err(_) => Err(self),
-        }
-    }
-}
-
-impl Complement for Condition {
-    fn complement(self) -> Result<Self, Self> {
-        match self {
-            Self::Property(predicate) => match predicate.filter.complement() {
-                Ok(filter) => Ok(Self::Property(PropertyPredicate {
-                    filter,
-                    ..predicate
-                })),
-                Err(filter) => Err(Self::Property(PropertyPredicate {
-                    filter,
-                    ..predicate
-                })),
-            },
+            Self::Eq => Some(Self::Ne),
+            Self::Ne => Some(Self::Eq),
+            Self::IsNull => Some(Self::IsNotNull),
+            Self::IsNotNull => Some(Self::IsNull),
+            _ => None,
         }
     }
 }
@@ -218,13 +198,21 @@ pub enum PredicateTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PropertyPredicate {
+pub struct Condition {
     pub target: PredicateTarget,
     pub property: String,
     pub filter: InputFilter,
 }
 
-impl PropertyPredicate {
+impl Condition {
+    fn complement(&mut self) -> bool {
+        let complement = self.filter.op.unwrap_or(FilterOp::Eq).complement();
+        if complement.is_some() {
+            self.filter.op = complement;
+        }
+        complement.is_some()
+    }
+
     pub fn compares_aliases(&self) -> bool {
         match (&self.target, &self.filter.rhs_column) {
             (PredicateTarget::Node(alias), Some((rhs, _))) => alias != rhs,
@@ -245,34 +233,19 @@ impl PropertyPredicate {
                 .map(|(alias, property)| (alias.as_str(), property.as_str())),
         )
     }
-}
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Condition {
-    Property(PropertyPredicate),
-}
-
-impl Condition {
     pub fn references(&self, target: &PredicateTarget) -> bool {
-        match self {
-            Self::Property(predicate) => {
-                predicate.target == *target
-                    || matches!(target, PredicateTarget::Node(alias)
-                        if predicate.node_properties().any(|(node, _)| node == alias))
-            }
-        }
+        self.target == *target
+            || matches!(target, PredicateTarget::Node(alias)
+                if self.node_properties().any(|(node, _)| node == alias))
     }
 }
 
 impl BooleanExpression<Condition> {
     pub fn local_node(&self) -> Option<&str> {
-        let mut aliases = self.leaves().map(|condition| match condition {
-            Condition::Property(predicate) => match &predicate.target {
-                PredicateTarget::Node(alias) if !predicate.compares_aliases() => {
-                    Some(alias.as_str())
-                }
-                _ => None,
-            },
+        let mut aliases = self.leaves().map(|condition| match &condition.target {
+            PredicateTarget::Node(alias) if !condition.compares_aliases() => Some(alias.as_str()),
+            _ => None,
         });
         let first = aliases.next()??;
         aliases.all(|alias| alias == Some(first)).then_some(first)
@@ -289,10 +262,64 @@ impl Input {
             .any(|condition| condition.references(target))
     }
 
+    pub fn entity_of(&self, alias: &str) -> Option<&str> {
+        self.nodes
+            .iter()
+            .find(|node| node.id == alias)
+            .and_then(|node| node.entity.as_deref())
+    }
+
+    pub fn has_negation(&self) -> bool {
+        self.predicates
+            .iter()
+            .any(|root| matches!(root, BooleanExpression::Not(_)))
+    }
+
+    pub fn absorb(&mut self, expression: BooleanExpression<Condition>) -> crate::error::Result<()> {
+        if expression.negated_leaves().any(|condition| {
+            std::iter::once(condition.property.as_str())
+                .chain(condition.node_properties().map(|(_, property)| property))
+                .any(|property| property == TRAVERSAL_PATH_COLUMN)
+        }) {
+            return Err(crate::error::QueryError::Validation(
+                "traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths".into(),
+            ));
+        }
+        for conjunct in expression.normalize().conjuncts() {
+            match conjunct {
+                BooleanExpression::Leaf(condition) if !condition.compares_aliases() => {
+                    let filters = match &condition.target {
+                        PredicateTarget::Node(alias) => {
+                            &mut self
+                                .nodes
+                                .iter_mut()
+                                .find(|node| node.id == *alias)
+                                .ok_or_else(|| {
+                                    crate::error::QueryError::PipelineInvariant(format!(
+                                        "condition node '{alias}' is not declared"
+                                    ))
+                                })?
+                                .filters
+                        }
+                        PredicateTarget::Relationship(index) => {
+                            &mut self.relationships[*index].filters
+                        }
+                    };
+                    filters
+                        .entry(condition.property)
+                        .or_default()
+                        .push(condition.filter);
+                }
+                root => self.predicates.push(root),
+            }
+        }
+        Ok(())
+    }
+
     pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
         for root in &mut self.predicates {
-            root.visit_mut(&mut |Condition::Property(predicate)| {
-                if let PredicateTarget::Relationship(position) = &mut predicate.target
+            root.visit_mut(&mut |condition| {
+                if let PredicateTarget::Relationship(position) = &mut condition.target
                     && *position > index
                 {
                     *position -= 1;
