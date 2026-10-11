@@ -46,6 +46,7 @@ impl Scalar<'_> {
 /// Named values every row carries, such as the project and branch being
 /// indexed. `export.yaml` binds them to header columns and picks the ones
 /// that seed row ids, so ids match code-graph's for the same inputs.
+#[derive(Clone)]
 pub struct Envelope<'a> {
     values: Vec<(&'a str, Scalar<'a>)>,
 }
@@ -247,21 +248,53 @@ pub fn export(
     ontology: &Ontology,
     envelope: &Envelope,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
+    export_selected(
+        &state.trees,
+        &state.edges,
+        lang,
+        ontology,
+        envelope,
+        true,
+        &|_| true,
+    )
+}
+
+pub(crate) fn export_selected(
+    trees: &[Tree],
+    edges: &[crate::tree::Edge],
+    lang: &Lang,
+    ontology: &Ontology,
+    envelope: &Envelope,
+    include_directories: bool,
+    owns_file: &dyn Fn(&str) -> bool,
+) -> Result<Vec<(String, RecordBatch)>, Error> {
     let plan = ExportPlan::load(ontology, lang)?;
     envelope.check(&plan)?;
-    let forest = Forest::new(&state.trees, lang);
-    let mut ids: FxHashMap<(u32, u32), (i64, usize)> = FxHashMap::default();
+    let forest = Forest::new(trees, lang);
+    let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
     for (index, entity) in plan.entities.iter().enumerate() {
         let mut b = BatchBuilder::new(&entity.specs, 0)?;
         write_entity(
-            &mut b, &plan, entity, index, &forest, lang, envelope, &mut ids,
+            &mut b,
+            &plan,
+            entity,
+            index,
+            &forest,
+            lang,
+            envelope,
+            &mut ids,
+            &|tree| match entity.name.as_str() {
+                "Directory" => include_directories,
+                "File" => owns_file(&tree.label),
+                _ => true,
+            },
         )?;
         tables.push((entity.table.clone(), b.finish()?));
     }
     tables.push((
         plan.edge_table.clone(),
-        write_edges(&plan, state, &forest, &ids)?,
+        write_edges(&plan, edges, &forest, &ids)?,
     ));
     Ok(tables)
 }
@@ -275,7 +308,8 @@ fn write_entity(
     forest: &Forest,
     lang: &Lang,
     envelope: &Envelope,
-    ids: &mut FxHashMap<(u32, u32), (i64, usize)>,
+    ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
+    emit: &dyn Fn(&Tree) -> bool,
 ) -> Result<(), Error> {
     for (ti, tree) in forest.all() {
         let root = tree.root();
@@ -314,6 +348,11 @@ fn write_entity(
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
                 let id = envelope.id(plan, &entity.id_seed, &parts);
+                let emitted = emit(tree);
+                ids.insert((ti, expanded.index()), (id, index, emitted));
+                if !emitted {
+                    continue;
+                }
                 for column in &plan.header {
                     let value = match &column.source {
                         HeaderSource::RowId => Scalar::Int(id),
@@ -333,7 +372,6 @@ fn write_entity(
                         Value::Str(s) => b.col(&column.name)?.push_str(s)?,
                     }
                 }
-                ids.insert((ti, expanded.index()), (id, index));
             }
         }
     }
@@ -348,21 +386,24 @@ struct EdgeRow<'a> {
 
 fn write_edges(
     plan: &ExportPlan,
-    state: &State,
+    edges: &[crate::tree::Edge],
     forest: &Forest,
-    ids: &FxHashMap<(u32, u32), (i64, usize)>,
+    ids: &FxHashMap<(u32, u32), (i64, usize, bool)>,
 ) -> Result<RecordBatch, Error> {
     let entity_name = |index: usize| plan.entities[index].name.as_str();
     let mut rows: Vec<EdgeRow> = Vec::new();
 
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
-    for (&(tree, node), &(id, entity)) in located {
+    for (&(tree, node), &(id, entity, emitted)) in located {
+        if !emitted {
+            continue;
+        }
         for rule in plan.containment.iter().filter(|c| c.to == entity) {
             let enclosing = forest
                 .ancestors(tree, node)
-                .find_map(|loc| ids.get(&loc).filter(|(_, e)| *e == rule.from));
-            if let Some(&(from_id, _)) = enclosing {
+                .find_map(|loc| ids.get(&loc).filter(|(_, e, _)| *e == rule.from));
+            if let Some(&(from_id, _, _)) = enclosing {
                 rows.push(EdgeRow {
                     source: (from_id, entity_name(rule.from)),
                     kind: &rule.kind,
@@ -374,11 +415,11 @@ fn write_edges(
 
     let mut seen_cross_file = FxHashSet::default();
 
-    for e in &state.edges {
-        let Some(&(from, from_entity)) = ids.get(&(e.from_tree, e.from_node)) else {
+    for e in edges {
+        let Some(&(from, from_entity, _)) = ids.get(&(e.from_tree, e.from_node)) else {
             continue;
         };
-        let Some(&(to, to_entity)) = ids.get(&(e.to_tree, e.to_node)) else {
+        let Some(&(to, to_entity, _)) = ids.get(&(e.to_tree, e.to_node)) else {
             continue;
         };
         let rule = plan.graph.iter().find(|g| {

@@ -103,6 +103,8 @@ pub struct Context<'e> {
     pub env: &'e Env,
     pub run: Sentinel,
     pub report: Report,
+    pub max_files: usize,
+    pub resolve_timeout_ms: u64,
     observers: Vec<Box<dyn Observer>>,
 }
 
@@ -112,6 +114,8 @@ impl<'e> Context<'e> {
             env,
             run: Sentinel::new("run", "", env.limits.total_ms),
             report: Report::default(),
+            max_files: 0,
+            resolve_timeout_ms: u64::MAX,
             observers: Vec::new(),
         }
     }
@@ -158,6 +162,7 @@ impl<'e> Context<'e> {
 #[derive(Default)]
 pub struct Report {
     pub skipped: Vec<Killed>,
+    pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
     /// How long each file took in each per-file phase, skipped ones included.
     pub files: Vec<FileTiming>,

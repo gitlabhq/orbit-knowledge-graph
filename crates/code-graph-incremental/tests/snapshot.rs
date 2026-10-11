@@ -4,7 +4,8 @@ use std::path::Path;
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, inventory, pattern, rules, templates};
+use code_graph_incremental::{Context, Env, State, pattern, rules, templates};
+mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
 const UTILS: &str = "def helper():\n    pass\n";
@@ -21,8 +22,7 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    let inventory = inventory::walk(repo).unwrap().to_vec();
-    templates::index(Context::new(env), repo, inventory)
+    templates::index(Context::new(env), common::walk(repo))
         .unwrap()
         .into_value()
         .state
@@ -33,10 +33,13 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
         std::fs::remove_file(repo.join(path)).unwrap();
     }
     let changes = Changes {
-        changed: inventory::classify(repo, changed),
+        changed: common::load(orbit_utils::vfs::sources::Diff {
+            root: repo,
+            paths: changed,
+        }),
         removed: removed.iter().map(|s| s.to_string()).collect(),
     };
-    templates::reindex(Context::new(env), state, repo, changes)
+    templates::reindex(Context::new(env), state, changes)
         .unwrap()
         .into_value()
         .state

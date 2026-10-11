@@ -4,7 +4,8 @@ use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, Resolved};
 use code_graph_incremental::tree::{Cursor, EdgeKind};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, Killed, Limits, State, inventory, templates};
+use code_graph_incremental::{Context, Env, Killed, Limits, State, templates};
+mod common;
 
 const UTILS: &str = "\
 def helper(x):
@@ -36,8 +37,7 @@ fn write_all(root: &Path, files: &[(&str, &str)]) {
 }
 
 fn resolve_repo(env: &Env, root: &Path) -> (Resolved, Vec<Killed>) {
-    let entries = inventory::walk(root).unwrap().into_inner();
-    let (context, resolved) = templates::index(Context::new(env), root, entries)
+    let (context, resolved) = templates::index(Context::new(env), common::walk(root))
         .unwrap()
         .finish();
     (resolved, context.report.skipped)
@@ -151,9 +151,8 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
     let (context, resolved) = templates::reindex(
         Context::new(&env),
         state,
-        repo.path(),
         Changes {
-            changed: vec![],
+            changed: common::load(orbit_utils::vfs::sources::Memory(vec![])),
             removed: vec![],
         },
     )
@@ -169,13 +168,15 @@ fn changing_an_entrypoint_resolves_only_its_importers_without_relinking() {
         &[("package/package.json", r#"{"main":"second.js"}"#)],
     );
     let changes = Changes {
-        changed: inventory::classify(repo.path(), ["package/package.json".into()]),
+        changed: common::load(orbit_utils::vfs::sources::Diff {
+            root: repo.path(),
+            paths: vec!["package/package.json".into()],
+        }),
         removed: vec![],
     };
-    let (context, resolved) =
-        templates::reindex(Context::new(&env), resolved.state, repo.path(), changes)
-            .unwrap()
-            .finish();
+    let (context, resolved) = templates::reindex(Context::new(&env), resolved.state, changes)
+        .unwrap()
+        .finish();
     assert!(context.report.skipped.is_empty());
     let mut resolved_files: Vec<_> = context
         .report
@@ -224,13 +225,15 @@ fn overlapping_importer_cycles_are_invalidated_once_after_multiple_edits() {
         ],
     );
     let changes = Changes {
-        changed: inventory::classify(repo.path(), ["left.js".into(), "right.js".into()]),
+        changed: common::load(orbit_utils::vfs::sources::Diff {
+            root: repo.path(),
+            paths: vec!["left.js".into(), "right.js".into()],
+        }),
         removed: vec![],
     };
-    let (context, resolved) =
-        templates::reindex(Context::new(&env), resolved.state, repo.path(), changes)
-            .unwrap()
-            .finish();
+    let (context, resolved) = templates::reindex(Context::new(&env), resolved.state, changes)
+        .unwrap()
+        .finish();
     let mut resolved_files: Vec<_> = context
         .report
         .files
