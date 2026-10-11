@@ -14,6 +14,17 @@
       interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+.rails-contract-cache:
+  cache:
+    key:
+      prefix: rails-contract-v1
+      files:
+        - e2e/config/versions.yaml
+        - scripts/rails-contract/export.rb
+    paths:
+      - rails-contract.json
+
+# On a cache hit the export job runs on alpine and skips the toolbox pull.
 rails-contract-image:
   stage: lint
   image: alpine:latest
@@ -21,23 +32,34 @@ rails-contract-image:
     - saas-linux-small-amd64
   extends:
     - .rails-contract-rules
+    - .rails-contract-cache
+  cache:
+    policy: pull
   needs: []
   script:
     - apk add --no-cache bash yq
-    - echo "RAILS_CONTRACT_TOOLBOX_IMAGE=$(bash scripts/rails-contract/toolbox-image.sh)" | tee rails-contract-image.env
+    - |
+      if [ -s rails-contract.json ]; then
+        echo "RAILS_CONTRACT_EXPORT_IMAGE=alpine:latest" | tee rails-contract-image.env
+      else
+        echo "RAILS_CONTRACT_EXPORT_IMAGE=$(bash scripts/rails-contract/toolbox-image.sh)" | tee rails-contract-image.env
+      fi
   artifacts:
+    paths:
+      - rails-contract.json
     reports:
       dotenv: rails-contract-image.env
 
 rails-contract-export:
   stage: lint
   image:
-    name: $RAILS_CONTRACT_TOOLBOX_IMAGE
+    name: $RAILS_CONTRACT_EXPORT_IMAGE
     entrypoint: [""]
   tags:
     - saas-linux-medium-amd64
   extends:
     - .rails-contract-rules
+    - .rails-contract-cache
   needs:
     - rails-contract-image
   services:
@@ -50,7 +72,12 @@ rails-contract-export:
     RAILS_ENV: production
     GITLAB_LICENSE_MODE: test
   script:
-    - bash scripts/rails-contract/export-in-toolbox.sh rails-contract.json
+    - |
+      if [ -s rails-contract.json ]; then
+        echo "Using the cached Rails contract for this toolbox image and exporter"
+      else
+        bash scripts/rails-contract/export-in-toolbox.sh rails-contract.json
+      fi
   artifacts:
     paths:
       - rails-contract.json

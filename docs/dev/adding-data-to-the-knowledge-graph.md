@@ -192,11 +192,7 @@ Skip this for edges. An edge needs no registration as long as both endpoint
      `EE_PRELOAD_ASSOCIATIONS` until the query count stays flat as the set grows.
 3. The registration **key string** (`your_type`) must exactly match the
    `redaction.resource_type` advertised by the ontology node (Section 5). Coordinate
-   this string with the Orbit team / ontology MR. The `rails-contract-check` job
-   compares each node with the Rails class map, policies, and role floors that
-   `rails-contract-export` reads from the GitLab image that e2e pins. To run it
-   locally, run `GITLAB_DIR=<gitlab checkout> mise run rails-contract:export`,
-   then `RAILS_CONTRACT_SNAPSHOT=/tmp/rails-contract.json mise run rails-contract:check`.
+   this string with the Orbit team / ontology MR.
 4. **Spec**: add a context in `ee/spec/services/ee/authz/redaction_service_spec.rb`
    proving an accessible vs inaccessible resource authorizes correctly, and add the
    type to the `supported_types` assertion. Mirror the existing `with packages` block.
@@ -369,7 +365,6 @@ knowledge-graph:
 |---------|-------|-----|
 | Node never appears in `graph.sql`; DDL "succeeds" | New node/edge not registered in `config/ontology/schema.yaml` | Add it to the registry (5.3). |
 | Queries return **zero rows** for the new node, no error | Node not registered in `EE::Authz::RedactionService` → fails closed | Add the redaction registration + policy (Section 4). |
-| `rails-contract-check` fails | The node's `resource_type`, ability, or `required_role` does not match Rails at the e2e GitLab pin | Fix the node, or merge the monolith MR and wait for the e2e pin bump (Section 4). |
 | `clickhouse:check-schema` fails on `main.sql` | Hand-edited `main.sql`, or dumped from non-pinned ClickHouse | Regenerate with the `25.12.3` Docker image (3.3). |
 | Siphon spec: `reconcile`/sharding mismatch | `expression_key_columns` ≠ `db/docs/<table>.yml` `sharding_key` | Align them; usually `[project_id]`. |
 | `bundle exec rails …` can't find a gem | Local bundle behind `master` | `bundle install`. |
