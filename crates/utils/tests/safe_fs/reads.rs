@@ -3,6 +3,18 @@ use std::io;
 use orbit_utils::safe_fs::{self, Entry, SizeLimitExceeded};
 
 #[test]
+fn single_component_relative_paths_can_be_inspected_and_read() {
+    let mut temporary = tempfile::NamedTempFile::new_in(std::env::current_dir().unwrap()).unwrap();
+    std::io::Write::write_all(&mut temporary, b"data").unwrap();
+    let name = std::path::Path::new(temporary.path().file_name().unwrap());
+    let Some(Entry::File(file)) = safe_fs::inspect(name).unwrap() else {
+        panic!("expected a regular file");
+    };
+    assert_eq!(file.size(), 4);
+    assert_eq!(file.read(4).unwrap(), b"data");
+}
+
+#[test]
 fn read_limits_are_inclusive_and_checked_before_opening() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().canonicalize().unwrap().join("file");

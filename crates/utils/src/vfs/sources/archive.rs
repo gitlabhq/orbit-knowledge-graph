@@ -40,9 +40,6 @@ impl<R: Read> Source for Archive<R> {
             let entry_path = entry.path_bytes().into_owned();
             let entry_path = std::str::from_utf8(&entry_path)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            if kind == EntryType::Directory && entry_path.trim_end_matches('/') == "." {
-                continue;
-            }
             let Some(path) = relative_path(entry_path, &mut root)? else {
                 continue;
             };
@@ -111,8 +108,12 @@ fn relative_path<'a>(
     root: &mut Option<String>,
 ) -> Result<Option<&'a str>, SourceError> {
     let path = Utf8UnixPath::new(path);
-    if !path
-        .components()
+    let mut components = path.components();
+    while matches!(components.clone().next(), Some(Utf8UnixComponent::CurDir)) {
+        components.next();
+    }
+    if !components
+        .clone()
         .all(|part| matches!(part, Utf8UnixComponent::Normal(_)))
     {
         return Err(std::io::Error::new(
@@ -121,7 +122,6 @@ fn relative_path<'a>(
         )
         .into());
     }
-    let mut components = path.components();
     let Some(first) = components.next() else {
         return Ok(None);
     };
@@ -275,6 +275,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn leading_dot_paths_share_the_archive_root() {
+        let mut builder = tar::Builder::new(Vec::new());
+        for (path, kind, target, body) in [
+            ("./", EntryType::Directory, "", &b""[..]),
+            ("././repo/", EntryType::Directory, "", &b""[..]),
+            ("./repo/file", EntryType::Regular, "", &b"data"[..]),
+            ("repo/other", EntryType::Regular, "", &b"other"[..]),
+            ("./repo/alias", EntryType::Symlink, "./file", &b""[..]),
+            ("./repo/hard", EntryType::Link, "././repo/file", &b""[..]),
+            ("./other/ignored", EntryType::Regular, "", &b"ignored"[..]),
+        ] {
+            let mut header = header(body.len() as u64, kind);
+            header.as_mut_bytes()[..path.len()].copy_from_slice(path.as_bytes());
+            header.as_mut_bytes()[157..157 + target.len()].copy_from_slice(target.as_bytes());
+            header.set_cksum();
+            builder.append(&header, body).unwrap();
+        }
+        let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
+        assert_eq!(paths(&vfs), ["alias", "file", "hard", "other"]);
+        for path in ["file", "alias", "hard"] {
+            assert_eq!(&*vfs.read(path).unwrap(), b"data");
+        }
+        assert_eq!(&*vfs.read("other").unwrap(), b"other");
+    }
+
     // crates/utils/src/archive.rs::tests::skips_entry_outside_archive_root_and_keeps_the_rest
     #[test]
     fn skips_entry_outside_archive_root_and_keeps_the_rest() {
@@ -322,7 +348,14 @@ mod tests {
     // crates/utils/src/archive.rs::tests::rejects_path_traversal
     #[test]
     fn rejects_path_traversal() {
-        for path in ["root/../../escape.txt", "../escape.txt", "/root/escape.txt"] {
+        for path in [
+            "root/../../escape.txt",
+            "../escape.txt",
+            "/root/escape.txt",
+            "./root/../../escape.txt",
+            "./../escape.txt",
+            "././root/../escape.txt",
+        ] {
             let mut builder = tar::Builder::new(Vec::new());
             let mut header = header(9, EntryType::Regular);
             header.as_mut_bytes()[..path.len()].copy_from_slice(path.as_bytes());

@@ -64,7 +64,11 @@ impl File {
 }
 
 pub fn inspect(path: &Path) -> io::Result<Option<Entry>> {
-    let parent = syscalls::open(path.parent().unwrap_or(Path::new(".")), true)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let parent = syscalls::open(parent, true)?;
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
     let metadata = statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW)?;
     Ok(match FileType::from_raw_mode(metadata.st_mode) {
