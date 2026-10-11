@@ -210,7 +210,7 @@ impl SnapshotLoader {
             self.catalog.load(version).await?.load_ontology()?
         };
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
-        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)
+        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)?
             .table_names()
             .into_iter()
             .map(String::from)

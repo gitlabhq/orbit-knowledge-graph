@@ -1,4 +1,4 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 use std::collections::HashSet;
 
 use ontology::constants::{
@@ -14,14 +14,14 @@ use super::HydrationStrategy;
 use super::context::PlanningContext;
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan, PhysicalSource, key_membership};
 
-struct FlatBuilder<'a, M: QueryDataModel + ?Sized> {
+struct FlatBuilder<'a, M: OrbitQueryModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
     definitions: Vec<(String, PhysicalPlan)>,
     filtered: HashSet<String>,
     tagged: HashSet<(String, String)>,
 }
 
-pub(super) fn plan<M: QueryDataModel + ?Sized>(
+pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
     facts: &PlanningContext<'_, M>,
 ) -> Result<ExecutionPlan> {
     FlatBuilder {
@@ -33,7 +33,7 @@ pub(super) fn plan<M: QueryDataModel + ?Sized>(
     .build()
 }
 
-impl<M: QueryDataModel + ?Sized> FlatBuilder<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
     fn build(mut self) -> Result<ExecutionPlan> {
         let mut source: Option<PhysicalSource> = None;
         let mut cascades = Vec::new();

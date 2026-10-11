@@ -1,4 +1,4 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use super::helpers::requested_columns;
 use crate::input::{
@@ -30,7 +30,7 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
-impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn aggregation(&self, execution: &ExecutionPlan) -> AggregationPlan {
         let aggregation = &self.input.aggregation;
         let mut source = &execution.source;

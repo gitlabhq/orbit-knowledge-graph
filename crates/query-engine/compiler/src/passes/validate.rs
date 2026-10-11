@@ -214,7 +214,7 @@ pub struct Skip {
     pub selectivity: bool,
 }
 
-pub struct Validator<'a, M: query_data_model::QueryDataModel> {
+pub struct Validator<'a, M: query_data_model::OrbitQueryModel> {
     model: ValidationModel<'a, M>,
     skip: Skip,
 }
@@ -235,7 +235,7 @@ impl<M> ValidationModel<'_, M> {
     }
 }
 
-impl<'a, M: query_data_model::QueryDataModel> Validator<'a, M> {
+impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     pub fn new(model: &'a M) -> Self {
         Self {
             model: ValidationModel::Borrowed(model),

@@ -309,7 +309,7 @@ pub async fn run_dispatcher(
                 let graph_schema = orbit_migrations::schema::GraphSchema::from_ontology_replicated(
                     &ontology,
                     graph.is_replicated(),
-                );
+                )?;
                 if let Err(error) =
                     orbit_migrations::execute::create_unversioned_definitions(&graph, &graph_schema)
                         .await
@@ -386,7 +386,7 @@ pub async fn run_dispatcher(
             &ontology,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
-        )),
+        )?),
         Box::new(NamespaceDeletionScheduler::new(
             deletion_store,
             checkpoint_store,

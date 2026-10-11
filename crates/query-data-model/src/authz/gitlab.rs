@@ -2,10 +2,20 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use crate::{
-    DataModelError, EntityId, GraphCatalog, PropertyId, QueryAuthorizationCatalog,
-    RelationshipVariantId,
-};
+use super::{PropertyPolicy, derive_property_policy};
+use crate::{DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
+
+pub trait GitLabPolicy: Send + Sync {
+    fn is_hidden(&self, property: PropertyId) -> bool;
+    fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope>;
+    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId>;
+    fn is_admin_only(&self, property: PropertyId) -> bool;
+    fn is_filterable(&self, property: PropertyId) -> bool;
+    fn is_like_allowed(&self, property: PropertyId) -> bool;
+    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig>;
+    fn redaction_id_column(&self, entity: EntityId) -> Option<&str>;
+    fn required_access_level(&self, entity: EntityId) -> Option<u32>;
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityAuthConfig {
@@ -23,14 +33,6 @@ pub struct EntityAuthorization {
     pub id_column: String,
     pub owner_entity: Option<EntityId>,
     pub required_access_level: u32,
-}
-
-#[derive(Debug, Clone)]
-struct PropertyPolicy {
-    admin_only: bool,
-    filterable: bool,
-    like_allowed: bool,
-    hidden: bool,
 }
 
 #[derive(Debug)]
@@ -69,11 +71,12 @@ impl GitLabAuthzCatalog {
     }
 }
 
-impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        Self::from_ontology(ontology, graph)
+impl GitLabPolicy for GitLabAuthzCatalog {
+    fn is_hidden(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.hidden)
     }
-
     fn variant_scope(&self, variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         GitLabAuthzCatalog::variant_scope(self, variant)
     }
@@ -98,12 +101,6 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
             .is_some_and(|policy| policy.like_allowed)
     }
 
-    fn is_hidden(&self, property: PropertyId) -> bool {
-        self.properties
-            .get(property.index())
-            .is_some_and(|policy| policy.hidden)
-    }
-
     fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
         GitLabAuthzCatalog::entity_auth(self)
     }
@@ -119,7 +116,7 @@ impl QueryAuthorizationCatalog for GitLabAuthzCatalog {
 }
 
 impl GitLabAuthzCatalog {
-    fn from_ontology(
+    pub(crate) fn from_ontology(
         ontology: &ontology::Ontology,
         graph: &GraphCatalog,
     ) -> Result<Self, DataModelError> {
@@ -216,100 +213,4 @@ impl GitLabAuthzCatalog {
             anchor_foreign_keys,
         })
     }
-}
-
-#[derive(Debug)]
-pub struct TrustedLocalCatalog {
-    properties: Vec<PropertyPolicy>,
-}
-
-impl QueryAuthorizationCatalog for TrustedLocalCatalog {
-    fn derive(ontology: &ontology::Ontology, graph: &GraphCatalog) -> Result<Self, DataModelError> {
-        Ok(Self {
-            properties: derive_property_policy(ontology, graph)?,
-        })
-    }
-
-    fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
-        None
-    }
-
-    fn anchor_foreign_keys(&self) -> &HashMap<String, EntityId> {
-        static EMPTY: std::sync::LazyLock<HashMap<String, EntityId>> =
-            std::sync::LazyLock::new(HashMap::new);
-        &EMPTY
-    }
-
-    fn is_admin_only(&self, _property: PropertyId) -> bool {
-        false
-    }
-
-    fn is_filterable(&self, property: PropertyId) -> bool {
-        self.properties
-            .get(property.index())
-            .is_some_and(|policy| policy.filterable)
-    }
-
-    fn is_like_allowed(&self, property: PropertyId) -> bool {
-        self.properties
-            .get(property.index())
-            .is_some_and(|policy| policy.like_allowed)
-    }
-
-    fn is_hidden(&self, _property: PropertyId) -> bool {
-        false
-    }
-
-    fn entity_auth(&self) -> &HashMap<String, EntityAuthConfig> {
-        static EMPTY: std::sync::LazyLock<HashMap<String, EntityAuthConfig>> =
-            std::sync::LazyLock::new(HashMap::new);
-        &EMPTY
-    }
-
-    fn redaction_id_column(&self, _entity: EntityId) -> Option<&str> {
-        None
-    }
-
-    fn required_access_level(&self, _entity: EntityId) -> Option<u32> {
-        None
-    }
-}
-
-fn derive_property_policy(
-    ontology: &ontology::Ontology,
-    graph: &GraphCatalog,
-) -> Result<Vec<PropertyPolicy>, DataModelError> {
-    let mut properties = vec![
-        PropertyPolicy {
-            admin_only: false,
-            filterable: true,
-            like_allowed: true,
-            hidden: false,
-        };
-        graph.properties().count()
-    ];
-    for node in ontology.nodes() {
-        let entity =
-            graph
-                .entity_id(&node.name)
-                .ok_or_else(|| DataModelError::UnknownReference {
-                    kind: "entity",
-                    name: node.name.clone(),
-                })?;
-        for field in &node.fields {
-            let property = graph.property_id(entity, &field.name).ok_or_else(|| {
-                DataModelError::UnknownReference {
-                    kind: "property",
-                    name: format!("{}.{}", node.name, field.name),
-                }
-            })?;
-            properties[property.index()] = PropertyPolicy {
-                admin_only: field.admin_only,
-                filterable: field.filterable,
-                like_allowed: field.like_allowed,
-                hidden: field.hidden,
-            };
-        }
-    }
-    Ok(properties)
 }
