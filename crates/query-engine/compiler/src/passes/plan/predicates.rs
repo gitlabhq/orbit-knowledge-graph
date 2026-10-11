@@ -5,12 +5,12 @@ use super::requirements::{Column, Predicate};
 use crate::input::{BooleanExpression, Condition, Input, PredicateTarget};
 use crate::{QueryError, Result};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 pub(super) fn bind(
     expression: &BooleanExpression<Condition>,
     input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
     hops: &[Hop],
     bindings: Option<&[BindingSource]>,
 ) -> Result<Predicate> {

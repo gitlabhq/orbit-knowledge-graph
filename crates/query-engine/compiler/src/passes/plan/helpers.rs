@@ -33,7 +33,7 @@ pub fn bind_filter(
     property: &str,
     filter: InputFilter,
     owner: &FilterOwner<'_>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> BoundFilter {
     let (metadata, table) = match owner {
         FilterOwner::Entity(entity) => (
