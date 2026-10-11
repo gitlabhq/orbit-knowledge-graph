@@ -46,7 +46,9 @@ helm "${HELM_ARGS[@]}"
 
 "$E2E_DIR/scripts/ch-chaos.sh" indexing &
 CHAOS_PID=$!
-trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" 2>/dev/null || true' EXIT
+"$E2E_DIR/scripts/export-rails-contract.sh" > "$DIAG_DIR/rails-contract.log" 2>&1 &
+CONTRACT_PID=$!
+trap 'rm -rf "$FIX_TMP"; kill "$CHAOS_PID" "$CONTRACT_PID" 2>/dev/null || true' EXIT
 
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
@@ -96,11 +98,16 @@ for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2
     > "$DIAG_DIR/${GKG_NS_SHORT}-${pod}.log" || true
 done
 
-if [ "$result" = "pass" ] && [ "$CHAOS_FAILED" -eq 0 ]; then
+CONTRACT_FAILED=0
+wait "$CONTRACT_PID" || CONTRACT_FAILED=1
+cat "$DIAG_DIR/rails-contract.log"
+
+if [ "$result" = "pass" ] && [ "$CHAOS_FAILED" -eq 0 ] && [ "$CONTRACT_FAILED" -eq 0 ]; then
   log "Tests passed"
   exit 0
 fi
 [ "$CHAOS_FAILED" -eq 0 ] || log "ch-chaos.sh indexing failed"
+[ "$CONTRACT_FAILED" -eq 0 ] || log "export-rails-contract.sh failed"
 
 log "Tests $result"
 

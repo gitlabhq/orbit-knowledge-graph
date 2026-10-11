@@ -372,6 +372,16 @@ dashboards-check:
   script:
     - mise run dashboards:check
 
+rails-contract-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run rails-contract:check
+
 query-language-docs-check:
   stage: lint
   extends:
