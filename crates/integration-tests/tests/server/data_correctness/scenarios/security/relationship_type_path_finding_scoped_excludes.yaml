@@ -1,17 +1,17 @@
 description: >
   RETURN type(r) in path finding does not widen the scope. Scoped to
-  1/100/, the path to Project 1000 is found and the path to Project
-  1004 in 1/102/ is not.
+  1/100/, the one-hop path to Group 100 is found and the path to Group
+  102 in 1/102/ is not.
 
 config:
   security: { org_id: 1, paths: ["1/100/"] }
 
 query:
   gql: |
-    MATCH p = ANY SHORTEST (start:User {id: 1})-[r:`CONTAINS`|MEMBER_OF*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1004] RETURN p, type(r)
+    MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(g:Group) WHERE g.id IN [100, 102] RETURN p, type(r)
 
 expect:
   referential_integrity: true
   path_count: 1
   path_destinations:
-    Project: [1000]
+    Group: [100]

@@ -46,12 +46,7 @@ impl Lowering {
                 value,
             } => {
                 let index = self.relationship_index(span, &variable)?;
-                if self.input.relationships[index].hops.max != 1 {
-                    return Err(invalid(
-                        span,
-                        "a variable-length relationship binds a list; list its types in the pattern, such as -[r:CLOSES|MENTIONS*1..3]->",
-                    ));
-                }
+                self.one_hop(span, &variable)?;
                 return Ok(Condition {
                     target: PredicateTarget::Relationship(index),
                     property: Condition::RELATIONSHIP_TYPE.into(),

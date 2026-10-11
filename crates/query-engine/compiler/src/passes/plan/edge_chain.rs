@@ -294,11 +294,32 @@ where
             })
             .collect();
     }
-    for (target, holder, column) in elided_fks {
+    for (hop, holder, column) in elided_fks {
+        let target = hop.fk.as_ref().map(|fk| fk.target_node.clone()).unwrap();
         context
             .node_edge_mappings
             .entry(target)
-            .or_insert((holder, column));
+            .or_insert((holder.clone(), column.clone()));
+        if input.relationship_return.uses(hop.input_index)
+            && let Some((alias, identity)) = context.node_edge_mappings.get(&holder)
+        {
+            let holder_id = super::requirements::Column::new(alias, identity);
+            let target_id = super::requirements::Column::new(&holder, &column);
+            let (from_id, to_id) = if hop.from_node == holder {
+                (holder_id, target_id)
+            } else {
+                (target_id, holder_id)
+            };
+            let index = context.hops.len();
+            execution.outputs.extend(super::fk::edge_outputs(
+                &hop,
+                index,
+                &context.nodes,
+                from_id,
+                to_id,
+            ));
+            context.hops.push(hop);
+        }
     }
     Ok(if input.query_type == QueryType::Aggregation {
         let result = context.aggregation(&execution);
@@ -423,7 +444,7 @@ fn elide_hops(
     nodes: &mut HashMap<String, NodePlan>,
     input: &Input,
     model: &(impl OrbitQueryModel + ?Sized),
-) -> (Vec<Hop>, Vec<(String, String, String)>) {
+) -> (Vec<Hop>, Vec<(Hop, String, String)>) {
     let mut keep_hops = Vec::new();
     let mut elided_fks = Vec::new();
     for hop in hops {
@@ -445,7 +466,6 @@ fn elide_hops(
                     .into_iter()
                     .any(|node| input.references(&PredicateTarget::Node(node.clone())))
                 || input.references(&PredicateTarget::Relationship(hop.input_index))
-                || input.returns_relationship(hop.input_index)
             {
                 return None;
             }
@@ -529,8 +549,7 @@ fn elide_hops(
 
         if elided {
             let (fk_node, fk_column, _) = elide_info.unwrap();
-            let target_node = hop.fk.as_ref().map(|fk| fk.target_node.clone()).unwrap();
-            elided_fks.push((target_node, fk_node, fk_column));
+            elided_fks.push((hop, fk_node, fk_column));
         } else {
             keep_hops.push(hop);
         }

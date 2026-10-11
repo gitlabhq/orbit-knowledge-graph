@@ -1,0 +1,8 @@
+description: type(r) IN [] rejects because it needs at least one relationship type name
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN [] RETURN u LIMIT 10
+
+expect:
+  compile_error: "type(r) supports = or IN with relationship type names"

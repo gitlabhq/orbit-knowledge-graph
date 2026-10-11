@@ -1,0 +1,28 @@
+description: ORDER BY kind DESC, the alias of type(r), pages through every edge once in descending edge-type order
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN mr.title, type(r) AS kind
+    ORDER BY kind DESC PAGE 2
+
+expect:
+  all_pages:
+    edge_count: 3
+    page_count: 2
+    node_ids:
+      MergeRequest: [2000, 2001, 2002]
+  pages:
+    - node_count: 3
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001]
+      edge_count: {APPROVED: 0, AUTHORED: 2}
+      has_more: true
+    - node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [2002]
+      edge_count: {APPROVED: 1, AUTHORED: 0}
+      has_more: false

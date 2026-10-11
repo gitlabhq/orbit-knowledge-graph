@@ -1,0 +1,8 @@
+description: Renaming type(r) on a neighbors query rejects because neighbors return one path column that already shows each edge type
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})<-[r]-(n) RETURN g, n, type(r) AS kind
+
+expect:
+  compile_error: "kind: neighbors and path finding return one path column that shows each edge type"

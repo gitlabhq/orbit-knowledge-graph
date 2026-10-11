@@ -6,31 +6,29 @@ use crate::passes::plan::edge_chain::Hop;
 
 use super::EmitOutput;
 pub fn emit_traversal(input: &Input, output: EmitOutput, hops: &[Hop]) -> Result<Node> {
-    let order_by = match (&input.order_by, &input.relationship_order) {
+    let mut q = output.into_query(vec![], vec![], vec![], input.limit);
+    q.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(ob), _) => vec![ordered(Expr::col(&ob.node, &ob.property), ob.direction)],
-        (None, Some(order)) => {
-            let (index, hop) = hops
+        (None, Some(sort)) => {
+            let edge_type = hops
                 .iter()
                 .enumerate()
-                .find(|(_, hop)| hop.input_index == order.relationship)
+                .find(|(_, hop)| hop.input_index == sort.relationship)
+                .and_then(|(index, hop)| edge_type(&q, hop, index))
                 .ok_or_else(|| {
-                    QueryError::Lowering("ordered relationship has no emitted hop".into())
+                    QueryError::Lowering("sorted relationship has no edge type column".into())
                 })?;
-            let column = format!("{}{EDGE_TYPE_SUFFIX}", hop.column_prefix(index));
-            let edge_type = output
-                .select
-                .iter()
-                .find(|select| select.alias.as_deref() == Some(column.as_str()))
-                .map(|select| select.expr.clone())
-                .ok_or_else(|| {
-                    QueryError::Lowering(format!("edge type column '{column}' is not selected"))
-                })?;
-            vec![ordered(edge_type, order.direction)]
+            vec![ordered(edge_type, sort.direction)]
         }
         (None, None) => Vec::new(),
     };
-    let q = output.into_query(vec![], vec![], order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
+}
+
+pub fn edge_type(query: &Query, hop: &Hop, index: usize) -> Option<Expr> {
+    query
+        .selected(&format!("{}{EDGE_TYPE_SUFFIX}", hop.column_prefix(index)))
+        .cloned()
 }
 
 fn ordered(expr: Expr, direction: OrderDirection) -> OrderExpr {

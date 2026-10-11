@@ -1,0 +1,21 @@
+description: RETURN r AS rel, type(r) adds a renamed relationship column and a type column in RETURN order
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN mr, r AS rel, type(r)
+    ORDER BY type(r) LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001, 2002]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+    APPROVED: [[1, 2002]]
+  gql_column_names: ["mr", "rel", "type(r)", "u"]
+  gql_columns:
+    rel: ['[:APPROVED]', '[:AUTHORED]', '[:AUTHORED]']
+    type(r): ['"APPROVED"', '"AUTHORED"', '"AUTHORED"']

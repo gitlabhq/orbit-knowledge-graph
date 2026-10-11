@@ -1,0 +1,8 @@
+description: RETURN r on a variable-length relationship rejects because r binds a list
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:MEMBER_OF*1..2]->(g:Group) RETURN u, r, g LIMIT 10
+
+expect:
+  compile_error: "r has a variable length and binds a list"

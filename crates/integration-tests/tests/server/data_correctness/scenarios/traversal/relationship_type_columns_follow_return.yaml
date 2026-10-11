@@ -1,0 +1,21 @@
+description: Two type() columns, written as TYPE(r2) and type(r1), keep their written names and follow RETURN order around the node columns
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r1:AUTHORED]->(mr:MergeRequest)-[r2:IN_PROJECT]->(p:Project)
+    RETURN TYPE(r2), mr.title, type(r1) LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+    Project:
+      ids: [1000]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+    IN_PROJECT: [[2000, 1000], [2001, 1000]]
+  gql_column_names: ["TYPE(r2)", "mr", "type(r1)", "u", "p"]
+  gql_columns:
+    TYPE(r2): ['"IN_PROJECT"', '"IN_PROJECT"']
+    type(r1): ['"AUTHORED"', '"AUTHORED"']

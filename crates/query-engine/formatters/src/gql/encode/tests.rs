@@ -181,7 +181,7 @@ fn traversal_keeps_every_result_row_and_reports_the_next_page() {
 }
 
 #[test]
-fn returned_relationship_types_add_one_column_each() {
+fn returned_relationships_add_columns_in_return_order() {
     let mut output = output(
         json!({"query_type": "traversal",
                "nodes": [{"id": "u", "entity": "User"}, {"id": "mr", "entity": "MergeRequest"}],
@@ -209,11 +209,12 @@ fn returned_relationship_types_add_one_column_each() {
         dst_type_column: "e0_dst_type".into(),
         relationship: 0,
     });
-    Arc::get_mut(&mut output.compiled)
+    let relationship_return = &mut Arc::get_mut(&mut output.compiled)
         .unwrap()
         .input
-        .options
-        .relationship_columns = vec![
+        .relationship_return;
+    relationship_return.column_order = vec!["kind".into(), "mr".into(), "r".into()];
+    relationship_return.columns = vec![
         RelationshipColumn {
             name: "kind".into(),
             relationship: 0,
@@ -228,10 +229,10 @@ fn returned_relationship_types_add_one_column_each() {
     assert_eq!(
         encode(&output),
         "+----------------------------------------------------------------------+\n\
-         | u               | mr                      | kind       | r           |\n\
+         | kind       | mr                      | r           | u               |\n\
          +----------------------------------------------------------------------+\n\
-         | (:User {id: 1}) | (:MergeRequest {id: 7}) | \"APPROVED\" | [:APPROVED] |\n\
-         | (:User {id: 1}) | (:MergeRequest {id: 8}) | \"AUTHORED\" | [:AUTHORED] |\n\
+         | \"APPROVED\" | (:MergeRequest {id: 7}) | [:APPROVED] | (:User {id: 1}) |\n\
+         | \"AUTHORED\" | (:MergeRequest {id: 8}) | [:AUTHORED] | (:User {id: 1}) |\n\
          +----------------------------------------------------------------------+\n\
          \n\
          2 rows\n"

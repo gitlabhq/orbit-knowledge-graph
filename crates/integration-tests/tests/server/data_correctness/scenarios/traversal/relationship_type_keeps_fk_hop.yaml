@@ -1,4 +1,4 @@
-description: RETURN type(r) keeps a hop that the planner could answer from a foreign key, so its edges and types stay in the response
+description: RETURN type(r) on a hop that the planner answers from a foreign key still returns its edges and types
 
 query:
   gql: |
