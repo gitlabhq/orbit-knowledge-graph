@@ -1,0 +1,11 @@
+description: The OR and XOR rejections do not echo a string literal from the query
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})
+    WHERE u.username = 'private-query-literal' XOR u.id = 2
+    RETURN u
+
+expect:
+  compile_error: "OR and XOR are not supported"
+  compile_error_not_contains: ["private-query-literal", "Orbit query syntax"]

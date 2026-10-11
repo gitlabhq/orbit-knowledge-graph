@@ -1,0 +1,8 @@
+description: A node whose only condition is NOT over a list is not anchored
+
+query:
+  gql: |
+    MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
+
+expect:
+  compile_error: "add filters or node_ids to at least one node (NOT conditions do not count)"

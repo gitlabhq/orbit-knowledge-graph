@@ -6,3 +6,4 @@ query:
 
 expect:
   compile_error: "administrator"
+  compile_error_not_contains: ["alice"]

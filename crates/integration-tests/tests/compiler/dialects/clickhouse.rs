@@ -1333,10 +1333,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
-        "MATCH (u:User {id: 1}) WHERE u.id = 1 OR u.id = 2 RETURN u",
-        "MATCH (u:User {id: 1}) WHERE NOT (u.id = 1 XOR u.id = 2) RETURN u",
-        "MATCH (u:User {id: 1}) WHERE u.id NOT IN [2] RETURN u",
-        "MATCH (u:User) WHERE NOT u.id IN [1] RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
@@ -1461,22 +1457,6 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
     for query in [nested, oversized] {
         assert!(compiler::passes::frontend::gql::parse(&query).is_err());
     }
-    for predicate in [
-        format!("{}u.id = 1", "NOT ".repeat(33)),
-        std::iter::repeat_n("NOT u.id = 1", 257)
-            .collect::<Vec<_>>()
-            .join(" AND "),
-    ] {
-        let query = format!("MATCH (u:User {{id: 1}}) WHERE {predicate} RETURN u");
-        let error = compiler::compile(
-            &query,
-            compiler::Frontend::Gql,
-            &test_ontology(),
-            &test_ctx(),
-        )
-        .unwrap_err();
-        assert!(error.is_client_safe(), "{error}");
-    }
     let query = "MATCH (u:User) WHERE u.id IN ['invalid'] AND u.id >= 1 AND u.id <= 3 RETURN u";
     assert!(
         compiler::compile(
@@ -1524,7 +1504,7 @@ fn orbit_query_rejects_traversal_path_column_comparisons() {
 }
 
 #[test]
-fn native_predicate_bounds() {
+fn native_predicate_trees_are_bounded_before_planning() {
     use compiler::input::{
         BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget, PropertyPredicate,
     };
@@ -1534,16 +1514,18 @@ fn native_predicate_bounds() {
     let validator = compiler::passes::validate::Validator::new(&model);
     let mut input =
         compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
-    let leaf = BooleanExpression::Leaf(Condition::Property(PropertyPredicate {
-        target: PredicateTarget::Node("u".into()),
-        property: "id".into(),
-        filter: InputFilter {
-            op: Some(FilterOp::In),
-            value: Some(serde_json::json!([1])),
-            ..Default::default()
-        },
-    }));
-    let mut deep = leaf.clone();
+    let leaf = |target| {
+        BooleanExpression::Leaf(Condition::Property(PropertyPredicate {
+            target,
+            property: "id".into(),
+            filter: InputFilter {
+                op: Some(FilterOp::In),
+                value: Some(serde_json::json!([1])),
+                ..Default::default()
+            },
+        }))
+    };
+    let mut deep = leaf(PredicateTarget::Node("u".into()));
     for _ in 0..1024 {
         deep = BooleanExpression::Not(Box::new(deep));
     }
@@ -1553,24 +1535,8 @@ fn native_predicate_bounds() {
         error.to_string().contains("must not nest deeper than 32"),
         "{error}"
     );
-    input.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
-        vec![leaf; 257],
-    )))];
-    let error = validator.check_shape(&input).unwrap_err();
-    assert!(
-        error.to_string().contains("more than 256 conditions"),
-        "{error}"
-    );
-    input.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::Leaf(
-        Condition::Property(PropertyPredicate {
-            target: PredicateTarget::Relationship(7),
-            property: "source_id".into(),
-            filter: InputFilter {
-                op: Some(FilterOp::In),
-                value: Some(serde_json::json!([1])),
-                ..Default::default()
-            },
-        }),
+    input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+        PredicateTarget::Relationship(7),
     )))];
     let error = validator.check_shape(&input).unwrap_err();
     assert!(

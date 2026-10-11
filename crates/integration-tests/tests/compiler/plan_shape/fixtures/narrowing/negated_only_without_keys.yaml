@@ -19,3 +19,9 @@ physical:
     emitted:
       ctes:
         absent: true
+  duckdb:
+    planned:
+      ctes:
+        exact_order: [_filter_a]
+      expect:
+        - (Filter NOT (b.name IN ['skip', 'other']), ... (_))

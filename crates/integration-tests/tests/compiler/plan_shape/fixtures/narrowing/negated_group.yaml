@@ -18,3 +18,7 @@ physical:
       expect:
         - (Scan Table(gl_definition) AS b)
         - (Filter b.name = 'keep', NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))
+  duckdb:
+    planned:
+      expect:
+        - (Filter b.name = 'keep', NOT ((b.id IN [3, 4]) AND (b.name = 'skip')), ... (_))
