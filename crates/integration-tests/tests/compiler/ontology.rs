@@ -391,8 +391,8 @@ fn search_with_specific_columns() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_u_id"));
-    assert!(rendered.contains("_gkg_u_type"));
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
     assert!(rendered.contains("u_username"));
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
@@ -408,8 +408,8 @@ fn search_with_wildcard_columns() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_u_id"));
-    assert!(rendered.contains("_gkg_u_type"));
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
@@ -428,10 +428,10 @@ fn traversal_with_columns() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_u_id"));
-    assert!(rendered.contains("_gkg_u_type"));
-    assert!(rendered.contains("_gkg_p_id"));
-    assert!(rendered.contains("_gkg_p_type"));
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
+    assert!(rendered.contains("_orbit_p_id"));
+    assert!(rendered.contains("_orbit_p_type"));
 }
 
 #[test]
@@ -451,16 +451,16 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_u_id"));
-    assert!(rendered.contains("_gkg_u_type"));
-    assert!(!rendered.contains("_gkg_mr_id"));
-    assert!(!rendered.contains("_gkg_mr_type"));
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
+    assert!(!rendered.contains("_orbit_mr_id"));
+    assert!(!rendered.contains("_orbit_mr_type"));
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
     assert!(rendered.contains("GROUP BY"));
 }
 
 #[test]
-fn path_finding_uses_gkg_path_not_node_columns() {
+fn path_finding_uses_orbit_path_not_node_columns() {
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -474,7 +474,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_path"));
+    assert!(rendered.contains("_orbit_path"));
     assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
 }
 
@@ -497,18 +497,18 @@ fn result_context_populated() {
 
     let user = result.base.result_context.get("u").unwrap();
     assert_eq!(user.entity_type, "User");
-    assert_eq!(user.id_column, "_gkg_u_id");
-    assert_eq!(user.type_column, "_gkg_u_type");
+    assert_eq!(user.id_column, "_orbit_u_id");
+    assert_eq!(user.type_column, "_orbit_u_type");
 
     let project = result.base.result_context.get("p").unwrap();
     assert_eq!(project.entity_type, "Project");
-    assert_eq!(project.id_column, "_gkg_p_id");
-    assert_eq!(project.type_column, "_gkg_p_type");
+    assert_eq!(project.id_column, "_orbit_p_id");
+    assert_eq!(project.type_column, "_orbit_p_type");
 
-    assert!(rendered.contains("_gkg_u_id"));
-    assert!(rendered.contains("_gkg_u_type"));
-    assert!(rendered.contains("_gkg_p_id"));
-    assert!(rendered.contains("_gkg_p_type"));
+    assert!(rendered.contains("_orbit_u_id"));
+    assert!(rendered.contains("_orbit_u_type"));
+    assert!(rendered.contains("_orbit_p_id"));
+    assert!(rendered.contains("_orbit_p_type"));
 }
 
 #[test]
@@ -565,10 +565,10 @@ fn definition_uses_project_id_for_redaction() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_d_id"));
-    assert!(rendered.contains("_gkg_d_type"));
+    assert!(rendered.contains("_orbit_d_id"));
+    assert!(rendered.contains("_orbit_d_type"));
     assert!(
-        rendered.contains("d.project_id") && rendered.contains("_gkg_d_id"),
+        rendered.contains("d.project_id") && rendered.contains("_orbit_d_id"),
         "Definition should use project_id for redaction"
     );
 }
@@ -584,9 +584,9 @@ fn project_still_uses_id_for_redaction() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_p_id"));
+    assert!(rendered.contains("_orbit_p_id"));
     assert!(
-        rendered.contains("p.id AS _gkg_p_id"),
+        rendered.contains("p.id AS _orbit_p_id"),
         "Project should use id for redaction"
     );
 }
@@ -612,7 +612,7 @@ fn cursor_pagination_validation() {
         "cursor fetches page_size + 1 probe row: {rendered}"
     );
     assert!(
-        rendered.contains("_gkg_cursor_0"),
+        rendered.contains("_orbit_cursor_0"),
         "cursor queries select hidden key readback columns: {rendered}"
     );
 

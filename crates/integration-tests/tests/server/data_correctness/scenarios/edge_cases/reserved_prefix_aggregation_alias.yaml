@@ -1,0 +1,20 @@
+description: Aggregation names cannot use the internal column prefix
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "p", "entity": "Project", "node_ids": [1000]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": ["p"],
+      "aggregations": [{"max": "mr.iid", "as": "_orbit_p_id"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1000 RETURN p, max(mr.iid) AS _orbit_p_id LIMIT 10
+
+expect:
+  compile_error: "output column \"_orbit_p_id\" conflicts with reserved prefix \"_orbit_\""

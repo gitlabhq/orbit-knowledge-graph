@@ -452,14 +452,17 @@ mod tests {
 
     fn make_test_batch() -> RecordBatch {
         make_batch(vec![
-            ("_gkg_u_id", Arc::new(Int64Array::from(vec![1, 2, 3]))),
+            ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2, 3]))),
             (
-                "_gkg_u_type",
+                "_orbit_u_type",
                 Arc::new(StringArray::from(vec!["User", "User", "User"])),
             ),
-            ("_gkg_p_id", Arc::new(Int64Array::from(vec![100, 200, 300]))),
             (
-                "_gkg_p_type",
+                "_orbit_p_id",
+                Arc::new(Int64Array::from(vec![100, 200, 300])),
+            ),
+            (
+                "_orbit_p_type",
                 Arc::new(StringArray::from(vec!["Project", "Project", "Project"])),
             ),
         ])
@@ -551,9 +554,9 @@ mod tests {
             let result = QueryResult::from_batches(&[make_test_batch()], &test_ctx());
             let row = &result.rows()[0];
 
-            assert_eq!(row.get("_gkg_u_id"), Some(&ColumnValue::Int64(1)));
+            assert_eq!(row.get("_orbit_u_id"), Some(&ColumnValue::Int64(1)));
             assert_eq!(
-                row.get("_gkg_u_type"),
+                row.get("_orbit_u_type"),
                 Some(&ColumnValue::String("User".to_string()))
             );
             assert_eq!(row.get("nonexistent"), None);
@@ -583,10 +586,10 @@ mod tests {
         #[test]
         fn get_public_id_prefers_pk_for_indirect_auth_entities() {
             let batch = make_batch(vec![
-                ("_gkg_d_id", Arc::new(Int64Array::from(vec![1000]))),
-                ("_gkg_d_pk", Arc::new(Int64Array::from(vec![5000]))),
+                ("_orbit_d_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_orbit_d_pk", Arc::new(Int64Array::from(vec![5000]))),
                 (
-                    "_gkg_d_type",
+                    "_orbit_d_type",
                     Arc::new(StringArray::from(vec!["Definition"])),
                 ),
             ]);
@@ -644,9 +647,9 @@ mod tests {
             let ghost = RedactionNode {
                 alias: "ghost".to_string(),
                 entity_type: "Ghost".to_string(),
-                pk_column: "_gkg_ghost_id".to_string(),
-                id_column: "_gkg_ghost_id".to_string(),
-                type_column: "_gkg_ghost_type".to_string(),
+                pk_column: "_orbit_ghost_id".to_string(),
+                id_column: "_orbit_ghost_id".to_string(),
+                type_column: "_orbit_ghost_type".to_string(),
             };
             assert_eq!(row.get_id(&ghost), None);
             assert_eq!(row.get_type(&ghost), None);
@@ -678,10 +681,10 @@ mod tests {
             let column_names: HashSet<&str> =
                 row.columns().map(|(name, _)| name.as_str()).collect();
 
-            assert!(column_names.contains("_gkg_u_id"));
-            assert!(column_names.contains("_gkg_u_type"));
-            assert!(column_names.contains("_gkg_p_id"));
-            assert!(column_names.contains("_gkg_p_type"));
+            assert!(column_names.contains("_orbit_u_id"));
+            assert!(column_names.contains("_orbit_u_type"));
+            assert!(column_names.contains("_orbit_p_id"));
+            assert!(column_names.contains("_orbit_p_type"));
             assert_eq!(column_names.len(), 4);
         }
 
@@ -693,12 +696,12 @@ mod tests {
             let columns: HashMap<&str, &ColumnValue> =
                 row.columns().map(|(k, v)| (k.as_str(), v)).collect();
 
-            assert_eq!(columns.get("_gkg_u_id"), Some(&&ColumnValue::Int64(1)));
+            assert_eq!(columns.get("_orbit_u_id"), Some(&&ColumnValue::Int64(1)));
             assert_eq!(
-                columns.get("_gkg_u_type"),
+                columns.get("_orbit_u_type"),
                 Some(&&ColumnValue::String("User".to_string()))
             );
-            assert_eq!(columns.get("_gkg_p_id"), Some(&&ColumnValue::Int64(100)));
+            assert_eq!(columns.get("_orbit_p_id"), Some(&&ColumnValue::Int64(100)));
         }
     }
 
@@ -726,16 +729,16 @@ mod tests {
         #[test]
         fn from_batches_multiple_batches() {
             let batch1 = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1, 2]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2]))),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec!["User", "User"])),
                 ),
             ]);
             let batch2 = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![3, 4]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![3, 4]))),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec!["User", "User"])),
                 ),
             ]);
@@ -926,8 +929,8 @@ mod tests {
         #[test]
         fn fail_closed_dynamic_node_unresolvable_owner() {
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
-                ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1]))),
+                ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
             ]);
 
             let mut ctx = ResultContext::new();
@@ -979,8 +982,11 @@ mod tests {
         #[test]
         fn dynamic_node_with_resolvable_owner_passes() {
             let batch = make_batch(vec![
-                ("_gkg_p_id", Arc::new(Int64Array::from(vec![1000]))),
-                ("_gkg_p_type", Arc::new(StringArray::from(vec!["Project"]))),
+                ("_orbit_p_id", Arc::new(Int64Array::from(vec![1000]))),
+                (
+                    "_orbit_p_type",
+                    Arc::new(StringArray::from(vec!["Project"])),
+                ),
             ]);
 
             let mut ctx = ResultContext::new();
@@ -1026,8 +1032,8 @@ mod tests {
         #[test]
         fn dynamic_node_resolves_owner_via_sibling_indirect_static_node() {
             let batch = make_batch(vec![
-                ("_gkg_f_id", Arc::new(Int64Array::from(vec![1000]))),
-                ("_gkg_f_type", Arc::new(StringArray::from(vec!["File"]))),
+                ("_orbit_f_id", Arc::new(Int64Array::from(vec![1000]))),
+                ("_orbit_f_type", Arc::new(StringArray::from(vec!["File"]))),
             ]);
 
             let mut ctx = ResultContext::new();
@@ -1065,7 +1071,7 @@ mod tests {
 
             assert_eq!(
                 redacted, 0,
-                "Definition should pass: File's _gkg_f_id (project_id=1000) \
+                "Definition should pass: File's _orbit_f_id (project_id=1000) \
                  resolves as the shared Project owner"
             );
             assert_eq!(result.authorized_count(), 1);
@@ -1093,11 +1099,11 @@ mod tests {
         fn null_values_extracted_as_null() {
             let batch = make_batch(vec![
                 (
-                    "_gkg_u_id",
+                    "_orbit_u_id",
                     Arc::new(Int64Array::from(vec![Some(1), None, Some(3)])),
                 ),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec![Some("User"), Some("User"), None])),
                 ),
             ]);
@@ -1105,12 +1111,15 @@ mod tests {
             let result = QueryResult::from_batches(&[batch], &user_ctx());
 
             assert_eq!(
-                result.rows()[0].get("_gkg_u_id"),
+                result.rows()[0].get("_orbit_u_id"),
                 Some(&ColumnValue::Int64(1))
             );
-            assert_eq!(result.rows()[1].get("_gkg_u_id"), Some(&ColumnValue::Null));
             assert_eq!(
-                result.rows()[2].get("_gkg_u_type"),
+                result.rows()[1].get("_orbit_u_id"),
+                Some(&ColumnValue::Null)
+            );
+            assert_eq!(
+                result.rows()[2].get("_orbit_u_type"),
                 Some(&ColumnValue::Null)
             );
         }
@@ -1118,9 +1127,12 @@ mod tests {
         #[test]
         fn null_id_returns_none_from_get_id() {
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![Some(1), None]))),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_id",
+                    Arc::new(Int64Array::from(vec![Some(1), None])),
+                ),
+                (
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec!["User", "User"])),
                 ),
             ]);
@@ -1135,9 +1147,9 @@ mod tests {
         #[test]
         fn null_type_returns_none_from_get_type() {
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1, 2]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1, 2]))),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec![Some("User"), None])),
                 ),
             ]);
@@ -1152,8 +1164,8 @@ mod tests {
         #[test]
         fn node_ref_returns_none_if_id_null() {
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![None]))),
-                ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![None]))),
+                ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
             ]);
 
             let result = QueryResult::from_batches(&[batch], &user_ctx());
@@ -1164,9 +1176,9 @@ mod tests {
         #[test]
         fn node_ref_returns_none_if_type_null() {
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1]))),
                 (
-                    "_gkg_u_type",
+                    "_orbit_u_type",
                     Arc::new(StringArray::from(vec![Option::<&str>::None])),
                 ),
             ]);
@@ -1184,8 +1196,8 @@ mod tests {
         fn mixed_data_types_in_batch() {
             let ts_arr = TimestampMillisecondArray::new(vec![1704067200000i64].into(), None);
             let batch = make_batch(vec![
-                ("_gkg_u_id", Arc::new(Int64Array::from(vec![1]))),
-                ("_gkg_u_type", Arc::new(StringArray::from(vec!["User"]))),
+                ("_orbit_u_id", Arc::new(Int64Array::from(vec![1]))),
+                ("_orbit_u_type", Arc::new(StringArray::from(vec!["User"]))),
                 ("view_count", Arc::new(UInt64Array::from(vec![1000u64]))),
                 ("created_at", Arc::new(ts_arr)),
             ]);

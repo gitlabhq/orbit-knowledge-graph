@@ -210,7 +210,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
-            internal_column_prefix: "_gkg_".to_string(),
+            internal_column_prefix: "_orbit_".to_string(),
             local_entities: BTreeMap::new(),
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
@@ -2701,7 +2701,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2742,7 +2742,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2771,7 +2771,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   default_edge_table: kg_edge
-  internal_column_prefix: "_gkg_"
+  internal_column_prefix: "_orbit_"
   default_entity_sort_key: [traversal_path, id]
   edge_tables:
     kg_edge:
@@ -2968,7 +2968,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .unwrap_err();
@@ -3016,7 +3016,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
