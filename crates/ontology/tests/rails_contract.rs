@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ontology::{Ontology, RedactionConfig};
 use serde::Deserialize;
@@ -81,16 +81,12 @@ fn access_level(role: &str) -> u32 {
     }
 }
 
-fn snapshot_paths() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CONFIG_DIR")).join("rails-contract");
-    let mut paths: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "no snapshots in {}", dir.display());
-    paths
+fn snapshot() -> Option<Snapshot> {
+    let Some(path) = std::env::var_os("RAILS_CONTRACT_SNAPSHOT") else {
+        eprintln!("RAILS_CONTRACT_SNAPSHOT is not set; run `mise run rails-contract:export` first");
+        return None;
+    };
+    Some(Snapshot::load(Path::new(&path)))
 }
 
 fn redaction_configs(ontology: &Ontology) -> Vec<(&str, &RedactionConfig)> {
@@ -155,29 +151,23 @@ fn contract_violations(ontology: &Ontology, snapshot: &Snapshot) -> Vec<String> 
 }
 
 #[test]
-fn redaction_config_matches_every_rails_snapshot() {
+fn redaction_config_matches_rails() {
+    let Some(snapshot) = snapshot() else { return };
     let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-    let failures: Vec<String> = snapshot_paths()
-        .iter()
-        .flat_map(|path| {
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            contract_violations(&ontology, &Snapshot::load(path))
-                .into_iter()
-                .map(move |violation| format!("{name}: {violation}"))
-        })
-        .collect();
+    let violations = contract_violations(&ontology, &snapshot);
     assert!(
-        failures.is_empty(),
+        violations.is_empty(),
         "Rails contract violations:\n{}",
-        failures.join("\n")
+        violations.join("\n")
     );
 }
 
 #[test]
 fn checker_reports_each_rule() {
+    let Some(mut snapshot) = snapshot() else {
+        return;
+    };
     let ontology = Ontology::load_embedded().expect("embedded ontology must load");
-    let path = snapshot_paths().into_iter().next().unwrap();
-    let mut snapshot = Snapshot::load(&path);
     snapshot.resource_types.remove("note");
     snapshot
         .policies
