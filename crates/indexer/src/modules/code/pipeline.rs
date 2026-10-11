@@ -603,6 +603,29 @@ impl CodeIndexer {
         indexed_at: DateTime<Utc>,
         cancel: CancellationToken,
     ) -> Result<(IndexingReport, Arc<ProjectCommit>, Arc<AtomicU64>), HandlerError> {
+        let mut limits = code_graph_incremental::Limits::load()
+            .map_err(|error| HandlerError::Processing(error.to_string()))?;
+        let config = &self.pipeline_config;
+        if config.max_files != 0 {
+            limits.max_files = limits.max_files.min(config.max_files);
+        }
+        if config.cross_file_resolve_timeout_ms != 0 {
+            limits.cross_file_resolve_ms = limits
+                .cross_file_resolve_ms
+                .min(config.cross_file_resolve_timeout_ms);
+        }
+        for (limit, configured) in [
+            (&mut limits.file_parse_ms, config.per_file_parse_timeout_ms),
+            (&mut limits.file_rewrite_ms, config.per_file_walk_timeout_ms),
+            (&mut limits.file_link_ms, config.per_file_ssa_timeout_ms),
+            (&mut limits.file_resolve_ms, config.per_file_timeout_ms),
+        ] {
+            *limit = if configured == 0 {
+                u64::MAX
+            } else {
+                configured
+            };
+        }
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -673,15 +696,9 @@ impl CodeIndexer {
             runtime: tokio::runtime::Handle::current(),
             notifier: context.progress.clone(),
         };
-        let timeout = |ms| (ms > 0).then(|| Duration::from_millis(ms));
         let options = super::incremental::Options {
-            max_files: self.pipeline_config.max_files,
+            limits,
             worker_threads: self.pipeline_config.worker_threads,
-            parse_timeout: timeout(self.pipeline_config.per_file_parse_timeout_ms),
-            rewrite_timeout: timeout(self.pipeline_config.per_file_walk_timeout_ms),
-            link_timeout: timeout(self.pipeline_config.per_file_ssa_timeout_ms),
-            resolve_timeout: timeout(self.pipeline_config.per_file_timeout_ms),
-            cross_file_timeout: timeout(self.pipeline_config.cross_file_resolve_timeout_ms),
             cancelled: Arc::new(move || cancel.is_cancelled()),
             family_finished: Arc::new(move || progress.family_finished()),
         };

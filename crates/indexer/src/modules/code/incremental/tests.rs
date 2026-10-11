@@ -249,13 +249,8 @@ fn config() -> CodeIndexingPipelineConfig {
 
 fn options() -> Options {
     Options {
-        max_files: 0,
+        limits: code_graph_incremental::Limits::UNLIMITED,
         worker_threads: 2,
-        parse_timeout: None,
-        rewrite_timeout: None,
-        link_timeout: None,
-        resolve_timeout: None,
-        cross_file_timeout: None,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| {}),
     }

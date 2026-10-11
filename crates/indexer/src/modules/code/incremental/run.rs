@@ -24,8 +24,11 @@ pub(in crate::modules::code) fn run(
     let mut stats = PipelineStats {
         files_discovered: repository.usage().files,
         bytes_discovered: repository.usage().bytes,
-        files_parsed: code_graph_incremental::pipeline::candidates(&repository, options.max_files)
-            .count(),
+        files_parsed: code_graph_incremental::pipeline::candidates(
+            &repository,
+            options.limits.max_files,
+        )
+        .count(),
         files_skipped: repository
             .files()
             .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
