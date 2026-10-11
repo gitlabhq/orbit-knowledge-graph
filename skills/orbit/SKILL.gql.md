@@ -66,7 +66,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
-- `WHERE` combines conditions with `AND` and `NOT`. There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`; use `IN [...]` to match one of several values.
+- There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 
 ## Iteration budget
 

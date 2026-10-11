@@ -458,14 +458,6 @@ operator object whose keys AND-combine:
 To repeat an operator on one property, use an array of operator objects:
 `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
-To exclude rows, give the node a `not` object with the same entries as
-`filters`. This node keeps the opened work items that are not incidents:
-
-```json
-{"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"},
- "not": {"work_item_type": {"in": ["incident"]}}}
-```
-
 ### Text-token search
 
 Use `all_tokens` to find entities whose text-indexed property contains every
