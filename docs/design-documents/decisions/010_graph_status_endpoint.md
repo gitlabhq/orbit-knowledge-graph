@@ -16,7 +16,7 @@ Accepted
 ## Update: last completed time (2026-10-11)
 
 `GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it
-again on `indexing` and `sdlc_indexing`. The value is the oldest `indexed_at` across the
+again on `indexing`. The value is the oldest `indexed_at` across the
 SDLC plans of the root, because each successful run sets `indexed_at`. A plan that stops
 completing keeps the time from moving. The field is absent until each plan has completed
 once.

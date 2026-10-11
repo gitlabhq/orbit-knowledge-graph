@@ -27,7 +27,7 @@ async fn graph_status() {
         projects_status_under_the_scope,
         empty_traversal_path_rejected,
         toon_renders_states_and_counts,
-        last_completed_at_is_the_oldest_sdlc_completion,
+        last_completed_at_is_on_the_scope_summary,
     );
 }
 
@@ -175,18 +175,15 @@ async fn toon_renders_states_and_counts(ctx: &TestContext) {
     assert!(text.contains("count"), "TOON output: {text}");
 }
 
-async fn last_completed_at_is_the_oldest_sdlc_completion(ctx: &TestContext) {
+async fn last_completed_at_is_on_the_scope_summary(ctx: &TestContext) {
     let status = fetch_status(ctx, "1/113/").await;
-    let last_completed_at =
-        |status: Option<IndexingStatus>| status.expect("present").last_completed_at;
 
     assert_eq!(
-        last_completed_at(status.indexing).as_deref(),
+        status
+            .indexing
+            .expect("present")
+            .last_completed_at
+            .as_deref(),
         Some("2026-01-01T00:00:00Z")
     );
-    assert_eq!(
-        last_completed_at(status.sdlc_indexing).as_deref(),
-        Some("2026-01-01T00:00:00Z")
-    );
-    assert_eq!(status.code_indexing, None);
 }
