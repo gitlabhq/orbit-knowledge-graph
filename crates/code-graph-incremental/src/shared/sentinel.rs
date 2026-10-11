@@ -59,6 +59,7 @@ pub struct Sentinel {
     budget: Duration,
     label: &'static str,
     path: String,
+    cancelled: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl Sentinel {
@@ -68,6 +69,7 @@ impl Sentinel {
             budget: Duration::from_millis(budget_ms),
             label,
             path: path.to_string(),
+            cancelled: None,
         }
     }
 
@@ -75,10 +77,18 @@ impl Sentinel {
         Self::new("", "", u64::MAX)
     }
 
+    pub fn with_cancellation(
+        mut self,
+        cancelled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.cancelled = Some(cancelled);
+        self
+    }
+
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
         let elapsed = self.started.elapsed();
-        if elapsed > self.budget {
+        if elapsed > self.budget || self.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
             return Err(Killed {
                 label: self.label,
                 path: self.path.clone(),

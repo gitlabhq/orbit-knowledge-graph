@@ -101,7 +101,7 @@ pub struct RepositoryResolver {
     cache: Arc<dyn RepositoryCache>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Repository {
     Extracted(CachedRepository),
     IncrementalEngine(super::super::incremental::Repository),

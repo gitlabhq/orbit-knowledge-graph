@@ -3,14 +3,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::StreamExt;
 use orbit_server_config::CodeIndexingPipelineConfig;
-use orbit_utils::vfs::{LimitKind, Limits, Options, SourceError, Vfs, sources::Archive};
+use orbit_utils::vfs::{
+    LimitKind, Limits, Options as StorageOptions, SourceError, Vfs, sources::Archive,
+};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::metrics::CodeMetrics;
 use super::repository::{ByteStream, cache::RepositoryCacheError};
-use crate::handler::HandlerError;
 
+mod outcome;
+mod output;
 mod policy;
+mod run;
+pub(super) use outcome::Outcome;
+pub(super) use run::{Options, run};
 #[cfg(test)]
 mod tests;
 use policy::CodePolicy;
@@ -38,10 +43,10 @@ pub(super) async fn load(
     };
     let cancel = CancelLoad(Arc::new(AtomicBool::new(false)));
     let cancelled = cancel.0.clone();
-    let options = Options {
+    let options = StorageOptions {
         compress_spill: config.source_compress_spill,
         cancelled: Some(Box::new(move || cancelled.load(Ordering::Relaxed))),
-        ..Options::default()
+        ..StorageOptions::default()
     };
     let reader = StreamReader::new(stream.map(|result| result.map_err(std::io::Error::other)));
     let handle = tokio::runtime::Handle::current();
@@ -62,14 +67,4 @@ pub(super) async fn load(
         }
         other => RepositoryCacheError::Archive(other.to_string()),
     })
-}
-
-pub(super) fn pending_handoff(repository: Repository, metrics: &CodeMetrics) -> HandlerError {
-    for file in repository.files() {
-        if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
-            metrics.record_archive_entry_skipped(reason, 1, file.size);
-        }
-    }
-    // TODO: pass the filtered VFS to the incremental indexing pipeline.
-    HandlerError::Processing("incremental VFS indexing is not implemented yet".into())
 }

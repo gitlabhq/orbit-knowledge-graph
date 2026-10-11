@@ -13,7 +13,7 @@ use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository::cache::CachedRepository;
+use super::repository::resolver::Repository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
@@ -64,7 +64,7 @@ impl IndexOutcome {
 }
 
 enum Fetched {
-    Repository(CachedRepository),
+    Repository(Repository),
     EmptyRepository,
 }
 
@@ -193,6 +193,89 @@ impl Drop for ProjectCommit {
 struct IndexedRun {
     commit: Arc<ProjectCommit>,
     rows_written: u64,
+}
+
+struct IndexingReport {
+    stats: code_graph::v2::pipeline::PipelineStats,
+    errors: Vec<code_graph::v2::pipeline::PipelineError>,
+    skipped: Vec<code_graph::v2::error::SkippedFile>,
+    faults: Vec<code_graph::v2::error::FaultedFile>,
+}
+
+impl From<code_graph::v2::PipelineResult> for IndexingReport {
+    fn from(result: code_graph::v2::PipelineResult) -> Self {
+        Self {
+            stats: result.stats,
+            errors: result.errors,
+            skipped: result.skipped,
+            faults: result.faults,
+        }
+    }
+}
+
+impl From<super::incremental::Outcome> for IndexingReport {
+    fn from(result: super::incremental::Outcome) -> Self {
+        use code_graph::v2::error::{AbortPhase, FaultedFile, FileFault, FileSkip, SkippedFile};
+        use code_graph::v2::pipeline::{LanguageTimings, PhaseTimings, PipelineStats};
+        Self {
+            stats: PipelineStats {
+                files_discovered: result.files,
+                bytes_discovered: result.source_bytes,
+                directories_indexed: result.directories,
+                files_indexed: result.files,
+                files_parsed: result.candidates,
+                files_skipped: result.filtered,
+                definitions_count: result.definitions,
+                imports_count: result.imports,
+                references_count: 0,
+                edges_count: result.edges,
+                slowest_files: Vec::new(),
+                language_timings: result
+                    .families
+                    .into_iter()
+                    .map(|family| LanguageTimings {
+                        language: family.language,
+                        file_count: family.files,
+                        total_bytes: family.bytes,
+                        total_ms: family.elapsed.as_secs_f64() * 1000.0,
+                        ..Default::default()
+                    })
+                    .collect(),
+                phase_timings: PhaseTimings {
+                    total_ms: result.elapsed.as_secs_f64() * 1000.0,
+                    language_processing_ms: result.elapsed.as_secs_f64() * 1000.0,
+                    ..Default::default()
+                },
+            },
+            errors: Vec::new(),
+            skipped: result
+                .skipped
+                .into_iter()
+                .map(|killed| {
+                    let phase = match killed.label {
+                        "tree-sitter" => AbortPhase::Parse,
+                        "rewrite" => AbortPhase::Walk,
+                        "link" => AbortPhase::Ssa,
+                        _ => AbortPhase::Sentinel,
+                    };
+                    SkippedFile {
+                        detail: killed.to_string(),
+                        path: killed.path,
+                        kind: FileSkip::Timeout(phase),
+                    }
+                })
+                .collect(),
+            faults: result
+                .faults
+                .into_iter()
+                .map(|file| FaultedFile {
+                    path: file.path,
+                    detail: file.detail,
+                    kind: FileFault::FileRead,
+                })
+                .collect(),
+        }
+    }
 }
 
 pub struct CodeIndexer {
@@ -364,15 +447,17 @@ impl CodeIndexer {
             )
             .await
         {
-            Ok(super::repository::resolver::Repository::Extracted(path)) => {
+            Ok(repository) => {
                 self.metrics.record_resolution_strategy("full_download");
-                path
-            }
-            Ok(super::repository::resolver::Repository::IncrementalEngine(repository)) => {
-                return Err(super::incremental::pending_handoff(
-                    repository,
-                    &self.metrics,
-                ));
+                if let Repository::IncrementalEngine(files) = &repository {
+                    for file in files.files() {
+                        if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
+                            self.metrics
+                                .record_archive_entry_skipped(reason, 1, file.size);
+                        }
+                    }
+                }
+                repository
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
                 // A commit SHA proves content exists, so an empty archive is
@@ -425,14 +510,24 @@ impl CodeIndexer {
 
     async fn acquire_indexing_lane(
         &self,
-        repository: &CachedRepository,
+        repository: &Repository,
         within: Duration,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = repository.file_inventory.count_by(|e| {
-            e.decision == code_graph::v2::Decision::Parse
-                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
-        });
+        let parseable = match repository {
+            Repository::Extracted(repository) => repository.file_inventory.count_by(|e| {
+                e.decision == code_graph::v2::Decision::Parse
+                    && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
+            }),
+            Repository::IncrementalEngine(repository) => repository
+                .files()
+                .filter(|file| {
+                    file.keeps()
+                        && code_graph_incremental::treesitter::SupportLang::from_path(&file.path)
+                            .is_some_and(code_graph_incremental::treesitter::SupportLang::has_rules)
+                })
+                .count(),
+        };
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -453,7 +548,7 @@ impl CodeIndexer {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         _lane: Option<OwnedSemaphorePermit>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
@@ -487,15 +582,14 @@ impl CodeIndexer {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
     ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
-            .build_code_graph(request, repository, indexed_at, config)
+            .build_code_graph(context, request, repository, indexed_at, cancel.clone())
             .await?;
 
         // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
@@ -573,18 +667,12 @@ impl CodeIndexer {
     /// Parse the repository, stream its batches to the writer under one project commit, return it.
     async fn build_code_graph(
         &self,
+        context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         indexed_at: DateTime<Utc>,
-        config: PipelineConfig,
-    ) -> Result<
-        (
-            code_graph::v2::PipelineResult,
-            Arc<ProjectCommit>,
-            Arc<AtomicU64>,
-        ),
-        HandlerError,
-    > {
+        cancel: CancellationToken,
+    ) -> Result<(IndexingReport, Arc<ProjectCommit>, Arc<AtomicU64>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -593,12 +681,6 @@ impl CodeIndexer {
             request.commit_sha.as_deref().unwrap_or("").to_string(),
             indexed_at,
         );
-
-        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
-            envelope,
-            &self.ontology,
-            self.table_names.clone(),
-        ));
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
         // the commit can't finalize mid-stream even if every flushed part drains first.
@@ -652,32 +734,66 @@ impl CodeIndexer {
         });
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path().to_path_buf();
-        let file_inventory = repository.file_inventory.clone();
+        let repository = repository.clone();
+        let ontology = self.ontology.clone();
+        let table_names = self.table_names.clone();
         let span = tracing::Span::current();
+        let legacy_config = match &repository {
+            Repository::Extracted(_) => Some(self.build_pipeline_config(context, cancel.clone())),
+            Repository::IncrementalEngine(_) => None,
+        };
+        let progress = NatsHeartbeat {
+            runtime: tokio::runtime::Handle::current(),
+            notifier: context.progress.clone(),
+        };
+        let timeout = |ms| (ms > 0).then(|| Duration::from_millis(ms));
+        let options = super::incremental::Options {
+            max_files: self.pipeline_config.max_files,
+            worker_threads: self.pipeline_config.worker_threads,
+            parse_timeout: timeout(self.pipeline_config.per_file_parse_timeout_ms),
+            rewrite_timeout: timeout(self.pipeline_config.per_file_walk_timeout_ms),
+            link_timeout: timeout(self.pipeline_config.per_file_ssa_timeout_ms),
+            resolve_timeout: timeout(self.pipeline_config.per_file_timeout_ms),
+            cross_file_timeout: timeout(self.pipeline_config.cross_file_resolve_timeout_ms),
+            cancelled: Arc::new(move || cancel.is_cancelled()),
+            family_finished: Arc::new(move || progress.family_finished()),
+        };
         let parsed = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                Pipeline::run_with_tracer(
-                    &repo_dir,
-                    file_inventory,
-                    config,
-                    tracer,
-                    converter,
+            span.in_scope(|| match repository {
+                Repository::IncrementalEngine(repository) => super::incremental::run(
+                    repository,
+                    options,
+                    envelope,
+                    ontology,
+                    table_names,
                     on_batch,
                 )
+                .map(IndexingReport::from),
+                Repository::Extracted(repository) => Ok(Pipeline::run_with_tracer(
+                    repository.path(),
+                    repository.file_inventory.clone(),
+                    legacy_config.ok_or_else(|| {
+                        code_graph::v2::SinkError("legacy configuration missing".into())
+                    })?,
+                    tracer,
+                    Arc::new(IndexerConverter::new(envelope, &ontology, table_names)),
+                    on_batch,
+                )
+                .into()),
             })
         })
         .await;
-        let result = match parsed {
+        let result = match parsed
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
+        {
             Ok(result) => result,
             Err(e) => {
                 // The parse thread panicked; drop the sentinel so the leaked commit can finalize
                 // (as failed) instead of pinning the inflight count forever.
                 commit.failed.store(true, Ordering::Release);
                 commit.release();
-                return Err(HandlerError::Processing(format!(
-                    "pipeline thread panicked: {e}"
-                )));
+                return Err(HandlerError::Processing(format!("pipeline failed: {e}")));
             }
         };
         info!(
@@ -690,7 +806,7 @@ impl CodeIndexer {
 
     fn record_indexing_results(
         &self,
-        result: &code_graph::v2::PipelineResult,
+        result: &IndexingReport,
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,

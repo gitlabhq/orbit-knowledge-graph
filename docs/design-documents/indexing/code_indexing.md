@@ -202,22 +202,25 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 
 #### Transform (call graph construction)
 
-##### VFS loading preparation
+##### Incremental engine behind a feature flag
 
 The `code_graph_incremental` feature flag selects VFS archive loading in `RepositoryResolver::resolve`.
 It defaults to off and supports a root-namespace allowlist.
 The enabled path uses the archive source and a separate content policy, without creating an extraction tree.
 Filtered files remain cataloged, but their content is unavailable.
-The policy retains source and resolver inputs; language selection belongs to the future incremental consumer.
+The policy retains source and resolver inputs. The incremental engine groups source files by language family and reads their bytes and manifests from the VFS.
 
 The code pipeline settings `source_memory_budget_bytes` and `source_compress_spill` control retained content.
 The memory budget defaults to 1 GiB per repository; zero spills all retained content.
 Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
 
-The incremental handoff is not implemented yet.
-After successful VFS loading, the enabled path returns an error instead of indexing or checkpointing the repository as complete.
-Keep the flag disabled until that handoff is implemented.
+Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
+File and directory rows are emitted once across language families, including files rejected by the content policy.
+The server adds version fields, branch relationships, and endpoint tags before routing batches through the existing buffered writer.
+Both engines share locking, heartbeats, stale-data cleanup, and checkpoint handling.
+Write failures and cancelled runs do not advance the checkpoint.
+Tree-sitter polls cancellation and the per-file parse deadline while parsing.
 
 ##### Parser architecture
 
