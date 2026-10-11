@@ -6,7 +6,6 @@ use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Context, Env, Envelope, Limits, Scalar, templates};
 mod common;
 use ontology::Ontology;
-use orbit_utils::arrow::ArrowUtils;
 
 const UTILS: &str = "\
 def helper(x):
@@ -42,6 +41,160 @@ fn envelope() -> Envelope<'static> {
     ])
 }
 
+#[test]
+fn export_config_emits_typed_metadata_and_envelope_overrides() {
+    use code_graph_incremental::export::ExportConfig;
+    use orbit_utils::arrow::{ColumnSpec, ColumnType};
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
+    let sources = common::walk(repo.path());
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let ontology = Ontology::load_embedded().unwrap();
+    let mut config = ExportConfig::embedded().clone();
+    let specs = ontology
+        .local_entity_fields("File")
+        .unwrap()
+        .iter()
+        .map(|field| ColumnSpec {
+            name: field.name.clone(),
+            col_type: if field.data_type == ontology::DataType::Int {
+                ColumnType::Int
+            } else {
+                ColumnType::DictStr
+            },
+            nullable: field.nullable,
+        })
+        .chain([
+            ColumnSpec {
+                name: "_version".into(),
+                col_type: ColumnType::TimestampMicros,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "_deleted".into(),
+                col_type: ColumnType::Bool,
+                nullable: false,
+            },
+        ])
+        .collect();
+    config.schemas.insert("gl_file".into(), specs);
+    let mut context = Context::new(&env);
+    context.export_config = &config;
+    let error = templates::index(context, sources.clone())
+        .unwrap()
+        .then(Display)
+        .unwrap()
+        .then(Export {
+            ontology: &ontology,
+            envelope: envelope(),
+        })
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("version"));
+    for traversal_path in [None, Some("1/2/")] {
+        let mut context = Context::new(&env);
+        context.export_config = &config;
+        let mut values = vec![
+            ("project_id", Scalar::Int(7)),
+            ("branch", Scalar::Str("main")),
+            ("commit_sha", Scalar::Str("abc")),
+            ("_version", Scalar::Int(123456)),
+            ("_deleted", Scalar::Bool(false)),
+        ];
+        if let Some(path) = traversal_path {
+            values.push(("traversal_path", Scalar::Str(path)));
+        }
+        let exported = templates::index(context, sources.clone())
+            .unwrap()
+            .then(Display)
+            .unwrap()
+            .then(Export {
+                ontology: &ontology,
+                envelope: Envelope::new(values),
+            })
+            .unwrap()
+            .into_value();
+        let batch = table(&exported, "gl_file");
+        assert_eq!(batch.num_rows(), 1);
+        let versions = batch
+            .column_by_name("_version")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::TimestampMicrosecondArray>()
+            .unwrap();
+        assert_eq!(versions.value(0), 123456);
+        assert_eq!(column(batch, "_deleted"), ["false"]);
+        assert_eq!(
+            column(batch, "traversal_path"),
+            [traversal_path.unwrap_or("")]
+        );
+    }
+}
+
+#[test]
+fn each_pipeline_uses_its_own_export_config() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
+    let sources = common::walk(repo.path());
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let ontology = Ontology::load_embedded().unwrap();
+    for marker in ["first", "second", ""] {
+        let yaml = include_str!("../config/export.yaml").replace(
+            "name: traversal_path, type: Utf8, const: \"\"",
+            &format!("name: traversal_path, type: Utf8, const: \"{marker}\""),
+        );
+        let export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
+        let mut context = Context::new(&env);
+        context.export_config = &export_config;
+        let exported = templates::index(context, sources.clone())
+            .unwrap()
+            .then(Display)
+            .unwrap()
+            .then(Export {
+                ontology: &ontology,
+                envelope: envelope(),
+            })
+            .unwrap()
+            .into_value();
+        assert!(
+            exported
+                .tables
+                .iter()
+                .any(|(_, batch)| batch.num_rows() > 0)
+        );
+        for (_, batch) in &exported.tables {
+            assert!(
+                column(batch, "traversal_path")
+                    .iter()
+                    .all(|value| value == marker)
+            );
+        }
+    }
+}
+
+#[test]
+fn custom_export_configs_still_validate_against_the_ontology() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(repo.path(), &[("main.py", MAIN.as_bytes())]);
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let ontology = Ontology::load_embedded().unwrap();
+    let yaml = include_str!("../config/export.yaml").replace("name: traversal_path", "name: typo");
+    let export_config = orbit_utils::yaml::from_str(&yaml).unwrap();
+    let mut context = Context::new(&env);
+    context.export_config = &export_config;
+    let error = templates::index(context, common::walk(repo.path()))
+        .unwrap()
+        .then(Display)
+        .unwrap()
+        .then(Export {
+            ontology: &ontology,
+            envelope: envelope(),
+        })
+        .err()
+        .expect("unknown columns must fail");
+    assert!(error.to_string().contains("traversal_path"));
+}
+
 fn export_repo(root: &Path) -> Exported {
     let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
     let ontology = Ontology::load_embedded().unwrap();
@@ -71,7 +224,7 @@ fn column(batch: &RecordBatch, name: &str) -> Vec<String> {
         .column_by_name(name)
         .unwrap_or_else(|| panic!("no column {name}"));
     (0..batch.num_rows())
-        .map(|row| ArrowUtils::array_value_to_string(array.as_ref(), row).unwrap_or_default())
+        .map(|row| arrow::util::display::array_value_to_string(array.as_ref(), row).unwrap())
         .collect()
 }
 
