@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 use format::ExpectedIndex;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
 };
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
-use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::pipeline::{
+    NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
+};
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{PipelineOutput, RedactionOutput};
+use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
@@ -29,7 +31,7 @@ pub use format::{
     SecurityOverride,
 };
 
-use orbit_server::pipeline::HydrationStage;
+use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
 
 /// Parse all YAML scenario files under `root` without executing them.
@@ -213,7 +215,8 @@ async fn run_frontend(
 ) {
     let label = &format!("{name} [{frontend_key}]");
 
-    let compiled = match compile_model(query, frontend, data_model, security) {
+    let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
+    let compiled = match compiled {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -223,7 +226,7 @@ async fn run_frontend(
                 !expects_error,
                 "{label}: expected compile error but got success"
             );
-            Arc::new(c)
+            c
         }
         Err(e) => match &expect.compile_error {
             None | Some(format::CompileErrorExpect::Flag(false)) => {
@@ -445,10 +448,9 @@ async fn run_pages(
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
 
-        let compiled = Arc::new(
-            compile_model(&query_str, frontend, data_model, security)
-                .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
-        );
+        let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
+            .await
+            .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
         let resp = execute_pipeline(
             ctx,
@@ -552,6 +554,38 @@ async fn run_pages(
             );
         }
     }
+}
+
+async fn compile_like_server(
+    query: &str,
+    frontend: Frontend,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
+    security: &SecurityContext,
+) -> Result<Arc<CompiledQueryContext>, PipelineError> {
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(data_model));
+    let mut pipeline_ctx = QueryPipelineContext {
+        frontend,
+        query_json: query.to_owned(),
+        compiled: None,
+        ontology: Arc::clone(ontology),
+        security_context: Some(security.clone()),
+        server_extensions,
+        phases: TypeMap::default(),
+    };
+    let mut obs = NoOpObserver;
+    if let RoutingOutput::Schema(_) = RoutingStage.execute(&mut pipeline_ctx, &mut obs).await? {
+        return Err(PipelineError::custom("schema calls are not graph queries"));
+    }
+    CompilationStage
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await?;
+    pipeline_ctx
+        .compiled
+        .ok_or_else(|| PipelineError::custom("CompilationStage produced no query"))
 }
 
 async fn execute_pipeline(
