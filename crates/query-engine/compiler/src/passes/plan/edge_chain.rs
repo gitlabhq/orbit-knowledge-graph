@@ -207,7 +207,9 @@ where
             nodes
                 .get_mut(alias)
                 .ok_or_else(|| {
-                    crate::error::QueryError::Lowering(format!("node '{alias}' has no plan"))
+                    crate::error::QueryError::PipelineInvariant(format!(
+                        "node '{alias}' has no plan"
+                    ))
                 })?
                 .predicates
                 .push(predicate);
