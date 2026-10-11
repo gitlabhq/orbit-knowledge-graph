@@ -7,31 +7,28 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 use arrow::record_batch::RecordBatch;
-use ontology::Ontology;
-use orbit_utils::arrow::BatchBuilder;
+use orbit_utils::arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::dsl::types::Tf;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
-use crate::pipeline::State;
 use crate::tree::{CallResolution, Compact};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 mod parse;
 
-pub use parse::ExportPlan;
-use parse::{
-    EdgeSource, EntityColumn, EntityPlan, HeaderSource, IdPart, On, Position, Source, SpanCandidate,
-};
+use parse::{EntityColumn, EntityPlan, IdPart, On, Position, RowSource, Source, SpanCandidate};
+pub use parse::{ExportConfig, ExportPlan};
 
 /// A value the caller hands in with every export.
 #[derive(Clone, Copy)]
 pub enum Scalar<'a> {
     Int(i64),
     Str(&'a str),
+    Bool(bool),
 }
 
 impl Scalar<'_> {
@@ -39,6 +36,28 @@ impl Scalar<'_> {
         match self {
             Scalar::Int(n) => Cow::Owned(n.to_string()),
             Scalar::Str(s) => Cow::Borrowed(s),
+            Scalar::Bool(value) => Cow::Owned(value.to_string()),
+        }
+    }
+
+    fn write(
+        self,
+        builder: &mut BatchBuilder,
+        name: &str,
+        column_type: ColumnType,
+    ) -> Result<(), arrow::error::ArrowError> {
+        match (self, column_type) {
+            (Self::Int(value), ColumnType::TimestampMicros) => {
+                builder.col(name)?.push_timestamp_micros(value)
+            }
+            (Self::Int(value), ColumnType::Int) => builder.col(name)?.push_int(value),
+            (Self::Bool(value), ColumnType::Bool) => builder.col(name)?.push_bool(value),
+            (Self::Str(value), ColumnType::Str | ColumnType::DictStr) => {
+                builder.col(name)?.push_str(value)
+            }
+            _ => Err(arrow::error::ArrowError::SchemaError(format!(
+                "invalid value for export column '{name}'"
+            ))),
         }
     }
 }
@@ -172,20 +191,6 @@ impl<'a> Forest<'a> {
     }
 }
 
-enum Value<'a> {
-    Str(Cow<'a, str>),
-    Int(i64),
-}
-
-impl Value<'_> {
-    fn id_part(&self) -> String {
-        match self {
-            Value::Str(s) => s.to_string(),
-            Value::Int(n) => n.to_string(),
-        }
-    }
-}
-
 /// The node a row describes and, under `expand:`, the child it was expanded
 /// from; without an expansion the node stands in for both.
 struct Row<'a> {
@@ -195,18 +200,18 @@ struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
-    fn value(&self, column: &'a EntityColumn, lang: &'a Lang) -> Value<'a> {
+    fn value(&self, column: &'a EntityColumn, lang: &'a Lang) -> Scalar<'a> {
         let node = match column.on {
             On::Node => self.node,
             On::Expanded => self.expanded,
         };
         match &column.source {
-            Source::Const(value) => Value::Str(Cow::Borrowed(value)),
+            Source::Const(value) => Scalar::Str(value),
             Source::Transform(tf) => {
                 let sym = tf.apply_at(self.tree, lang, node.index(), None);
-                Value::Str(Cow::Borrowed(lang.syms.resolve(sym)))
+                Scalar::Str(lang.syms.resolve(sym))
             }
-            Source::Position(p, span) => Value::Int(position(measured(node, span), *p)),
+            Source::Position(p, span) => Scalar::Int(position(measured(node, span), *p)),
         }
     }
 
@@ -243,33 +248,15 @@ fn child(c: Cursor, kind: u16) -> Option<Cursor> {
 
 /// One `(table, batch)` per local entity, then the edge table.
 pub fn export(
-    state: &State,
-    lang: &Lang,
-    ontology: &Ontology,
-    envelope: &Envelope,
-) -> Result<Vec<(String, RecordBatch)>, Error> {
-    export_selected(
-        &state.trees,
-        &state.edges,
-        lang,
-        ontology,
-        envelope,
-        true,
-        &|_| true,
-    )
-}
-
-pub(crate) fn export_selected(
     trees: &[Tree],
     edges: &[crate::tree::Edge],
     lang: &Lang,
-    ontology: &Ontology,
+    plan: &ExportPlan,
     envelope: &Envelope,
     include_directories: bool,
     owns_file: &dyn Fn(&str) -> bool,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
-    let plan = ExportPlan::load(ontology, lang)?;
-    envelope.check(&plan)?;
+    envelope.check(plan)?;
     let forest = Forest::new(trees, lang);
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
@@ -277,7 +264,7 @@ pub(crate) fn export_selected(
         let mut b = BatchBuilder::new(&entity.specs, 0)?;
         write_entity(
             &mut b,
-            &plan,
+            plan,
             entity,
             index,
             &forest,
@@ -294,7 +281,7 @@ pub(crate) fn export_selected(
     }
     tables.push((
         plan.edge_table.clone(),
-        write_edges(&plan, edges, &forest, &ids)?,
+        write_edges(plan, edges, &forest, &ids, envelope)?,
     ));
     Ok(tables)
 }
@@ -343,7 +330,9 @@ fn write_entity(
                     .iter()
                     .map(|part| match part {
                         IdPart::Span => row.span(),
-                        IdPart::Column(i) => row.value(&entity.columns[*i], lang).id_part(),
+                        IdPart::Column(i) => {
+                            row.value(&entity.columns[*i], lang).text().into_owned()
+                        }
                     })
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
@@ -353,24 +342,17 @@ fn write_entity(
                 if !emitted {
                     continue;
                 }
-                for column in &plan.header {
+                for column in &entity.header {
                     let value = match &column.source {
-                        HeaderSource::RowId => Scalar::Int(id),
-                        HeaderSource::Envelope(name) => envelope
-                            .get(name)
-                            .expect("Envelope::check ran before any row was written"),
-                        HeaderSource::Const(v) => Scalar::Str(v),
+                        RowSource::Value(name) if name == "id" => Scalar::Int(id),
+                        RowSource::Value(name) => envelope.get(name).expect("validated envelope"),
+                        RowSource::Const(v) => envelope.get(&column.name).unwrap_or(Scalar::Str(v)),
                     };
-                    match value {
-                        Scalar::Int(n) => b.col(&column.name)?.push_int(n)?,
-                        Scalar::Str(s) => b.col(&column.name)?.push_str(s)?,
-                    }
+                    value.write(b, &column.name, column.col_type)?;
                 }
                 for column in &entity.columns {
-                    match row.value(column, lang) {
-                        Value::Int(n) => b.col(&column.name)?.push_int(n)?,
-                        Value::Str(s) => b.col(&column.name)?.push_str(s)?,
-                    }
+                    row.value(column, lang)
+                        .write(b, &column.name, column.col_type)?;
                 }
             }
         }
@@ -389,6 +371,7 @@ fn write_edges(
     edges: &[crate::tree::Edge],
     forest: &Forest,
     ids: &FxHashMap<(u32, u32), (i64, usize, bool)>,
+    envelope: &Envelope,
 ) -> Result<RecordBatch, Error> {
     let entity_name = |index: usize| plan.entities[index].name.as_str();
     let mut rows: Vec<EdgeRow> = Vec::new();
@@ -445,14 +428,20 @@ fn write_edges(
     Ok(
         BatchBuilder::new(&plan.edge_specs, rows.len())?.build(&rows, |row, b| {
             for column in &plan.edge_columns {
-                match &column.source {
-                    EdgeSource::SourceId => b.col(&column.name)?.push_int(row.source.0)?,
-                    EdgeSource::SourceEntity => b.col(&column.name)?.push_str(row.source.1)?,
-                    EdgeSource::Kind => b.col(&column.name)?.push_str(row.kind)?,
-                    EdgeSource::TargetId => b.col(&column.name)?.push_int(row.target.0)?,
-                    EdgeSource::TargetEntity => b.col(&column.name)?.push_str(row.target.1)?,
-                    EdgeSource::Const(v) => b.col(&column.name)?.push_str(v)?,
-                }
+                let value = match &column.source {
+                    RowSource::Const(value) => {
+                        envelope.get(&column.name).unwrap_or(Scalar::Str(value))
+                    }
+                    RowSource::Value(name) => match name.as_str() {
+                        "source.id" => Scalar::Int(row.source.0),
+                        "source.entity" => Scalar::Str(row.source.1),
+                        "kind" => Scalar::Str(row.kind),
+                        "target.id" => Scalar::Int(row.target.0),
+                        "target.entity" => Scalar::Str(row.target.1),
+                        name => envelope.get(name).expect("validated envelope"),
+                    },
+                };
+                value.write(b, &column.name, column.col_type)?;
             }
             Ok(())
         })?,
@@ -462,12 +451,14 @@ fn write_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::Ontology;
 
     #[test]
     fn a_missing_envelope_value_is_a_named_error() {
         let ontology = Ontology::load_embedded().expect("embedded ontology");
         let lang = Lang::new();
-        let plan = ExportPlan::load(&ontology, &lang).expect("export.yaml loads");
+        let plan = ExportPlan::from_config(ExportConfig::embedded(), &ontology, &lang)
+            .expect("export.yaml loads");
         let envelope = Envelope::new([("project_id", Scalar::Int(1))]);
         let message = envelope.check(&plan).unwrap_err().to_string();
         assert!(message.contains("'branch'"), "{message}");
@@ -478,7 +469,8 @@ mod tests {
     fn export_yaml_agrees_with_the_ontology() {
         let ontology = Ontology::load_embedded().expect("embedded ontology");
         let lang = Lang::new();
-        let plan = ExportPlan::load(&ontology, &lang).unwrap_or_else(|e| panic!("{e}"));
+        let plan = ExportPlan::from_config(ExportConfig::embedded(), &ontology, &lang)
+            .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(plan.entities.len(), ontology.local_entity_names().len());
     }
 }
