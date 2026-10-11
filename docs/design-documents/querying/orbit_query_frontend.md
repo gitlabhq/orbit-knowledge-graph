@@ -228,7 +228,7 @@ Unsupported syntax or lowering returns a client-safe error rather than dropping 
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
-The same `schema_limits::MAX_PREDICATE_DEPTH` bounds a run of `NOT` keywords plus the depth of its operand. Validation caps condition trees at that depth and at 256 leaves, and tree leaves count toward the per-node and per-relationship filter caps.
+The same `passes::validate::MAX_PREDICATE_DEPTH` bounds a run of `NOT` keywords plus the depth of its operand. Validation caps condition trees at that depth and at 256 leaves, and tree leaves count toward the per-node and per-relationship filter caps.
 Existing compiler limits still apply after lowering.
 Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
 An ID selector or IN list counts as one predicate; an ID range counts as two.
