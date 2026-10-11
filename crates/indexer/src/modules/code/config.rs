@@ -101,7 +101,10 @@ mod tests {
             "/../../config/seeds/overlays/variant_routes"
         ))
         .unwrap();
-        assert!(CodeTableNames::from_ontology(&ontology).is_err());
+        assert!(
+            matches!(CodeTableNames::from_ontology(&ontology), Err(OntologyError::Validation(message))
+            if message.contains("relationship 'CALLS' has split table routes"))
+        );
     }
 
     #[test]

@@ -218,23 +218,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.etl_settings = etl_settings.clone();
     ontology.internal_column_prefix = schema.settings.internal_column_prefix;
 
-    // Edge table names become SQL identifiers, so restrict to lowercase ASCII and underscores.
     for table_name in ontology.edge_table_configs.keys() {
-        if !table_name.starts_with(&ontology.table_prefix) {
-            return Err(OntologyError::Validation(format!(
-                "edge table '{}' does not start with table_prefix '{}'",
-                table_name, ontology.table_prefix
-            )));
-        }
-        if !table_name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c == '_')
-        {
-            return Err(OntologyError::Validation(format!(
-                "edge table '{}' contains invalid characters (only a-z and _ allowed)",
-                table_name
-            )));
-        }
+        validate_table_name(table_name, &ontology.table_prefix)?;
     }
     if !ontology
         .edge_table_configs
@@ -814,32 +799,49 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         ontology.denormalized_joins.push(resolved);
     }
     validate_unique_denormalized_joins(&ontology)?;
+    let mut occupied: std::collections::BTreeSet<String> = all_table_names
+        .into_iter()
+        .chain(
+            ontology
+                .auxiliary_dictionaries()
+                .iter()
+                .map(|object| object.name.clone()),
+        )
+        .chain(
+            ontology
+                .materialized_views()
+                .iter()
+                .map(|object| object.name.clone()),
+        )
+        .chain(
+            ontology
+                .refreshable_materialized_views()
+                .iter()
+                .map(|object| object.name.clone()),
+        )
+        .collect();
+    for join in ontology.denormalized_joins() {
+        occupied.insert(join.table.clone());
+        occupied
+            .extend((0..join.tables.len()).map(|trigger| format!("{}__on_t{trigger}", join.table)));
+    }
+    let mut copy_names = std::collections::BTreeSet::new();
     for copy in schema.settings.reordered_tables {
-        let valid_name = copy
-            .name
-            .strip_prefix("gl_")
-            .and_then(|name| name.bytes().next())
-            .is_some_and(|byte| byte.is_ascii_lowercase())
-            && copy
-                .name
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
-        let occupied = ontology
-            .nodes()
-            .any(|node| node.destination_table == copy.name)
-            || ontology.edge_table_config(&copy.name).is_some()
-            || ontology
-                .auxiliary_tables()
-                .iter()
-                .any(|table| table.name == copy.name)
-            || ontology
-                .denormalized_joins()
-                .iter()
-                .any(|join| join.table == copy.name)
-            || ontology
-                .reordered_tables
-                .iter()
-                .any(|table| table.name == copy.name);
+        validate_table_name(&copy.name, &ontology.table_prefix)?;
+        if !copy_names.insert(copy.name.clone()) {
+            return Err(OntologyError::Validation(format!(
+                "duplicate reordered table '{}'",
+                copy.name
+            )));
+        }
+        for name in [copy.name.clone(), format!("{}__on_insert", copy.name)] {
+            if !occupied.insert(name.clone()) {
+                return Err(OntologyError::Validation(format!(
+                    "reordered table '{}': database object '{name}' already exists",
+                    copy.name
+                )));
+            }
+        }
         let source_key = ontology
             .nodes()
             .find(|node| node.destination_table == copy.source)
@@ -864,14 +866,24 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             )));
         };
         let unique: std::collections::BTreeSet<_> = copy.sort_key.iter().collect();
-        if !valid_name
-            || occupied
-            || copy.sort_key.is_empty()
-            || unique.len() != copy.sort_key.len()
-            || unique != source_key.iter().collect()
+        let invalid_key = if copy.sort_key.is_empty() {
+            Some("sort key must not be empty")
+        } else if unique.len() != copy.sort_key.len() {
+            Some("sort key contains duplicate columns")
+        } else if unique != source_key.iter().collect() {
+            Some("sort key must be a permutation of the source sort key")
+        } else if source_key
+            .iter()
+            .any(|column| column == crate::TRAVERSAL_PATH_COLUMN)
+            && copy.sort_key.first().map(String::as_str) != Some(crate::TRAVERSAL_PATH_COLUMN)
         {
+            Some("scoped source requires traversal_path first in the sort key")
+        } else {
+            None
+        };
+        if let Some(reason) = invalid_key {
             return Err(OntologyError::Validation(format!(
-                "reordered table '{}': requires a unique gl_ name and a permutation of the source sort key",
+                "reordered table '{}': {reason}",
                 copy.name
             )));
         }
@@ -906,6 +918,24 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_unique_pipeline_names(&ontology)?;
 
     Ok(ontology)
+}
+
+fn validate_table_name(name: &str, prefix: &str) -> Result<(), OntologyError> {
+    if !name.starts_with(prefix) {
+        return Err(OntologyError::Validation(format!(
+            "table '{name}' does not start with table_prefix '{prefix}'"
+        )));
+    }
+    if name.len() == prefix.len()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    {
+        return Err(OntologyError::Validation(format!(
+            "table '{name}' must have a nonempty suffix and contain only a-z and _"
+        )));
+    }
+    Ok(())
 }
 
 fn get_pipeline_node_metadata(
@@ -1615,6 +1645,152 @@ mod tests {
     };
     use indexmap::IndexMap;
     use std::collections::BTreeMap;
+
+    fn load_modified_sources(
+        path: &str,
+        change: impl FnOnce(&mut serde_json::Value),
+    ) -> Result<Ontology, OntologyError> {
+        let mut sources = crate::migrations::embedded_sources();
+        let mut document = orbit_utils::yaml::from_str(&sources[path]).unwrap();
+        change(&mut document);
+        sources.insert(
+            path.into(),
+            orbit_utils::yaml::to_string(&document).unwrap(),
+        );
+        let archive = crate::archive::OntologyArchive::from_sources(1, &sources).unwrap();
+        load_with(&archive)
+    }
+
+    #[test]
+    fn reordered_table_validation_reports_the_invalid_declaration() {
+        use serde_json::json;
+        let key = json!([
+            "traversal_path",
+            "target_id",
+            "source_id",
+            "relationship_kind",
+            "source_kind",
+            "target_kind"
+        ]);
+        for (name, source, sort_key, expected) in [
+            ("wrong_copy", "gl_edge", key.clone(), "table_prefix"),
+            ("gl_copy1", "gl_edge", key.clone(), "only a-z and _"),
+            ("gl_", "gl_edge", key.clone(), "nonempty suffix"),
+            ("gl_user", "gl_edge", key.clone(), "already exists"),
+            (
+                "gl_project_traversal_paths_dict",
+                "gl_edge",
+                key.clone(),
+                "already exists",
+            ),
+            (
+                "gl_copy",
+                "gl_missing",
+                key.clone(),
+                "unknown base or joined source",
+            ),
+            ("gl_copy", "gl_edge", json!([]), "must not be empty"),
+            (
+                "gl_copy",
+                "gl_edge",
+                json!(["source_id", "source_id"]),
+                "duplicate columns",
+            ),
+            ("gl_copy", "gl_edge", json!(["source_id"]), "permutation"),
+            (
+                "gl_copy",
+                "gl_edge",
+                json!([
+                    "target_id",
+                    "traversal_path",
+                    "source_id",
+                    "relationship_kind",
+                    "source_kind",
+                    "target_kind"
+                ]),
+                "traversal_path first",
+            ),
+        ] {
+            let error = load_modified_sources("schema.yaml", |schema| {
+                schema["settings"]["reordered_tables"] =
+                    json!([{"name": name, "source": source, "sort_key": sort_key}]);
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains(expected), "{name}: {error}");
+        }
+        for (names, expected) in [
+            (["gl_copy", "gl_copy"], "duplicate reordered table"),
+            (["gl_copy", "gl_copy__on_insert"], "already exists"),
+            (["gl_copy__on_insert", "gl_copy"], "already exists"),
+        ] {
+            let error = load_modified_sources("schema.yaml", |schema| {
+                schema["settings"]["reordered_tables"] = json!(
+                    names.map(|name| json!({"name": name, "source": "gl_edge", "sort_key": key}))
+                );
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+        for category in ["materialized_views", "refreshable_materialized_views"] {
+            for collision in ["gl_copy", "gl_copy__on_insert"] {
+                let error = load_modified_sources("schema.yaml", |schema| {
+                    if category == "materialized_views" {
+                        schema["settings"][category] = json!([{
+                            "name": collision, "to_table": "gl_edge", "select_query": "SELECT * FROM gl_edge"
+                        }]);
+                    }
+                    schema["settings"][category][0]["name"] = json!(collision);
+                    schema["settings"]["reordered_tables"] =
+                        json!([{"name": "gl_copy", "source": "gl_edge", "sort_key": key}]);
+                })
+                .unwrap_err();
+                assert!(error.to_string().contains("already exists"), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn edge_variants_reject_duplicate_endpoints_and_unknown_fields() {
+        let duplicate = load_modified_sources("edges/calls.yaml", |edge| {
+            let variant = edge["variants"][0].clone();
+            edge["variants"].as_array_mut().unwrap().push(variant);
+        })
+        .unwrap_err();
+        assert!(
+            duplicate.to_string().contains("duplicate variant"),
+            "{duplicate}"
+        );
+        let unknown = load_modified_sources("edges/calls.yaml", |edge| {
+            edge["variants"][0]["future_table"] = serde_json::json!("gl_edge");
+        })
+        .unwrap_err();
+        assert!(unknown.to_string().contains("unknown field"), "{unknown}");
+    }
+
+    #[test]
+    fn reordered_tables_use_configured_prefix_and_reserve_join_objects() {
+        use serde_json::json;
+        let key = json!([
+            "traversal_path",
+            "target_id",
+            "source_id",
+            "relationship_kind",
+            "source_kind",
+            "target_kind"
+        ]);
+        let ontology = load_modified_sources("schema.yaml", |schema| {
+            schema["settings"]["table_prefix"] = json!("gl");
+            schema["settings"]["reordered_tables"] =
+                json!([{"name": "glcustom", "source": "gl_edge", "sort_key": key}]);
+        })
+        .unwrap();
+        assert_eq!(ontology.reordered_tables()[0].name, "glcustom");
+        let error = load_modified_sources("schema.yaml", |schema| {
+            schema["settings"]["denormalized_joins"] = json!([{"name": "approved", "hops": [{"relationship": "APPROVED", "from": "User", "to": "MergeRequest"}]}]);
+            schema["settings"]["reordered_tables"] = json!([{"name": "gl_denorm_approved", "source": "gl_edge", "sort_key": key}]);
+        }).unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error}");
+    }
 
     fn system_note(emits: &[&str]) -> DerivedEntity {
         DerivedEntity {

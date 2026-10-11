@@ -242,6 +242,10 @@ pub async fn run_dispatcher(
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
+    let candidate = archive
+        .load_ontology()
+        .map_err(orbit_migrations::catalog::CatalogError::from)?;
+    let code_tables = modules::code::config::CodeTableNames::from_ontology(&candidate)?;
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
@@ -374,8 +378,7 @@ pub async fn run_dispatcher(
             backfill.clone(),
             CodeStaleSweep::new(
                 config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(&ontology)
-                    .expect("code tables must resolve from the archived ontology"),
+                &code_tables,
                 checkpoint_store.clone(),
                 config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),

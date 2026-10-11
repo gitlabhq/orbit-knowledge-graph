@@ -22,7 +22,10 @@ pub(crate) struct EdgeYaml {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EdgeVariantYaml {
+    #[serde(default, rename = "description")]
+    _description: Option<String>,
     from_node: EdgeNodeRef,
     to_node: EdgeNodeRef,
     #[serde(default)]

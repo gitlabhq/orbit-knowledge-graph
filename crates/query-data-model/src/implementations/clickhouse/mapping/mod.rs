@@ -67,8 +67,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         .then(|| PathColumn {
                             name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                             entity: Some(entity_id),
-                            source_table: node.table.clone(),
-                            occurrence: 0,
                         })
                         .into_iter()
                         .collect(),
@@ -100,8 +98,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                     vec![PathColumn {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                         entity: None,
-                        source_table: table_name.to_string(),
-                        occurrence: 0,
                     }],
                     false,
                 ),
@@ -224,12 +220,9 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             let path_columns = join
                 .sources
                 .iter()
-                .enumerate()
-                .filter_map(|(index, source)| {
+                .filter_map(|source| {
                     Some(PathColumn {
                         name: source.path_column.clone()?,
-                        source_table: source.table.clone(),
-                        occurrence: index,
                         entity: entities.iter().enumerate().find_map(|(entity, layout)| {
                             (layout.as_ref()?.table == source.table).then_some(EntityId(entity))
                         }),
@@ -275,11 +268,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
         Ok(ClickHouseBindings {
             materialized_joins,
             reordered_layouts: storage.copies().to_vec(),
-            source_dependencies: storage
-                .dependencies()
-                .iter()
-                .map(|(table, sources)| (table.clone(), sources.clone()))
-                .collect(),
             default_edge_table: storage.metadata.default_edge_table.clone(),
             entities,
             relationships,

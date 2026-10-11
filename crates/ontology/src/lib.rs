@@ -932,7 +932,7 @@ impl Ontology {
         for kind in self.edge_names() {
             if self.edge_tables_for_relationship(kind).len() > 1 {
                 return Err(OntologyError::Validation(format!(
-                    "relationship '{kind}' has split table routes; this producer requires one table per relationship kind"
+                    "relationship '{kind}' has split table routes; this consumer requires one table per relationship kind"
                 )));
             }
         }
@@ -940,6 +940,7 @@ impl Ontology {
     }
 
     #[must_use]
+    /// Requires `validate_single_table_edge_routes`; use `edge_tables_for_relationship` for split routes.
     pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
         self.edges
             .get(relationship_kind)

@@ -49,6 +49,24 @@ const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
 ];
 
 #[tokio::test]
+async fn split_route_archive_is_not_served() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1, 2]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+    let mut sources = ontology::migrations::embedded_sources();
+    let mut calls: Value = yaml::from_str(&sources["edges/calls.yaml"]).unwrap();
+    calls["variants"][0]["table"] = json!("gl_edge");
+    sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
+    let archive = OntologyArchive::from_sources(2, &sources).unwrap();
+    cluster.catalog.publish(&archive).await.unwrap();
+    cluster.promote(2).await;
+    cluster.await_serving(None).await;
+    cluster.restore_archive(2).await;
+    cluster.await_serving(Some(2)).await;
+}
+
+#[tokio::test]
 async fn promotion_and_rollback_keep_in_flight_queries_on_their_snapshot() {
     let mut cluster = Cluster::start(2).await;
     cluster.publish_archive(1).await;

@@ -181,6 +181,11 @@ promotion cannot switch tables under a running query.
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.
 
+Deploy variant-table parsing and routing support to every query server before publishing split-route archives.
+Older binaries can ignore a variant's `table` field and read the wrong table.
+The metadata-only release rejects split routes at dispatcher startup and server snapshot loading.
+Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
+
 ### Webserver readiness gate
 
 `ActiveSchema` watches the `active_version` key in the `orbit_ontology_archives` NATS KV bucket

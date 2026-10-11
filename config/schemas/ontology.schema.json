@@ -582,8 +582,8 @@
             "additionalProperties": false,
             "required": ["name", "source", "sort_key"],
             "properties": {
-              "name": {"type": "string", "pattern": "^gl_[a-z][a-z0-9_]*$"},
-              "source": {"type": "string", "pattern": "^gl_[a-z][a-z0-9_]*$"},
+              "name": {"type": "string", "pattern": "^[a-z_]+$"},
+              "source": {"type": "string", "pattern": "^[a-z_]+$"},
               "sort_key": {
                 "type": "array",
                 "minItems": 1,

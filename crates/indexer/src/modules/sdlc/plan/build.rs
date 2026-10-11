@@ -27,7 +27,7 @@ impl Sizing<'_> {
 #[derive(Debug, thiserror::Error)]
 pub(in crate::modules::sdlc) enum PlanError {
     #[error(transparent)]
-    UnsupportedEdgeRoutes(#[from] ontology::OntologyError),
+    Ontology(#[from] ontology::OntologyError),
     #[error(
         "duplicate plan name '{0}': plan names are handler names and checkpoint keys and must be unique"
     )]
@@ -246,7 +246,10 @@ mod tests {
                 overrides: &HashMap::new(),
             },
         );
-        assert!(matches!(result, Err(PlanError::UnsupportedEdgeRoutes(_))));
+        assert!(
+            matches!(result, Err(PlanError::Ontology(ontology::OntologyError::Validation(message)))
+            if message.contains("relationship 'CALLS' has split table routes"))
+        );
     }
 
     fn plans(ontology: &Ontology, batch_size: u64) -> Plans {

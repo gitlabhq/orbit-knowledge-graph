@@ -39,8 +39,6 @@ pub struct TraversalPathLookup {
 pub struct PathColumn {
     pub name: String,
     pub entity: Option<EntityId>,
-    pub source_table: String,
-    pub occurrence: usize,
 }
 
 #[derive(Debug)]
