@@ -73,7 +73,45 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
         });
     }
     infer_wildcard_relationship_kinds(&mut input, model);
+    resolve_relationship_types(&mut input, model)?;
     Ok(input)
+}
+
+fn resolve_relationship_types(
+    input: &mut Input,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Result<()> {
+    let (conditions, predicates) = std::mem::take(&mut input.predicates)
+        .into_iter()
+        .partition::<Vec<_>, _>(|root| root.relationship_type().is_some());
+    input.predicates = predicates;
+    for root in &conditions {
+        let Some((condition, negated)) = root.relationship_type() else {
+            continue;
+        };
+        let PredicateTarget::Relationship(index) = condition.target else {
+            continue;
+        };
+        let names = condition.relationship_type_names().unwrap_or_default();
+        let types = match (&mut input.path, &mut input.neighbors) {
+            (Some(path), _) => &mut path.rel_types,
+            (_, Some(neighbors)) => &mut neighbors.rel_types,
+            _ => &mut input.relationships[index].types,
+        };
+        if is_wildcard(types) {
+            *types = match negated {
+                true => model.graph().relationship_names(None, None),
+                false => names.iter().map(|name| name.to_string()).collect(),
+            };
+        }
+        types.retain(|kind| names.contains(&kind.as_str()) != negated);
+        if types.is_empty() {
+            return Err(QueryError::Validation(
+                "type(r) excludes every relationship type the pattern allows".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn is_wildcard(types: &[String]) -> bool {

@@ -1,0 +1,21 @@
+description: RETURN r in a traversal is accepted; the relationship's edges are listed under @edges
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+      ],
+      "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+      "limit": 50
+    }
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) RETURN u, r, mr.title LIMIT 50
+
+expect:
+  node_count: 3
+  referential_integrity: true
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]

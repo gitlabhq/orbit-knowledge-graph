@@ -37,7 +37,32 @@ impl Lowering {
     }
 
     fn condition(&self, predicate: Predicate<'_>) -> Result<Condition> {
-        let Predicate::Comparison(comparison) = predicate;
+        let comparison = match predicate {
+            Predicate::Comparison(comparison) => comparison,
+            Predicate::RelationshipType {
+                span,
+                variable,
+                op,
+                value,
+            } => {
+                let index = self.relationship_index(span, &variable)?;
+                if self.input.relationships[index].hops.max != 1 {
+                    return Err(invalid(
+                        span,
+                        "a variable-length relationship binds a list; list its types in the pattern, such as -[r:CLOSES|MENTIONS*1..3]->",
+                    ));
+                }
+                return Ok(Condition {
+                    target: PredicateTarget::Relationship(index),
+                    property: Condition::RELATIONSHIP_TYPE.into(),
+                    filter: InputFilter {
+                        op: Some(op),
+                        value,
+                        rhs_column: None,
+                    },
+                });
+            }
+        };
         let Comparison {
             span,
             property,

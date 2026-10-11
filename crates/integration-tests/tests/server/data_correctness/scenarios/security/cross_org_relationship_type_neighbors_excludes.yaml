@@ -1,0 +1,21 @@
+description: >
+  type(r) on a neighbors query does not widen access across org
+  boundaries. The unlabeled endpoint may be any entity, and org-2 MR
+  9100 must still be excluded.
+
+config:
+  security: { org_id: 1, paths: ["1/"] }
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(n) WHERE type(r) = 'AUTHORED' RETURN u, n, type(r)
+
+expect:
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      absent: [9100]
+  edge_exists:
+    AUTHORED: [[1, 2000], [1, 2001]]
+  edge_absent:
+    AUTHORED: [[1, 9100]]

@@ -17,7 +17,18 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
                 "a query must not combine more than {MAX_PREDICATE_LEAVES} conditions"
             )));
         }
-        for predicate in input.conditions() {
+        for root in &input.predicates {
+            match root.relationship_type() {
+                Some((condition, _)) => self.check_relationship_type(condition)?,
+                None if root.leaves().any(Condition::is_relationship_type) => {
+                    return Err(QueryError::Validation(
+                        "type(r) cannot be used inside a NOT group; write it as its own condition joined with AND, such as NOT type(r) = 'CLOSES'".into(),
+                    ));
+                }
+                None => {}
+            }
+        }
+        for predicate in input.conditions().filter(|c| !c.is_relationship_type()) {
             match &predicate.target {
                 PredicateTarget::Node(_) => {
                     for (alias, property) in predicate.node_properties() {
@@ -34,6 +45,24 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
                 }
             }
             check_filter_entries(&predicate.property, std::slice::from_ref(&predicate.filter))?;
+        }
+        Ok(())
+    }
+
+    fn check_relationship_type(&self, condition: &Condition) -> Result<()> {
+        check_filter_entries("type", std::slice::from_ref(&condition.filter))?;
+        let names = condition.relationship_type_names().ok_or_else(|| {
+            QueryError::Validation(
+                "type(r) supports =, <>, or IN with relationship type names, such as type(r) = 'CLOSES' or type(r) IN ['CLOSES', 'MENTIONS']".into(),
+            )
+        })?;
+        if names
+            .iter()
+            .any(|name| !self.model.get().relationship_exists(name))
+        {
+            return Err(QueryError::Validation(
+                "type() names a relationship type that the schema does not have; relationship type names are uppercase and case-sensitive, and CALL db.schema() lists them".into(),
+            ));
         }
         Ok(())
     }

@@ -1,0 +1,8 @@
+description: type() on a node variable rejects and says it takes a relationship variable
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(u) = 'AUTHORED' RETURN u LIMIT 10
+
+expect:
+  compile_error: "type() takes a relationship variable, such as r in -[r]->, but u is a node"

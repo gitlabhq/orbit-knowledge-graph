@@ -11,7 +11,7 @@ use crate::passes::cursor;
 use crate::query_limits::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
-use super::ast::{Limit, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
+use super::ast::{Limit, Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
 use super::{ParsedQuery, QueryParser, Rule, invalid};
 
 pub(super) fn lower(source: &str, query: Query<'_>) -> Result<ParsedQuery> {
@@ -216,6 +216,28 @@ impl Lowering {
         }
         self.input.relationships.push(edge);
         Ok(())
+    }
+
+    fn relationship_index(&self, span: pest::Span<'_>, variable: &Name<'_>) -> Result<usize> {
+        let name = &variable.value;
+        if let Some(index) = self.edges.get(name) {
+            return Ok(*index);
+        }
+        let kind = if self.neighbor.as_ref() == Some(name)
+            || self.input.nodes.iter().any(|n| &n.id == name)
+        {
+            "a node"
+        } else if self.path.as_ref() == Some(name) {
+            "a path"
+        } else {
+            return Err(invalid(span, &format!("undefined variable {name}")));
+        };
+        Err(invalid(
+            span,
+            &format!(
+                "type() takes a relationship variable, such as r in -[r]->, but {name} is {kind}"
+            ),
+        ))
     }
 
     fn classify(&mut self) -> Result<()> {

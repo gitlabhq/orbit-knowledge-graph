@@ -1,0 +1,8 @@
+description: WHERE type(r) on a variable-length relationship rejects and points to the typed pattern form
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r*1..2]->(p:Project) WHERE type(r) = 'MEMBER_OF' RETURN u, p LIMIT 10
+
+expect:
+  compile_error: "a variable-length relationship binds a list; list its types in the pattern"
