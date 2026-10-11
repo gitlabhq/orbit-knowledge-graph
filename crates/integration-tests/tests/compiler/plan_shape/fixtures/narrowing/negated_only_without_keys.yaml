@@ -1,4 +1,4 @@
-name: A node whose only condition is NOT gets no candidate or filter keys
+name: A node whose only condition is NOT gets edge-key narrowing, not candidate or filter keys
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000]},{"id":"b","entity":"Definition","not":{"name":{"in":["skip","other"]}},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
@@ -13,15 +13,15 @@ physical:
   clickhouse:
     planned:
       ctes:
-        absent: true
+        exact_order: [_narrow_b]
       expect:
         - (Filter NOT (b.name IN ['skip', 'other']), ... (_))
     emitted:
       ctes:
-        absent: true
+        exact_order: [_narrow_b]
   duckdb:
     planned:
       ctes:
-        exact_order: [_filter_a]
+        exact_order: [_filter_a, _narrow_b]
       expect:
         - (Filter NOT (b.name IN ['skip', 'other']), ... (_))

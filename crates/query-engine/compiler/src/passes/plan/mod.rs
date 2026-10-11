@@ -70,18 +70,29 @@ pub fn denormalized_facts(
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
                 .flat_map(move |direction| {
-                    node.filters.keys().filter_map(move |property| {
-                        let property = model.graph().property_id(entity, property)?;
-                        let key = DenormalizedKey {
-                            property,
-                            direction,
-                        };
-                        model
-                            .denormalized()
-                            .property(key)
-                            .cloned()
-                            .map(|facts| (key, facts))
-                    })
+                    node.filters
+                        .keys()
+                        .map(String::as_str)
+                        .chain(
+                            input
+                                .conditions()
+                                .filter(|condition| {
+                                    condition.target == PredicateTarget::Node(node.id.clone())
+                                })
+                                .map(|condition| condition.property.as_str()),
+                        )
+                        .filter_map(move |property| {
+                            let property = model.graph().property_id(entity, property)?;
+                            let key = DenormalizedKey {
+                                property,
+                                direction,
+                            };
+                            model
+                                .denormalized()
+                                .property(key)
+                                .cloned()
+                                .map(|facts| (key, facts))
+                        })
                 })
         })
         .collect()

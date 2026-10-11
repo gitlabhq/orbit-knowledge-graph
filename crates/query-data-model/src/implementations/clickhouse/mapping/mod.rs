@@ -183,6 +183,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                     edge_column: property.edge_column.clone(),
                     tag_key: property.tag_key.clone(),
                     relationships: vec![relationship],
+                    nullable: property.nullable,
                 });
         }
 

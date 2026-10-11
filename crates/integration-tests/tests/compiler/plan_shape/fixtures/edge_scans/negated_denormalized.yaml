@@ -1,4 +1,4 @@
-name: NOT over a denormalized property reads the node table instead of edge tags
+name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
@@ -13,7 +13,6 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Scan Table(gl_definition) AS a)
-        - (Filter NOT (a.definition_type IN ['function', 'method']), ... (_))
+        - (Filter ..., NOT (e0.source_tags HAS ANY ['definition_type:function', 'definition_type:method']) (Scan Table(gl_code_edge) AS e0))
       reject:
-        - (Filter e0.source_tags HAS ANY ['definition_type:function', 'definition_type:method'], ... (_))
+        - (Filter NOT (a.definition_type IN ['function', 'method']), ... (_))

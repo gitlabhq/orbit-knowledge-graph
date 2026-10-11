@@ -201,8 +201,46 @@ where
     let model = context.model;
     let hops = build_hops(input, model);
     let mut nodes = build_node_plans(input, model);
-    for root in &input.predicates {
-        if let Some(alias) = root.local_node() {
+    let denormalized = super::denormalized_facts(input, model);
+    let after_joins: Vec<bool> = input
+        .predicates
+        .iter()
+        .map(|root| {
+            root.local_node().is_none()
+                || !hops.is_empty()
+                    && root.leaves().all(|condition| {
+                        super::predicates::edge_covered(
+                            condition,
+                            input,
+                            model,
+                            &hops,
+                            &denormalized,
+                        )
+                    })
+        })
+        .collect();
+    let mut predicate_joins = HashSet::new();
+    for (root, after_joins) in input.predicates.iter().zip(&after_joins) {
+        match root.local_node() {
+            Some(alias) if !after_joins => {
+                predicate_joins.insert(alias.to_string());
+            }
+            _ => predicate_joins.extend(
+                root.leaves()
+                    .filter(|condition| {
+                        super::predicates::edge_tag(condition, input, model, &hops, &denormalized)
+                            .is_none()
+                    })
+                    .flat_map(Condition::node_properties)
+                    .filter(|(_, property)| *property != DEFAULT_PRIMARY_KEY)
+                    .map(|(alias, _)| alias.to_string()),
+            ),
+        }
+    }
+    for (root, after_joins) in input.predicates.iter().zip(&after_joins) {
+        if let Some(alias) = root.local_node()
+            && !after_joins
+        {
             let predicate = super::predicates::bind(root, input, model, &[], None)?;
             nodes
                 .get_mut(alias)
@@ -225,7 +263,6 @@ where
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     let _ = reversed;
-    let denormalized = super::denormalized_facts(input, model);
 
     for node_plan in nodes.values_mut() {
         if use_fk_elision {
@@ -235,6 +272,7 @@ where
                 &hops,
                 &denormalized,
                 table_scans.contains(&node_plan.alias),
+                predicate_joins.contains(&node_plan.alias),
             );
         } else {
             node_plan.hydration = HydrationStrategy::Join;
@@ -244,7 +282,7 @@ where
     resolve_join_columns(&mut hops)?;
     resolve_cascade_anchors(&mut hops);
 
-    resolve_node_flags(&hops, &mut nodes, input);
+    resolve_node_flags(&hops, &mut nodes, input, &predicate_joins);
 
     if input.query_type == QueryType::Aggregation {
         let group_by_nodes: HashSet<&str> =
@@ -273,9 +311,16 @@ where
     let predicates = input
         .predicates
         .iter()
-        .filter(|root| root.local_node().is_none())
-        .map(|root| {
-            super::predicates::bind(root, input, model, &context.hops, Some(&execution.bindings))
+        .zip(&after_joins)
+        .filter(|(_, after_joins)| **after_joins)
+        .map(|(root, _)| {
+            super::predicates::bind(
+                root,
+                input,
+                model,
+                &context.hops,
+                Some((&execution.bindings, &context.denormalized)),
+            )
         })
         .collect::<Result<_>>()?;
     execution.source = execution.source.filter(predicates);
@@ -639,6 +684,7 @@ fn determine_hydration(
     hops: &[Hop],
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
     requires_table_scan: bool,
+    is_predicate_target: bool,
 ) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -655,14 +701,6 @@ fn determine_hydration(
             && !matches!(a.expr.function(), AggFunction::Count)
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
-    let is_predicate_target = input.predicates.iter().any(|root| match root.local_node() {
-        Some(node) => node == alias,
-        None => root.leaves().any(|predicate| {
-            predicate
-                .node_properties()
-                .any(|(node, property)| node == alias && property != DEFAULT_PRIMARY_KEY)
-        }),
-    });
 
     if is_group_by_node
         || is_group_by_property
@@ -678,7 +716,7 @@ fn determine_hydration(
     let has_uncovered_filter = node_plan
         .filters
         .iter()
-        .any(|(_, filter)| !filter_covered_by_denorm(filter, alias, hops, denormalized));
+        .any(|(_, filter)| denorm_hop(filter, alias, hops, denormalized).is_none());
 
     if has_uncovered_filter {
         HydrationStrategy::FilterOnly
@@ -691,36 +729,35 @@ fn determine_hydration(
 
 // Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag
 // push must agree on which hop carries a denorm.
-fn filter_covered_by_denorm(
+pub(super) fn denorm_hop<'a>(
     filter: &BoundFilter,
     alias: &str,
     hops: &[Hop],
-    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-) -> bool {
-    hops.iter().any(|hop| {
+    denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Option<(usize, &'a DenormalizedProperty)> {
+    hops.iter().enumerate().find_map(|(position, hop)| {
         if crate::passes::normalize::is_wildcard(&hop.rel_types) {
-            return false;
+            return None;
         }
         let (start_col, end_col) = hop.direction.edge_columns();
         [(&hop.from_node, start_col), (&hop.to_node, end_col)]
             .iter()
-            .any(|(node, id_col)| {
+            .find_map(|(node, id_col)| {
                 if node.as_str() != alias {
-                    return false;
+                    return None;
                 }
                 let direction = if *id_col == SOURCE_ID_COLUMN {
                     DenormalizedDirection::Source
                 } else {
                     DenormalizedDirection::Target
                 };
-                super::helpers::lowerable_denorm(filter, direction, denormalized).is_some_and(
-                    |facts| {
-                        hop.relationships
-                            .iter()
-                            .any(|relationship| facts.relationships.contains(relationship))
-                    },
-                )
+                super::helpers::lowerable_denorm(filter, direction, denormalized).filter(|facts| {
+                    hop.relationships
+                        .iter()
+                        .any(|relationship| facts.relationships.contains(relationship))
+                })
             })
+            .map(|facts| (position, facts))
     })
 }
 
@@ -783,12 +820,19 @@ fn resolve_join_columns(hops: &mut [Hop]) -> Result<()> {
     Ok(())
 }
 
-fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
+fn resolve_node_flags(
+    hops: &[Hop],
+    nodes: &mut HashMap<String, NodePlan>,
+    input: &Input,
+    predicate_joins: &HashSet<String>,
+) {
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
+    let narrows =
+        |alias: &String| has_filter_only || input.has_negation() && predicate_joins.contains(alias);
 
-    if has_filter_only {
+    if nodes.keys().any(narrows) {
         let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
         for hop in hops {
             *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
@@ -796,7 +840,8 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         let needs: Vec<String> = nodes
             .values()
             .filter(|np| {
-                np.hydration == HydrationStrategy::Join
+                narrows(&np.alias)
+                    && np.hydration == HydrationStrategy::Join
                     && np.filters.is_empty()
                     && np.node_ids.is_empty()
                     && np.id_range.is_none()

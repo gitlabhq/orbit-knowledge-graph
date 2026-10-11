@@ -95,9 +95,14 @@ GQL WHERE clauses and the JSON Query DSL's node-level `not` object both enter th
 It normalizes the tree and moves plain leaves into the filter maps.
 A tree holds cross-node comparisons and the `NOT` conditions that have no exact complement.
 Validation and restriction check both sides of every leaf, and normalization coerces enum values inside each tree.
-Planning binds a tree that reads one node to that node's scan. It applies other trees after the joins, where a node ID reads the edge column that binds the node.
+Planning binds a tree that reads one node to that node's scan, unless every leaf of the tree can read the edge. It applies the other trees after the joins.
+There, a node ID reads the edge column that binds the node.
+An `=` or `IN` leaf on a non-nullable denormalized property reads the edge tags, as a positive filter on that property does.
+This applies only to a one-hop edge that has no foreign key.
+A nullable property reads the node table, because a missing tag does not show a NULL value.
 Nodes and relationships that a tree reads keep their table scans: foreign-key elision and FK chains skip them, and aggregation scope proofs exclude them.
 Trees never make a node selective, so a node whose only condition is `NOT` gets no candidate or filter keys.
+When a tree reads a node from the node table, planning narrows that scan to the IDs on the edge keys.
 Queries that keep a `NOT` node after normalization set `transform_null_in = 0`, so a NULL value under `IN` stays NULL at every depth of negation. A complemented `NOT` is an ordinary filter and does not set it.
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
