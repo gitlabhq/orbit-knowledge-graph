@@ -1,0 +1,13 @@
+description: >
+  An uppercase type(r) name that the schema does not have rejects with a
+  static message, so the error does not echo the query literal.
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) = 'NOPE_PRIVATE_TYPE'
+    RETURN u LIMIT 10
+
+expect:
+  compile_error: "type() names a relationship type that the schema does not have"
+  compile_error_not_contains: ["NOPE_PRIVATE_TYPE"]
