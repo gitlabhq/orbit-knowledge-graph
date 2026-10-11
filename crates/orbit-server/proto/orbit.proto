@@ -569,6 +569,7 @@ message NamespaceIndexingStatus {
   string traversal_path = 1;
   IndexingPhase phase = 2;
   repeated DomainIndexingStatus domains = 3;
+  optional string last_completed_at = 4;
 }
 
 message DomainIndexingStatus {

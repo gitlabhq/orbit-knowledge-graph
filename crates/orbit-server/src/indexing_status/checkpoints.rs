@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
 use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
+use ontology::pipelines::PipelineDescriptor;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
 use tonic::Status;
@@ -18,7 +19,7 @@ const STALE_AFTER: TimeDelta = TimeDelta::hours(2);
 // Not `FINAL`: until a merge, a completed row still counts after an overlapping run's late page write.
 const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
-       toBool(isNotNull(maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at))) AS completed, \
+       maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
        argMax(attempts, _version) AS attempts, \
        max(_version) AS written_at \
   FROM (SELECT *, \
@@ -33,7 +34,7 @@ SELECT root, plan, \
 HAVING argMax(_deleted, _version) = false";
 
 struct PlanCheckpoint {
-    completed: bool,
+    indexed_at: Option<DateTime<Utc>>,
     attempts: i64,
     written_at: DateTime<Utc>,
 }
@@ -49,7 +50,7 @@ impl PlanCheckpoints {
             return Phase::NotStarted;
         };
 
-        if checkpoint.completed {
+        if checkpoint.indexed_at.is_some() {
             Phase::Ready
         } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS
             || now - checkpoint.written_at > STALE_AFTER
@@ -58,6 +59,15 @@ impl PlanCheckpoints {
         } else {
             Phase::Syncing
         }
+    }
+
+    pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
+        let indexed_at: Option<Vec<DateTime<Utc>>> = plans
+            .iter()
+            .map(|plan| self.by_plan.get(&plan.name)?.indexed_at)
+            .collect();
+
+        indexed_at?.into_iter().min()
     }
 }
 
@@ -80,23 +90,28 @@ pub async fn read_plan_checkpoints(
         })
         .await?;
 
+    let mut checkpoints: HashMap<i64, PlanCheckpoints> = roots
+        .iter()
+        .map(|root| (*root, PlanCheckpoints::default()))
+        .collect();
+
     let roots = i64::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let plans = String::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
-    let completed = bool::extract_column(&batches, 2).map_err(map_column_extraction_error)?;
+    let indexed_at = Option::<DateTime<Utc>>::extract_column(&batches, 2)
+        .map_err(map_column_extraction_error)?;
     let attempts = i64::extract_column(&batches, 3).map_err(map_column_extraction_error)?;
     let written_at =
         DateTime::<Utc>::extract_column(&batches, 4).map_err(map_column_extraction_error)?;
 
-    let mut checkpoints: HashMap<i64, PlanCheckpoints> = HashMap::new();
-    for ((((root, plan), completed), attempts), written_at) in roots
+    for ((((root, plan), indexed_at), attempts), written_at) in roots
         .into_iter()
         .zip(plans)
-        .zip(completed)
+        .zip(indexed_at)
         .zip(attempts)
         .zip(written_at)
     {
         let checkpoint = PlanCheckpoint {
-            completed,
+            indexed_at,
             attempts,
             written_at,
         };
