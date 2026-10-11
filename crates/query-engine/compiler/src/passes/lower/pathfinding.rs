@@ -249,7 +249,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
 
-    if !force_cte && !np.node_ids.is_empty() {
+    if !force_cte && np.is_id_pinned_only() {
         return Anchor {
             edge_filter: Expr::col_in(
                 "e1",
@@ -348,7 +348,7 @@ const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
 const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
 fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
-    if !np.node_ids.is_empty() {
+    if np.is_id_pinned_only() {
         return Expr::col_in(
             alias,
             col,

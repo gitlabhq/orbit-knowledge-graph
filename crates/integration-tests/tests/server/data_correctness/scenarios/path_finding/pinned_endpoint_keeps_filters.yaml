@@ -1,0 +1,25 @@
+description: A pinned path endpoint with a property filter only reaches the IDs that pass the filter
+
+query:
+  json: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "u", "entity": "User", "node_ids": [1]},
+        {"id": "g", "entity": "Group", "node_ids": [100, 102], "filters": {"visibility_level": "public"}}
+      ],
+      "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 2, "rel_types": ["MEMBER_OF"]}
+    }
+  gql: |
+    MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF*1..2]->(g:Group)
+    WHERE g.id IN [100, 102] AND g.visibility_level = 'public'
+    RETURN p
+
+expect:
+  path_count: 1
+  path_destinations:
+    Group: [100]
+  nodes:
+    Group:
+      filters:
+        visibility_level: public
