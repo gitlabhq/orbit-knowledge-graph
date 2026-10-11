@@ -18,7 +18,7 @@ pub struct DuckDbEntityLayout {
 }
 
 #[derive(Debug)]
-pub struct DuckDbCatalog {
+pub struct DuckDbMapping {
     edge_table: String,
     edge_sort_key: Vec<String>,
     edge_column_types: std::collections::BTreeMap<String, ontology::DataType>,
@@ -29,7 +29,7 @@ pub struct DuckDbCatalog {
     denormalized: DenormalizedCatalog,
 }
 
-impl RelationalMapping for DuckDbCatalog {
+impl RelationalMapping for DuckDbMapping {
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
@@ -84,7 +84,7 @@ impl RelationalMapping for DuckDbCatalog {
     }
 
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
-        DuckDbCatalog::relationship_table(self, relationship)
+        DuckDbMapping::relationship_table(self, relationship)
     }
 
     fn edge_tables(&self, _relationships: &[RelationshipId]) -> Vec<String> {
@@ -129,7 +129,7 @@ impl RelationalMapping for DuckDbCatalog {
     }
 }
 
-impl DuckDbCatalog {
+impl DuckDbMapping {
     pub fn entity(&self, id: EntityId) -> Option<&DuckDbEntityLayout> {
         self.entities.get(id.index())?.as_ref()
     }

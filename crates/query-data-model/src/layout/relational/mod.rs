@@ -6,28 +6,16 @@ pub use mapping::{
     TraversalPathLookup,
 };
 use std::fmt::Debug;
-use std::marker::PhantomData;
-
-use super::{Layout, LayoutModel};
 
 pub trait RelationalBackend: Debug + Clone {
     type StorageType: Debug + Clone;
     type TableOptions: Debug + Clone;
     type ColumnOptions: Debug + Clone;
     type Metadata: Debug;
-    type Mapping: Debug;
 }
 
 #[derive(Debug)]
-pub struct Relational<B: RelationalBackend>(PhantomData<B>);
-
-impl<B: RelationalBackend> LayoutModel for Relational<B> {
-    type Schema = Schema<B>;
-    type Mapping = B::Mapping;
-}
-
-#[derive(Debug)]
-pub struct Schema<B: RelationalBackend> {
+pub struct Relational<B: RelationalBackend> {
     pub tables: Vec<Table<B>>,
     pub metadata: B::Metadata,
 }
@@ -50,17 +38,7 @@ pub struct Column<B: RelationalBackend> {
     pub options: B::ColumnOptions,
 }
 
-impl<B: RelationalBackend> Layout<Relational<B>> {
-    pub fn tables(&self) -> &[Table<B>] {
-        self.schema.tables()
-    }
-
-    pub fn table(&self, name: &str) -> Option<&Table<B>> {
-        self.schema.table(name)
-    }
-}
-
-impl<B: RelationalBackend> Schema<B> {
+impl<B: RelationalBackend> Relational<B> {
     pub fn tables(&self) -> &[Table<B>] {
         &self.tables
     }

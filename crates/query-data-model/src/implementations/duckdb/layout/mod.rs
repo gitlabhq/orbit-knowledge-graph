@@ -8,20 +8,19 @@ impl crate::RelationalBackend for DuckDb {
     type TableOptions = ();
     type ColumnOptions = ();
     type Metadata = Metadata;
-    type Mapping = super::DuckDbCatalog;
 }
 
-pub type LayoutCatalog = crate::layout::relational::Schema<DuckDb>;
 pub type Table = crate::layout::relational::Table<DuckDb>;
 pub type Column = crate::layout::relational::Column<DuckDb>;
 
 #[derive(Debug)]
 pub struct Metadata {
+    pub(crate) entities: Vec<crate::implementations::EntityFacts>,
     pub edge_table: String,
     pub entity_tables: HashMap<String, String>,
 }
 
-impl LayoutCatalog {
+impl crate::Relational<DuckDb> {
     pub fn derive(ontology: &ontology::Ontology) -> Self {
         let edge_table = ontology
             .local_edge_table_name()
@@ -90,6 +89,7 @@ impl LayoutCatalog {
         Self {
             tables,
             metadata: Metadata {
+                entities: crate::implementations::entity_facts(ontology, true),
                 edge_table,
                 entity_tables,
             },

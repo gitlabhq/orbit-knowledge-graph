@@ -8,7 +8,9 @@ pub use translate::render_refreshable_view_select;
 
 #[derive(Debug)]
 pub struct GraphSchema {
-    pub storage: query_data_model::implementations::clickhouse::layout::LayoutCatalog,
+    pub storage: query_data_model::Relational<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >,
     pub tables: Vec<Table>,
     pub views: Vec<View>,
     pub dictionaries: Vec<Dictionary>,
@@ -159,9 +161,10 @@ impl GraphSchema {
     /// `replicated` renders every MergeTree engine as its `Replicated*` variant for a
     /// self-managed cluster; a `Replicated` database replicates DDL only.
     pub fn from_ontology_replicated(ontology: &Ontology, replicated: bool) -> Self {
-        let storage =
-            query_data_model::implementations::clickhouse::layout::LayoutCatalog::derive(ontology)
-                .expect("validated ontology storage");
+        let storage = query_data_model::Relational::<
+            query_data_model::implementations::clickhouse::layout::ClickHouse,
+        >::derive(ontology)
+        .expect("validated ontology storage");
         let mut tables = translate::build_all_tables(&storage);
         let mut views = translate::build_views(&storage);
         if replicated {

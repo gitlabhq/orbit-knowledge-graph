@@ -140,9 +140,10 @@ pub async fn replace_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let storage =
-        query_data_model::implementations::clickhouse::layout::LayoutCatalog::derive(ontology)
-            .expect("validated storage catalog");
+    let storage = query_data_model::Relational::<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >::derive(ontology)
+    .expect("validated storage catalog");
     for view in storage.refreshable_views() {
         let view_name = if view.versioned {
             format!("{prefix}{}", view.name)
@@ -182,9 +183,10 @@ pub async fn drop_versioned_refreshable_views(
     version: u32,
 ) -> Result<(), MigrationError> {
     let prefix = table_prefix(version);
-    let storage =
-        query_data_model::implementations::clickhouse::layout::LayoutCatalog::derive(ontology)
-            .expect("validated storage catalog");
+    let storage = query_data_model::Relational::<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >::derive(ontology)
+    .expect("validated storage catalog");
     for view in storage
         .refreshable_views()
         .iter()

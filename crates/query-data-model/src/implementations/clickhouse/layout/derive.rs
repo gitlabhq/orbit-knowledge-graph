@@ -5,7 +5,7 @@ use ontology::{DataType, Ontology, StorageColumn, StorageIndex, StorageProjectio
 use super::*;
 use crate::DataModelError;
 
-impl LayoutCatalog {
+impl crate::Relational<ClickHouse> {
     pub fn derive(ontology: &Ontology) -> Result<Self, DataModelError> {
         let mut tables = Vec::new();
         for node in ontology.nodes() {
@@ -215,6 +215,10 @@ impl LayoutCatalog {
         Ok(Self {
             tables,
             metadata: Metadata {
+                entities: crate::implementations::entity_facts(ontology, false),
+                default_edge_table: ontology.edge_table().to_string(),
+                denormalized: ontology.denormalized_properties().to_vec(),
+                traversal_path_lookups: ontology.traversal_path_lookups().to_vec(),
                 auxiliary_tables: ontology
                     .auxiliary_tables()
                     .iter()

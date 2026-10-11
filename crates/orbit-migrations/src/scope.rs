@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ontology::pipelines::PipelineDescriptor;
 use ontology::{EtlScope, Ontology};
-use query_data_model::implementations::clickhouse::layout::LayoutCatalog;
+use query_data_model::{Relational, implementations::clickhouse::layout::ClickHouse};
 use serde::{Deserialize, Serialize};
 
 pub const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
@@ -129,7 +129,7 @@ pub fn widen_scope_for_shared_table_writers(
 
     let invalidated = invalidated_entities(ontology, requested_scope);
 
-    let storage = LayoutCatalog::derive(ontology).expect("validated layout catalog");
+    let storage = Relational::<ClickHouse>::derive(ontology).expect("validated layout catalog");
     for table in storage.versioned_tables().map(|table| &table.name) {
         if matches!(requested_scope, MigrationScope::Code) && table == ontology.edge_table() {
             continue;
@@ -157,7 +157,7 @@ pub fn classify_tables_for_scope(
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
-    let storage = LayoutCatalog::derive(ontology).expect("validated layout catalog");
+    let storage = Relational::<ClickHouse>::derive(ontology).expect("validated layout catalog");
 
     storage
         .versioned_tables()
@@ -230,7 +230,7 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
 }
 
 fn migration_action_for_table(
-    storage: &LayoutCatalog,
+    storage: &Relational<ClickHouse>,
     table: &str,
     scope: &MigrationScope,
     invalidated: &BTreeSet<String>,

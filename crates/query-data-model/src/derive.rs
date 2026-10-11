@@ -1,35 +1,25 @@
 use crate::implementations::{clickhouse, duckdb};
 use crate::{
-    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog, Layout,
-    TrustedLocalCatalog,
+    ClickHouseDataModel, DataModelError, DuckDbDataModel, GitLabAuthzCatalog, GraphCatalog,
+    Relational, TrustedLocalCatalog,
 };
 use std::sync::Arc;
 
 impl ClickHouseDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
         let graph = GraphCatalog::derive(&ontology)?;
-        let schema = clickhouse::layout::LayoutCatalog::derive(&ontology)?;
-        let mapping = clickhouse::mapping::derive(&ontology, &graph, &schema)?;
+        let schema = Relational::<clickhouse::layout::ClickHouse>::derive(&ontology)?;
         let authorization = GitLabAuthzCatalog::from_ontology(&ontology, &graph)?;
-        Ok(Self::new(
-            graph,
-            Layout::new(schema, mapping),
-            authorization,
-        ))
+        Self::build(graph, schema, authorization)
     }
 }
 
 impl DuckDbDataModel {
     pub fn derive(ontology: Arc<ontology::Ontology>) -> Result<Self, DataModelError> {
         let graph = GraphCatalog::derive(&ontology)?;
-        let schema = duckdb::layout::LayoutCatalog::derive(&ontology);
-        let mapping = duckdb::mapping::derive(&ontology, &graph, &schema)?;
+        let schema = Relational::<duckdb::layout::DuckDb>::derive(&ontology);
         let authorization = TrustedLocalCatalog::from_ontology(&ontology, &graph)?;
-        Ok(Self::new(
-            graph,
-            Layout::new(schema, mapping),
-            authorization,
-        ))
+        Self::build(graph, schema, authorization)
     }
 }
 
@@ -45,13 +35,22 @@ mod tests {
 
     #[test]
     fn constructs_a_document_model_without_relational_or_gitlab_contracts() {
-        use crate::{DataModel, GraphCatalog, Layout, LayoutModel};
+        use crate::{DataModel, DataModelError, GraphCatalog, Mapping};
         use std::collections::HashMap;
 
-        struct Documents;
-        impl LayoutModel for Documents {
-            type Schema = Vec<String>;
-            type Mapping = HashMap<crate::PropertyId, Vec<String>>;
+        struct Documents {
+            collections: Vec<String>,
+        }
+        struct DocumentMapping(HashMap<crate::PropertyId, Vec<String>>);
+        impl Mapping<Documents> for DocumentMapping {
+            fn derive(graph: &GraphCatalog, schema: &Documents) -> Result<Self, DataModelError> {
+                assert_eq!(schema.collections, ["records"]);
+                let property = graph.property_named("Record", "key").unwrap().id;
+                Ok(Self(HashMap::from([(
+                    property,
+                    vec!["metadata".into(), "key".into()],
+                )])))
+            }
         }
 
         let mut graph = GraphCatalog::new();
@@ -62,17 +61,39 @@ mod tests {
         let related = graph
             .add_relationship("RELATED".into(), &[(entity, entity)])
             .unwrap();
-        let layout = Layout::<Documents>::new(
-            vec!["records".into()],
-            HashMap::from([(key, vec!["metadata".into(), "key".into()])]),
-        );
-        let model = DataModel::new(graph, layout, ());
+        let model = DataModel::<_, DocumentMapping, _>::build(
+            graph,
+            Documents {
+                collections: vec!["records".into()],
+            },
+            (),
+        )
+        .unwrap();
 
-        assert_eq!(model.layout().schema, ["records"]);
-        assert_eq!(model.backend()[&key], ["metadata", "key"]);
+        assert_eq!(model.layout().schema().collections, ["records"]);
+        assert_eq!(model.backend().0[&key], ["metadata", "key"]);
         assert!(model.graph().property_id(entity, "id").is_none());
         assert!(model.graph().variant_id(related, entity, entity).is_some());
         assert!(model.graph().property_id(entity, "key").is_some());
+    }
+
+    #[test]
+    fn rejects_a_schema_whose_entities_are_missing_from_the_graph() {
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let schema =
+            crate::Relational::<crate::implementations::clickhouse::layout::ClickHouse>::derive(
+                &ontology,
+            )
+            .unwrap();
+        let result = crate::DataModel::<_, crate::implementations::ClickHouseMapping, _>::build(
+            crate::GraphCatalog::new(),
+            schema,
+            (),
+        );
+        assert!(matches!(
+            result,
+            Err(crate::DataModelError::UnknownReference { kind: "entity", .. })
+        ));
     }
 
     #[test]

@@ -11,10 +11,8 @@ impl crate::RelationalBackend for ClickHouse {
     type TableOptions = TableOptions;
     type ColumnOptions = ColumnOptions;
     type Metadata = Metadata;
-    type Mapping = super::ClickHouseCatalog;
 }
 
-pub type LayoutCatalog = crate::layout::relational::Schema<ClickHouse>;
 pub type Table = crate::layout::relational::Table<ClickHouse>;
 pub type Column = crate::layout::relational::Column<ClickHouse>;
 
@@ -177,6 +175,10 @@ pub struct EdgeRoute {
 
 #[derive(Debug)]
 pub struct Metadata {
+    pub(crate) entities: Vec<crate::implementations::EntityFacts>,
+    pub(crate) default_edge_table: String,
+    pub(crate) denormalized: Vec<ontology::DenormalizedProperty>,
+    pub(crate) traversal_path_lookups: Vec<ontology::TraversalPathLookup>,
     auxiliary_tables: Vec<AuxiliaryTable>,
     dictionaries: Vec<Dictionary>,
     views: Vec<MaterializedView>,
@@ -188,7 +190,7 @@ pub struct Metadata {
     relationship_tables: BTreeMap<String, BTreeSet<String>>,
 }
 
-impl LayoutCatalog {
+impl crate::Relational<ClickHouse> {
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.metadata.auxiliary_tables
     }

@@ -4,33 +4,34 @@ mod ids;
 pub use catalog::{Entity, GraphCatalog, Property, Relationship, RelationshipVariant};
 pub use ids::{EntityId, PropertyId, RelationshipId, RelationshipVariantId};
 
-use crate::{Layout, LayoutModel};
+use crate::{DataModelError, Layout, Mapping};
 
-pub struct DataModel<T: LayoutModel, A> {
+pub struct DataModel<S, M: Mapping<S>, A> {
     graph: GraphCatalog,
-    layout: Layout<T>,
+    layout: Layout<S, M>,
     authorization: A,
 }
 
-impl<T: LayoutModel, A> DataModel<T, A> {
-    pub fn new(graph: GraphCatalog, layout: Layout<T>, authorization: A) -> Self {
-        Self {
+impl<S, M: Mapping<S>, A> DataModel<S, M, A> {
+    pub fn build(graph: GraphCatalog, schema: S, authorization: A) -> Result<Self, DataModelError> {
+        let layout = Layout::build(&graph, schema)?;
+        Ok(Self {
             graph,
             layout,
             authorization,
-        }
+        })
     }
 
     pub fn graph(&self) -> &GraphCatalog {
         &self.graph
     }
 
-    pub fn layout(&self) -> &Layout<T> {
+    pub fn layout(&self) -> &Layout<S, M> {
         &self.layout
     }
 
-    pub fn backend(&self) -> &T::Mapping {
-        &self.layout.mapping
+    pub fn backend(&self) -> &M {
+        self.layout.mapping()
     }
 
     pub fn authorization(&self) -> &A {

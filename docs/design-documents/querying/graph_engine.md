@@ -28,12 +28,13 @@ primary keys, and secondary indexes.
 ### Storage catalogs
 
 Each backend owns its storage catalog under `query-data-model/src/implementations/`.
-Both use `Layout<Relational<Backend>>` with shared table, column, and key structures.
-`LayoutModel` selects schema and mapping types, so `Layout<T>` does not require tables or columns.
-`RelationalBackend` supplies physical types, table options, column options, and backend metadata.
+Both use `Layout<Relational<Backend>, Mapping>` with shared table, column, and key structures.
+`Layout<S, M>` pairs an explicit schema and mapping. The bound `M: Mapping<S>` enforces compatible types.
+`Relational<Backend>` owns the tables directly. `RelationalBackend` supplies physical types, options, and backend metadata.
 ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
 DuckDB uses the same relational structures with its local type facts.
-`DataModel<T, A>` owns the graph, storage, and an independent policy value. It can be built from parts without an ontology.
+`DataModel<S, M, A>` owns the graph, layout, and an independent policy value.
+Its fallible constructor derives the mapping from the supplied graph and schema. Private layout fields prevent callers from substituting an unrelated mapping.
 Constructors in `derive.rs` derive a storage schema once, then build its query mapping from that schema.
 The model does not retain the ontology. JSON frontend validation reads the graph and policy catalogs directly.
 The existing compiler uses `OrbitQueryModel` in `models/orbit.rs`, which combines relational mapping with GitLab policy.

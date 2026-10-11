@@ -5,7 +5,7 @@ pub mod generic;
 pub mod implementations;
 pub mod layout;
 pub mod models;
-pub use layout::{Layout, LayoutModel, Relational, RelationalBackend};
+pub use layout::{Layout, Mapping, Relational, RelationalBackend};
 
 pub use authz::gitlab::{EntityAuthConfig, GitLabAuthzCatalog, GitLabPolicy};
 pub use authz::trusted::TrustedLocalCatalog;

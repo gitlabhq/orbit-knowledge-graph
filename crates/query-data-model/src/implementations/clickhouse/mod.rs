@@ -58,7 +58,7 @@ pub struct EntityLayout {
 }
 
 #[derive(Debug)]
-pub struct ClickHouseCatalog {
+pub struct ClickHouseMapping {
     default_edge_table: String,
     entities: Vec<Option<EntityLayout>>,
     relationships: Vec<Option<String>>,
@@ -69,7 +69,7 @@ pub struct ClickHouseCatalog {
     traversal_path_lookups: HashMap<(EntityId, ontology::TraversalPathKind), TraversalPathLookup>,
 }
 
-impl ClickHouseCatalog {
+impl ClickHouseMapping {
     pub fn entity(&self, id: EntityId) -> Option<&EntityLayout> {
         self.entities.get(id.index())?.as_ref()
     }
@@ -117,7 +117,7 @@ impl ClickHouseCatalog {
     }
 }
 
-impl RelationalMapping for ClickHouseCatalog {
+impl RelationalMapping for ClickHouseMapping {
     fn entity_table(&self, entity: EntityId) -> Option<&str> {
         self.entity(entity).map(|layout| layout.table.as_str())
     }
@@ -170,11 +170,11 @@ impl RelationalMapping for ClickHouseCatalog {
     }
 
     fn default_edge_table(&self) -> &str {
-        ClickHouseCatalog::default_edge_table(self)
+        ClickHouseMapping::default_edge_table(self)
     }
 
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str> {
-        ClickHouseCatalog::relationship_table(self, relationship)
+        ClickHouseMapping::relationship_table(self, relationship)
     }
 
     fn edge_tables(&self, relationships: &[RelationshipId]) -> Vec<String> {
@@ -224,6 +224,6 @@ impl RelationalMapping for ClickHouseCatalog {
         entity: EntityId,
         kind: ontology::TraversalPathKind,
     ) -> Option<&TraversalPathLookup> {
-        ClickHouseCatalog::traversal_path_lookup(self, entity, kind)
+        ClickHouseMapping::traversal_path_lookup(self, entity, kind)
     }
 }

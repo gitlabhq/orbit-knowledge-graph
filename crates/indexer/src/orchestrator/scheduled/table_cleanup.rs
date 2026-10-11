@@ -111,9 +111,10 @@ impl TableCleanup {
 }
 
 fn list_graph_tables(ontology: &ontology::Ontology) -> Vec<String> {
-    let storage =
-        query_data_model::implementations::clickhouse::layout::LayoutCatalog::derive(ontology)
-            .expect("validated storage catalog");
+    let storage = query_data_model::Relational::<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >::derive(ontology)
+    .expect("validated storage catalog");
     storage
         .graph_tables()
         .iter()

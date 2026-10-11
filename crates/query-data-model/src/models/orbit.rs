@@ -2,10 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 pub type ClickHouseDataModel = crate::DataModel<
     crate::Relational<crate::implementations::clickhouse::layout::ClickHouse>,
+    crate::implementations::ClickHouseMapping,
     crate::GitLabAuthzCatalog,
 >;
 pub type DuckDbDataModel = crate::DataModel<
     crate::Relational<crate::implementations::duckdb::layout::DuckDb>,
+    crate::implementations::DuckDbMapping,
     crate::TrustedLocalCatalog,
 >;
 
@@ -16,19 +18,19 @@ use crate::{Entity, EntityId, GraphCatalog, Property, PropertyId};
 
 use crate::GitLabPolicy;
 
-impl<B, A> OrbitQueryModel for crate::DataModel<crate::Relational<B>, A>
+impl<B, M, A> OrbitQueryModel for crate::DataModel<crate::Relational<B>, M, A>
 where
     B: crate::RelationalBackend,
-    B::Mapping: RelationalMapping,
+    M: crate::Mapping<crate::Relational<B>> + RelationalMapping,
     A: GitLabPolicy,
 {
-    type BackendCatalog = B::Mapping;
+    type BackendCatalog = M;
     type AuthorizationCatalog = A;
 
     fn graph(&self) -> &GraphCatalog {
         self.graph()
     }
-    fn query_backend(&self) -> &B::Mapping {
+    fn query_backend(&self) -> &M {
         self.backend()
     }
     fn query_authorization(&self) -> &A {

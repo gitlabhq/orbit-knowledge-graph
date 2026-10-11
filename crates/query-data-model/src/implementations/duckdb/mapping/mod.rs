@@ -1,84 +1,60 @@
-use super::{DuckDbCatalog, DuckDbEntityLayout, layout::LayoutCatalog};
+use super::{DuckDbEntityLayout, DuckDbMapping, layout::DuckDb};
 use crate::implementations::derive_property_backend_facts;
-use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, PropertyRealization};
+use crate::{DataModelError, DenormalizedCatalog, GraphCatalog, Mapping, Relational};
 
-pub(crate) fn derive(
-    ontology: &ontology::Ontology,
-    graph: &GraphCatalog,
-    storage: &LayoutCatalog,
-) -> Result<DuckDbCatalog, DataModelError> {
-    let mut entities = std::iter::repeat_with(|| None)
-        .take(graph.entities().count())
-        .collect::<Vec<_>>();
-    let mut property_facts = derive_property_backend_facts(ontology, graph)?;
-    let local_entities = ontology.local_entity_names();
-    let entity_names: Vec<_> = if local_entities.is_empty() {
-        ontology.node_names().collect()
-    } else {
-        local_entities
-    };
-    for entity_name in entity_names {
-        let entity_id =
-            graph
-                .entity_id(entity_name)
-                .ok_or_else(|| DataModelError::UnknownReference {
-                    kind: "local entity",
-                    name: entity_name.to_string(),
-                })?;
-        let node =
-            ontology
-                .get_node(entity_name)
-                .ok_or_else(|| DataModelError::UnknownReference {
-                    kind: "entity",
-                    name: entity_name.to_string(),
-                })?;
-        let local_fields = ontology
-            .local_entity_fields(entity_name)
-            .unwrap_or_else(|| node.fields.iter().collect());
-        let table = storage
-            .entity_table(entity_name)
-            .expect("derived local entity table");
-        let has_traversal_path = table
-            .columns
-            .iter()
-            .any(|column| column.name == ontology::constants::TRAVERSAL_PATH_COLUMN);
-        for field in local_fields {
-            let Some(property) = graph.property_id(entity_id, &field.name) else {
-                continue;
-            };
-            property_facts[property.index()].realization = Some(match &field.source {
-                ontology::FieldSource::DatabaseColumn(column) => PropertyRealization::Stored {
-                    column: column.clone(),
-                },
-                ontology::FieldSource::Virtual(source) => {
-                    PropertyRealization::Virtual(source.clone())
+impl Mapping<Relational<DuckDb>> for DuckDbMapping {
+    fn derive(graph: &GraphCatalog, storage: &Relational<DuckDb>) -> Result<Self, DataModelError> {
+        let mut entities = std::iter::repeat_with(|| None)
+            .take(graph.entities().count())
+            .collect::<Vec<_>>();
+        let mut property_facts = derive_property_backend_facts(&storage.metadata.entities, graph)?;
+        for entity in graph.entities() {
+            if !storage.metadata.entity_tables.contains_key(&entity.name) {
+                for property in &entity.properties {
+                    property_facts[property.index()].realization = None;
                 }
+            }
+        }
+        for entity_name in storage.metadata.entity_tables.keys().map(String::as_str) {
+            let entity_id =
+                graph
+                    .entity_id(entity_name)
+                    .ok_or_else(|| DataModelError::UnknownReference {
+                        kind: "local entity",
+                        name: entity_name.to_string(),
+                    })?;
+            let table = storage
+                .entity_table(entity_name)
+                .expect("derived local entity table");
+            let has_traversal_path = table
+                .columns
+                .iter()
+                .any(|column| column.name == ontology::constants::TRAVERSAL_PATH_COLUMN);
+            entities[entity_id.index()] = Some(DuckDbEntityLayout {
+                table: table.name.clone(),
+                default_properties: graph.entity(entity_id).properties.clone(),
+                sort_key: table.sort_key.clone(),
+                has_traversal_path,
             });
         }
-        entities[entity_id.index()] = Some(DuckDbEntityLayout {
-            table: table.name.clone(),
-            default_properties: graph.entity(entity_id).properties.clone(),
-            sort_key: table.sort_key.clone(),
-            has_traversal_path,
-        });
+        let relationships = graph
+            .relationships()
+            .map(|_| storage.edge().name.clone())
+            .collect();
+        Ok(DuckDbMapping {
+            edge_columns: storage
+                .edge()
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect(),
+            edge_table: storage.edge().name.clone(),
+            edge_sort_key: storage.edge().sort_key.clone(),
+            edge_column_types: storage.edge().column_types.clone(),
+            entities,
+            property_facts,
+            relationships,
+            denormalized: DenormalizedCatalog::default(),
+        })
     }
-    let relationships = graph
-        .relationships()
-        .map(|_| storage.edge().name.clone())
-        .collect();
-    Ok(DuckDbCatalog {
-        edge_columns: storage
-            .edge()
-            .columns
-            .iter()
-            .map(|column| column.name.clone())
-            .collect(),
-        edge_table: storage.edge().name.clone(),
-        edge_sort_key: storage.edge().sort_key.clone(),
-        edge_column_types: storage.edge().column_types.clone(),
-        entities,
-        property_facts,
-        relationships,
-        denormalized: DenormalizedCatalog::default(),
-    })
 }
