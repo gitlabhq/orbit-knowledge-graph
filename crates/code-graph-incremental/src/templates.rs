@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::pipeline::{
-    Canonicalize, Changes, Context, Display, Each, Export, FamilyTiming, Insert, ItemPhase, Link,
-    Outcome, Parse, Pipeline, Prepare, ReadFailure, ReindexInput, Remap, Resolve, Resolved,
-    Rewrite, Sources, State,
+    Canonicalize, Changes, Context, Display, Each, Insert, ItemPhase, Link, Parse, Pipeline,
+    Prepare, ReindexInput, Remap, Report, Resolve, Resolved, Rewrite, Sources, State,
 };
 use crate::sentinel::Sentinel;
 use crate::treesitter::SupportLang;
@@ -57,8 +56,7 @@ pub fn repository<E: std::fmt::Display>(
     envelope: &Envelope<'_>,
     ontology: &ontology::Ontology,
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
-) -> Result<Outcome, Error> {
-    let started = Instant::now();
+) -> Result<Report, Error> {
     let limits = Limits {
         file_parse_ms: millis(options.parse_timeout),
         file_rewrite_ms: millis(options.rewrite_timeout),
@@ -81,24 +79,42 @@ pub fn repository<E: std::fmt::Display>(
             );
         }
     }
+    let mut result = Report::default();
     if families.is_empty() {
-        families.insert("python", SupportLang::Python);
+        let lang = crate::intern::Lang::new();
+        let trees: Vec<_> = repository
+            .files()
+            .map(|file| {
+                let reason = match file.decision() {
+                    orbit_utils::vfs::Decision::List(reason) => format!("skip_{reason}"),
+                    _ => String::new(),
+                };
+                crate::tree::Tree::unparsed(&lang, &file.path, file.size, &reason).into()
+            })
+            .collect();
+        emit(crate::export::export_selected(
+            &trees,
+            &[],
+            &lang,
+            ontology,
+            envelope,
+            true,
+            &|_| true,
+        )?)
+        .map_err(|error| {
+            Error::Export(arrow::error::ArrowError::ExternalError(
+                error.to_string().into(),
+            ))
+        })?;
+        run.check()?;
+        return Ok(result);
     }
-    let first = families.keys().next().copied().unwrap_or("python");
+    let first = *families.first_key_value().expect("nonempty families").0;
     let owns = |family: &str, path: &str| {
         SupportLang::from_path(path)
             .filter(|_| selected.contains(path))
             .map_or(first, SupportLang::family)
             == family
-    };
-    let mut result = Outcome {
-        source_bytes: repository.usage().bytes,
-        candidates: selected.len(),
-        filtered: repository
-            .files()
-            .filter(|file| matches!(file.decision(), orbit_utils::vfs::Decision::List(_)))
-            .count(),
-        ..Outcome::default()
     };
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(options.worker_threads)
@@ -107,46 +123,32 @@ pub fn repository<E: std::fmt::Display>(
         .map_err(|error| LoadError::new(error.to_string()))?;
     for (family, language) in &families {
         run.check()?;
-        let family_started = Instant::now();
         let env = Env::with_limits(*language, limits)?;
         let mut context = Context::new(&env);
         context.run = run.clone();
         context.max_files = options.max_files;
         context.resolve_timeout_ms = millis(options.cross_file_timeout);
         let pipeline = pool.install(|| index(context, repository.clone()))?;
-        result
-            .skipped
-            .extend(pipeline.context().report.skipped.iter().cloned());
-        let reason_key = env.lang.syms.lookup("reason");
-        for tree in &pipeline.value().state.trees {
-            if owns(family, &tree.label)
-                && tree
-                    .root()
-                    .tag(reason_key)
-                    .is_some_and(|reason| env.lang.syms.resolve(reason) == "fault_file_read")
-            {
-                result.faults.push(ReadFailure {
-                    path: tree.label.clone(),
-                    detail: "source or manifest could not be read".into(),
-                });
-            }
-        }
-        let graph = pipeline
-            .then(Display)
-            .and_then(|pipeline| {
-                pipeline.then(Export {
-                    ontology,
-                    envelope: envelope.clone(),
-                })
-            })?
-            .into_value();
+        let (context, graph) = pipeline.then(Display)?.finish();
+        result.skipped.extend(context.report.skipped);
+        result.unread_files.extend(
+            context
+                .report
+                .unread_files
+                .into_iter()
+                .filter(|path| owns(family, path)),
+        );
+        result.files.extend(context.report.files);
+        result.phases.extend(context.report.phases);
         run.check()?;
-        let batches = crate::export::repository_rows(
-            graph.tables,
+        let batches = crate::export::export_selected(
+            &graph.state.trees,
+            &graph.state.edges,
+            &env.lang,
             ontology,
+            envelope,
             *family == first,
-            |path| owns(family, path),
-            &mut result,
+            &|path| owns(family, path),
         )?;
         emit(batches).map_err(|error| {
             Error::Export(arrow::error::ArrowError::ExternalError(
@@ -154,20 +156,7 @@ pub fn repository<E: std::fmt::Display>(
             ))
         })?;
         run.check()?;
-        let (files, bytes) = repository
-            .files()
-            .filter(|file| selected.contains(file.path.as_ref()) && owns(family, &file.path))
-            .fold((0, 0), |(count, bytes), file| {
-                (count + 1, bytes + file.size)
-            });
-        result.families.push(FamilyTiming {
-            language: (*family).into(),
-            files,
-            bytes,
-            elapsed: family_started.elapsed(),
-        });
         (options.family_finished)();
     }
-    result.elapsed = started.elapsed();
     Ok(result)
 }

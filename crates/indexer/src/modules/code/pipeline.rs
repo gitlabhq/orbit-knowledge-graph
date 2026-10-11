@@ -195,11 +195,11 @@ struct IndexedRun {
     rows_written: u64,
 }
 
-struct IndexingReport {
-    stats: code_graph::v2::pipeline::PipelineStats,
-    errors: Vec<code_graph::v2::pipeline::PipelineError>,
-    skipped: Vec<code_graph::v2::error::SkippedFile>,
-    faults: Vec<code_graph::v2::error::FaultedFile>,
+pub(super) struct IndexingReport {
+    pub stats: code_graph::v2::pipeline::PipelineStats,
+    pub errors: Vec<code_graph::v2::pipeline::PipelineError>,
+    pub skipped: Vec<code_graph::v2::error::SkippedFile>,
+    pub faults: Vec<code_graph::v2::error::FaultedFile>,
 }
 
 impl From<code_graph::v2::PipelineResult> for IndexingReport {
@@ -209,71 +209,6 @@ impl From<code_graph::v2::PipelineResult> for IndexingReport {
             errors: result.errors,
             skipped: result.skipped,
             faults: result.faults,
-        }
-    }
-}
-
-impl From<super::incremental::Outcome> for IndexingReport {
-    fn from(result: super::incremental::Outcome) -> Self {
-        use code_graph::v2::error::{AbortPhase, FaultedFile, FileFault, FileSkip, SkippedFile};
-        use code_graph::v2::pipeline::{LanguageTimings, PhaseTimings, PipelineStats};
-        Self {
-            stats: PipelineStats {
-                files_discovered: result.files,
-                bytes_discovered: result.source_bytes,
-                directories_indexed: result.directories,
-                files_indexed: result.files,
-                files_parsed: result.candidates,
-                files_skipped: result.filtered,
-                definitions_count: result.definitions,
-                imports_count: result.imports,
-                references_count: 0,
-                edges_count: result.edges,
-                slowest_files: Vec::new(),
-                language_timings: result
-                    .families
-                    .into_iter()
-                    .map(|family| LanguageTimings {
-                        language: family.language,
-                        file_count: family.files,
-                        total_bytes: family.bytes,
-                        total_ms: family.elapsed.as_secs_f64() * 1000.0,
-                        ..Default::default()
-                    })
-                    .collect(),
-                phase_timings: PhaseTimings {
-                    total_ms: result.elapsed.as_secs_f64() * 1000.0,
-                    language_processing_ms: result.elapsed.as_secs_f64() * 1000.0,
-                    ..Default::default()
-                },
-            },
-            errors: Vec::new(),
-            skipped: result
-                .skipped
-                .into_iter()
-                .map(|killed| {
-                    let phase = match killed.label {
-                        "tree-sitter" => AbortPhase::Parse,
-                        "rewrite" => AbortPhase::Walk,
-                        "link" => AbortPhase::Ssa,
-                        _ => AbortPhase::Sentinel,
-                    };
-                    SkippedFile {
-                        detail: killed.to_string(),
-                        path: killed.path,
-                        kind: FileSkip::Timeout(phase),
-                    }
-                })
-                .collect(),
-            faults: result
-                .faults
-                .into_iter()
-                .map(|file| FaultedFile {
-                    path: file.path,
-                    detail: file.detail,
-                    kind: FileFault::FileRead,
-                })
-                .collect(),
         }
     }
 }
@@ -759,8 +694,7 @@ impl CodeIndexer {
                     ontology,
                     table_names,
                     on_batch,
-                )
-                .map(IndexingReport::from),
+                ),
                 Repository::Extracted(repository) => Ok(Pipeline::run_with_tracer(
                     repository.path(),
                     repository.file_inventory.clone(),

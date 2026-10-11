@@ -16,7 +16,7 @@ pub fn candidate_count(repository: &Vfs<()>) -> usize {
     candidates(repository, 0).count()
 }
 
-pub(crate) fn candidates(
+pub fn candidates(
     repository: &Vfs<()>,
     max_files: usize,
 ) -> impl Iterator<Item = &orbit_utils::vfs::File<'static, ()>> {

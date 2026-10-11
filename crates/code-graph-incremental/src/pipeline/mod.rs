@@ -162,37 +162,10 @@ impl<'e> Context<'e> {
 #[derive(Default)]
 pub struct Report {
     pub skipped: Vec<Killed>,
+    pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
     /// How long each file took in each per-file phase, skipped ones included.
     pub files: Vec<FileTiming>,
-}
-
-#[derive(Default)]
-pub struct Outcome {
-    pub files: usize,
-    pub source_bytes: u64,
-    pub candidates: usize,
-    pub filtered: usize,
-    pub directories: usize,
-    pub definitions: usize,
-    pub imports: usize,
-    pub edges: usize,
-    pub skipped: Vec<Killed>,
-    pub faults: Vec<ReadFailure>,
-    pub families: Vec<FamilyTiming>,
-    pub elapsed: Duration,
-}
-
-pub struct ReadFailure {
-    pub path: String,
-    pub detail: String,
-}
-
-pub struct FamilyTiming {
-    pub language: String,
-    pub files: usize,
-    pub bytes: u64,
-    pub elapsed: Duration,
 }
 
 pub struct PhaseReport {

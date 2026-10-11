@@ -438,6 +438,9 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
                 _ if candidates.contains(path) || missing_manifest => "fault_file_read".into(),
                 _ => String::new(),
             };
+            if reason == "fault_file_read" {
+                context.report.unread_files.push(path.to_owned());
+            }
             unparsed.push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
         state.trees.extend(unparsed);

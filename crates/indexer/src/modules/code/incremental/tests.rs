@@ -92,10 +92,9 @@ async fn archive_indexes_multiple_families_into_server_batches() {
         sink,
     )
     .unwrap();
-    assert_eq!(result.files, 6);
-    assert_eq!(result.candidates, 4);
-    assert_eq!(result.filtered, 1);
-    assert_eq!(result.families.len(), 2);
+    assert_eq!(result.stats.files_indexed, 6);
+    assert_eq!(result.stats.files_parsed, 4);
+    assert_eq!(result.stats.files_skipped, 1);
     let batches = batches.lock().unwrap();
     let files = collected_rows(&batches, &tables.file);
     let paths: std::collections::HashSet<_> = files
@@ -226,10 +225,10 @@ async fn repositories_without_source_files_still_emit_inventory() {
         }),
     )
     .unwrap();
-    assert_eq!(result.candidates, 0);
-    assert_eq!(result.files, 2);
-    assert_eq!(result.filtered, 1);
-    assert_eq!(result.definitions, 0);
+    assert_eq!(result.stats.files_parsed, 0);
+    assert_eq!(result.stats.files_indexed, 2);
+    assert_eq!(result.stats.files_skipped, 1);
+    assert_eq!(result.stats.definitions_count, 0);
     assert_eq!(
         collected_rows(&batches.lock().unwrap(), &tables.file).len(),
         2
