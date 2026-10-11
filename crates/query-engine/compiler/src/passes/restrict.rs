@@ -10,7 +10,7 @@
 
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
+use crate::input::{ColumnSelection, Condition, FilterOp, Input, InputFilter, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 #[cfg(test)]
 use ontology::Ontology;
@@ -305,8 +305,9 @@ pub fn restrict(
         }
     }
 
-    for jp in &input.join_predicates {
-        for (node_id, prop) in [(&jp.lhs_node, &jp.lhs_prop), (&jp.rhs_node, &jp.rhs_prop)] {
+    for condition in input.conditions() {
+        let Condition::Property(predicate) = condition;
+        for (node_id, prop) in predicate.node_properties() {
             if let Some(entity) = entity_of(input, node_id)
                 && admin_only(model, entity, prop)
             {
