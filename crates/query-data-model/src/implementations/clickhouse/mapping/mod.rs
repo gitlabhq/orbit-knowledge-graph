@@ -21,6 +21,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
         let mut tables = HashMap::new();
 
         for node in &storage.metadata.entities {
+            let table = storage.require_table(&node.table)?;
             let entity_id =
                 graph
                     .entity_id(&node.name)
@@ -58,7 +59,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             tables.insert(
                 node.table.clone(),
                 TableLayout::from_storage(
-                    storage.table(&node.table).expect("derived node storage"),
+                    table,
                     Some(entity_id),
                     (!node.global)
                         .then(|| PathColumn {
@@ -69,12 +70,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         .collect(),
                     node.has_traversal_path
                         && !node.global
-                        && storage
-                            .table(&node.table)
-                            .expect("derived node layout")
-                            .sort_key
-                            .first()
-                            .map(String::as_str)
+                        && table.sort_key.first().map(String::as_str)
                             == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
                 ),
             );
@@ -95,7 +91,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             tables.insert(
                 table_name.to_string(),
                 TableLayout::from_storage(
-                    storage.table(table_name).expect("derived edge storage"),
+                    storage.require_table(table_name)?,
                     None,
                     vec![PathColumn {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
@@ -227,7 +223,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 })
                 .collect();
             let mut layout = TableLayout::from_storage(
-                storage.table(&join.table).expect("derived join storage"),
+                storage.require_table(&join.table)?,
                 None,
                 path_columns,
                 true,

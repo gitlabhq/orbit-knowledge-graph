@@ -24,7 +24,6 @@ pub mod errors;
 pub mod etl;
 pub mod etl_sql;
 pub mod introspection;
-mod json_schema;
 mod loading;
 pub mod migrations;
 pub mod pipelines;
@@ -2400,83 +2399,6 @@ mod tests {
         assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
         assert_eq!(DataType::Enum.to_json_schema_type(), "string");
         assert_eq!(DataType::Uuid.to_json_schema_type(), "string");
-    }
-
-    fn base_schema() -> &'static str {
-        include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"))
-    }
-
-    #[test]
-    fn test_derive_json_schema() {
-        let ontology = Ontology::new()
-            .with_nodes(["User", "Project"])
-            .with_edges(["AUTHORED"])
-            .with_fields("User", [("username", DataType::String)]);
-
-        let result = ontology.derive_json_schema(base_schema()).unwrap();
-
-        let labels = result["$defs"]["EntityType"]["enum"].as_array().unwrap();
-        let label_strs: Vec<_> = labels.iter().filter_map(|v| v.as_str()).collect();
-        assert!(label_strs.contains(&"User"));
-        assert!(label_strs.contains(&"Project"));
-
-        let types = result["$defs"]["RelationshipTypeName"]["enum"]
-            .as_array()
-            .unwrap();
-        let type_strs: Vec<_> = types.iter().filter_map(|v| v.as_str()).collect();
-        assert!(type_strs.contains(&"AUTHORED"));
-
-        let user_props = &result["$defs"]["NodeProperties"]["User"];
-        assert!(user_props.is_object());
-        assert_eq!(user_props["username"]["type"], "string");
-    }
-
-    #[test]
-    fn test_derive_json_schema_errors() {
-        let ontology = Ontology::new();
-
-        let err = ontology.derive_json_schema("not valid json").unwrap_err();
-        assert!(err.to_string().contains("failed to parse base schema"));
-
-        let err = ontology.derive_json_schema("{}").unwrap_err();
-        assert!(err.to_string().contains("missing $defs"));
-    }
-
-    #[test]
-    fn test_derive_json_schema_with_enum_field() {
-        let mut enum_values = std::collections::BTreeMap::new();
-        enum_values.insert(1, "active".to_string());
-        enum_values.insert(2, "inactive".to_string());
-        enum_values.insert(3, "pending".to_string());
-
-        let node = NodeEntity {
-            name: "User".to_string(),
-            domain: "core".to_string(),
-            label: "username".to_string(),
-            fields: vec![Field {
-                name: "status".to_string(),
-                source: FieldSource::DatabaseColumn("status".to_string()),
-                data_type: DataType::Enum,
-                nullable: false,
-                enum_values: Some(enum_values),
-                enum_type: EnumType::Int,
-                ..Default::default()
-            }],
-            destination_table: "gl_user".to_string(),
-            ..Default::default()
-        };
-
-        let mut ontology = Ontology::new();
-        ontology.nodes.insert("User".to_string(), node);
-
-        let result = ontology.derive_json_schema(base_schema()).unwrap();
-
-        let status_schema = &result["$defs"]["NodeProperties"]["User"]["status"];
-        assert_eq!(status_schema["type"], "string");
-
-        let enum_array = status_schema["enum"].as_array().unwrap();
-        let enum_values: Vec<_> = enum_array.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(enum_values, vec!["active", "inactive", "pending"]);
     }
 
     fn assert_redaction(

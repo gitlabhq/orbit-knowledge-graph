@@ -95,13 +95,4 @@ impl crate::Relational<DuckDb> {
             },
         }
     }
-
-    pub fn edge(&self) -> &Table {
-        self.table(&self.metadata.edge_table)
-            .expect("derived local edge table")
-    }
-
-    pub fn entity_table(&self, entity: &str) -> Option<&Table> {
-        self.table(self.metadata.entity_tables.get(entity)?)
-    }
 }

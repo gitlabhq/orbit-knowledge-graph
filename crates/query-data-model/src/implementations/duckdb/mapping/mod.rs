@@ -15,7 +15,7 @@ impl Mapping<Relational<DuckDb>> for DuckDbBindings {
                 }
             }
         }
-        for entity_name in storage.metadata.entity_tables.keys().map(String::as_str) {
+        for (entity_name, table_name) in &storage.metadata.entity_tables {
             let entity_id =
                 graph
                     .entity_id(entity_name)
@@ -23,9 +23,7 @@ impl Mapping<Relational<DuckDb>> for DuckDbBindings {
                         kind: "local entity",
                         name: entity_name.to_string(),
                     })?;
-            let table = storage
-                .entity_table(entity_name)
-                .expect("derived local entity table");
+            let table = storage.require_table(table_name)?;
             let has_traversal_path = table
                 .columns
                 .iter()
@@ -37,20 +35,17 @@ impl Mapping<Relational<DuckDb>> for DuckDbBindings {
                 has_traversal_path,
             });
         }
-        let relationships = graph
-            .relationships()
-            .map(|_| storage.edge().name.clone())
-            .collect();
+        let edge = storage.require_table(&storage.metadata.edge_table)?;
+        let relationships = graph.relationships().map(|_| edge.name.clone()).collect();
         Ok(DuckDbBindings {
-            edge_columns: storage
-                .edge()
+            edge_columns: edge
                 .columns
                 .iter()
                 .map(|column| column.name.clone())
                 .collect(),
-            edge_table: storage.edge().name.clone(),
-            edge_sort_key: storage.edge().sort_key.clone(),
-            edge_column_types: storage.edge().column_types.clone(),
+            edge_table: edge.name.clone(),
+            edge_sort_key: edge.sort_key.clone(),
+            edge_column_types: edge.column_types.clone(),
             entities,
             property_facts,
             relationships,

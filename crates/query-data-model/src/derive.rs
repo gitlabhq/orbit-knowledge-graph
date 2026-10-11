@@ -97,6 +97,49 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_physical_tables_without_panicking() {
+        use crate::implementations::{clickhouse::layout::ClickHouse, duckdb::layout::DuckDb};
+        use crate::{DataModelError, GraphCatalog, Mapping, Relational};
+
+        let ontology = ontology::Ontology::load_embedded().unwrap();
+        let graph = GraphCatalog::derive(&ontology).unwrap();
+        let remote = Relational::<ClickHouse>::derive(&ontology).unwrap();
+        let local = Relational::<DuckDb>::derive(&ontology);
+        let remote_names: Vec<_> = remote
+            .tables()
+            .iter()
+            .map(|table| table.name.clone())
+            .collect();
+        let local_names: Vec<_> = local
+            .tables()
+            .iter()
+            .map(|table| table.name.clone())
+            .collect();
+
+        for name in remote_names {
+            let mut schema = Relational::<ClickHouse>::derive(&ontology).unwrap();
+            schema.tables.retain(|table| table.name != name);
+            let result =
+                crate::DataModel::<_, crate::implementations::ClickHouseBindings, _>::build(
+                    GraphCatalog::derive(&ontology).unwrap(),
+                    schema,
+                    (),
+                );
+            assert!(
+                matches!(result, Err(DataModelError::UnknownReference { kind: "table", name: missing }) if missing == name)
+            );
+        }
+        for name in local_names {
+            let mut schema = Relational::<DuckDb>::derive(&ontology);
+            schema.tables.retain(|table| table.name != name);
+            let result = crate::implementations::DuckDbBindings::derive(&graph, &schema);
+            assert!(
+                matches!(result, Err(DataModelError::UnknownReference { kind: "table", name: missing }) if missing == name)
+            );
+        }
+    }
+
+    #[test]
     fn derives_remote_and_local_models_from_the_same_ontology() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
