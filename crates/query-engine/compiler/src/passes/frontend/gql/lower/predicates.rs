@@ -5,7 +5,7 @@ use crate::{QueryError, Result};
 use serde_json::Value;
 
 use super::super::ast::{Comparison, MapEntry};
-use super::super::invalid;
+use super::super::errors::invalid;
 use super::Lowering;
 
 impl Lowering {

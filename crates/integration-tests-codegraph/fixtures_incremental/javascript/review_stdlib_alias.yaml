@@ -1,0 +1,20 @@
+name: Review explicit aliases override bare standard module names
+fixtures:
+  - path: tsconfig.json
+    content: |
+      {"compilerOptions":{"baseUrl":".","paths":{"fs":["./shim"]}}}
+  - path: shim.ts
+    content: |
+      export function readFile() {}
+  - path: main.ts
+    content: |
+      import { readFile } from 'fs';
+      function run() { readFile(); }
+tests:
+  - name: Explicit project alias reaches shim
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path AS file
+    assert:
+      - { row: { file: shim.ts } }

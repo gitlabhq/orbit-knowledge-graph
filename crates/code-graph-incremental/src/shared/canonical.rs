@@ -209,6 +209,8 @@ pub enum Canonical {
     Scope,
     #[strum(serialize = "__declaration")]
     Declaration,
+    #[strum(serialize = "__dispatch")]
+    Dispatch,
 }
 
 impl From<Canonical> for u16 {
@@ -242,7 +244,9 @@ impl Canonical {
     }
 }
 
-pub fn def_type_of(cursor: Cursor) -> Option<Canonical> {
+pub fn def_type_of<S: crate::tree::Storage<Node = crate::tree::Node>>(
+    cursor: Cursor<'_, S>,
+) -> Option<Canonical> {
     cursor.children().find_map(|c| {
         let ck = Canonical::try_from_u16(c.kind())?;
         ck.is_def_type().then_some(ck)

@@ -32,12 +32,12 @@ fn fingerprint_path() -> PathBuf {
     config_dir().join(migrations::FINGERPRINT_FILE)
 }
 
-fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
-    Fingerprints {
+fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints> {
+    Ok(Fingerprints {
         sources: migrations::source_fingerprints(),
-        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology),
-        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology),
-    }
+        ddl: orbit_migrations::fingerprint::ddl_fingerprints(ontology)?,
+        auxiliary_schema: orbit_migrations::fingerprint::auxiliary_schema_fingerprints(ontology)?,
+    })
 }
 
 fn read_committed_fingerprints() -> Result<Option<Fingerprints>> {
@@ -164,7 +164,7 @@ fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeS
 
 pub fn check(base: Option<String>) -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
+    let current = current_fingerprints(&ontology)?;
 
     let committed = read_committed_fingerprints()?.ok_or_else(|| {
         anyhow!(
@@ -275,7 +275,7 @@ pub fn bump(
     }
 
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
+    let current = current_fingerprints(&ontology)?;
 
     let Some(committed) = read_committed_fingerprints()? else {
         return write_initial_snapshot(&ontology, &current);
@@ -410,7 +410,7 @@ pub fn bump(
 
 pub fn snapshot() -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
-    let current = current_fingerprints(&ontology);
+    let current = current_fingerprints(&ontology)?;
     let committed = read_committed_fingerprints()?.ok_or_else(|| {
         anyhow!(
             "fingerprint snapshot {} is missing. Run `mise schema:bump` to create it.",

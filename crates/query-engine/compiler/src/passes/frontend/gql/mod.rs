@@ -1,4 +1,5 @@
 mod ast;
+mod errors;
 mod lower;
 mod syntax;
 
@@ -7,11 +8,10 @@ use std::sync::Arc;
 use crate::config::{self, CompilerCtx as _};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
+use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{
     IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
 };
-use pest::Span;
-use pest::error::{ErrorVariant, LineColLocation};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -40,12 +40,6 @@ pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
 
 const MAX_QUERY_BYTES: usize = 32 * 1024;
 const MAX_NESTING: usize = 32;
-
-const INVARIANT_PREFIXES: [&str; 3] = [
-    "grammar produced",
-    "Nodes didn't match any pattern",
-    "pest_consume::parser",
-];
 
 #[derive(Debug)]
 pub enum RoutedStatement {
@@ -126,13 +120,10 @@ fn resolve_schema(
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
     let Some(name) = node else {
-        return Ok(build_schema_response(ontology, scope, &[]));
+        return build_schema_response(ontology, scope, &[])
+            .map_err(|error| QueryError::Validation(error.to_string()));
     };
-    if name == "*"
-        || ontology.get_node(&name).is_none()
-        || (scope == IntrospectionScope::Local
-            && !ontology.local_entity_names().contains(&name.as_str()))
-    {
+    if name == "*" || !scope.includes(ontology, &name) {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
@@ -143,15 +134,7 @@ fn resolve_schema(
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
     check_bounds(raw)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
-        .map_err(|error| {
-            let (line, column) = match error.line_col {
-                LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
-            };
-            QueryError::Validation(format!(
-                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
-                error.variant.message()
-            ))
-        })?
+        .map_err(parse_failure)?
         .single()
         .expect("Statement produces one pair");
     QueryParser::Statement(statement).map_err(syntax_error)
@@ -185,23 +168,4 @@ fn check_nesting(query: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn syntax_error(error: pest_consume::Error<Rule>) -> QueryError {
-    let (line, column) = match error.line_col {
-        LineColLocation::Pos(pos) | LineColLocation::Span(pos, _) => pos,
-    };
-    let message = match &error.variant {
-        ErrorVariant::CustomError { message } => message.clone(),
-        variant => variant.message().into_owned(),
-    };
-    if INVARIANT_PREFIXES.iter().any(|p| message.starts_with(p)) {
-        return QueryError::PipelineInvariant(message);
-    }
-    QueryError::Validation(format!("line {line}, column {column}: {message}"))
-}
-
-fn invalid(span: Span<'_>, message: &str) -> QueryError {
-    let (line, column) = span.start_pos().line_col();
-    QueryError::Validation(format!("line {line}, column {column}: {message}"))
 }

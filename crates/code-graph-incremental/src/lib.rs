@@ -1,5 +1,6 @@
 pub mod constants;
 pub mod dsl;
+pub mod edge;
 pub mod env;
 pub mod export;
 pub mod file_tree;

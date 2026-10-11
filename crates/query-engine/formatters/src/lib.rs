@@ -1,8 +1,8 @@
-mod goon;
 mod gql;
 mod graph;
 mod raw_row;
 mod text;
+mod toon;
 
 use std::sync::LazyLock;
 
@@ -12,13 +12,13 @@ use serde_json::{Value, json};
 use orbit_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
-pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
 pub use gql::{GQL_OUTPUT_FORMAT_VERSION, GqlFormatter};
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
     PaginationResponse,
 };
 pub use raw_row::row_to_json;
+pub use toon::{TOON_OUTPUT_FORMAT_VERSION, ToonFormatter};
 
 pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
     orbit_versions::VERSIONS
@@ -33,14 +33,12 @@ pub static RAW_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
 #[strum(serialize_all = "lowercase")]
 pub enum FormatName {
     Raw,
-    Goon,
+    Toon,
     Gql,
 }
 
 pub trait ResultFormatter: Send + Sync {
     fn format_name(&self) -> FormatName;
-    /// `None` for stubs that have not yet defined their own version
-    /// (e.g. `GoonFormatter` before ADR 009 ships).
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 

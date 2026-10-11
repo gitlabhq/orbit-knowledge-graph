@@ -1,0 +1,11 @@
+description: Empty membership survives edge-tag planning in aggregation
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest) WHERE mr.state IN [] RETURN count(mr) AS total
+expect:
+  node_count: 0
+  nodes:
+    User: {ids: []}
+  row_count: 1
+  row_values: [{total: 0}]
+  skip_requirements: [filter:state]

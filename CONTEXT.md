@@ -144,10 +144,10 @@ _Avoid_: materialized table (the ClickHouse materialized views only feed it), pr
 Fetching properties for **Nodes** discovered dynamically during query execution. Required for PathFinding and Neighbors queries where the result set's node types aren't known upfront.
 _Avoid_: enrichment, decoration
 
-**GOON (Graph Object Output Notation)**:
-A line-oriented text format for representing graph query results compactly. Designed for LLM consumption. Measured at −11% cost, −15% duration, and +4.8pp correctness vs raw JSON on Haiku 4.5 (ADR 012). Used when queries specify `format=llm`.
-_Avoid_: LLM format, text format
+**TOON (Token-Oriented Object Notation)**:
+A standard compact text encoding, used for every `format=llm` response. Query results list one table per node type, then an edge table. Schema, status, and health responses use it too. It replaced GOON (ADR 012).
+_Avoid_: GOON, LLM format
 
 **GQL Response Format**:
-A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019). Intended to replace **GOON** once evals confirm it performs at least as well.
+A cypher-shell style result table. Columns are node aliases, and cells hold node literals such as `(:Label {id: 1, ...})`. Used when queries specify `format=gql` (ADR 019).
 _Avoid_: Cypher output

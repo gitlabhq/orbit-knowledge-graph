@@ -1,0 +1,8 @@
+description: An unsupported function in RETURN is named and points to the typed relationship form
+
+query:
+  gql: |
+    MATCH (m:MergeRequest)-[r]->(w:WorkItem) WHERE w.id = 1 RETURN m.id, type(r) LIMIT 10
+
+expect:
+  compile_error: "function type() is not supported: match a typed relationship such as -[r:CLOSES]->"

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use crate::error::{QueryError, Result};
 use crate::input::{Input, InputNode, QueryType};
@@ -8,7 +8,7 @@ use crate::input::{Input, InputNode, QueryType};
 use super::physical::{BindingSource, ExecutionPlan, PhysicalPlan};
 use super::{DenormalizedKey, DenormalizedProperty, Hop, NodePlan, Plan};
 
-pub(super) struct PlanningContext<'a, M: QueryDataModel + ?Sized> {
+pub(super) struct PlanningContext<'a, M: OrbitQueryModel + ?Sized> {
     pub input: &'a Input,
     pub model: &'a M,
     pub hops: Vec<Hop>,
@@ -17,7 +17,7 @@ pub(super) struct PlanningContext<'a, M: QueryDataModel + ?Sized> {
     pub node_edge_mappings: HashMap<String, (String, String)>,
 }
 
-impl<M: QueryDataModel + ?Sized> PlanningContext<'_, M> {
+impl<M: OrbitQueryModel + ?Sized> PlanningContext<'_, M> {
     pub fn finish<T>(self, operation: T) -> Plan<T> {
         Plan {
             nodes: self.nodes,

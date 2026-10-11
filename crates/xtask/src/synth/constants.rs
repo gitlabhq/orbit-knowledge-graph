@@ -22,3 +22,6 @@ pub const CLICKHOUSE_NATIVE_PORT: &str = "9000";
 
 /// Rows per batch.
 pub const DEFAULT_EDGE_FLUSH_THRESHOLD: usize = 1_000_000;
+
+/// Fixed "now" for seeded runs (2026-01-01T00:00:00Z) so timestamps are reproducible.
+pub const SEEDED_BASE_TIME_MILLIS: i64 = 1_767_225_600_000;

@@ -294,11 +294,6 @@ fn from_tree_sitter(
         let field = cursor
             .field_id()
             .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
-        let sym = if ts.is_named() && ts.named_child_count() == 0 {
-            lang.syms.intern(&source[ts.start_byte()..ts.end_byte()])
-        } else {
-            0
-        };
         let sp = ts.start_position();
         let ep = ts.end_position();
 
@@ -310,7 +305,7 @@ fn from_tree_sitter(
                 field,
                 named: ts.is_named(),
                 synth: false,
-                sym,
+                sym: 0,
                 start: ts.start_byte() as u32,
                 end: ts.end_byte() as u32,
                 start_row: sp.row as u32,

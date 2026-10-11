@@ -138,7 +138,7 @@ Two control points keep this safe:
 
 The MCP wrapper (`API::Orbit::McpHandlers::CallTool`) advertises either the legacy tool set or the new `list_commands`/`invoke_command` pair, controlled by a feature flag (see [Feature flag rollout](#feature-flag-rollout)). Agents discover the command catalog by calling `list_commands` once at the start of a session.
 
-GKG inlines the catalog in the `list_commands` description when the caller's JWT `source_type` is `dws`. Each command appears with its description and input schema as compact JSON. Duo Agent Platform agents then call `invoke_command` without a discovery turn. Other callers keep the short description.
+GKG inlines the catalog in the `list_commands` description when the caller's JWT `source_type` is `dws`. Each command appears with its description and input schema as compact JSON. The active ontology's relationship patterns follow, one `(Source)-[:TYPE]->(Target|Target)` line per source node and edge type, so node and edge names need no schema call. Duo Agent Platform agents then call `invoke_command` without a discovery turn. Other callers keep the short description.
 
 ### Discovery and invocation contract for agents
 

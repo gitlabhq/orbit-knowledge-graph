@@ -29,9 +29,11 @@ method that matches how you work, then run your first query.
 Install the `orbit` binary directly with the one-line installer, from npm,
 or through the GitLab CLI (`glab`) if you already use it.
 
-On Linux, the installer uses the glibc archive by default and automatically
-selects the fully static musl archive on musl-based distributions like Alpine.
-To force the static Linux archive, pass `--libc musl`.
+On Linux, the installer uses the glibc archive by default. The glibc archive
+needs glibc 2.28 or later. It runs on RHEL 8, Oracle Linux 8, Debian 10, Ubuntu
+20.04, and later releases. On musl-based distributions like Alpine, the
+installer selects the fully static musl archive. On older glibc, pass
+`--libc musl` to force the static archive.
 
 {{< tabs >}}
 

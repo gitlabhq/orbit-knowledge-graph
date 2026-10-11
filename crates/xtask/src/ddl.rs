@@ -26,7 +26,7 @@ pub fn run_remote(
     diff: Option<PathBuf>,
 ) -> Result<()> {
     let ontology = load_ontology(ontology_path.as_ref())?;
-    let schema = GraphSchema::from_ontology(&ontology);
+    let schema = GraphSchema::from_ontology(&ontology)?;
     let credentials = local_dictionary_credentials();
 
     let mut generated: Vec<String> = schema
@@ -49,7 +49,7 @@ pub fn run_remote(
         let prefixed = view
             .clone()
             .with_schema_version_prefix(&prefix, &all_table_names);
-        generated.push(format!("{};\n", prefixed.to_create_sql()));
+        generated.push(format!("{};\n", prefixed.to_create_sql()?));
     }
 
     let schema_version = orbit_versions::VERSIONS.schema;
@@ -115,7 +115,7 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
 
 pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
     let ontology = load_ontology(ontology_path.as_ref())?;
-    let schema = GraphSchema::from_ontology(&ontology);
+    let schema = GraphSchema::from_ontology(&ontology)?;
 
     let generated: Vec<String> = schema
         .unversioned_definitions
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn remote_ddl_contains_create_table() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let schema = GraphSchema::from_ontology(&ontology);
+        let schema = GraphSchema::from_ontology(&ontology).unwrap();
         assert!(!schema.tables.is_empty());
         assert!(schema.tables[0].to_create_sql("").contains("CREATE TABLE"));
     }
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn persistent_ddl_contains_unversioned_table_without_prefix() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let schema = GraphSchema::from_ontology(&ontology);
+        let schema = GraphSchema::from_ontology(&ontology).unwrap();
         let table = schema
             .unversioned_definitions
             .iter()

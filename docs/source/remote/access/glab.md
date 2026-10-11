@@ -130,13 +130,20 @@ as the final fallback.
 
 ### Check indexing progress
 
-Pass exactly one scope flag:
+Inside a clone, run `graph-status` without flags to inspect the project of
+its `origin` remote. To inspect a different scope, pass one scope flag:
 
 ```shell
+glab orbit graph-status
 glab orbit graph-status --full-path your-group/your-project
 glab orbit graph-status --namespace-id 24
 glab orbit graph-status --project-id 2
 ```
+
+In a terminal, `graph-status` shows a summary of the indexing state and the
+largest entity counts in each domain. When the output goes to a pipe or a
+file, it prints the full JSON response. Use `--response-format raw` for JSON
+or `--response-format llm` for compact text in a terminal.
 
 ## Exit codes
 
@@ -146,7 +153,7 @@ can branch on them without parsing stderr.
 | Status | Exit code | Meaning |
 |--------|-----------|---------|
 | `200` | `0` | Success. |
-| `404` | `2` | `knowledge_graph` feature flag is off, or path typo. |
+| `404` | `2` | `knowledge_graph` feature flag is off, or no project or group at that path. |
 | `401` | `3` | Missing or expired token. |
 | `403` | `4` | No Knowledge Graph enabled namespaces available. |
 | `429` | `5` | Rate limited. Inspect `Retry-After` and back off. |

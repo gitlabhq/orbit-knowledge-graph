@@ -1,0 +1,58 @@
+name: "Parent paths resolve directory segments without cancelling other parents"
+fixtures:
+  - path: lib/target.ts
+    content: |
+      export class Client {}
+      export function target() {}
+  - path: app/deep/nested/consumer.ts
+    content: |
+      import { target } from '../../../lib/target';
+      import type { Client } from '../../../lib/target';
+      export function direct() { target(); }
+  - path: app/deep/webpack.config.js
+    content: |
+      const path = require('path');
+      module.exports = { resolve: { alias: {
+        localTarget: path.resolve(__dirname, '../../lib/target'),
+        escapedTarget: path.resolve(__dirname, '../../../../lib/target'),
+      } } };
+  - path: app/deep/consumer.ts
+    content: |
+      import { target as local } from 'localTarget';
+      import { target as escaped } from 'escapedTarget';
+      export function aliased() { local(); }
+      export function escapedAlias() { escaped(); }
+  - path: app/escaped.ts
+    content: |
+      import { target } from '../../../lib/target';
+      export function escapedRelative() { target(); }
+  - path: app/.hidden/consumer.ts
+    content: |
+      import { target } from '../../lib/target';
+      export function hidden() { target(); }
+tests:
+  - name: "relative and config-relative paths reach the repository target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['direct', 'aliased', 'hidden']
+      RETURN caller.name AS caller, callee.file_path AS file, callee.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: direct, file: 'lib/target.ts', name: target } }
+      - { row: { caller: aliased, file: 'lib/target.ts', name: target } }
+      - { row: { caller: hidden, file: 'lib/target.ts', name: target } }
+  - name: "type-only imports use the same parent-path rules"
+    query: |
+      MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+      WHERE symbol.identifier_name = 'Client'
+      RETURN target.file_path AS file, target.name AS name, target.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { file: 'lib/target.ts', name: Client, type: Class } }
+  - name: "excess parents never wrap back into the repository"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['escapedAlias', 'escapedRelative']
+      RETURN callee.name
+    assert:
+      - { empty: true }

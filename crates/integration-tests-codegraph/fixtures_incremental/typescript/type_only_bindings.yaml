@@ -1,0 +1,58 @@
+name: "TypeScript type-only bindings retain imports without runtime calls"
+fixtures:
+  - path: types.ts
+    content: |
+      export class Client {}
+      export default class DefaultClient {}
+      export function createClient() {}
+  - path: main.ts
+    content: |
+      import type DefaultClient from './types';
+      import type * as Types from './types';
+      import { type Client as TypeClient, createClient } from './types';
+      import { type Client } from './types';
+      import type { Missing } from 'external-sdk';
+      export function run() {
+        DefaultClient();
+        Types.createClient();
+        TypeClient();
+        Client();
+        Missing();
+        createClient();
+      }
+tests:
+  - name: "every imported binding remains cataloged"
+    query: |
+      MATCH (i:ImportedSymbol) WHERE i.file_path = 'main.ts'
+      RETURN i.identifier_name AS name, i.identifier_alias AS alias
+    assert:
+      - { row_count: 6 }
+      - { row: { name: "default", alias: "DefaultClient" } }
+      - { row: { name: "*", alias: "Types" } }
+      - { row: { name: "Client", alias: "TypeClient" } }
+      - { row: { name: "Client", alias: null } }
+      - { row: { name: "Missing", alias: null } }
+      - { row: { name: "createClient", alias: null } }
+  - name: "type-only names still resolve to their definitions"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'main.ts' AND i.identifier_name IN ['Client', 'default']
+      RETURN i.identifier_alias AS alias, d.name AS target
+    assert:
+      - { row_count: 3 }
+      - { row: { alias: "DefaultClient", target: "DefaultClient" } }
+      - { row: { alias: "TypeClient", target: "Client" } }
+      - { row: { alias: null, target: "Client" } }
+  - name: "only the runtime binding creates a call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run' RETURN callee.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "createClient" } }
+  - name: "type-only bindings never fall back to runtime imports"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(i:ImportedSymbol)
+      WHERE caller.name = 'run' RETURN i.identifier_name
+    assert:
+      - { empty: true }

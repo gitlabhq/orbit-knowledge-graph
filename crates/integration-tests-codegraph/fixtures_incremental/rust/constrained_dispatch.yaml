@@ -1,0 +1,82 @@
+name: "Rust qualified dispatch selects the requested implementation"
+fixtures:
+  - path: src/lib.rs
+    content: |
+      pub mod types;
+      use types::{Service, Runner, Other, Defaulted};
+      pub fn explicit_runner() { <Service as Runner>::run(); }
+      pub fn explicit_other() { <Service as Other>::run(); }
+      pub fn explicit_default() { <Service as Defaulted>::run(); }
+      trait Local { fn run() { local_body(); } }
+      struct Here;
+      fn local_body() {}
+      impl Local for Here {}
+      pub fn local_default() { <Here as Local>::run(); }
+      pub fn missing_implementation() { <Here as Runner>::run(); }
+      pub fn unknown_contract() { <Service as Missing>::run(); }
+      pub fn inherent_with_argument() { Service::accept(&Service::new()); }
+  - path: src/types.rs
+    content: |
+      pub struct Service;
+      pub trait Runner { fn run(); }
+      pub trait Other { fn run(); }
+      pub trait Defaulted { fn run() { default_body(); } }
+      fn runner_body() {}
+      fn other_body() {}
+      fn inherent_body() {}
+      fn default_body() {}
+      impl Runner for Service { fn run() { runner_body(); } }
+      impl Other for Service { fn run() { other_body(); } }
+      impl Defaulted for Service {}
+      impl Service {
+          pub fn run() { inherent_body(); }
+          pub fn new() -> Self { Service }
+          pub fn accept(_: &Service) {}
+      }
+tests:
+  - name: "explicit contracts exclude competing and inherent methods"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+      WHERE caller.name IN ['explicit_runner', 'explicit_other', 'explicit_default']
+      RETURN caller.name AS caller, body.name AS body
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: explicit_runner, body: runner_body } }
+      - { row: { caller: explicit_other, body: other_body } }
+      - { row: { caller: explicit_default, body: default_body } }
+  - name: "same-file default implementation is selected"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+      WHERE caller.name = 'local_default' RETURN body.name AS body
+    assert:
+      - { row_count: 1 }
+      - { row: { body: local_body } }
+  - name: "unresolved constraints never select an unrelated implementation"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+      WHERE caller.name IN ['missing_implementation', 'unknown_contract']
+      RETURN method.name
+    assert:
+      - { empty: true }
+  - name: "ordinary associated calls retain their receiver type"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(method:Definition)
+      WHERE caller.name = 'inherent_with_argument' AND method.name = 'accept'
+      RETURN method.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: accept } }
+steps:
+  - name: restore qualified calls from snapshot
+    snapshot: true
+    tests:
+      - name: "qualified implementations survive snapshot loading"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(method:Definition)-[:CALLS]->(body:Definition)
+          WHERE caller.name IN ['explicit_runner', 'explicit_other', 'explicit_default']
+          RETURN caller.name AS caller, body.name AS body
+        assert:
+          - { row_count: 3 }
+          - { row: { caller: explicit_runner, body: runner_body } }
+          - { row: { caller: explicit_other, body: other_body } }
+          - { row: { caller: explicit_default, body: default_body } }

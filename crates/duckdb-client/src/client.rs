@@ -297,6 +297,22 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
+    #[cfg(feature = "static-fts")]
+    #[test]
+    fn json_is_linked_and_extension_autoloading_is_disabled() {
+        let client = DuckDbClient::open_in_memory().unwrap();
+        let batches = client
+            .query_arrow("SELECT to_json(struct_pack(a := 1)) AS j")
+            .unwrap();
+        assert_eq!(batches[0].num_rows(), 1);
+
+        let loaded = client
+            .query_arrow("SELECT current_setting('autoload_known_extensions')::VARCHAR")
+            .unwrap();
+        let value = arrow::util::display::array_value_to_string(loaded[0].column(0), 0).unwrap();
+        assert_eq!(value, "false");
+    }
+
     const TEST_DDL: &str = "\
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,

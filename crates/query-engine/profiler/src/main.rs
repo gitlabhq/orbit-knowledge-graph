@@ -17,7 +17,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
-use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
+use formatters::{GraphFormatter, ResultFormatter, ToonFormatter};
 use orbit_server_config::ProfilingConfig;
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
@@ -93,7 +93,7 @@ struct Cli {
     #[arg(long, value_enum)]
     compile_only: Option<CompileShow>,
 
-    /// Include the formatted response agents receive (`goon` = llm format,
+    /// Include the formatted response agents receive (`toon` = llm format,
     /// `json` = raw graph) as a `response` field in the profiler output.
     #[arg(long, value_enum)]
     emit_response: Option<ResponseFormat>,
@@ -108,7 +108,7 @@ enum CompileShow {
 
 #[derive(Clone, clap::ValueEnum)]
 enum ResponseFormat {
-    Goon,
+    Toon,
     Json,
 }
 
@@ -145,7 +145,7 @@ async fn run_single(
     enrich_output(ctx.client, &mut output, ctx.profiling_config).await;
 
     let response = ctx.emit_response.as_ref().map(|fmt| match fmt {
-        ResponseFormat::Goon => GoonFormatter.format(&output),
+        ResponseFormat::Toon => ToonFormatter.format(&output),
         ResponseFormat::Json => GraphFormatter.format(&output),
     });
 

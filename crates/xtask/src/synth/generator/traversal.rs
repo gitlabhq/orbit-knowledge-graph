@@ -119,7 +119,9 @@ impl EntityRegistry {
         if self.compacted {
             return;
         }
-        for (node_type, contexts) in self.entities.drain() {
+        let mut drained: Vec<_> = self.entities.drain().collect();
+        drained.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (node_type, contexts) in drained {
             let real_type = aliases.get(&node_type).cloned().unwrap_or(node_type);
             let mut ids = Vec::with_capacity(contexts.len());
             for ctx in contexts {
@@ -128,7 +130,8 @@ impl EntityRegistry {
             }
             self.ids_only.entry(real_type).or_default().extend(ids);
         }
-        let id_entries: Vec<_> = self.ids_only.keys().cloned().collect();
+        let mut id_entries: Vec<_> = self.ids_only.keys().cloned().collect();
+        id_entries.sort_unstable();
         for key in id_entries {
             if let Some(real_type) = aliases.get(&key)
                 && let Some(ids) = self.ids_only.remove(&key)

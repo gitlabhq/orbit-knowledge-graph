@@ -1,0 +1,147 @@
+name: Rails library boundaries preserve application resolution
+fixtures:
+  - path: active_record/base.rb
+    content: |
+      module ActiveRecord
+        class Base
+          def self.establish_connection; end
+        end
+      end
+  - path: active_support/concern.rb
+    content: |
+      module ActiveSupport
+        module Concern
+        end
+      end
+  - path: app/models/application_record.rb
+    content: |
+      class ApplicationRecord < ActiveRecord::Base
+        def self.find; end
+        def self.create; end
+      end
+  - path: app/models/post.rb
+    content: |
+      class Post < ApplicationRecord
+        def render; end
+        def run
+          render
+        end
+      end
+  - path: config/boot.rb
+    content: |
+      require 'active_record'
+      require 'active_support/concern'
+      def boot
+        ActiveRecord::Base.establish_connection
+      end
+  - path: app/services/loader.rb
+    content: |
+      class Loader
+        def run
+          ApplicationRecord.find
+          ApplicationRecord.create
+          Post.new.run
+        end
+      end
+  - path: relative.rb
+    content: |
+      require_relative 'active_record/base'
+      class Relative < ActiveRecord::Base
+      end
+  - path: app/models/concerns/auditable.rb
+    content: |
+      module Auditable
+        extend ActiveSupport::Concern
+        def audit; end
+      end
+  - path: app/models/event.rb
+    content: |
+      class Event
+        include Auditable
+        def run
+          audit
+        end
+      end
+tests:
+  - name: Framework imports do not bind repository lookalikes
+    query: |
+      MATCH (source:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+      WHERE source.file_path <> 'relative.rb'
+        AND target.file_path IN ['active_record/base.rb', 'active_support/concern.rb']
+      RETURN target.fqn
+    assert:
+      - { empty: true }
+  - name: Framework calls do not resolve into repository lookalikes
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'boot'
+      RETURN target.file_path
+    assert:
+      - { empty: true }
+  - name: Application classes retain their inheritance
+    query: |
+      MATCH (child:Definition)-[:EXTENDS]->(parent:Definition)
+      WHERE child.fqn = 'Post'
+      RETURN parent.fqn AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: ApplicationRecord } }
+  - name: Rails method spellings do not block project definitions
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Loader::run'
+      RETURN target.fqn AS name
+    assert:
+      - { row_count: 5 }
+      - { column_values: { field: name, values: [ApplicationRecord, 'ApplicationRecord::find', 'ApplicationRecord::create', Post, 'Post::run'] } }
+  - name: Application render method resolves
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Post::run'
+      RETURN target.fqn AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'Post::render' } }
+  - name: Application concern still resolves
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.fqn = 'Event::run'
+      RETURN target.fqn AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'Auditable::audit' } }
+  - name: Explicit relative import remains eligible
+    query: |
+      MATCH (source:Definition)-[:EXTENDS]->(target:Definition)
+      WHERE source.fqn = 'Relative'
+      RETURN target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: active_record/base.rb } }
+steps:
+  - name: Edit a framework lookalike after snapshot loading
+    snapshot: true
+    modify:
+      - path: active_record/base.rb
+        content: |
+          module ActiveRecord
+            class Base
+              def self.establish_connection; true; end
+            end
+          end
+    tests:
+      - name: Framework remains external after reindex
+        query: |
+          MATCH (source:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+          WHERE source.file_path <> 'relative.rb' AND target.file_path = 'active_record/base.rb'
+          RETURN target.fqn
+        assert:
+          - { empty: true }
+      - name: Relative import retains the project target after reindex
+        query: |
+          MATCH (source:Definition)-[:EXTENDS]->(target:Definition)
+          WHERE source.fqn = 'Relative'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: active_record/base.rb } }

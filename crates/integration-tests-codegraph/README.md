@@ -1,11 +1,11 @@
 # Code Graph Integration Tests
 
-YAML-driven integration tests for the v2 code-graph pipeline. Each fixture defines source files, runs them through the full pipeline (parse, build graph, resolve), and asserts on Cypher query results.
+YAML-driven integration tests for the v2 code-graph pipeline. Each fixture defines source files, runs them through the full pipeline (parse, build graph, resolve), and asserts on the results of OpenCypher-like queries.
 
 ## Running
 
-```bash
-cargo nextest run -p integration-tests-codegraph
+```shell
+mise test:integration:codegraph
 ```
 
 ## Fixture structure
@@ -114,33 +114,25 @@ Inverts any assertion. The check must fail for the assertion to pass.
 
 ## Fixture directories
 
-```
-fixtures/
-  containment.yaml          # definition nesting (class > method > inner class)
-  structural.yaml           # file/directory structure, edge kinds, imports
-  java_resolution.yaml      # Java same-class and cross-file call resolution
-  kotlin_resolution.yaml    # Kotlin call resolution and package scoping
-  python_resolution.yaml    # Python cross-file import + call resolution
-  java/                     # additional Java-specific test suites
-  kotlin/                   # additional Kotlin-specific test suites
-  python/                   # additional Python-specific test suites
-  javascript/               # JS-v2 custom pipeline fixtures (use pipeline: js)
-  typescript/               # TS-v2 custom pipeline fixtures (use pipeline: js when mixing .ts/.js/.vue)
-  vue/                      # Vue SFC fixtures exercised through the JS-v2 pipeline
-  examples/                 # example/reference fixtures (e.g. ruby_custom_pipeline)
-fixtures_incremental/       # the same suite format, run by code-graph-incremental
-  python/                   # one directory per language as its rule file lands
-  cross_language/
-```
+`fixtures/` and `fixtures_incremental/` have one directory for each language, for
+example `python/`, `ruby/`, and `typescript/`. Both also have `cross_language/`, `jvm/`,
+and framework directories such as `next/`, `react/`, and `vue/`.
 
-Two test targets generate one test per YAML file: `suites` runs `fixtures/`
-through `code-graph`, `incremental_suites` runs `fixtures_incremental/`
-through `code-graph-incremental`. A suite mixing languages declares
-`pipeline:`. A known gap is a `skip: true` with a comment naming the reason.
+Four test targets run the suites and the pipeline checks:
+
+| Target | What it runs |
+|---|---|
+| `suites` | one test for each YAML file in `fixtures/`, through `code-graph` |
+| `incremental_suites` | one test for each YAML file in `fixtures_incremental/`, through `code-graph-incremental` |
+| `cancellation` | a job that runs past its budget cancels the run, and its work stops |
+| `vanished_tree` | a repository tree that disappears does not fail the other files |
+
+A suite that mixes languages declares `pipeline:`. A known gap is a `skip: true`
+with a comment that gives the reason.
 
 ## Adding a test
 
 1. Create or edit a YAML file in `fixtures/`
 2. Define source files under `fixtures`
-3. Write Cypher queries and assertions under `tests`
-4. Run `cargo nextest run -p integration-tests-codegraph` to verify
+3. Write OpenCypher-like queries and assertions under `tests`
+4. Run `mise test:integration:codegraph` to verify

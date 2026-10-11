@@ -170,6 +170,15 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         resolve_preset("redaction", &Some(redaction_with_default), presets, name);
     let security = build_security(&security_override);
     let redaction = build_redaction(&redaction_config);
+    let ontology = cfg
+        .ontology_overlay
+        .as_ref()
+        .map_or_else(load_ontology, |name| {
+            Arc::new(
+                crate::load_ontology_overlay(name).with_schema_version_prefix(&crate::TABLE_PREFIX),
+            )
+        });
+    let data_model = derive_clickhouse_data_model(&ontology);
 
     for (frontend_key, query_str) in &scenario.query {
         let Ok(frontend) = frontend_key.parse::<Frontend>() else {
@@ -177,7 +186,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             continue;
         };
         run_frontend(
-            &ctx,
+            (&ctx, &data_model, &ontology),
             (frontend, frontend_key),
             query_str,
             &security,
@@ -190,7 +199,11 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 }
 
 async fn run_frontend(
-    ctx: &TestContext,
+    (ctx, data_model, ontology): (
+        &TestContext,
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
@@ -199,9 +212,8 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
-    let data_model = derive_clickhouse_data_model(&load_ontology());
 
-    let compiled = match compile_model(query, frontend, &data_model, security) {
+    let compiled = match compile_model(query, frontend, data_model, security) {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -274,7 +286,7 @@ async fn run_frontend(
             ctx,
             frontend,
             query,
-            &data_model,
+            (data_model, ontology),
             security,
             redaction,
             expect,
@@ -284,15 +296,30 @@ async fn run_frontend(
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+    let resp = execute_pipeline(
+        ctx,
+        frontend,
+        &compiled,
+        (data_model, ontology),
+        security,
+        redaction,
+    )
+    .await;
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
         let baseline_node_ids = canonical_ids(&resp);
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
-            let rerun =
-                execute_pipeline(ctx, frontend, &compiled, &data_model, security, redaction).await;
+            let rerun = execute_pipeline(
+                ctx,
+                frontend,
+                &compiled,
+                (data_model, ontology),
+                security,
+                redaction,
+            )
+            .await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
@@ -397,7 +424,10 @@ async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
     base_query: &str,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -420,8 +450,15 @@ async fn run_pages(
                 .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
         );
 
-        let resp =
-            execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
+        let resp = execute_pipeline(
+            ctx,
+            frontend,
+            &compiled,
+            (data_model, ontology),
+            security,
+            redaction,
+        )
+        .await;
         let response: query_engine::formatters::GraphResponse =
             serde_json::from_value(resp).expect("response should deserialize");
 
@@ -521,7 +558,10 @@ async fn execute_pipeline(
     ctx: &TestContext,
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
@@ -546,7 +586,7 @@ async fn execute_pipeline(
         frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(data_model.ontology()),
+        ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),

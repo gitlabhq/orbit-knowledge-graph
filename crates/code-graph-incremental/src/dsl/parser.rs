@@ -53,7 +53,7 @@ fn visit_element(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> R<Pat> {
         Rule::Spread => visit_spread(c, node),
         Rule::Negation => {
             let inner = next(&mut node.into_children(), "negated element")?;
-            Ok(Pat::Not(Box::new(visit_element(c, inner, 0)?)))
+            Ok(Pat::Not(Box::new(visit_element(c, inner, field)?)))
         }
         Rule::Descendant => {
             let inner = next(&mut node.into_children(), "descendant element")?;

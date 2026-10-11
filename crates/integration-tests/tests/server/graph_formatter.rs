@@ -12,7 +12,7 @@ use orbit_server::redaction::QueryResult;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
-use query_engine::shared::RedactionOutput;
+use query_engine::shared::{PipelineOutput, RedactionOutput};
 use serde_json::Value;
 
 static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
@@ -191,6 +191,17 @@ async fn run_pipeline_with_security(
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> Value {
+    let value = GraphFormatter.format(&pipeline_output(ctx, json, svc, security_ctx).await);
+    assert_valid(&value);
+    value
+}
+
+pub(super) async fn pipeline_output(
+    ctx: &TestContext,
+    json: &str,
+    svc: &MockRedactionService,
+    security_ctx: SecurityContext,
+) -> PipelineOutput {
     let ontology = load_ontology();
     let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
@@ -238,7 +249,7 @@ async fn run_pipeline_with_security(
         &compiled.pagination,
     ));
 
-    let pipeline_output = query_engine::shared::PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
         redacted_count: hydration_output.redacted_count,
         query_type: compiled.query_type.to_string(),
@@ -248,11 +259,7 @@ async fn run_pipeline_with_security(
         result_context: hydration_output.result_context,
         execution_log: vec![],
         pagination,
-    };
-
-    let value = GraphFormatter.format(&pipeline_output);
-    assert_valid(&value);
-    value
+    }
 }
 
 fn allow_all() -> MockRedactionService {

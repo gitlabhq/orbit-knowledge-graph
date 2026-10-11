@@ -10,6 +10,7 @@ Use mise for all tasks.
 | Fast tests | `mise test:fast` |
 | Local tests | `mise test:local` |
 | Integration tests | `mise test:integration` |
+| Code-graph integration tests | `mise test:integration:codegraph` |
 | Server integration tests | `mise test:integration:server` |
 | CLI integration tests | `mise test:cli` |
 | Check or fix code | `mise lint:code`, `mise lint:code:fix` |
@@ -20,10 +21,12 @@ Use mise for all tasks.
 `docs-locale/` is generated. Never read, edit, or reference it.
 
 Open agent-authored Draft MRs with `[skip ci]` at the end of the Conventional
-Commits title to skip unnecessary merge request pipelines while iterating. When
-ready for CI, remove `[skip ci]` and push a commit. Editing the title alone
-starts no pipeline, and a manually triggered one can still be skipped. The merge
-ref keeps the old title until it is regenerated, which a push guarantees.
+Commits title and keep it there through review. Editing the title starts no
+pipeline, and the merge ref keeps the old title until a push with a new SHA.
+
+When ready for CI, remove `[skip ci]` from the title, then run
+`git commit --amend --no-edit --allow-empty` and push with `--force-with-lease`.
+Check that the new MR head pipeline is not skipped.
 
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
@@ -35,7 +38,7 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 List these directories and read the relevant owner before you act:
 
-- `docs/design-documents/` for architecture, security, schema, querying, and indexing.
+- `docs/design-documents/` for architecture, security, schema, querying, indexing, and testing (`testing.md`).
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 

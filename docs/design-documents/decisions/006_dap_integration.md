@@ -270,8 +270,8 @@ Prompt content for Orbit-aware agents should teach:
   resource the user referenced by URL.
 - How to query. Discover the schema first and expand only the relevant
   nodes. Respect the server limits (3 hops, 1,000 results, 500 node IDs per
-  selector) and filter early. Read results as GOON, the compact text
-  format for LLM consumption ([ADR 012](012_goon_format.md)).
+  selector) and filter early. Read results as TOON, the compact text
+  format for LLM consumption.
 
 Guidance in flow definitions must stay consistent with the server limits and
 with itself. A prompt that names the wrong depth ceiling, or encourages

@@ -1,0 +1,17 @@
+name: Review Lua standard modules already loaded by runtime
+fixtures:
+  - path: math.lua
+    content: |
+      function sqrt(x) return x end
+  - path: main.lua
+    content: |
+      local m = require('math')
+      function run() return m.sqrt(4) end
+tests:
+  - name: Runtime loaded math does not bind unrelated math.lua
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path
+    assert:
+      - { empty: true }

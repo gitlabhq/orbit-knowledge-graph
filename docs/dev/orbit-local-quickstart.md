@@ -5,7 +5,7 @@ ClickHouse, or PostgreSQL. Many contributions only need the tools on this
 page: language parser additions, `orbit-cli` changes, docs, unit
 tests, and the code-graph integration tests.
 
-For anything that touches the server pipeline (SDLC indexing, the query
+To run the server pipeline end to end (Siphon, SDLC indexing, the query
 REST API), you need the full setup in
 [Local development](local-development.md). The same applies to most
 ontology YAML changes: `mise run ontology:validate` catches schema problems
@@ -27,9 +27,6 @@ git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
 cd knowledge-graph
 mise trust && mise install
 ```
-
-`mise install` supplies the repository's pinned `protoc` compiler for the
-code-graph integration tests, along with the other managed tools.
 
 If `mise install` errors on first run (the Rust toolchain post-install step
 can fail before the toolchain is fully linked), re-run it once.
@@ -89,24 +86,26 @@ query DSL documented under `docs/source/remote/` applies to Orbit Remote.
 ## Run tests without infrastructure
 
 ```shell
-mise run test:fast                    # unit tests (~1900 tests, no Docker)
+mise run test:fast                    # unit tests, no Docker
 mise run test:local                   # local integration tests, no Docker
-mise run test:integration:codegraph   # code-graph fixture tests (needs protoc)
+mise run test:integration:codegraph   # code-graph YAML suites, no Docker
 mise run ontology:validate            # validate ontology YAML changes
 mise run lint:code                    # clippy, warnings as errors
 mise run lint:docs                    # markdownlint + Vale + lychee
 ```
 
-`test:fast` runs in a few seconds once the test binaries are compiled; the
-first invocation pays the compile cost.
+For every test layer and where to add a test, see
+[Testing](../design-documents/testing.md).
 
-## What you can't test without GDK
+## What needs GDK
 
-- SDLC indexing (requires ClickHouse, NATS, and Siphon)
-- The query REST API and authorization paths
+The container tests run without GDK. They cover SDLC indexing with indexer
+scenarios on a ClickHouse testcontainer. On macOS, start Docker with
+`colima start gkg --memory 12`, then run `mise run test:integration`.
 
-The full server integration suite (`mise run test:integration`) also runs
-without GDK. It needs Docker (`mise run colima:start` on macOS), not the
-GDK stack.
+Only these parts need GDK or the [e2e harness](e2e-testing.md):
+
+- Live Siphon CDC from PostgreSQL.
+- Rails authorization and the Rails query API.
 
 For the rest, follow [Local development](local-development.md).

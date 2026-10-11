@@ -191,6 +191,8 @@ struct PropertyYaml {
     #[serde(default)]
     admin_only: bool,
     #[serde(default)]
+    hidden: bool,
+    #[serde(default)]
     selectivity: Option<FieldSelectivity>,
     #[serde(default)]
     description: Option<String>,
@@ -379,6 +381,7 @@ impl NodeYaml {
                     like_allowed: prop_def.like_allowed,
                     filterable: prop_def.filterable,
                     admin_only: prop_def.admin_only,
+                    hidden: prop_def.hidden,
                     selectivity,
                     description: prop_def.description,
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
@@ -1133,6 +1136,20 @@ mod tests {
         )
         .unwrap();
         assert!(hub.global);
+    }
+
+    #[test]
+    fn hidden_defaults_false_and_parses_when_true() {
+        let node = parse_test_node(
+            "node_type: entity\ndomain: test\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n  traversal_path: {type: string, source: traversal_path, hidden: true}\n",
+        )
+        .unwrap();
+        let hidden: Vec<_> = node
+            .fields
+            .iter()
+            .map(|f| (f.name.as_str(), f.hidden))
+            .collect();
+        assert_eq!(hidden, vec![("id", false), ("traversal_path", true)]);
     }
 
     #[test]

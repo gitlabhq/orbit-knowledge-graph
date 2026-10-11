@@ -1,0 +1,7 @@
+description: Empty membership matches neither null nor non-null values
+query:
+  gql: |
+    MATCH (wi:WorkItem) WHERE wi.weight IN [] RETURN wi.weight LIMIT 10
+expect:
+  node_count: 0
+  skip_requirements: [filter:weight]

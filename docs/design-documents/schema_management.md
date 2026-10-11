@@ -8,6 +8,20 @@ table-prefix-aware migration orchestrator.
 
 ## Schema Definition
 
+The ontology declares storage. `Relational<ClickHouse>` resolves ClickHouse graph-table definitions and source bindings during derivation.
+The query catalog and DDL renderer consume those resolved definitions.
+Migration uses the catalog's writer map to classify graph-table rebuilds.
+Schema construction and view rendering return errors for invalid layouts. Migration classification reuses the constructed schema's layout.
+Cleanup construction and refreshable-view lifecycle operations propagate layout errors. Fingerprint generation fails on invalid view templates instead of omitting them.
+These backend-specific types contain owned data and require no compiler dependency or SQL parser.
+Query models own `Layout<Relational<ClickHouse>, ClickHouseBindings>`, which pairs the schema with its bindings.
+DDL consumes the relational schema. Shared types hold tables, columns, and keys; ClickHouse options hold physical settings.
+Shared graph contracts contain no ClickHouse codecs, engine settings, or MV definitions.
+Auxiliary tables, dictionaries, and declared materialized views also derive into the ClickHouse storage catalog.
+The catalog preserves table lifetimes, engine arguments, TTLs, dictionary settings, and view SQL or templates.
+Schema rendering, auxiliary fingerprints, and refreshable-view creation consume those catalog definitions.
+Graph cleanup uses only graph tables; the versioned schema inventory also includes versioned auxiliary tables.
+
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
@@ -23,7 +37,7 @@ the primary key keeps pruning.
 
 This file covers ClickHouse schema migration versions and archive-backed serving. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
-enforced by `scripts/check-pinned-version.sh`. See
+enforced by `scripts/checks/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 A request's `migration_version` is the version of the archive it was served from; telemetry and
@@ -408,8 +422,8 @@ single project failure must not hold a schema migration open indefinitely.
 Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
 pipeline ran and committed for that scope. It does not validate that the output tables contain
 the expected number of rows. This is the standard pattern for CDC/ETL systems. Silent data-loss
-bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
-data correctness validation is deferred to staging E2E tests.
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Container tests check row counts after a clone on small
+fixtures, but no production check compares row counts.
 
 ### Status transitions on completion
 

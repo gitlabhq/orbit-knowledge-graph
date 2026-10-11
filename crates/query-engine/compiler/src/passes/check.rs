@@ -19,7 +19,7 @@ use ontology::Ontology;
 pub fn check_ast(
     node: &Node,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     match node {
         Node::Query(q) => visit_queries(q, &mut |query| check_query(query, ctx, model)),
@@ -30,7 +30,7 @@ pub fn check_ast(
 fn check_query(
     q: &Query,
     ctx: &SecurityContext,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let aliases = collect_node_aliases(&q.from, model);
     for alias in &aliases {

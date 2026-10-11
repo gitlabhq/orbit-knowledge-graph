@@ -3,6 +3,7 @@ use std::time::Duration;
 use reqwest::StatusCode;
 use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use secrecy::ExposeSecret;
+use serde::Deserialize;
 use tracing::warn;
 
 use super::key::CdotRequest;
@@ -20,20 +21,7 @@ pub(crate) enum QuotaAuth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaDecision {
     Allow,
-    Deny(DenyReason),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DenyReason {
-    QuotaExhausted,
-}
-
-impl DenyReason {
-    pub(crate) fn message(self) -> &'static str {
-        match self {
-            DenyReason::QuotaExhausted => "GitLab credits exhausted",
-        }
-    }
+    Deny(Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,11 +30,14 @@ pub(crate) enum QuotaOutcome {
         decision: QuotaDecision,
         ttl: Duration,
     },
-    FailOpen(FailOpenReason),
+    Failed {
+        reason: FailureReason,
+        block_reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FailOpenReason {
+pub(crate) enum FailureReason {
     Unreachable,
     Unauthorized,
     UnexpectedResponse,
@@ -84,6 +75,7 @@ impl QuotaClient {
         let http = reqwest::Client::builder()
             .user_agent(format!("{APP_ID}/{}", orbit_utils::version::get()))
             .timeout(request_timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers)
             .build()?;
         Ok(Self {
@@ -98,10 +90,10 @@ impl QuotaClient {
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), CDOT_QUOTA_PATH);
         let params = request.as_query_params();
 
-        let mut builder = self.http.head(&url).query(&params);
+        let mut builder = self.http.get(&url).query(&params);
         if self.license_auth {
-            // Without the header CDot can only answer 401, so an unusable claim fails open here
-            // instead of sending an unauthenticated request.
+            // Without the header CDot can only answer 401, so an unusable claim fails closed
+            // here instead of sending an unauthenticated request.
             let Some(mut token) = request
                 .license_checksum
                 .as_ref()
@@ -112,9 +104,12 @@ impl QuotaClient {
                     instance_id = %request.key.instance_id,
                     unique_instance_id = %request.key.unique_instance_id,
                     feature_qualified_name = %request.key.feature_qualified_name,
-                    "license_checksum claim is missing or not a valid header value; failing open"
+                    "license_checksum claim is missing or not a valid header value; failing closed"
                 );
-                return QuotaOutcome::FailOpen(FailOpenReason::Unauthorized);
+                return QuotaOutcome::Failed {
+                    reason: FailureReason::Unauthorized,
+                    block_reason: None,
+                };
             };
             token.set_sensitive(true);
             builder = builder.header(X_LICENSE_TOKEN, token);
@@ -132,45 +127,67 @@ impl QuotaClient {
                     instance_id = %request.key.instance_id,
                     unique_instance_id = %request.key.unique_instance_id,
                     feature_qualified_name = %request.key.feature_qualified_name,
-                    "quota check request failed; failing open"
+                    "quota check request failed; failing closed"
                 );
-                return QuotaOutcome::FailOpen(FailOpenReason::Unreachable);
+                return QuotaOutcome::Failed {
+                    reason: FailureReason::Unreachable,
+                    block_reason: None,
+                };
             }
         };
 
         let status = response.status();
         let ttl = parse_max_age(response.headers().get(CACHE_CONTROL)).unwrap_or(self.default_ttl);
 
-        match status {
-            StatusCode::OK => QuotaOutcome::Decided {
+        if status == StatusCode::OK {
+            return QuotaOutcome::Decided {
                 decision: QuotaDecision::Allow,
                 ttl,
-            },
-            StatusCode::PAYMENT_REQUIRED => QuotaOutcome::Decided {
-                decision: QuotaDecision::Deny(DenyReason::QuotaExhausted),
+            };
+        }
+
+        let block_reason = read_block_reason(response).await;
+        if status == StatusCode::PAYMENT_REQUIRED {
+            return QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(block_reason),
                 ttl,
-            },
-            other => {
-                warn!(
-                    status = %other,
-                    user_id = %request.key.user_id,
-                    realm = %request.key.realm,
-                    root_namespace_id = %request.key.root_namespace_id,
-                    global_user_id = %request.global_user_id,
-                    instance_id = %request.key.instance_id,
-                    unique_instance_id = %request.key.unique_instance_id,
-                    feature_qualified_name = %request.key.feature_qualified_name,
-                    "unexpected quota check response; failing open"
-                );
-                let reason = if other == StatusCode::UNAUTHORIZED {
-                    FailOpenReason::Unauthorized
-                } else {
-                    FailOpenReason::UnexpectedResponse
-                };
-                QuotaOutcome::FailOpen(reason)
-            }
+            };
+        }
+
+        warn!(
+            status = %status,
+            block_reason = block_reason.as_deref().unwrap_or("none"),
+            user_id = %request.key.user_id,
+            realm = %request.key.realm,
+            root_namespace_id = %request.key.root_namespace_id,
+            global_user_id = %request.global_user_id,
+            instance_id = %request.key.instance_id,
+            unique_instance_id = %request.key.unique_instance_id,
+            feature_qualified_name = %request.key.feature_qualified_name,
+            "unexpected quota check response; failing closed"
+        );
+        let reason = if status == StatusCode::UNAUTHORIZED {
+            FailureReason::Unauthorized
+        } else {
+            FailureReason::UnexpectedResponse
+        };
+        QuotaOutcome::Failed {
+            reason,
+            block_reason,
         }
     }
+}
+
+#[derive(Deserialize)]
+struct BlockBody {
+    block_reason: String,
+}
+
+async fn read_block_reason(response: reqwest::Response) -> Option<String> {
+    let body = response.bytes().await.ok()?;
+    serde_json::from_slice::<BlockBody>(&body)
+        .ok()
+        .map(|b| b.block_reason)
 }
 
 fn parse_max_age(header: Option<&HeaderValue>) -> Option<Duration> {
@@ -193,10 +210,17 @@ mod tests {
     use super::*;
     use axum::Router;
     use axum::http::{HeaderMap as AxumHeaderMap, StatusCode as AxumStatus, Uri};
-    use axum::routing::head;
+    use axum::routing::get;
     use reqwest::header::HeaderMap;
     use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
+
+    fn failed(reason: FailureReason) -> QuotaOutcome {
+        QuotaOutcome::Failed {
+            reason,
+            block_reason: None,
+        }
+    }
 
     fn hv(s: &str) -> HeaderValue {
         HeaderValue::from_str(s).unwrap()
@@ -241,7 +265,7 @@ mod tests {
         let recorder = seen.clone();
         let app = Router::new().route(
             crate::constants::CDOT_QUOTA_PATH,
-            head(move |headers: AxumHeaderMap, uri: Uri| {
+            get(move |headers: AxumHeaderMap, uri: Uri| {
                 let recorder = recorder.clone();
                 async move {
                     let query = uri.query().unwrap_or_default().to_string();
@@ -280,15 +304,23 @@ mod tests {
     }
 
     async fn stub_server(status: AxumStatus, cache_control: Option<&'static str>) -> String {
+        stub_server_with_body(status, cache_control, "").await
+    }
+
+    async fn stub_server_with_body(
+        status: AxumStatus,
+        cache_control: Option<&'static str>,
+        body: &'static str,
+    ) -> String {
         install_crypto();
         let app = Router::new().route(
             crate::constants::CDOT_QUOTA_PATH,
-            head(move || async move {
+            get(move || async move {
                 let mut headers = AxumHeaderMap::new();
                 if let Some(cc) = cache_control {
                     headers.insert("cache-control", cc.parse().unwrap());
                 }
-                (status, headers)
+                (status, headers, body)
             }),
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -354,7 +386,7 @@ mod tests {
         let outcome = client.check(&sample_request()).await;
         match outcome {
             QuotaOutcome::Decided { decision, ttl } => {
-                assert_eq!(decision, QuotaDecision::Deny(DenyReason::QuotaExhausted));
+                assert_eq!(decision, QuotaDecision::Deny(None));
                 assert_eq!(ttl, Duration::from_secs(42));
             }
             other => panic!("expected Decided, got {other:?}"),
@@ -362,7 +394,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_403_fails_open_as_unexpected_response() {
+    async fn status_403_fails_closed_as_unexpected_response() {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
         let client = QuotaClient::new(
             url,
@@ -373,12 +405,162 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::UnexpectedResponse)
+            failed(FailureReason::UnexpectedResponse)
         );
     }
 
     #[tokio::test]
-    async fn connection_error_fails_open_as_unreachable() {
+    async fn status_402_carries_block_reason() {
+        let url = stub_server_with_body(
+            AxumStatus::PAYMENT_REQUIRED,
+            None,
+            r#"{"block_reason":"license_revoked"}"#,
+        )
+        .await;
+        let outcome = license_client(url).check(&license_request()).await;
+        assert!(matches!(
+            outcome,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(Some(ref reason)),
+                ..
+            } if reason == "license_revoked"
+        ));
+    }
+
+    #[tokio::test]
+    async fn status_403_fails_closed_with_block_reason() {
+        let url = stub_server_with_body(
+            AxumStatus::FORBIDDEN,
+            None,
+            r#"{"block_reason":"resolution_error"}"#,
+        )
+        .await;
+        assert_eq!(
+            license_client(url).check(&license_request()).await,
+            QuotaOutcome::Failed {
+                reason: FailureReason::UnexpectedResponse,
+                block_reason: Some("resolution_error".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn non_json_402_body_has_no_block_reason() {
+        let url = stub_server_with_body(
+            AxumStatus::PAYMENT_REQUIRED,
+            None,
+            "<html>Payment Required</html>",
+        )
+        .await;
+        let outcome = license_client(url).check(&license_request()).await;
+        assert!(matches!(
+            outcome,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(None),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn non_200_success_status_fails_closed() {
+        let url = stub_server(AxumStatus::NO_CONTENT, None).await;
+        assert_eq!(
+            license_client(url).check(&license_request()).await,
+            failed(FailureReason::UnexpectedResponse)
+        );
+    }
+
+    #[tokio::test]
+    async fn redirect_is_not_followed() {
+        let (target, seen) = recording_server(AxumStatus::OK).await;
+        let location: &'static str =
+            Box::leak(format!("{target}{}", crate::constants::CDOT_QUOTA_PATH).into_boxed_str());
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(move || async move {
+                (
+                    AxumStatus::TEMPORARY_REDIRECT,
+                    [(axum::http::header::LOCATION, location)],
+                )
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        assert_eq!(
+            license_client(format!("http://{addr}"))
+                .check(&license_request())
+                .await,
+            failed(FailureReason::UnexpectedResponse)
+        );
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn timeout_fails_closed_as_unreachable() {
+        install_crypto();
+        let app = Router::new().route(
+            crate::constants::CDOT_QUOTA_PATH,
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                AxumStatus::OK
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = QuotaClient::new(
+            format!("http://{addr}"),
+            admin_auth(),
+            Duration::from_millis(200),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        assert_eq!(
+            client.check(&sample_request()).await,
+            failed(FailureReason::Unreachable)
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_402_body_still_denies() {
+        use tokio::io::AsyncWriteExt;
+
+        install_crypto();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut request).await;
+            socket
+                .write_all(b"HTTP/1.1 402 Payment Required\r\ncontent-length: 100\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let client = QuotaClient::new(
+            format!("http://{addr}"),
+            admin_auth(),
+            Duration::from_millis(300),
+            Duration::from_secs(42),
+        )
+        .unwrap();
+        assert_eq!(
+            client.check(&sample_request()).await,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(None),
+                ttl: Duration::from_secs(42),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_error_fails_closed_as_unreachable() {
         // Port 1 is reserved and unroutable; the TCP connect fails before any HTTP exchange.
         install_crypto();
         let client = QuotaClient::new(
@@ -390,7 +572,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unreachable)
+            failed(FailureReason::Unreachable)
         );
     }
 
@@ -440,29 +622,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn license_mode_with_unencodable_checksum_fails_open_without_calling_cdot() {
+    async fn license_mode_with_unencodable_checksum_fails_closed_without_calling_cdot() {
         let (url, seen) = recording_server(AxumStatus::OK).await;
         let mut request = license_request();
         request.license_checksum = Some("bad\nvalue".into());
 
         assert_eq!(
             license_client(url).check(&request).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            failed(FailureReason::Unauthorized)
         );
         assert!(seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn license_mode_401_fails_open_as_unauthorized() {
+    async fn license_mode_401_fails_closed_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         assert_eq!(
             license_client(url).check(&license_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            failed(FailureReason::Unauthorized)
         );
     }
 
     #[tokio::test]
-    async fn admin_mode_401_fails_open_as_unauthorized() {
+    async fn admin_mode_401_fails_closed_as_unauthorized() {
         let (url, _) = recording_server(AxumStatus::UNAUTHORIZED).await;
         let client = QuotaClient::new(
             url,
@@ -473,7 +655,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client.check(&sample_request()).await,
-            QuotaOutcome::FailOpen(FailOpenReason::Unauthorized)
+            failed(FailureReason::Unauthorized)
         );
     }
 

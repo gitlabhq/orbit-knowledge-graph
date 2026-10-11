@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -100,7 +101,12 @@ fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStre
 }
 
 fn run_orbit(base_url: &str, args: &[&str]) -> std::process::Output {
+    run_orbit_in(Path::new("."), base_url, args)
+}
+
+fn run_orbit_in(dir: &Path, base_url: &str, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_orbit"))
+        .current_dir(dir)
         .args(args)
         .env("ORBIT_API_BASE_URL", base_url)
         .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
@@ -179,6 +185,74 @@ fn graph_status_sends_full_path_query() {
     assert_eq!(
         request.request_line,
         "GET /api/v4/orbit/graph_status?full_path=gitlab-org%2Fgitlab HTTP/1.1"
+    );
+}
+
+#[test]
+fn graph_status_without_scope_inspects_the_origin_remote_project() {
+    for remote in [
+        "git@localhost:my-group/my-project.git",
+        "localhost:my-group/my-project.git",
+        "ssh://git@localhost:2222/my-group/my-project.git",
+        "https://localhost/my-group/my-project",
+    ] {
+        let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let base_url = base_url.replace("127.0.0.1", "localhost");
+        let clone = tempfile::tempdir().expect("tempdir");
+        for args in [
+            ["init", "--quiet"].as_slice(),
+            &["remote", "add", "origin", remote],
+        ] {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(clone.path())
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?} failed");
+        }
+
+        let output = run_orbit_in(clone.path(), &base_url, &["graph-status"]);
+        let request = handle.join().expect("join mock");
+
+        assert!(
+            output.status.success(),
+            "{remote}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            request.request_line,
+            "GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project HTTP/1.1",
+            "{remote}"
+        );
+    }
+}
+
+#[test]
+fn graph_status_llm_format_prints_the_formatted_text() {
+    let (base_url, handle) = serve_once(
+        r#"{"formatted_text":"projects:\n  indexed: 1"}"#,
+        "application/json",
+    );
+    let output = run_orbit(
+        &base_url,
+        &[
+            "graph-status",
+            "--namespace-id",
+            "9970",
+            "--response-format",
+            "llm",
+        ],
+    );
+    let request = handle.join().expect("join mock");
+
+    assert!(output.status.success());
+    assert_eq!(
+        request.request_line,
+        "GET /api/v4/orbit/graph_status?namespace_id=9970&response_format=llm HTTP/1.1"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "projects:\n  indexed: 1\n"
     );
 }
 

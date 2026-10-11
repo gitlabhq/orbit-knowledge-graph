@@ -15,7 +15,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, instrument};
+use tracing::{Instrument, info, instrument, warn};
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -48,7 +48,7 @@ use crate::skills::{get_skill, list_skills};
 use crate::tools::{AgentCommand, CommandRegistry, ExecutorError, ToolRegistry, ToolService};
 use orbit_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{
-    FormatName, GoonFormatter, GqlFormatter, GraphFormatter, ResultFormatter,
+    FormatName, GqlFormatter, GraphFormatter, ResultFormatter, ToonFormatter,
 };
 
 fn query_frontend(language: i32) -> Result<Frontend, String> {
@@ -109,14 +109,14 @@ fn schema_query_result(
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
         FormatName::Raw => ProtoFormatName::Raw,
-        FormatName::Goon => ProtoFormatName::Goon,
+        FormatName::Toon => ProtoFormatName::Toon,
         FormatName::Gql => ProtoFormatName::Gql,
     }
 }
 
 fn query_formatter(format: i32) -> Result<&'static dyn ResultFormatter, Status> {
     match ResponseFormat::try_from(format) {
-        Ok(ResponseFormat::Llm) => Ok(&GoonFormatter),
+        Ok(ResponseFormat::Llm) => Ok(&ToonFormatter),
         Ok(ResponseFormat::Gql) => Ok(&GqlFormatter),
         Ok(ResponseFormat::Raw) => Ok(&GraphFormatter),
         Err(_) => Err(Status::invalid_argument(format!(
@@ -239,10 +239,25 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         info!("Listing tools for user");
 
+        let frontend =
+            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
         let inline_catalog = ctx.claims.source_type == SourceType::Dws;
+        let schema = inline_catalog
+            .then(|| {
+                self.active_schema
+                    .snapshot()
+                    .inspect_err(|error| {
+                        warn!(error = %error.message(), "Inlining the command catalog without relationship patterns");
+                    })
+                    .ok()
+            })
+            .flatten();
         let tools = ToolRegistry::tools_with_catalog(
-            query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?,
+            frontend,
             inline_catalog,
+            schema
+                .as_ref()
+                .map(|schema| schema.relationship_patterns.as_str()),
         )
         .into_iter()
         .map(proto_tool_definition)
@@ -497,7 +512,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(command_error_to_status)?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
@@ -792,8 +807,7 @@ impl OrbitServiceImpl {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
                 let properties = if should_expand {
-                    n.fields
-                        .iter()
+                    n.listed_fields()
                         .map(|f| SchemaProperty {
                             name: f.name.clone(),
                             data_type: format!("{}", f.data_type),
@@ -1052,8 +1066,8 @@ mod tests {
             ),
             (
                 ResponseFormat::Llm as i32,
-                FormatName::Goon,
-                ProtoFormatName::Goon,
+                FormatName::Toon,
+                ProtoFormatName::Toon,
             ),
             (
                 ResponseFormat::Gql as i32,
@@ -1092,7 +1106,8 @@ mod tests {
             &test_ontology(),
             Default::default(),
             &[],
-        );
+        )
+        .unwrap();
         let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
         let result =
             schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();
@@ -1317,6 +1332,17 @@ mod tests {
                 domain.name
             );
         }
+    }
+
+    #[test]
+    fn test_structured_schema_leaves_out_hidden_properties() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
+        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+        let names: Vec<&str> = project.properties.iter().map(|p| p.name.as_str()).collect();
+
+        assert!(names.contains(&"full_path"), "{names:?}");
+        assert!(!names.contains(&"traversal_path"), "{names:?}");
     }
 
     #[test]

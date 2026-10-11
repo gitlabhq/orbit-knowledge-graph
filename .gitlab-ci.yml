@@ -18,6 +18,8 @@ workflow:
       variables:
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
       variables:
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
@@ -31,6 +33,8 @@ workflow:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
       variables:
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
@@ -43,6 +47,8 @@ workflow:
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
@@ -92,14 +98,46 @@ stages:
 
 # Job Templates
 
+# Trust model: scripts/ci/cargo-home-cache.sh.
+.cargo-home-cache:
+  paths: &cargo-home-paths
+    - .cargo-cache/git/db
+    - .cargo-cache/registry/cache
+    - .cargo-cache/registry/index
+  pull:
+    key: &cargo-home-key
+      prefix: cargo-home
+      files:
+        - Cargo.lock
+    paths: *cargo-home-paths
+    policy: pull
+  push:
+    key: *cargo-home-key
+    paths: *cargo-home-paths
+    # So only merged code writes the cache; set in unit-test.
+    policy: $CARGO_HOME_CACHE_POLICY
+
+# For jobs that resolve no dependencies, and for the release CLI builds,
+# which fetch fresh because git/db and the index are not verified.
+# Extend it after `.job-template` so its `cache` replaces the template's.
+.no-cargo-home-cache:
+  variables:
+    SKIP_CARGO_HOME_CACHE: "1"
+  cache: []
+
 .job-template:
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
     MISE_DISABLE_TOOLS: lefthook
+    # Fail closed: an empty policy would let the runner upload.
+    CARGO_HOME_CACHE_POLICY: pull
   before_script:
+    - ./scripts/ci/cargo-home-cache.sh
     - mise install
+  cache:
+    - !reference [.cargo-home-cache, pull]
 
 .sccache-template:
   variables:
@@ -109,10 +147,17 @@ stages:
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
+    - ./scripts/ci/cargo-home-cache.sh
     - mise install
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
+        # With the mise shim (cargo nextest), sccache probes `rustc +stable` through
+        # the rustup proxy; the image has no `stable` toolchain, so rustup silently
+        # downloads one (10-17 s per job in CI). The variable must be in cargo's
+        # environment, not only the sccache server's. Jobs that need another
+        # toolchain must install it explicitly.
+        export RUSTUP_AUTO_INSTALL=0
         sccache --start-server || true
       fi
 
@@ -156,29 +201,36 @@ stages:
 .mr-only-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
 
 .mr-and-main-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-.canonical-only-rules:
+# Jobs that pull alpine through the group dependency proxy. The proxy answers
+# 404 when the job user lacks at least Guest on the top-level group, as with
+# project-only bot accounts. The runner pulls the job image before any script
+# runs, so the choice is made at pipeline creation. The login match is a
+# heuristic: a match only falls back to the public image, which is always safe.
+.alpine-image-mr-only:
+  variables:
+    ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: ${ALPINE_IMAGE}
   rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)|^service_account_/
+      interruptible: true
+      variables:
+        ALPINE_IMAGE: alpine:latest
+    - !reference [.mr-only-rules, rules]
 
 .canonical-mr-only-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-
-.canonical-main-only-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # Lint Stage
 
@@ -203,7 +255,7 @@ mr-title-check:
   before_script:
     - npm ci --ignore-scripts
   script:
-    - ./scripts/check-mr-title.sh
+    - ./scripts/checks/check-mr-title.sh
 
 ontology-schema-validate:
   stage: lint
@@ -295,6 +347,7 @@ rust-toolchain-sync-check:
     - .job-template
     - .sccache-template
     - .mr-and-main-rules
+    - .no-cargo-home-cache
   needs: []
   script:
     - mise run toolchain:check
@@ -337,7 +390,7 @@ ddl-freshness-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - bash ./scripts/check-ddl-freshness.sh
+    - bash ./scripts/checks/check-ddl-freshness.sh
 
 integration-test-lane-coverage-check:
   stage: lint
@@ -359,7 +412,7 @@ migration-ledger-check:
   needs: []
   script:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash ./scripts/checks/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 pinned-version-check:
   stage: lint
@@ -371,8 +424,15 @@ pinned-version-check:
   needs: []
   script:
     - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-pinned-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    # Prefer the commit a merged results pipeline merged into, then the MR diff
+    # base. Both are in HEAD's history, so the three-dot diff has a merge base.
+    # A branch longer than the clone depth needs its full history to reach it.
+    - |
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      if [ -z "$BASE" ]; then echo "No merge request diff base for this commit, so nothing to compare."; exit 0; fi
+      echo "Comparing against $BASE"
+      git merge-base "$BASE" HEAD >/dev/null 2>&1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
+      bash ./scripts/checks/check-pinned-version.sh "$BASE"
 
 skill-version-bump-check:
   stage: lint
@@ -389,7 +449,7 @@ skill-version-bump-check:
         git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
         export BASE_REF_OVERRIDE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
       fi
-      python3 scripts/check-skill-version-bump.py --ci --no-worktree ${BASE_REF_OVERRIDE:+--base-ref "$BASE_REF_OVERRIDE"}
+      python3 scripts/checks/check-skill-version-bump.py --ci --no-worktree ${BASE_REF_OVERRIDE:+--base-ref "$BASE_REF_OVERRIDE"}
 
 prompt-version-bump-check:
   stage: lint
@@ -406,7 +466,7 @@ prompt-version-bump-check:
         git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
         export CI_MERGE_REQUEST_DIFF_BASE_SHA="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
       fi
-      sh scripts/check-prompt-version-bump.sh
+      sh scripts/checks/check-prompt-version-bump.sh
 
 iglu-schema-check:
   stage: lint
@@ -425,11 +485,10 @@ iglu-schema-check:
 
 system-note-actions-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   # Verifies config/vendored/system_note_metadata.actions matches Rails
   # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
@@ -439,11 +498,10 @@ system-note-actions-check:
 
 duckdb-fts-sources-sync-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .alpine-image-mr-only
   needs: []
   script:
     - apk add --no-cache bash git gzip tar yq
@@ -463,6 +521,7 @@ fmt-check:
   extends:
     - .job-template
     - .mr-only-rules
+    - .no-cargo-home-cache
   script:
     - cargo fmt --all -- --check
 
@@ -471,6 +530,7 @@ newline-check:
   extends:
     - .job-template
     - .mr-only-rules
+    - .no-cargo-home-cache
   script:
     - mise run lint:newlines
 
@@ -496,9 +556,9 @@ fips-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - ./scripts/check-fips-graph.sh
+    - ./scripts/checks/fips/check-graph.sh
     - cargo build -p orbit-server --locked
-    - ./scripts/check-fips-binary.sh target/debug/gkg-server
+    - ./scripts/checks/fips/check-binary.sh target/debug/gkg-server
     - sccache --show-stats || true
 
 cargo-audit:
@@ -506,6 +566,7 @@ cargo-audit:
   extends:
     - .job-template
     - .mr-and-main-rules
+    - .no-cargo-home-cache
   needs: []
   script:
     - cargo audit
@@ -595,6 +656,7 @@ secret_detection:
 
 check_docs_markdown:
   stage: docs
+  needs: []
   extends:
     - .mr-only-rules
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
@@ -605,10 +667,11 @@ check_docs_markdown:
     # docs that previously reached CI unlinted (design-documents deferred: #981).
     - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
     # Check links
-    - lychee --offline --include-fragments docs/source/**/*.md
+    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
+  needs: []
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
   parallel:
     matrix:
@@ -628,6 +691,7 @@ check_docs_i18n_markdown:
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
+  needs: []
   extends:
     - .mr-only-rules
   variables:
@@ -680,12 +744,21 @@ unit-test:
   stage: test
   extends:
     - .test-template
-    - .mr-and-main-rules
+  # Same rules as .mr-and-main-rules, plus the cache upload on main only.
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        CARGO_HOME_CACHE_POLICY: pull-push
+  cache:
+    - !reference [.cargo-home-cache, push]
   tags:
     - ${RUNNER_LARGE}
   needs: []
   script:
-    - ./scripts/run-unit-tests.sh --profile ci
+    - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
 compiler-integration-test:
@@ -726,7 +799,7 @@ cli-integration-test:
   needs: []
   script:
     - cargo build -p orbit-cli
-    - cargo nextest run --profile ci --test cli --no-fail-fast
+    - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - sccache --show-stats || true
 
 .integration-test-template:
@@ -887,6 +960,7 @@ code-indexing-benchmark-build:
 code-indexing-benchmark-v2-linux:
   extends:
     - .job-template
+    - .no-cargo-home-cache
     - .code-indexing-benchmark-template
   tags:
     - ${RUNNER_LARGE}
@@ -902,6 +976,7 @@ code-indexing-benchmark-v2-linux:
   extends:
     - .job-template
     - .code-indexing-benchmark-rules
+    - .no-cargo-home-cache
   interruptible: true
   script:
     - |
@@ -971,10 +1046,9 @@ code-indexing-benchmark-v2-analyze:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - git fetch --tags
-    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1s/^v//p')
+    - BASE_VERSION=$(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' | sed -n '1s#.*refs/tags/v##p')
     - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
+    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
 docker-build-amd64:
   extends: .docker-build
@@ -1006,7 +1080,7 @@ docker-manifest:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - ./scripts/publish-manifest.sh
+    - ./scripts/release/publish-manifest.sh
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}"
         "--"
@@ -1053,7 +1127,7 @@ docker-build-mr:
       when: manual
       allow_failure: true
   script:
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
+    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
@@ -1096,7 +1170,7 @@ check-go-proto:
   before_script:
     - apt-get update -qq && apt-get install -y -qq unzip
   script:
-    - scripts/proto-go.sh check
+    - scripts/dev/proto-go.sh check
     - cd clients/orbitpb && go build ./...
   rules:
     - !reference [.skip-on-solo-schedule, rules]
@@ -1205,7 +1279,7 @@ semantic-release:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   script:
     - export GKG_VERSION="${CI_COMMIT_TAG#v}"
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${GKG_VERSION}-${ARCH}"
+    - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${GKG_VERSION}-${ARCH}"
 
 release-build-amd64:
   extends: .docker-release
@@ -1263,7 +1337,7 @@ release-manifest:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - VERSION="${CI_COMMIT_TAG#v}"
-    - ./scripts/publish-manifest.sh
+    - ./scripts/release/publish-manifest.sh
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest"
         "--"
@@ -1287,6 +1361,17 @@ release-manifest:
   - apk add --update openssl
   - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
   - chmod 755 trigger-build.rb
+  secrets:
+    DOCS_PROJECT_API_TOKEN:
+      gitlab_secrets_manager:
+        name: DOCS_PROJECT_API_TOKEN
+        source: group/gitlab-org
+      file: false
+    DOCS_TRIGGER_TOKEN:
+      gitlab_secrets_manager:
+        name: DOCS_TRIGGER_TOKEN
+        source: group/gitlab-org
+      file: false
   variables:
     GIT_STRATEGY: none
     DOCS_GITLAB_REPO_SUFFIX: orbit
@@ -1407,7 +1492,9 @@ e2e:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
   needs:
-    - job: docker-manifest
+    # The e2e cluster is amd64-only, so the per-arch image is enough. Waiting
+    # for docker-manifest would add the arm64 build and signing to the path.
+    - job: docker-build-amd64
       optional: true
     - job: e2e-robot-image
       optional: true

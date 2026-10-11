@@ -8,7 +8,7 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::status_query::{
-    QueryCache, bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
 
@@ -78,20 +78,14 @@ pub async fn read_project_coverage(
     let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
     let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
-    let batches = fetch_status_query_batches(
-        client,
-        &sql,
-        "project coverage",
-        QueryCache::Skip,
-        |query| {
-            let query = query
-                .param("project_table", project_table)
-                .param("code_checkpoint_table", code_checkpoint_table)
-                .param("scopes", &scopes)
-                .param("max_code_attempts", MAX_CODE_ATTEMPTS);
-            bind_prefix_parameters(query, "scope", &scopes)
-        },
-    )
+    let batches = fetch_status_query_batches(client, &sql, "project coverage", |query| {
+        let query = query
+            .param("project_table", project_table)
+            .param("code_checkpoint_table", code_checkpoint_table)
+            .param("scopes", &scopes)
+            .param("max_code_attempts", MAX_CODE_ATTEMPTS);
+        bind_prefix_parameters(query, "scope", &scopes)
+    })
     .await?;
 
     let scopes = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;

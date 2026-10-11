@@ -146,7 +146,8 @@ pub fn compile_local(
 ) -> Result<CompiledQueryContext> {
     let mut ontology = ontology.as_ref().clone();
     ontology.remove_data_model_optimizations();
-    let data_model = data_model::duckdb(Arc::new(ontology))
+    let ontology = Arc::new(ontology);
+    let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
         Frontend::JsonDsl => {

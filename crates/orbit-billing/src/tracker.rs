@@ -76,6 +76,12 @@ impl SnowplowBillingTracker {
         })
     }
 
+    pub async fn shutdown(&self) {
+        tracing::info!("billing tracker shutdown: draining queued events");
+        self.tracker.shutdown().await;
+        tracing::info!("billing tracker shutdown: complete");
+    }
+
     fn token_source(
         config: &BillingConfig,
         cc_token_cache: Option<Arc<CloudConnectorTokenCache>>,
@@ -162,9 +168,16 @@ impl BillingTracker for FailingBillingTracker {
 mod tests {
     use std::future::Future;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
 
+    use axum::Router;
+    use axum::body::Bytes;
+    use axum::http::StatusCode;
+    use axum::routing::post;
     use gitlab_client::{CloudConnectorToken, CloudConnectorTokenFetcher, GitlabClientError};
     use orbit_server_config::AppConfig;
+    use tokio::net::TcpListener;
 
     use super::*;
 
@@ -215,5 +228,85 @@ mod tests {
             Some(cache),
         );
         assert!(source.is_ok());
+    }
+
+    async fn serve(app: Router) -> String {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    async fn slow_collector(delay: Duration) -> (String, Arc<AtomicUsize>) {
+        let received = Arc::new(AtomicUsize::new(0));
+        let counter = received.clone();
+        let app = Router::new().route(
+            labkit_events::AUTH_COLLECTOR_PATH,
+            post(move |body: Bytes| {
+                let counter = counter.clone();
+                async move {
+                    tokio::time::sleep(delay).await;
+                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    let events = payload["data"].as_array().map_or(0, Vec::len);
+                    counter.fetch_add(events, Ordering::Relaxed);
+                    StatusCode::OK
+                }
+            }),
+        );
+        (serve(app).await, received)
+    }
+
+    async fn hanging_collector() -> (String, Arc<AtomicUsize>) {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        let app = Router::new().route(
+            labkit_events::AUTH_COLLECTOR_PATH,
+            post(move || {
+                counter.fetch_add(1, Ordering::Relaxed);
+                std::future::pending::<StatusCode>()
+            }),
+        );
+        (serve(app).await, requests)
+    }
+
+    fn tracker_for(collector_url: String) -> SnowplowBillingTracker {
+        let mut config = config(BillingAuthMode::CloudConnector);
+        config.collector_url = collector_url;
+        let cache = Arc::new(CloudConnectorTokenCache::new(Arc::new(StubFetcher)));
+        SnowplowBillingTracker::from_config(&config, Some(cache)).unwrap()
+    }
+
+    fn event() -> BillingEvent {
+        BillingEvent::builder("orbit", "orbit_query", "SaaS", "request", 1.0)
+            .build()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn shutdown_delivers_queued_events_before_returning() {
+        let (url, received) = slow_collector(Duration::from_millis(100)).await;
+        let tracker = tracker_for(url);
+        for _ in 0..3 {
+            tracker.track(event()).unwrap();
+        }
+
+        tracker.shutdown().await;
+
+        assert_eq!(received.load(Ordering::Relaxed), 3);
+    }
+
+    #[tokio::test]
+    async fn shutdown_yields_to_an_outer_timeout_when_the_collector_hangs() {
+        let (url, requests) = hanging_collector().await;
+        let tracker = tracker_for(url);
+        tracker.track(event()).unwrap();
+
+        let started = Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_millis(200), tracker.shutdown()).await;
+
+        assert!(outcome.is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
     }
 }

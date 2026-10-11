@@ -9,7 +9,7 @@ use tonic::Status;
 
 use super::phase::Phase;
 use crate::active_schema::SchemaSnapshot;
-use crate::status_query::{QueryCache, fetch_status_query_batches, map_column_extraction_error};
+use crate::status_query::{fetch_status_query_batches, map_column_extraction_error};
 
 const MAX_SDLC_ATTEMPTS: i64 = 5;
 // The hourly sweep retries a dead run, so wait for two sweeps.
@@ -71,19 +71,14 @@ pub async fn read_plan_checkpoints(
     }
 
     let table = prefixed_table_name(CHECKPOINT_TABLE, schema.migration_version);
-    let batches = fetch_status_query_batches(
-        client,
-        PLAN_CHECKPOINTS_SQL,
-        "plan checkpoints",
-        QueryCache::Skip,
-        |query| {
+    let batches =
+        fetch_status_query_batches(client, PLAN_CHECKPOINTS_SQL, "plan checkpoints", |query| {
             query
                 .param("table", &table)
                 .param("namespace_prefix", NAMESPACE_KEY_PREFIX)
                 .param("roots", roots)
-        },
-    )
-    .await?;
+        })
+        .await?;
 
     let roots = i64::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let plans = String::extract_column(&batches, 1).map_err(map_column_extraction_error)?;

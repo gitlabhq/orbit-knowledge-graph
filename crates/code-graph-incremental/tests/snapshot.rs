@@ -4,7 +4,7 @@ use std::path::Path;
 use code_graph_incremental::canonical::Canonical as C;
 use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, inventory, templates};
+use code_graph_incremental::{Context, Env, State, inventory, pattern, rules, templates};
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
 const UTILS: &str = "def helper():\n    pass\n";
@@ -95,6 +95,92 @@ fn a_snapshot_round_trips_the_graph() {
         assert_eq!(
             (before.from(), before.to(), before.kind),
             (after.from(), after.to(), after.kind)
+        );
+    }
+}
+
+#[test]
+fn post_link_tree_edits_preserve_node_ids_tags_and_edges_across_snapshots() {
+    let repo = tempfile::tempdir().unwrap();
+    write(repo.path(), &[("main.py", MAIN), ("utils.py", UTILS)]);
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let mut state = index(&env, repo.path());
+    let edits = rules::load_rules(
+        r#"
+stages:
+  - rules:
+      - match: '(__defname)'
+        append: ['(__name "owner")', '(__name "discard")', '(__name "member")']
+  - rules:
+      - match: '(__name "discard")'
+        replace: '(discard)'
+      - match: '(__name "member")'
+        tag: { identity: member }
+"#,
+        &env.lang,
+    )
+    .unwrap();
+    state.trees = state
+        .trees
+        .into_iter()
+        .map(|tree| {
+            let mut tree: code_graph_incremental::tree::Tree = tree.into();
+            for stage in &edits {
+                pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]).unwrap();
+            }
+            tree.prune();
+            tree.into()
+        })
+        .collect();
+    let structure = |state: &State| {
+        state
+            .trees
+            .iter()
+            .map(|tree| {
+                std::iter::once(tree.root())
+                    .chain(tree.root().descendants())
+                    .map(|node| {
+                        (
+                            node.index(),
+                            node.kind(),
+                            node.sym(),
+                            node.parent().map(|parent| parent.index()),
+                            node.tag(env.lang.syms.lookup("identity")),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = structure(&state);
+    let (loaded_env, loaded) = save_and_load(&env, &state);
+    assert_eq!(structure(&loaded), expected);
+    assert_eq!(loaded.edges.len(), state.edges.len());
+    for (before, after) in state.edges.iter().zip(&loaded.edges) {
+        assert_eq!(
+            (before.from(), before.to(), before.site),
+            (after.from(), after.to(), after.site)
+        );
+    }
+    let updated = reindex(&loaded_env, loaded, repo.path(), vec![], &[]);
+    assert_eq!(structure(&updated), expected);
+    assert_eq!(cross_file_edges(&updated), cross_file_edges(&state));
+    let (_, restored) = save_and_load(&loaded_env, &updated);
+    assert_eq!(structure(&restored), expected);
+    let changed = write(
+        repo.path(),
+        &[("main.py", "from utils import helper\nhelper()\nhelper()\n")],
+    );
+    let updated = reindex(&loaded_env, restored, repo.path(), changed, &[]);
+    for edge in updated
+        .edges
+        .iter()
+        .filter(|edge| edge.from_tree != edge.to_tree)
+    {
+        let target = updated.trees[edge.to_tree as usize].cursor(edge.to_node);
+        assert_eq!(
+            target.child_sym(C::DefName),
+            Some(loaded_env.lang.syms.lookup("helper"))
         );
     }
 }

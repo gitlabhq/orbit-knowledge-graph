@@ -97,7 +97,7 @@ ClickHouse from your GDK installation.
 
    ```shell
    cd /path/to/knowledge-graph
-   scripts/apply-graph-schema.sh
+   scripts/dev/apply-graph-schema.sh
    ```
 
    The script defaults to `localhost:9001` and database

@@ -1,0 +1,119 @@
+name: "Package entrypoints select files without rewriting subpaths"
+fixtures:
+  - path: node_modules/widget/package.json
+    content: |
+      { "main": "./lib/start.js" }
+  - path: node_modules/widget/lib/start.js
+    content: |
+      export function run() {}
+  - path: node_modules/widget/index.js
+    content: |
+      export function run() {}
+  - path: node_modules/widget/extra.js
+    content: |
+      export function extra() {}
+  - path: node_modules/@scope/widget/package.json
+    content: |
+      { "main": "./lib/../start.js" }
+  - path: node_modules/@scope/widget/start.js
+    content: |
+      export function scoped() {}
+  - path: node_modules/escape/package.json
+    content: |
+      { "main": "../../../outside.js" }
+  - path: outside.js
+    content: |
+      export function outside() {}
+  - path: src/main.js
+    content: |
+      import { run } from 'widget';
+      import { extra } from 'widget/extra';
+      import { scoped } from '@scope/widget';
+      import { outside } from 'escape';
+      export function caller() { run(); extra(); scoped(); outside(); }
+  - path: src/barrel.js
+    content: |
+      export { run } from 'widget';
+  - path: src/consumer.js
+    content: |
+      import { run } from './barrel';
+      export function throughBarrel() { run(); }
+tests:
+  - name: "main overrides index while subpaths and scoped packages remain distinct"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'caller'
+      RETURN target.file_path AS file, target.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { file: 'node_modules/widget/lib/start.js', name: run } }
+      - { row: { file: 'node_modules/widget/extra.js', name: extra } }
+      - { row: { file: 'node_modules/@scope/widget/start.js', name: scoped } }
+steps:
+  - name: change package main after snapshot loading
+    snapshot: true
+    modify:
+      - path: node_modules/widget/package.json
+        content: |
+          { "main": "./index.js" }
+    tests:
+      - name: "unchanged consumers follow the edited entrypoint"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
+        assert:
+          - { row_count: 4 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+          - { row: { caller: caller, file: 'node_modules/@scope/widget/start.js', name: scoped } }
+  - name: remove scoped package metadata
+    snapshot: true
+    remove: [node_modules/@scope/widget/package.json]
+    tests:
+      - name: "removing a manifest removes its resolved calls"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
+        assert:
+          - { row_count: 3 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+  - name: remove explicit entrypoint
+    snapshot: true
+    modify:
+      - path: node_modules/widget/package.json
+        content: |
+          {}
+    tests:
+      - name: "default index lookup survives removal of main"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
+        assert:
+          - { row_count: 3 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+  - name: restore previously unresolved package
+    snapshot: true
+    modify:
+      - path: node_modules/@scope/widget/package.json
+        content: |
+          { "main": "./start.js" }
+    tests:
+      - name: "restoring metadata resolves the unchanged consumer again"
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name IN ['caller', 'throughBarrel']
+          RETURN caller.name AS caller, target.file_path AS file, target.name AS name
+        assert:
+          - { row_count: 4 }
+          - { row: { caller: caller, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: throughBarrel, file: 'node_modules/widget/index.js', name: run } }
+          - { row: { caller: caller, file: 'node_modules/widget/extra.js', name: extra } }
+          - { row: { caller: caller, file: 'node_modules/@scope/widget/start.js', name: scoped } }

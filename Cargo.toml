@@ -77,6 +77,7 @@ mimalloc = { version = "0.1.48", default-features = false }
 parking_lot = "0.12.5"
 petgraph = "0.8.3"
 globset = "0.4"
+libc = "0.2"
 memchr = "2.8.3"
 rust-lapper = "1.2.0"
 rkyv = { version = "0.8.18", features = ["alloc"] }
@@ -92,6 +93,7 @@ smallvec = "1.15.1"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 stacker = "0.1.23"
 tempfile = "3.24.0"
+typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
@@ -104,6 +106,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tokio-util = { version = "0.7.18", features = ["io-util"] }
 ignore = "0.4.25"
 rayon = "1.11.0"
+lz4_flex = "0.11.6"
 walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
@@ -166,7 +169,7 @@ oxc_resolver = "11.24.2"
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"
-tabled = "0.21"
+tabled = "0.22"
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
@@ -204,10 +207,6 @@ jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
 semver = { version = "1.0", features = ["serde"] }
 secrecy = "0.10.3"
-
-# Formatter test dependencies
-insta = { version = "1.40", features = ["yaml"] }
-proptest = "1.5"
 
 # Health check dependencies
 kube = { version = "4.2", default-features = false, features = ["client", "runtime", "ws", "rustls-tls", "aws-lc-rs"] }

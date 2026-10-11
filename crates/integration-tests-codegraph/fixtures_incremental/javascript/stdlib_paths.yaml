@@ -1,0 +1,45 @@
+name: Node builtins and relative modules have separate identities
+fixtures:
+  - path: util.js
+    content: |
+      export function format() {}
+  - path: main.js
+    content: |
+      import { format as local } from './util';
+      import { format as builtin } from 'util';
+      import { format as explicit } from 'node:util';
+      function run() { local(); builtin(); explicit(); }
+tests:
+  - name: Only the relative import binds to the project
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'run'
+      RETURN target.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: util.js } }
+  - name: Both builtin spellings remain external
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'run'
+      RETURN target.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: util } }
+      - { row: { path: 'node:util' } }
+steps:
+  - name: Edit local module after snapshot loading
+    snapshot: true
+    modify:
+      - path: util.js
+        content: |
+          export function format() { return "updated"; }
+    tests:
+      - name: Relative binding survives resolved path normalization
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+          WHERE caller.name = 'run'
+          RETURN target.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: util.js } }

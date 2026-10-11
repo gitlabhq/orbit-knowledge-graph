@@ -90,6 +90,10 @@ LIMIT 10
 - Aggregates are `count`, `sum`, `avg`, `min`, and `max`. Other return items
   become group keys. Alias a metric to sort by it:
   `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
+- Traversals and neighbors accept `AS` on properties but ignore it (no
+  rename). A traversal can `ORDER BY` the alias:
+  `RETURN mr.iid AS number ORDER BY number`. Aliases must be unique, and you
+  cannot order by a node alias; order by one of its properties.
 
 ## Pagination
 
@@ -104,6 +108,9 @@ window is incomplete. Do not report the returned rows as a complete list.
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
 subqueries, `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions,
 and offset pagination all reject. Syntax errors report a line and column.
+Other function calls, such as `type(r)` or `collect(x)`, reject with an error
+that names the function. For relationship types, match a typed relationship
+such as `-[r:CLOSES]->`. The response lists each edge type under `@edges`.
 
 ## Recipes
 

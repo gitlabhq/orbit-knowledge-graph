@@ -11,11 +11,27 @@
 #   get the same treatment as properties: a __def plus SSA bindings.
 
 config:
-  link:
-    builtins: [
-      println, print, readLine, require, requireNotNull, check, checkNotNull, error,
-      TODO, lazy, run, with, repeat, arrayOf, listOf, setOf, mapOf, mutableListOf,
-      mutableSetOf, mutableMapOf, emptyList, emptySet, emptyMap
+  stdlib: [{ module: java, precedence: runtime }, { module: javax }, { module: jdk },
+      { module: kotlin, availability: implicit, precedence: runtime, symbols: [
+      require, requireNotNull, check, checkNotNull, error,
+      TODO, lazy, run, with, repeat, arrayOf, assert, arrayOfNulls,
+      booleanArrayOf, byteArrayOf, charArrayOf, doubleArrayOf, floatArrayOf,
+      intArrayOf, longArrayOf, shortArrayOf, runCatching,
+      synchronized, Pair, Triple, Result, Unit, Any, String, Boolean, Byte,
+      Char, Double, Float, Int, Long, Short, Array, BooleanArray, ByteArray,
+      CharArray, DoubleArray, FloatArray, IntArray, LongArray, ShortArray
+      ] },
+      { module: kotlin/io, availability: implicit, symbols: [print, println, readLine,
+          readln, readlnOrNull] },
+      { module: kotlin/collections, availability: implicit, symbols: [listOf, setOf,
+          mapOf, mutableListOf, mutableSetOf, mutableMapOf, emptyList, emptySet,
+          emptyMap, setOfNotNull, listOfNotNull, linkedMapOf, linkedSetOf,
+          hashMapOf, hashSetOf, buildList, buildMap, buildSet] },
+      { module: kotlin/sequences, availability: implicit, symbols: [sequenceOf, emptySequence] },
+      { module: kotlin/math, symbols: [abs, acos, acosh, asin, asinh, atan,
+          atan2, atanh, cbrt, ceil, cos, cosh, exp, expm1, floor, hypot, ln,
+          ln1p, log, log10, log2, max, min, round, sign, sin, sinh, sqrt, tan,
+          tanh, truncate] }
     ]
   resolve:
     lookup_from:

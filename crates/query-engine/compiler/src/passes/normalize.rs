@@ -18,7 +18,7 @@ pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, Entit
         .unwrap_or_default()
 }
 
-pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -> Result<Input> {
+pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) -> Result<Input> {
     let mut input = input;
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -44,6 +44,7 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
             let columns = properties
                 .iter()
                 .filter(|property| model.property_realization(**property).is_some())
+                .filter(|property| !model.property_is_hidden(**property))
                 .map(|property| model.graph().property(*property).name.clone())
                 .collect();
             node.columns = Some(ColumnSelection::List(columns));
@@ -78,7 +79,7 @@ pub(crate) fn is_wildcard(types: &[String]) -> bool {
 
 fn infer_wildcard_relationship_kinds(
     input: &mut Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) {
     let entity_for: HashMap<&str, &str> = input
         .nodes

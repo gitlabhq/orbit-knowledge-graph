@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{ColumnSelection, FilterOp, InputFilter};
-use query_data_model::QueryBackendCatalog;
+use query_data_model::RelationalMapping;
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
@@ -12,7 +12,7 @@ pub enum FilterOwner<'a> {
 pub fn ordered_filters(
     filters: &HashMap<String, Vec<InputFilter>>,
     owner: FilterOwner<'_>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
@@ -98,16 +98,21 @@ pub fn has_non_denorm_filters(
     denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
 ) -> bool {
     filters.iter().any(|(_, filter)| {
-        let Some(property) = filter.property else {
-            return true;
-        };
         [DenormalizedDirection::Source, DenormalizedDirection::Target]
             .into_iter()
-            .all(|direction| {
-                !denormalized.contains_key(&DenormalizedKey {
-                    property,
-                    direction,
-                })
-            })
+            .all(|direction| lowerable_denorm(filter, direction, denormalized).is_none())
     })
+}
+
+pub fn lowerable_denorm<'a>(
+    filter: &BoundFilter,
+    direction: DenormalizedDirection,
+    denormalized: &'a HashMap<DenormalizedKey, DenormalizedProperty>,
+) -> Option<&'a DenormalizedProperty> {
+    denormalized
+        .get(&DenormalizedKey {
+            property: filter.property?,
+            direction,
+        })
+        .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.filter).is_some())
 }

@@ -3,18 +3,23 @@ use itertools::Itertools;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::canonical::Canonical as C;
 use crate::constants::{PATH_SEP, WILDCARD};
 use crate::env::Env;
+use crate::file_tree::LookupConfig;
 use crate::intern::Lang;
 use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    Cursor, Edge, EdgeKind, Tree, find_method_in, infer_return_type, members_by_level, reachable,
+    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, members_by_level,
+    reachable,
 };
+type Tree = crate::tree::Tree<Compact>;
+type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 use crate::treesitter::SupportLang;
 
 pub const CLASS_LIKE: &[C] = &[
@@ -77,6 +82,14 @@ impl FileIndex {
     fn get(&self, key: &str) -> Option<Loc> {
         self.keys.get(key).copied()
     }
+
+    fn insert_entrypoints(&mut self, entrypoints: &[(String, String)]) {
+        for (directory, path) in entrypoints {
+            if let Some(target) = self.get(path) {
+                self.keys.insert(directory.clone(), target);
+            }
+        }
+    }
 }
 
 #[derive(Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -118,6 +131,7 @@ impl ImportReq {
 }
 
 pub struct Resolver {
+    pub(crate) lookup: LookupConfig,
     visible: VisibleMap,
     reqs: Vec<ImportReq>,
     file_index: FileIndex,
@@ -128,6 +142,7 @@ pub struct Resolver {
 impl Resolver {
     pub fn new(lang: &Lang) -> Self {
         Self {
+            lookup: LookupConfig::default(),
             visible: Vec::new(),
             reqs: Vec::new(),
             file_index: FileIndex::default(),
@@ -150,6 +165,79 @@ impl Resolver {
 
     pub fn reqs(&self) -> &[ImportReq] {
         &self.reqs
+    }
+
+    pub(crate) fn rebuild_file_index(
+        &mut self,
+        trees: &[Tree],
+        env: &Env,
+        entrypoints: &[(String, String)],
+    ) -> FileIndex {
+        let mut index = build_file_index(trees, &env.lang, env.lang_id, env.lang_id.index_names());
+        index.insert_entrypoints(entrypoints);
+        std::mem::replace(&mut self.file_index, index)
+    }
+
+    fn invalidate(
+        &self,
+        previous_index: &FileIndex,
+        trees: &[Tree],
+        dirty_fis: &FxHashSet<u32>,
+        lookup: &LookupConfig,
+        env: &Env,
+    ) -> FxHashSet<u32> {
+        let mut invalidated: FxHashSet<u32> = self
+            .reqs
+            .iter()
+            .filter(|req| {
+                self.lookup != *lookup
+                    || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
+                        .contains(&Loc::new(req.target_fi as usize, req.anchor))
+            })
+            .map(|req| req.fi)
+            .chain(dirty_fis.iter().copied())
+            .collect();
+        let added_keys = self
+            .file_index
+            .keys
+            .keys()
+            .any(|key| !previous_index.keys.contains_key(key));
+        if added_keys || self.lookup != *lookup {
+            let known_imports: FxHashSet<_> =
+                self.reqs.iter().map(|req| (req.fi, req.node)).collect();
+            let discovery_files = (0..trees.len() as u32)
+                .filter(|fi| !dirty_fis.contains(fi))
+                .collect();
+            let (discovered, _) = gather_imports_for(
+                trees,
+                &env.lang,
+                &self.file_index,
+                lookup,
+                &env.resolve.config,
+                &discovery_files,
+            );
+            invalidated.extend(
+                discovered
+                    .iter()
+                    .filter(|req| !known_imports.contains(&(req.fi, req.node)))
+                    .map(|req| req.fi),
+            );
+        }
+        if !invalidated.is_empty() {
+            let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+            for req in &self.reqs {
+                dependents.entry(req.target_fi).or_default().push(req.fi);
+            }
+            let mut pending: VecDeque<_> = invalidated.iter().copied().collect();
+            while let Some(target) = pending.pop_front() {
+                for &dependent in dependents.get(&target).into_iter().flatten() {
+                    if invalidated.insert(dependent) {
+                        pending.push_back(dependent);
+                    }
+                }
+            }
+        }
+        invalidated
     }
 
     /// Renumbers the resolver's memory after files left the graph. Returns
@@ -215,18 +303,21 @@ impl Resolver {
     pub fn resolve(
         &mut self,
         trees: &[Tree],
-        edges: &[Edge],
+        edges: &mut Vec<Edge>,
         lang: &Lang,
         dirty_fis: &FxHashSet<u32>,
         support_lang: SupportLang,
-        lookup_prefixes: &[String],
+        lookup: &LookupConfig,
         config: &ResolveConfig,
-        aliases: &[(String, String)],
+        entrypoints: &[(String, String)],
         env: &Env,
         run: &Sentinel,
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
-        self.file_index = build_file_index(trees, lang, support_lang, index_names);
+        let previous_index = self.rebuild_file_index(trees, env, entrypoints);
+        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, lookup, env);
+        self.lookup = lookup.clone();
+        edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
 
         self.visible.resize_with(trees.len(), Default::default);
         for &fi in dirty_fis {
@@ -236,15 +327,8 @@ impl Resolver {
             }
         }
         self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
-        let (new_reqs, mut cross_edges) = gather_imports_for(
-            trees,
-            lang,
-            &self.file_index,
-            lookup_prefixes,
-            &config.external,
-            dirty_fis,
-            aliases,
-        );
+        let (new_reqs, mut cross_edges) =
+            gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
         self.reqs.extend(new_reqs);
         let ambiguous = propagate_reexports(
             trees,
@@ -272,20 +356,12 @@ impl Resolver {
             })
             .collect();
 
-        let reverse_dirty: FxHashSet<u32> = self
-            .reqs
-            .iter()
-            .filter(|r| !dirty_fis.contains(&r.fi) && dirty_fis.contains(&r.target_fi))
-            .map(|r| r.fi)
-            .collect();
-        let active_fis: FxHashSet<u32> = dirty_fis.union(&reverse_dirty).copied().collect();
-
         let mut type_uses: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut producers: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut extends_of: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
         let mut imports_to: FxHashMap<(u32, u32), Vec<&Edge>> = FxHashMap::default();
         let mut call_at_site: FxHashMap<(u32, u32), &Edge> = FxHashMap::default();
-        for e in edges {
+        for e in edges.iter() {
             match e.kind {
                 EdgeKind::Extends => extends_of.entry(e.from()).or_default().push(e.to()),
                 EdgeKind::Imports => imports_to.entry(e.to()).or_default().push(e),
@@ -304,8 +380,7 @@ impl Resolver {
             }
         }
 
-        let (partials, extensions, defs_by_name) =
-            gather_members(trees, config.merge_same_named_types);
+        let (partials, extensions) = gather_members(trees, config.merge_same_named_types);
         let declared_members: Vec<FxHashMap<(u32, u32), u32>> = trees
             .par_iter()
             .map(|tree| {
@@ -346,7 +421,26 @@ impl Resolver {
                     })
             })
             .collect();
+        let resolved_imports: FxHashSet<_> =
+            self.reqs.iter().map(|req| (req.fi, req.node)).collect();
+        let mut saved_imports: FxHashMap<_, Vec<u32>> = FxHashMap::default();
+        for edge in edges.iter().filter(|edge| {
+            edge.kind == EdgeKind::Imports && edge.call_resolution == CallResolution::Reference
+        }) {
+            if let Some(site) = edge.site
+                && let Some(import) = trees[edge.to_tree as usize].cursor(edge.to_node).parent()
+                && !resolved_imports.contains(&(edge.to_tree, import.index()))
+            {
+                saved_imports
+                    .entry((edge.from_tree, site))
+                    .or_default()
+                    .push(edge.to_node);
+            }
+        }
         let mut ctx = ResolveCtx {
+            references: FxHashMap::default(),
+            implementations: FxHashMap::default(),
+            saved_imports,
             trees,
             run,
             file_resolve_ms: env.limits.file_resolve_ms,
@@ -368,12 +462,12 @@ impl Resolver {
             merge_types: config.merge_same_named_types,
             partials: &partials,
             extensions: &extensions,
-            defs_by_name: &defs_by_name,
             declared_members: &declared_members,
             exporters: &exporters,
             imports: &imports,
         };
-        let (outcomes, file_timings): (Vec<_>, Vec<(u32, Duration)>) = active_fis
+        ctx.resolve_owners(edges, &self.reqs);
+        let (outcomes, file_timings): (Vec<_>, Vec<(u32, Duration)>) = dirty_fis
             .par_iter()
             .map(|&fi| {
                 let started = Instant::now();
@@ -389,7 +483,7 @@ impl Resolver {
         let wave1: Vec<Edge> = self
             .reqs
             .par_iter()
-            .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
+            .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
             .flat_map(|req| resolve_one_import(&ctx, req))
             .chain(per_file.into_par_iter().flatten())
             .filter(|e| {
@@ -414,19 +508,21 @@ impl Resolver {
             .filter(|e| e.kind == EdgeKind::Imports)
         {
             let target = ctx.corpus.jump(e.to_tree, e.to_node);
-            if e.from_tree == e.to_tree && wildcard_or_name(&ctx, target) == ctx.wildcard_sym {
+            if e.from_tree == e.to_tree
+                && wildcard_or_name(ctx.wildcard_sym, target) == ctx.wildcard_sym
+            {
                 referrers.entry(e.to()).or_default().insert(e.from_node);
             }
         }
         let wildcard_edges: Vec<Edge> = self
             .reqs
             .par_iter()
-            .filter(|r| active_fis.contains(&r.fi) || active_fis.contains(&r.target_fi))
+            .filter(|r| dirty_fis.contains(&r.fi) || dirty_fis.contains(&r.target_fi))
             .flat_map_iter(|req| {
                 let import = ctx.corpus.jump(req.fi, req.node);
                 import
                     .names()
-                    .filter(|n| wildcard_or_name(&ctx, *n) == ctx.wildcard_sym)
+                    .filter(|n| wildcard_or_name(ctx.wildcard_sym, *n) == ctx.wildcard_sym)
                     .filter_map(|n| referrers.get(&(n.fi(), n.index())).map(|r| (n, r)))
                     .flat_map(|(n, r)| wildcard_uses(&ctx, req, n, r))
                     .collect::<Vec<_>>()
@@ -452,7 +548,7 @@ impl Resolver {
         let mut wave: Vec<Edge> = edges
             .iter()
             .chain(&cross_edges)
-            .filter(|e| e.kind == EdgeKind::Calls && active_fis.contains(&e.from_tree))
+            .filter(|e| e.kind == EdgeKind::Calls && dirty_fis.contains(&e.from_tree))
             .copied()
             .collect();
         let key = |e: &Edge| (e.from_tree, e.from_node, e.site, e.to_tree, e.to_node);
@@ -472,6 +568,59 @@ impl Resolver {
         }
         cross_edges.extend(type_edges);
 
+        let mut import_sites: FxHashSet<_> = edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+            .map(|edge| (edge.from(), edge.to(), edge.site))
+            .collect();
+        cross_edges.retain(|edge| {
+            edge.kind != EdgeKind::Imports
+                || edge.site.is_none()
+                || import_sites.insert((edge.from(), edge.to(), edge.site))
+        });
+
+        let mut non_callable = FxHashMap::default();
+        for edge in edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+        {
+            let target = ctx.corpus.follow(edge);
+            if target.is(C::Def) {
+                non_callable
+                    .entry(edge.from())
+                    .and_modify(|known| *known &= target.has_tag(ctx.tags.non_callable))
+                    .or_insert_with(|| target.has_tag(ctx.tags.non_callable));
+            }
+        }
+        let callable_sites: FxHashSet<_> = edges
+            .iter()
+            .chain(&cross_edges)
+            .filter(|edge| edge.kind == EdgeKind::Calls)
+            .filter_map(|edge| edge.site.map(|site| (edge.from_tree, site)))
+            .collect();
+        drop(ctx);
+        for edge in edges.iter_mut().chain(&mut cross_edges).filter(|edge| {
+            edge.kind == EdgeKind::Imports && edge.call_resolution != CallResolution::Reference
+        }) {
+            let Some(site) = edge.site else {
+                continue;
+            };
+            edge.call_resolution = CallResolution::Unknown;
+            if callable_sites.contains(&(edge.from_tree, site)) {
+                edge.call_resolution = CallResolution::Callable;
+            } else if non_callable.get(&edge.to()) == Some(&true)
+                && trees[edge.from_tree as usize]
+                    .cursor(site)
+                    .child(C::Callee)
+                    .is_some_and(|callee| {
+                        callee.sym_opt().is_some() && !callee.has(C::Member) && !callee.has(C::Ivar)
+                    })
+            {
+                edge.call_resolution = CallResolution::NonCallable;
+            }
+        }
+
         Ok(ResolveResult {
             cross_edges,
             killed,
@@ -482,6 +631,9 @@ impl Resolver {
 }
 
 struct ResolveCtx<'a> {
+    references: FxHashMap<(u32, u32), (u32, u32)>,
+    implementations: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
+    saved_imports: FxHashMap<(u32, u32), Vec<u32>>,
     trees: &'a [Tree],
     run: &'a Sentinel,
     file_resolve_ms: u64,
@@ -503,13 +655,56 @@ struct ResolveCtx<'a> {
     merge_types: bool,
     partials: &'a FxHashMap<(u32, u32, u32), Vec<Loc>>,
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
-    defs_by_name: &'a [FxHashMap<u32, Vec<u32>>],
     declared_members: &'a [FxHashMap<(u32, u32), u32>],
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
 
 impl ResolveCtx<'_> {
+    fn resolve_owners(&mut self, edges: &[Edge], reqs: &[ImportReq]) {
+        self.references = edges
+            .iter()
+            .filter(|edge| {
+                edge.kind == EdgeKind::Imports
+                    && edge.call_resolution == CallResolution::Reference
+                    && edge.site.is_none()
+            })
+            .map(|edge| (edge.from(), edge.to()))
+            .collect();
+        let referenced_imports: FxHashSet<_> = self.references.values().copied().collect();
+        let imported_references: Vec<_> = reqs
+            .iter()
+            .flat_map(|req| {
+                self.corpus
+                    .jump(req.fi, req.node)
+                    .names()
+                    .map(move |name| (req, name))
+            })
+            .filter(|(_, name)| referenced_imports.contains(&(name.fi(), name.index())))
+            .filter_map(|(req, name)| {
+                let target = name_target(self, req, name)?;
+                Some(((name.fi(), name.index()), (target.fi, target.node)))
+            })
+            .collect();
+        self.references.extend(imported_references);
+        for &source in self.references.keys() {
+            let reference = self.corpus.jump(source.0, source.1);
+            if reference.is(C::DefName)
+                && let Some(implementation) =
+                    reference.parent().filter(|node| node.has(C::ImplBlock))
+                && let Some(owner) = resolve_reference(self, reference)
+            {
+                self.implementations
+                    .entry((owner.fi(), owner.index()))
+                    .or_default()
+                    .push((implementation.fi(), implementation.index()));
+            }
+        }
+        for owners in self.implementations.values_mut() {
+            owners.sort_unstable();
+        }
+    }
+
     /// Import edges into `target`, its name children, or its parent import.
     fn imports_to(&self, fi: usize, target: u32) -> impl Iterator<Item = &Edge> {
         let node = self.corpus.jump(fi as u32, target);
@@ -524,7 +719,7 @@ impl ResolveCtx<'_> {
 }
 
 fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32, Loc> {
-    tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
+    let mut names = tree.root().fold_tree(FxHashMap::default(), |names, c, _w| {
         if !c.is(C::Def) || c.has(C::ImplBlock) {
             return;
         }
@@ -544,19 +739,59 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
                 names.insert(name, loc);
             }
         }
-    })
+    });
+    for export in tree
+        .root()
+        .children()
+        .filter(|node| node.is(C::ModuleExport))
+    {
+        let bindings = export
+            .names()
+            .map(|name| (name.sym(), name.child_sym(C::Alias).unwrap_or(name.sym())))
+            .chain(
+                export
+                    .child_sym(C::DefaultExport)
+                    .map(|alias| (export.sym(), alias)),
+            );
+        for (name, alias) in bindings {
+            if let Some(target) = tree
+                .root()
+                .children()
+                .find(|node| node.is(C::Def) && node.child_sym(C::DefName) == Some(name))
+            {
+                names.insert(alias, Loc::new(fi, target.index()));
+            }
+        }
+    }
+    names
 }
 
 fn gather_imports_for(
     trees: &[Tree],
     lang: &Lang,
     file_index: &FileIndex,
-    lookup_prefixes: &[String],
-    external: &[String],
+    lookup: &LookupConfig,
+    config: &ResolveConfig,
     dirty_fis: &FxHashSet<u32>,
-    aliases: &[(String, String)],
 ) -> (Vec<ImportReq>, Vec<Edge>) {
-    let resolved_tag_key = ReservedTags::new(lang).resolved_source;
+    let tags = ReservedTags::new(lang);
+    let resolved_tag_key = tags.resolved_source;
+    let root_relative = lang.syms.lookup("source_root_rel");
+    let declared_roots: FxHashSet<_> = trees
+        .iter()
+        .filter_map(|tree| {
+            let relative = lang.syms.resolve(tree.root().tag(root_relative)?);
+            tree.label
+                .strip_suffix(relative)
+                .map(|root| root.trim_end_matches(PATH_SEP))
+        })
+        .collect();
+    let stdlib_prefixes: Vec<_> = lookup
+        .prefixes
+        .iter()
+        .filter(|prefix| declared_roots.contains(prefix.as_str()))
+        .cloned()
+        .collect();
     let dirty_vec: Vec<u32> = dirty_fis.iter().copied().collect();
     let per_tree: Vec<(Vec<ImportReq>, Vec<Edge>)> = dirty_vec
         .par_iter()
@@ -567,21 +802,41 @@ fn gather_imports_for(
                     if cur.kind() != C::Import && cur.kind() != C::ImportType {
                         return;
                     }
-                    let Some(source_sym) = cur.child_sym(C::SourcePath) else {
+                    let Some(source_sym) = cur
+                        .tag(tags.original_source_path)
+                        .or_else(|| cur.child_sym(C::SourcePath))
+                    else {
                         return;
                     };
                     let source_str = lang.syms.resolve(source_sym);
-                    if is_external(source_str, external) {
-                        return;
-                    }
                     let Some(resolved_sym) = tree.get_tag(cur.index(), resolved_tag_key) else {
                         return;
                     };
                     let raw_path = lang.syms.resolve(resolved_sym);
-                    let target_path = apply_aliases(raw_path, aliases);
+                    let mapped = lookup.aliases.iter().find_map(|alias| {
+                        if alias.scope.is_some() && alias.scope != cur.tag(tags.alias_scope) {
+                            return None;
+                        }
+                        let path = apply_alias(source_str, &alias.pattern, &alias.replacement)?;
+                        (!alias.if_exists || !resolve_glob(&path, file_index, &[]).is_empty())
+                            .then_some(path)
+                    });
+                    if mapped.is_none() && is_external(source_str, &config.external) {
+                        return;
+                    }
                     let node_idx = cur.index();
-                    let mut direct = resolve_glob(&target_path, file_index, lookup_prefixes);
+                    let stdlib = mapped.is_none() && is_external(source_str, &config.stdlib);
+                    let prefixes = if stdlib {
+                        &stdlib_prefixes
+                    } else {
+                        &lookup.prefixes
+                    };
+                    let target_path = mapped.unwrap_or_else(|| raw_path.to_owned());
+                    let mut direct = resolve_glob(&target_path, file_index, prefixes);
                     direct.retain(|loc| loc.fi != fi);
+                    if direct.is_empty() && stdlib {
+                        return;
+                    }
                     let candidates = match direct.is_empty() {
                         false => Either::Left(
                             direct
@@ -591,7 +846,7 @@ fn gather_imports_for(
                         true => Either::Right(cur.names().flat_map(|c| {
                             let submod =
                                 format!("{target_path}{PATH_SEP}{}", lang.syms.resolve(c.sym()));
-                            resolve_glob(&submod, file_index, lookup_prefixes)
+                            resolve_glob(&submod, file_index, &lookup.prefixes)
                                 .into_iter()
                                 .map(move |loc| (loc, submod.clone(), true))
                         })),
@@ -652,9 +907,18 @@ fn propagate_reexports(
         for req in reqs {
             let exports = req.exports(trees, visible);
             for c in trees[req.fi as usize].cursor(req.node).names() {
-                let hint = c.child_sym(C::SsaHint).filter(|&h| h == wildcard_sym);
-                let ns = hint.unwrap_or(c.sym());
+                let ns = wildcard_or_name(wildcard_sym, c);
                 if ns == wildcard_sym {
+                    if let Some(alias) = namespace_alias(wildcard_sym, c)
+                        && c.ancestors().any(|node| node.is(C::ModuleExport))
+                    {
+                        export(
+                            req.fi as usize,
+                            alias,
+                            Loc::new(req.target_fi as usize, req.anchor),
+                        );
+                        continue;
+                    }
                     for (&ds, &loc) in exports.iter() {
                         export(req.fi as usize, ds, loc);
                     }
@@ -703,21 +967,21 @@ fn propagate_reexports(
     ambiguous
 }
 
-fn name_targets(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Vec<Loc> {
+fn name_target(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Option<Loc> {
     let tfi = req.target_fi as usize;
     let exports = req.exports(ctx.trees, ctx.visible);
-    let ns = wildcard_or_name(ctx, c);
+    let ns = wildcard_or_name(ctx.wildcard_sym, c);
     if ns == ctx.wildcard_sym {
-        return vec![Loc::new(tfi, req.anchor)];
+        return Some(Loc::new(tfi, req.anchor));
     }
     if ctx.ambiguous.contains(&(req.target_fi, ns)) {
-        return vec![];
+        return None;
     }
     if let Some(&loc) = exports.get(&ns) {
-        return vec![loc];
+        return Some(loc);
     }
     if req.anchor != 0 {
-        return vec![];
+        return None;
     }
     let target_path = ctx.lang.syms.resolve(ctx.corpus.jump(tfi as u32, 0).sym());
     resolve_submodule(
@@ -728,8 +992,6 @@ fn name_targets(ctx: &ResolveCtx, req: &ImportReq, c: Cursor) -> Vec<Loc> {
         ctx.file_index,
     )
     .map(|fi| Loc::new(fi, 0))
-    .into_iter()
-    .collect()
 }
 
 fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
@@ -739,16 +1001,11 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
     let import_edges: Vec<Edge> = import
         .names()
         .flat_map(|c| {
-            name_targets(ctx, req, c)
+            name_target(ctx, req, c)
                 .into_iter()
                 .filter(move |loc| loc.fi as usize != fi)
                 .map(move |loc| c.edge_to(c.jump(loc.fi, loc.node), EdgeKind::Imports))
         })
-        .collect();
-
-    let target_files: Vec<usize> = std::iter::once(tfi)
-        .chain(import_edges.iter().map(|e| e.to_fi()))
-        .unique()
         .collect();
 
     let mut edges: Vec<Edge> = import_edges.clone();
@@ -763,34 +1020,63 @@ fn resolve_one_import(ctx: &ResolveCtx, req: &ImportReq) -> Vec<Edge> {
             continue;
         };
         let local = |n: Cursor| n.child_sym(C::Alias).unwrap_or(n.sym());
-        if !import
+        let Some(name) = import
             .names()
-            .any(|n| m.child_sym(C::Object) == Some(local(n)))
-        {
+            .find(|n| m.child_sym(C::Object) == Some(local(*n)))
+        else {
             continue;
-        }
+        };
         let exports = req.exports(ctx.trees, ctx.visible);
-        let members = target_files
-            .iter()
-            .filter_map(|&t| match t == tfi {
-                true => exports.get(&m.sym()),
-                false => ctx.visible[t].get(&m.sym()),
-            })
-            .unique()
-            .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
-            .filter(|tgt| tgt.has_tag(ctx.tags.callable))
-            .collect();
-        edges.extend(call_edges(caller, members, edge.site));
+        let target_file = name_target(ctx, req, name)
+            .filter(|target| target.node == 0)
+            .map_or(tfi, |target| target.fi as usize);
+        let target = if target_file == tfi {
+            exports.get(&m.sym())
+        } else {
+            ctx.visible[target_file].get(&m.sym())
+        }
+        .map(|loc| ctx.corpus.jump(loc.fi, loc.node))
+        .filter(|tgt| tgt.has_tag(ctx.tags.callable));
+        if let Some(target) = target {
+            if namespace_alias(ctx.wildcard_sym, name).is_some() {
+                edges.push(name.edge_to(target, EdgeKind::Imports));
+            }
+            edges.push(call_edge(caller, target, edge.site));
+        }
     }
 
     for ie in &import_edges {
         let target = ctx.corpus.follow(ie);
         let name = ctx.corpus.jump(ie.from_tree, ie.from_node);
-        if wildcard_or_name(ctx, name) == ctx.wildcard_sym || !target.has_tag(ctx.tags.callable) {
+        if wildcard_or_name(ctx.wildcard_sym, name) == ctx.wildcard_sym
+            || !target.has_tag(ctx.tags.callable)
+        {
             continue;
         }
         for intra in ctx.imports_to(ie.from_fi(), ie.from_node) {
+            if intra.call_resolution == CallResolution::Reference
+                && intra.site.is_some_and(|site| {
+                    let binding = ctx.corpus.jump(intra.from_tree, site);
+                    binding.is(C::Binding) && binding.bare_rhs().is_some()
+                })
+            {
+                continue;
+            }
             let from = ctx.corpus.jump(ie.from_tree, intra.from_node);
+            if intra.site.is_some_and(|site| {
+                ctx.corpus
+                    .jump(intra.from_tree, site)
+                    .member()
+                    .is_some_and(|member| {
+                        member
+                            .child(C::Dispatch)
+                            .is_some_and(|dispatch| !dispatch.has(C::Object))
+                            || member.has(C::Dispatch)
+                                && target.enclosing(Cursor::is_dispatch_contract).is_some()
+                    })
+            }) {
+                continue;
+            }
             edges.push(call_edge(from, target, intra.site));
         }
     }
@@ -808,6 +1094,9 @@ fn wildcard_uses<'a>(
     name: Cursor<'a>,
     referrers: &FxHashSet<u32>,
 ) -> Vec<Edge> {
+    if namespace_alias(ctx.wildcard_sym, name).is_some() {
+        return Vec::new();
+    }
     let fi = req.fi as usize;
     let exports = req.exports(ctx.trees, ctx.visible);
     let provided = |sym: u32| {
@@ -868,9 +1157,14 @@ fn qualified<'a>(
     Some(current)
 }
 
-fn wildcard_or_name(ctx: &ResolveCtx, name: Cursor) -> u32 {
+fn namespace_alias(wildcard_sym: u32, name: Cursor) -> Option<u32> {
+    name.child_sym(C::Alias)
+        .filter(|_| wildcard_or_name(wildcard_sym, name) == wildcard_sym)
+}
+
+fn wildcard_or_name(wildcard_sym: u32, name: Cursor) -> u32 {
     name.child_sym(C::SsaHint)
-        .filter(|&h| h == ctx.wildcard_sym)
+        .filter(|&h| h == wildcard_sym)
         .unwrap_or(name.sym())
 }
 
@@ -919,9 +1213,19 @@ fn dispatch(
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
             let Some(class) = class else {
+                if call
+                    .child(C::Callee)
+                    .is_some_and(|callee| callee.sym_opt().is_some())
+                    && let Some(imports) = ctx.saved_imports.get(&(producer.fi(), producer.index()))
+                {
+                    return Some(Either::Left(imports.iter().map(move |&node| Edge {
+                        site: usage.site,
+                        ..from.edge_to(from.jump(producer.fi(), node), EdgeKind::Imports)
+                    })));
+                }
                 let owner = Owner::External(external_of(ctx, producer)?);
                 let targets = extension_members(ctx, owner, call.member()?.sym(), usage.from_fi());
-                return Some(call_edges(from, targets, usage.site));
+                return Some(Either::Right(call_edges(from, targets, usage.site)));
             };
             let class = match call.member().and_then(|m| m.child(C::Object)) {
                 Some(object) if object.child(C::Member).is_some() => {
@@ -932,15 +1236,14 @@ fn dispatch(
             if call.is(C::Binding) && class.initializer().and_then(Cursor::rhs_callee).is_none() {
                 return None;
             }
-            let name = call
-                .member()
-                .map(|m| m.sym())
-                .or_else(|| class.child_sym(C::Callable));
-            let targets = match name {
-                Some(name) => method_up(ctx, class, name, usage.from_fi()),
-                None => vec![class],
+            let targets = match call.member() {
+                Some(member) => member_targets(ctx, member, class),
+                None => class.child_sym(C::Callable).map_or_else(
+                    || vec![class],
+                    |name| method_up(ctx, class, name, usage.from_fi()),
+                ),
             };
-            Some(call_edges(from, targets, usage.site))
+            Some(Either::Right(call_edges(from, targets, usage.site)))
         })
         .flatten()
         .collect()
@@ -970,9 +1273,7 @@ enum Owner<'a> {
 
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
     if producer.typed().is_none()
-        && let Some(rhs) = producer
-            .child(C::Rhs)
-            .filter(|rhs| rhs.children().next().is_none())
+        && let Some(rhs) = producer.bare_rhs()
     {
         return resolve_chain(ctx, rhs);
     }
@@ -1018,8 +1319,19 @@ fn visible_type<'a>(ctx: &'a ResolveCtx, fi: u32, sym: u32) -> Option<Cursor<'a>
 
 fn resolve_chain<'a>(ctx: &'a ResolveCtx, c: Cursor<'a>) -> Option<Cursor<'a>> {
     chain(ctx, c, &|r| {
-        enclosing_alias(ctx, r).or_else(|| visible_type(ctx, r.fi(), r.sym()))
+        resolve_reference(ctx, r)
+            .or_else(|| enclosing_alias(ctx, r))
+            .or_else(|| visible_type(ctx, r.fi(), r.sym()))
     })
+}
+
+fn resolve_reference<'a>(ctx: &'a ResolveCtx, reference: Cursor<'a>) -> Option<Cursor<'a>> {
+    reachable((reference.fi(), reference.index()), |id| {
+        ctx.references.get(&id).copied()
+    })
+    .skip(1)
+    .map(|(fi, node)| ctx.corpus.jump(fi, node))
+    .find(|node| node.is(C::Def))
 }
 
 /// `Self` in `impl Service { fn new() -> Self }` names the enclosing def;
@@ -1049,10 +1361,8 @@ fn chain<'a>(
         return value_type(ctx, root(c)?);
     };
     let receiver = chain(ctx, m.child(C::Object)?, root)?;
-    let member = method_up(ctx, receiver, m.sym(), c.fi() as usize)
-        .into_iter()
-        .exactly_one()
-        .ok()?;
+    let targets = member_targets(ctx, m, receiver);
+    let member = targets.into_iter().exactly_one().ok()?;
     value_type(ctx, member)
 }
 
@@ -1096,20 +1406,15 @@ fn partial_key(d: Cursor, merge_types: bool) -> Option<(u32, u32, u32)> {
 type Members = (
     FxHashMap<(u32, u32, u32), Vec<Loc>>,
     FxHashMap<u32, Vec<Loc>>,
-    Vec<FxHashMap<u32, Vec<u32>>>,
 );
 
-/// Partial-type parts by key, extension members by name, and every def by
-/// name per file.
 fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
-    let (mut parts, mut extensions, mut defs_by_name) = Members::default();
-    defs_by_name.resize_with(trees.len(), Default::default);
+    let (mut parts, mut extensions) = Members::default();
     for (fi, tree) in trees.iter().enumerate() {
         for d in tree.root().descendants().filter(|d| d.is(C::Def)) {
             let Some(name) = d.child_sym(C::DefName) else {
                 continue;
             };
-            defs_by_name[fi].entry(name).or_default().push(d.index());
             let nested = d.ancestors().any(|a| a.is(C::Def) && !a.has(C::ImplBlock));
             if nested {
                 continue;
@@ -1126,7 +1431,7 @@ fn gather_members(trees: &[Tree], merge_types: bool) -> Members {
             }
         }
     }
-    (parts, extensions, defs_by_name)
+    (parts, extensions)
 }
 
 fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
@@ -1144,15 +1449,21 @@ fn supertypes<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// The other same-named defs in the file when one side is an impl block:
-/// `struct Service` and its `impl Service` / `impl Runner for Service`.
 fn impl_blocks_of<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>) -> impl Iterator<Item = Cursor<'a>> {
-    cls.child_sym(C::DefName)
-        .and_then(|n| ctx.defs_by_name[cls.fi() as usize].get(&n))
-        .into_iter()
-        .flatten()
-        .map(move |&n| cls.jump(cls.fi(), n))
-        .filter(move |d| d.index() != cls.index() && (d.has(C::ImplBlock) || cls.has(C::ImplBlock)))
+    let owner = cls
+        .child(C::DefName)
+        .filter(|_| cls.has(C::ImplBlock))
+        .and_then(|name| resolve_reference(ctx, name))
+        .unwrap_or(cls);
+    std::iter::once(owner)
+        .chain(
+            ctx.implementations
+                .get(&(owner.fi(), owner.index()))
+                .into_iter()
+                .flatten()
+                .map(|&(fi, node)| ctx.corpus.jump(fi, node)),
+        )
+        .filter(move |node| (node.fi(), node.index()) != (cls.fi(), cls.index()))
 }
 
 fn lub<'a>(
@@ -1208,6 +1519,46 @@ fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> 
         return inherited.into_iter().map(jump).collect();
     }
     extension_members(ctx, Owner::Class(cls), name, fi)
+}
+
+fn member_targets<'a>(
+    ctx: &'a ResolveCtx,
+    member: Cursor<'a>,
+    receiver: Cursor<'a>,
+) -> Vec<Cursor<'a>> {
+    let Some(constraint) = member.child(C::Dispatch) else {
+        return method_up(ctx, receiver, member.sym(), member.fi() as usize);
+    };
+    let Some(contract) = resolve_reference(ctx, constraint)
+        .or_else(|| {
+            qualified(ctx, constraint.sym(), &|name| {
+                visible_type(ctx, constraint.fi(), name)
+            })
+        })
+        .filter(|owner| owner.is_dispatch_contract())
+    else {
+        return Vec::new();
+    };
+    let mut implementations = std::iter::once(receiver)
+        .chain(impl_blocks_of(ctx, receiver))
+        .filter(|owner| {
+            owner
+                .children_of(C::SuperType)
+                .filter_map(|constraint| resolve_chain(ctx, constraint))
+                .any(|target| (target.fi(), target.index()) == (contract.fi(), contract.index()))
+        });
+    let Some(implementation) = implementations.next() else {
+        return Vec::new();
+    };
+    if implementations.next().is_some() {
+        return Vec::new();
+    }
+    find_method_in(implementation, member.sym())
+        .or_else(|| {
+            find_method_in(contract, member.sym()).filter(|method| !method.has(C::Declaration))
+        })
+        .into_iter()
+        .collect()
 }
 
 fn extension_members<'a>(
@@ -1321,6 +1672,17 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 continue;
             };
             match resolve_chain(ctx, object) {
+                Some(target)
+                    if m.child(C::Dispatch)
+                        .is_some_and(|dispatch| !dispatch.has(C::Object)) =>
+                {
+                    out.extend(call_edges(
+                        from,
+                        member_targets(ctx, m, target),
+                        Some(node.index()),
+                    ));
+                }
+                Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
                     let members = method_up(ctx, target, m.sym(), fi);
                     out.extend(call_edges(from, members, Some(node.index())));
@@ -1486,9 +1848,12 @@ fn resolve_glob(target: &str, idx: &FileIndex, prefixes: &[String]) -> Vec<Loc> 
 }
 
 fn is_external(source_str: &str, external: &[String]) -> bool {
-    external
-        .iter()
-        .any(|e| e == source_str.split(PATH_SEP).next().unwrap_or(source_str))
+    external.iter().any(|module| {
+        source_str == module
+            || source_str
+                .strip_prefix(module.as_str())
+                .is_some_and(|suffix| suffix.starts_with(PATH_SEP))
+    })
 }
 
 fn resolve_path(target: &str, file_index: &FileIndex, prefixes: &[String]) -> Option<Loc> {
@@ -1528,40 +1893,32 @@ fn resolve_submodule(
 
 /// `@/*` -> `src/*` rewrites a prefix; a key without `*` matches whole path
 /// components only, so `app` never matches `application/x`.
-fn apply_aliases(path: &str, aliases: &[(String, String)]) -> String {
-    for (key, val) in aliases {
-        if let (Some(prefix), Some(target)) = (key.strip_suffix('*'), val.strip_suffix('*')) {
-            if let Some(rest) = path.strip_prefix(prefix) {
-                return format!("{target}{rest}");
-            }
-            continue;
-        }
-        let Some(rest) = path.strip_prefix(key.as_str()) else {
-            continue;
-        };
-        if rest.is_empty() {
-            return val.clone();
-        }
-        if let Some(rest) = rest.strip_prefix(PATH_SEP) {
-            return format!("{val}{PATH_SEP}{rest}");
-        }
+fn apply_alias(path: &str, pattern: &str, replacement: &str) -> Option<String> {
+    if let (Some(prefix), Some(target)) = (pattern.strip_suffix('*'), replacement.strip_suffix('*'))
+    {
+        return path
+            .strip_prefix(prefix)
+            .map(|rest| format!("{target}{rest}"));
     }
-    path.to_string()
+    let rest = path.strip_prefix(pattern)?;
+    (rest.is_empty() || rest.starts_with(PATH_SEP)).then(|| format!("{replacement}{rest}"))
 }
 
 #[cfg(test)]
 mod alias_tests {
-    use super::apply_aliases;
+    use super::apply_alias;
 
     #[test]
     fn an_alias_matches_whole_path_components_only() {
-        let aliases = [("app".to_string(), "src/app".to_string())];
-        assert_eq!(apply_aliases("app", &aliases), "src/app");
-        assert_eq!(apply_aliases("app/foo", &aliases), "src/app/foo");
         assert_eq!(
-            apply_aliases("application/foo", &aliases),
-            "application/foo"
+            apply_alias("app", "app", "src/app").as_deref(),
+            Some("src/app")
         );
+        assert_eq!(
+            apply_alias("app/foo", "app", "src/app").as_deref(),
+            Some("src/app/foo")
+        );
+        assert_eq!(apply_alias("application/foo", "app", "src/app"), None);
     }
 }
 

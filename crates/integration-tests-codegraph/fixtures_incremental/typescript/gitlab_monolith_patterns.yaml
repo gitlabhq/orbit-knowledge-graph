@@ -59,6 +59,14 @@ fixtures:
       export { fetchFlags } from './actions';
       export * as featureFlagModule from './modules';
       export { default as legacyAdapter } from './legacy_adapter';
+  - path: app/assets/javascripts/feature_flags/consumer.ts
+    content: |
+      import { fetchFlags, featureFlagModule, legacyAdapter } from './store';
+      export function useStore() {
+        fetchFlags('project');
+        featureFlagModule.buildFlagName('project');
+        legacyAdapter('project');
+      }
   - path: app/assets/javascripts/projects/your_work/components/app.ts
     content: |
       export default function renderProjects(name: string): string {
@@ -171,8 +179,6 @@ fixtures:
 
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
@@ -200,21 +206,16 @@ tests:
       - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "buildFlagName" } }
       - { row: { name: "DEFAULT_SCOPE", alias: null, target: "DEFAULT_SCOPE" } }
 
-  - name: feature flag barrel import preserves underlying module targets
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
+  - name: feature flag barrel imports call the underlying definitions
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/index.ts'
-      RETURN d.fqn AS fqn
+      MATCH (caller:Definition)-[:CALLS]->(d:Definition)
+      WHERE caller.name = 'useStore'
+      RETURN d.name AS name, d.file_path AS file
     assert:
-      - { row_count: 4 }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::fetchFlags" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::featureFlagModule" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::legacyAdapter" } }
+      - { row_count: 3 }
+      - { row: { name: fetchFlags, file: 'app/assets/javascripts/feature_flags/store/actions.ts' } }
+      - { row: { name: buildFlagName, file: 'app/assets/javascripts/feature_flags/store/modules/feature_flag.ts' } }
+      - { row: { name: legacyAdapter, file: 'app/assets/javascripts/feature_flags/store/legacy_adapter.js' } }
 
   - name: imported constants from alias barrels do not create false call edges
     query: |
@@ -226,8 +227,6 @@ tests:
       - { empty: true }
 
   - name: CommonJS require through alias targets the primary export proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
@@ -236,21 +235,16 @@ tests:
       - { row_count: 1 }
       - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
 
-  - name: CommonJS alias modules emit module and local definitions
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: CommonJS files define the exported function once
     query: |
-      MATCH (d:Definition)
-      WHERE d.file_path = 'app/assets/javascripts/feature_flags/store/legacy_adapter.js'
+      MATCH (file:File)-[:DEFINES]->(d:Definition)
+      WHERE file.path = 'app/assets/javascripts/feature_flags/store/legacy_adapter.js'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 1 }
       - { row: { fqn: "legacyAdapter" } }
-      - { row: { fqn: "app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
 
-  - name: explicit default reexports target the barrel proxy
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: explicit default reexports target the original definition
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
@@ -258,48 +252,42 @@ tests:
       RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
+      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "renderProjects" } }
 
   - name: project barrel imports preserve explicit, star, and constant targets
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamedImport'
-      RETURN i.identifier_name AS name, d.fqn AS target
+      RETURN i.identifier_name AS name, d.fqn AS target, d.file_path AS file
     assert:
       - { row_count: 4 }
-      - { row: { name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
-      - { row: { name: "buildTab", target: "app/assets/javascripts/projects/your_work/components/index.ts::buildTab" } }
-      - { row: { name: "normalizeSearch", target: "normalizeSearch" } }
-      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB" } }
+      - { row: { name: "ProjectsApp", target: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
+      - { row: { name: "buildTab", target: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
+      - { row: { name: "normalizeSearch", target: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
+      - { row: { name: "DEFAULT_TAB", target: "DEFAULT_TAB", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
 
-  - name: namespace imports over alias barrels target the synthesized barrel module
-    # Known gap: The old pipeline synthesized module and export-proxy Definitions; the incremental engine does not.
-    skip: true
+  - name: namespace imports over alias barrels retain their binding
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
         AND i.import_type = 'NamespaceImport'
-      RETURN i.import_path AS path, d.fqn AS target
+      RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
     assert:
       - { row_count: 1 }
-      - { row: { path: "~/projects/your_work/components", target: "app/assets/javascripts/projects/your_work/components/index.ts" } }
+      - { row: { path: "~/projects/your_work/components", name: "*", alias: "ProjectComponents" } }
 
   - name: namespace alias barrel calls resolve to concrete component definitions
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'runProjectsNamespace'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS file
       ORDER BY callee
     assert:
       - { row_count: 3 }
-      - { row: { caller: "runProjectsNamespace", callee: "buildTab" } }
-      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch" } }
-      - { row: { caller: "runProjectsNamespace", callee: "renderProjects" } }
+      - { row: { caller: "runProjectsNamespace", callee: "buildTab", file: 'app/assets/javascripts/projects/your_work/components/tabs.ts' } }
+      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch", file: 'app/assets/javascripts/projects/your_work/components/filters.ts' } }
+      - { row: { caller: "runProjectsNamespace", callee: "renderProjects", file: 'app/assets/javascripts/projects/your_work/components/app.ts' } }
 
   - name: imported constants from monolith barrels stay inert
     query: |
@@ -311,10 +299,6 @@ tests:
       - { empty: true }
 
   - name: ee alias helper imports target enterprise utility definitions
-
-    # Known gap: GitLab monolith alias conventions (ee/, jh/, ee_else_ce, ~) are not declared as aliases.
-
-    skip: true
     query: |
       MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'

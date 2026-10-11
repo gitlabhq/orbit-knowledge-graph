@@ -8,7 +8,7 @@ toc_hide: true
 
 ## Status
 
-Accepted
+Superseded. `format=llm` query results use [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), with one table per node type. The GOON encoder was removed.
 
 ## Date
 

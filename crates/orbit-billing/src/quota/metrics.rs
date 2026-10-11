@@ -4,7 +4,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 use orbit_observability::billing::quota as spec;
 use orbit_observability::billing::quota::labels::{CACHE, DECISION, SOURCE_TYPE};
-use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS, SKIPPED};
+use orbit_observability::billing::quota::values::{ALLOW, DENY, FAIL_CLOSED, HIT, MISS, SKIPPED};
 
 pub(super) static QUOTA_METRICS: LazyLock<QuotaMetrics> = LazyLock::new(QuotaMetrics::new);
 
@@ -29,8 +29,8 @@ impl QuotaMetrics {
 /// series on the first scrape. OTel only exposes a series after it has been
 /// observed at least once.
 ///
-/// `decisions{decision=fail_open, cache=hit}` is intentionally omitted: fail-open
-/// outcomes are never inserted into the cache, so that combination cannot occur.
+/// `decisions{decision=fail_closed, cache=hit}` is intentionally omitted: failed
+/// checks are never inserted into the cache, so that combination cannot occur.
 /// Histograms are not pre-seeded — `record(0.0)` would be a real observation that
 /// skews `_count` and `_sum`; they appear on the first genuine CDot call.
 pub fn register() {
@@ -57,8 +57,8 @@ pub fn register() {
             }
         }
     }
-    // fail_open and skipped are only ever observed on cache=miss (never cached).
-    for decision in [FAIL_OPEN, SKIPPED] {
+    // fail_closed and skipped are only ever observed on cache=miss (never cached).
+    for decision in [FAIL_CLOSED, SKIPPED] {
         for source_type in metered_types {
             QUOTA_METRICS.decisions.add(
                 0,

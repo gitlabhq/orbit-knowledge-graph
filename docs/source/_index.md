@@ -118,7 +118,7 @@ GitLab Orbit indexes two categories of data:
 
 GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
 
-[Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
+[Full indexing coverage](compare-local-remote.md#indexed-data) | [Schema reference](remote/schema.md)
 
 ## Get started
 

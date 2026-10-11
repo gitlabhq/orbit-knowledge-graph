@@ -11,7 +11,7 @@ pub mod labels {
 pub mod values {
     pub const ALLOW: &str = "allow";
     pub const DENY: &str = "deny";
-    pub const FAIL_OPEN: &str = "fail_open";
+    pub const FAIL_CLOSED: &str = "fail_closed";
     pub const SKIPPED: &str = "skipped";
     pub const HIT: &str = "hit";
     pub const MISS: &str = "miss";
@@ -19,18 +19,19 @@ pub mod values {
 
 const DOMAIN: &str = "billing.quota";
 
-// `decision=fail_open` means CDot was unreachable or returned an unexpected status;
-// the request was allowed through. Distinct from `decision=allow` (CDot returned 200).
+// `decision=fail_closed` means CDot was unreachable, rejected the credentials, or
+// returned a status other than 200 or 402; the request was denied. Distinct from
+// `decision=deny` (CDot returned 402).
 //
-// `cache=miss` on `decision=fail_open` does not imply a 1:1 CDot call ratio: moka
-// coalesces concurrent misses, and fail-open results are never cached, so under a
+// `cache=miss` on `decision=fail_closed` does not imply a 1:1 CDot call ratio: moka
+// coalesces concurrent misses, and failed checks are never cached, so under a
 // CDot outage every request reports `cache=miss` while actual HTTP calls are far
-// fewer. Use `cdot_duration_seconds_count{outcome="fail_open"}` for the call rate.
+// fewer. Use `cdot_duration_seconds_count{outcome="fail_closed"}` for the call rate.
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
-    "Quota gate decisions, labelled by outcome (allow/deny/fail_open/skipped), cache result \
+    "Quota gate decisions, labelled by outcome (allow/deny/fail_closed/skipped), cache result \
      (hit/miss), and source_type (mcp/rest). \
-     cache=miss on fail_open does not imply a 1:1 CDot call ratio — see \
+     cache=miss on fail_closed does not imply a 1:1 CDot call ratio — see \
      gkg.billing.quota.cdot.duration for actual upstream call counts.",
     None,
     &[labels::DECISION, labels::CACHE, labels::SOURCE_TYPE],
@@ -42,7 +43,7 @@ pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
 // N concurrent waiters on the same key produce N miss increments but 1 CDot call.
 pub const QUOTA_CDOT_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.billing.quota.cdot.duration",
-    "Latency of upstream CustomersDot HEAD requests for quota resolution. \
+    "Latency of upstream CustomersDot GET requests for quota resolution. \
      Recorded once per actual HTTP call; concurrent cache-miss coalescing means \
      this count is lower than the decisions{cache=miss} counter under load.",
     Some("s"),

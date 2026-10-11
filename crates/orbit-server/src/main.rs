@@ -214,6 +214,7 @@ async fn run_webserver(
 
     orbit_billing::register_metrics();
     orbit_billing::register_quota_metrics();
+    let mut billing_tracker = None;
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
@@ -228,9 +229,12 @@ async fn run_webserver(
         let cc_token_cache = Some(Arc::new(gitlab_client::CloudConnectorTokenCache::new(
             gitlab_client.clone(),
         )));
-        let tracker = SnowplowBillingTracker::from_config(&config.billing, cc_token_cache)
-            .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
-        grpc_server = grpc_server.with_billing(Arc::new(tracker));
+        let tracker = Arc::new(
+            SnowplowBillingTracker::from_config(&config.billing, cc_token_cache)
+                .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?,
+        );
+        grpc_server = grpc_server.with_billing(tracker.clone());
+        billing_tracker = Some(tracker);
     } else {
         info!("billing tracker disabled (billing.enabled=false): no events will be emitted");
     }
@@ -274,8 +278,19 @@ async fn run_webserver(
         res = grpc_server.run(grpc_listener) => res.map_err(Into::into),
         _ = shutdown.cancelled() => Ok(()),
     };
-    if let Some(tracker) = analytics_tracker {
-        tracker.shutdown().await;
-    }
+
+    tokio::join!(
+        async {
+            if let Some(tracker) = analytics_tracker {
+                tracker.shutdown().await;
+            }
+        },
+        async {
+            if let Some(tracker) = billing_tracker {
+                tracker.shutdown().await;
+            }
+        }
+    );
+
     result
 }

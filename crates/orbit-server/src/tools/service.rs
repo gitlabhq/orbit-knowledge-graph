@@ -179,8 +179,15 @@ impl ToolService {
         ontology: &Ontology,
         expand_nodes: &[String],
     ) -> Result<String, ExecutorError> {
-        let response = build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-        Self::encode_schema_toon(&response)
+        Self::encode_schema_toon(&Self::schema_response(ontology, expand_nodes)?)
+    }
+
+    fn schema_response(
+        ontology: &Ontology,
+        expand_nodes: &[String],
+    ) -> Result<SchemaResponse, ExecutorError> {
+        build_schema_response(ontology, IntrospectionScope::All, expand_nodes)
+            .map_err(|error| ExecutorError::InvalidArguments(format!("expand_nodes: {error}")))
     }
 
     pub fn encode_schema_toon(response: &SchemaResponse) -> Result<String, ExecutorError> {
@@ -244,9 +251,7 @@ impl ToolService {
         match format {
             OutputFormat::Llm => Self::build_schema_toon(ontology, expand_nodes).map(Value::String),
             OutputFormat::Raw => {
-                let response =
-                    build_schema_response(ontology, IntrospectionScope::All, expand_nodes);
-                serde_json::to_value(response)
+                serde_json::to_value(Self::schema_response(ontology, expand_nodes)?)
                     .map_err(|error| ExecutorError::InvalidArguments(error.to_string()))
             }
         }

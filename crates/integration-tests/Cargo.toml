@@ -45,6 +45,7 @@ rcgen = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toon-format = { workspace = true }
 siphon-proto = { workspace = true }
 regex = { workspace = true }
 tar = { workspace = true }

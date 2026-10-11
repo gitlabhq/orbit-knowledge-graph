@@ -16,7 +16,9 @@ use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
 use crate::pipeline::State;
-use crate::tree::{Cursor, EdgeKind, Tree};
+use crate::tree::{CallResolution, Compact};
+type Tree = crate::tree::Tree<Compact>;
+type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 mod parse;
 
@@ -125,7 +127,7 @@ impl<'a> Forest<'a> {
         let stand_in = labels.iter().map(|l| by_path.get(*l).copied()).collect();
         Self {
             trees,
-            project,
+            project: project.into(),
             stand_in,
         }
     }
@@ -200,7 +202,7 @@ impl<'a> Row<'a> {
         match &column.source {
             Source::Const(value) => Value::Str(Cow::Borrowed(value)),
             Source::Transform(tf) => {
-                let sym = tf.apply_sym(self.tree, lang, self.tree.to_id(node.index()), None);
+                let sym = tf.apply_at(self.tree, lang, node.index(), None);
                 Value::Str(Cow::Borrowed(lang.syms.resolve(sym)))
             }
             Source::Position(p, span) => Value::Int(position(measured(node, span), *p)),
@@ -370,20 +372,6 @@ fn write_edges(
         }
     }
 
-    let sources_with: FxHashMap<EdgeKind, FxHashSet<(u32, u32)>> = plan
-        .graph
-        .iter()
-        .filter_map(|g| g.unless_source_has)
-        .map(|kind| {
-            let set = state
-                .edges
-                .iter()
-                .filter(|e| e.kind == kind)
-                .map(|e| (e.from_tree, e.from_node))
-                .collect();
-            (kind, set)
-        })
-        .collect();
     let mut seen_cross_file = FxHashSet::default();
 
     for e in &state.edges {
@@ -399,10 +387,7 @@ fn write_edges(
         let Some(rule) = rule else {
             continue;
         };
-        if rule
-            .unless_source_has
-            .is_some_and(|k| sources_with[&k].contains(&(e.from_tree, e.from_node)))
-        {
+        if rule.fallback && e.call_resolution != CallResolution::Unknown {
             continue;
         }
         let kind = rule.kind.as_str();

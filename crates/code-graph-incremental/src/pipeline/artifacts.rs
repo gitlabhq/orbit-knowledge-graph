@@ -9,7 +9,7 @@ use orbit_utils::fs_walk::FileInventoryEntry;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{SourceFile, State};
-use crate::tree::{Edge, Tree};
+use crate::tree::{Compact, Edge, Tree};
 
 /// A repository's classified files; parse entries are read from `root` as
 /// workers take them.
@@ -61,10 +61,10 @@ pub struct Parsed(pub Tree);
 pub struct Rewritten(pub Tree);
 
 /// Only canonical nodes remain; the source text is gone.
-pub struct Canonical(pub Tree);
+pub struct Canonical(pub Tree<Compact>);
 
 pub struct LinkedFile {
-    pub tree: Tree,
+    pub tree: Tree<Compact>,
     pub edges: Vec<Edge>,
 }
 

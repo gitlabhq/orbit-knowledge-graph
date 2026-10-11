@@ -11,7 +11,7 @@ local etlHandlerDur = o.metric('gkg.etl.handler.duration').prom_name;
 local etlHandlerErr = o.metric('gkg.etl.handler.errors').prom_name;
 
 local items = [
-  o.row('GKG webserver'),
+  o.row('Webserver'),
   o.stat('Successful queries / min', 'Queries that returned status="ok", per minute. Each one sends one gkg_query_executed analytics event, except GQL schema requests (query_type="unknown").',
     o.target('sum(rate(%s{%s, status="ok"}[5m]) * 60)' % [pipelineQueries, o.GKG_WEB_SEL], 'ok/min', 'ORBIT_DS'),
     'short', 6),
@@ -37,7 +37,7 @@ local items = [
     o.target('sum(rate(%s{%s, failure_reason="security"}[5m]) * 60)' % [pipelineFailed, o.GKG_WEB_SEL], 'rejects/min', 'ORBIT_DS'),
     'short', 6),
 
-  o.row('GKG indexer'),
+  o.row('Indexer'),
   o.stat('Rows indexed / min', 'Total rows written to ClickHouse per minute.',
     o.target('sum(rate(%s{%s}[5m]) * 60)' % [etlRows, o.GKG_IDX_SEL], 'rows/min', 'ORBIT_DS'),
     'short', 6),
@@ -62,8 +62,8 @@ local items = [
     o.target('count(count by (app_id) (siphon_operations_total{%s}))' % o.SIPHON_SEL, 'apps', 'ORBIT_DS'),
     'short', 8),
 
-  o.row('Rails → KG'),
-  o.stat('gRPC calls / min', 'Rails → GKG gRPC requests per minute.',
+  o.row('Rails → Orbit'),
+  o.stat('gRPC calls / min', 'Rails → Orbit gRPC requests per minute.',
     o.target('sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{%s}[5m]) * 60)' % o.RAILS_SEL, 'calls/min', 'RAILS_DS'),
     'short', 8),
   o.stat('gRPC errors / min', 'Rails-side gRPC errors per minute.',

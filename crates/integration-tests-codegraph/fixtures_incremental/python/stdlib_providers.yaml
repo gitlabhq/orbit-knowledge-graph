@@ -1,0 +1,27 @@
+name: Python implicit and explicit provider symbols stay distinct
+fixtures:
+  - path: main.py
+    content: |
+      from math import *
+      def standard(): return sqrt(4)
+      def implicit(): return len([])
+  - path: other.py
+    content: |
+      from unknown_package import *
+      def unresolved(): return sqrt(4)
+tests:
+  - name: Implicit and visible provider names do not become wildcard calls
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['standard', 'implicit']
+      RETURN target.import_path
+    assert:
+      - { empty: true }
+  - name: Import-only provider symbol is not implicitly builtin
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'unresolved'
+      RETURN target.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: unknown_package } }

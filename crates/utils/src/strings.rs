@@ -1,39 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::{borrow::Cow, fmt};
 
-/// Builds a byte lookup table allowing ASCII alphanumerics and the supplied extra bytes.
-pub const fn ascii_alphanumeric_table(extra: &[u8]) -> [bool; 256] {
-    let mut table = [false; 256];
-    let mut byte = b'0';
-    while byte <= b'9' {
-        table[byte as usize] = true;
-        byte += 1;
-    }
-    byte = b'A';
-    while byte <= b'Z' {
-        table[byte as usize] = true;
-        byte += 1;
-    }
-    byte = b'a';
-    while byte <= b'z' {
-        table[byte as usize] = true;
-        byte += 1;
-    }
-    let mut index = 0;
-    while index < extra.len() {
-        table[extra[index] as usize] = true;
-        index += 1;
-    }
-    table
-}
-
-/// Returns whether every byte is enabled in the supplied lookup table.
-#[inline]
-pub fn bytes_are_allowed(bytes: &[u8], allowed: &[bool; 256]) -> bool {
-    bytes.iter().all(|byte| allowed[*byte as usize])
-}
-
-/// Wraps a string in quotes using GOON's escapes for backslash, quote, newline, carriage return,
+/// Wraps a string in quotes, escaping backslash, quote, newline, carriage return,
 /// and tab.
 ///
 /// All other C0 control bytes and DEL (`0x7f`) are silently dropped. This policy is not
@@ -266,8 +234,6 @@ impl fmt::Write for ScratchBuf {
 mod tests {
     use super::*;
 
-    const TOKEN_BYTES: [bool; 256] = ascii_alphanumeric_table(b"_-:./@+");
-
     fn quote_escaped_reference(value: &str) -> String {
         let mut output = String::with_capacity(value.len() + 2);
         output.push('"');
@@ -284,13 +250,6 @@ mod tests {
         }
         output.push('"');
         output
-    }
-
-    fn is_bare_token_reference(value: &str) -> bool {
-        value.chars().all(|character| {
-            character.is_ascii_alphanumeric()
-                || matches!(character, '_' | '-' | ':' | '.' | '/' | '@' | '+')
-        })
     }
 
     fn truncate_reference(value: &str, limit: usize) -> Cow<'_, str> {
@@ -345,10 +304,6 @@ mod tests {
 
         for value in values {
             assert_eq!(quote_escaped(&value), quote_escaped_reference(&value));
-            assert_eq!(
-                bytes_are_allowed(value.as_bytes(), &TOKEN_BYTES),
-                is_bare_token_reference(&value)
-            );
             for limit in (0..=8).chain([199, 200, 201, 999, 1000, 1001]) {
                 assert_eq!(
                     truncate_chars(&value, limit, "..."),
@@ -360,11 +315,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn lookup_table_rejects_every_non_ascii_byte() {
-        assert!(bytes_are_allowed(b"Az09_-:./@+", &TOKEN_BYTES));
-        assert!((0x80_u8..=u8::MAX).all(|byte| !TOKEN_BYTES[byte as usize]));
     }
 }

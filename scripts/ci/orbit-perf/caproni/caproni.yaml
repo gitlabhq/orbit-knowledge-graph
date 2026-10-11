@@ -49,7 +49,7 @@ deployers:
       values_file: ./values/gkg.yaml
       release:
         name: gkg
-        chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
+        chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg:3.0.0
 
 cluster:
   driver: auto

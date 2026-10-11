@@ -44,6 +44,15 @@ pub(crate) fn is_reserved_node_key(key: &str) -> bool {
     key == "type" || key == "id"
 }
 
+pub(crate) fn group_node_cell(cell: &Value) -> Option<(&str, i64, &Map<String, Value>)> {
+    let cell = cell.as_object()?;
+    Some((
+        cell.get("type")?.as_str()?,
+        cell.get("id")?.as_str()?.parse().ok()?,
+        cell.get("properties")?.as_object()?,
+    ))
+}
+
 #[derive(Debug, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphResponse {
