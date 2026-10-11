@@ -6,12 +6,16 @@ use orbit_server_config::CodeIndexingPipelineConfig;
 use orbit_utils::vfs::{LimitKind, Limits, Options, SourceError, Vfs, sources::Archive};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::{ByteStream, cache::RepositoryCacheError};
+use super::metrics::CodeMetrics;
+use super::repository::{ByteStream, cache::RepositoryCacheError};
+use crate::handler::HandlerError;
 
 mod policy;
+#[cfg(test)]
+mod tests;
 use policy::CodePolicy;
 
-pub type VirtualRepository = Arc<Vfs<()>>;
+pub type Repository = Arc<Vfs<()>>;
 
 struct CancelLoad(Arc<AtomicBool>);
 
@@ -24,7 +28,7 @@ impl Drop for CancelLoad {
 pub(super) async fn load(
     stream: ByteStream,
     config: &CodeIndexingPipelineConfig,
-) -> Result<VirtualRepository, RepositoryCacheError> {
+) -> Result<Repository, RepositoryCacheError> {
     let to_cap = |value| (value > 0).then_some(value);
     let limits = Limits {
         file_bytes: to_cap(config.max_file_size_bytes),
@@ -58,4 +62,14 @@ pub(super) async fn load(
         }
         other => RepositoryCacheError::Archive(other.to_string()),
     })
+}
+
+pub(super) fn pending_handoff(repository: Repository, metrics: &CodeMetrics) -> HandlerError {
+    for file in repository.files() {
+        if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
+            metrics.record_archive_entry_skipped(reason, 1, file.size);
+        }
+    }
+    // TODO: pass the filtered VFS to the incremental indexing pipeline.
+    HandlerError::Processing("incremental VFS indexing is not implemented yet".into())
 }

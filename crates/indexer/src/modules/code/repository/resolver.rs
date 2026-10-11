@@ -104,7 +104,7 @@ pub struct RepositoryResolver {
 #[derive(Debug)]
 pub enum Repository {
     Extracted(CachedRepository),
-    Virtual(super::virtual_repository::VirtualRepository),
+    IncrementalEngine(super::super::incremental::Repository),
 }
 
 impl RepositoryResolver {
@@ -166,7 +166,7 @@ impl RepositoryResolver {
             };
 
             let repository = match virtual_config {
-                Some(config) => super::virtual_repository::load(archive_stream, config).await.map(Repository::Virtual),
+                Some(config) => super::super::incremental::load(archive_stream, config).await.map(Repository::IncrementalEngine),
                 None => self.cache.extract_archive(archive_stream).await.map(Repository::Extracted),
             };
             match repository {
@@ -353,7 +353,9 @@ mod tests {
                 .await?
             {
                 Repository::Extracted(repository) => Ok(repository),
-                Repository::Virtual(_) => panic!("feature defaults must select legacy extraction"),
+                Repository::IncrementalEngine(_) => {
+                    panic!("feature defaults must select legacy extraction")
+                }
             }
         }
     }
@@ -371,90 +373,6 @@ mod tests {
         ));
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
         (temp_dir, LegacyResolver(resolver))
-    }
-
-    #[tokio::test]
-    async fn virtual_loading_keeps_filtered_files_without_an_extraction_tree() {
-        use orbit_utils::vfs::Decision;
-
-        let service = ScriptedRepositoryService::with_archive(
-            &[
-                ("src/main.rs", "fn main() {}"),
-                ("Cargo.toml", "[package]"),
-                ("image.png", "image"),
-                ("binary.rs", "\0binary"),
-            ],
-            "abc123",
-        );
-        let (dir, resolver) = create_resolver(service);
-        let mut config = orbit_server_config::AppConfig::embedded_defaults()
-            .engine
-            .handlers
-            .code_indexing_task
-            .pipeline;
-        for budget in [0, 1024] {
-            config.source_memory_budget_bytes = budget;
-            let Repository::Virtual(repository) = resolver
-                .0
-                .full_download(1, "main", "abc123", Some(&config))
-                .await
-                .unwrap()
-            else {
-                panic!("expected VFS repository");
-            };
-            assert_eq!(repository.usage().files, 4);
-            assert_eq!(&*repository.read("src/main.rs").unwrap(), b"fn main() {}");
-            assert_eq!(
-                repository.stat("src/main.rs").unwrap().decision,
-                Some(Decision::Keep(()))
-            );
-            assert_eq!(
-                repository.stat("Cargo.toml").unwrap().decision,
-                Some(Decision::Keep(()))
-            );
-            for (path, reason) in [("image.png", "excluded_extension"), ("binary.rs", "binary")] {
-                assert_eq!(
-                    repository.stat(path).unwrap().decision,
-                    Some(Decision::List(reason))
-                );
-                assert_eq!(
-                    repository.read(path).unwrap_err().kind(),
-                    std::io::ErrorKind::Unsupported
-                );
-            }
-            assert_eq!(repository.usage().resident == 0, budget == 0);
-            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-        }
-    }
-
-    #[tokio::test]
-    async fn virtual_loading_preserves_size_and_empty_archive_outcomes() {
-        let mut config = orbit_server_config::AppConfig::embedded_defaults()
-            .engine
-            .handlers
-            .code_indexing_task
-            .pipeline;
-        config.max_total_bytes = 4;
-        for (service, expected) in [
-            (
-                ScriptedRepositoryService::with_raw_archive(Vec::new()),
-                EmptyRepositoryReason::EmptyArchive,
-            ),
-            (
-                ScriptedRepositoryService::with_archive(&[("file.png", "oversize")], "main"),
-                EmptyRepositoryReason::RepositoryTooLarge,
-            ),
-        ] {
-            let (_dir, resolver) = create_resolver(service);
-            let error = resolver
-                .0
-                .full_download(1, "main", "main", Some(&config))
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(error, ResolveError::EmptyRepository { reason, .. } if reason == expected)
-            );
-        }
     }
 
     #[tokio::test]

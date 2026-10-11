@@ -2,6 +2,7 @@ mod arrow_converter;
 mod checkpoint;
 pub mod config;
 mod handler;
+mod incremental;
 pub mod metrics;
 pub(crate) mod observer;
 mod pipeline;

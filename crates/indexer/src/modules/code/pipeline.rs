@@ -368,16 +368,10 @@ impl CodeIndexer {
                 self.metrics.record_resolution_strategy("full_download");
                 path
             }
-            Ok(super::repository::resolver::Repository::Virtual(repository)) => {
-                for file in repository.files() {
-                    if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
-                        self.metrics
-                            .record_archive_entry_skipped(reason, 1, file.size);
-                    }
-                }
-                // TODO: pass the filtered VFS to the incremental indexing pipeline.
-                return Err(HandlerError::Processing(
-                    "incremental VFS indexing is not implemented yet".into(),
+            Ok(super::repository::resolver::Repository::IncrementalEngine(repository)) => {
+                return Err(super::incremental::pending_handoff(
+                    repository,
+                    &self.metrics,
                 ));
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {

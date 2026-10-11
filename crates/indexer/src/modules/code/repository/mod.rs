@@ -3,7 +3,6 @@ pub mod blob_stream;
 pub mod cache;
 pub mod resolver;
 pub(crate) mod service;
-mod virtual_repository;
 
 pub use cache::{LocalRepositoryCache, RepositoryCache};
 pub use resolver::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
