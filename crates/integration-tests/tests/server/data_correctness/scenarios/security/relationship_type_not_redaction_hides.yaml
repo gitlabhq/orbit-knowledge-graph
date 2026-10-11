@@ -22,5 +22,12 @@ expect:
       absent: [2001, 2002]
   edges:
     AUTHORED: [[1, 2000]]
+    ASSIGNED: []
+    CLOSED: []
+    LAST_EDITED_BY: []
+    MERGED: []
+    REOPENED: []
+    REVIEWER: []
+    UPDATED_BY: []
   edge_absent:
     AUTHORED: [[1, 2001]]

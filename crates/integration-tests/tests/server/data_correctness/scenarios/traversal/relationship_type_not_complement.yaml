@@ -15,5 +15,12 @@ expect:
       absent: [2000, 2001]
   edges:
     APPROVED: [[1, 2002]]
+    ASSIGNED: []
+    CLOSED: []
+    LAST_EDITED_BY: []
+    MERGED: []
+    REOPENED: []
+    REVIEWER: []
+    UPDATED_BY: []
   gql_columns:
     type(r): ['"APPROVED"']
