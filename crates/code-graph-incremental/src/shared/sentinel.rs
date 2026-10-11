@@ -7,6 +7,8 @@ use crate::error::LoadError;
 
 #[derive(Clone, Copy, serde::Deserialize)]
 pub struct Limits {
+    pub max_files: usize,
+    pub cross_file_resolve_ms: u64,
     pub file_parse_ms: u64,
     pub file_rewrite_ms: u64,
     pub file_link_ms: u64,
@@ -22,6 +24,8 @@ impl Limits {
     }
 
     pub const UNLIMITED: Self = Self {
+        max_files: 0,
+        cross_file_resolve_ms: u64::MAX,
         file_parse_ms: u64::MAX,
         file_rewrite_ms: u64::MAX,
         file_link_ms: u64::MAX,

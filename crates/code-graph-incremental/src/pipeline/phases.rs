@@ -52,7 +52,7 @@ fn workset(
     repository: Sources,
     dirty: FxHashSet<u32>,
 ) -> Result<Workset<SourcePaths>, Error> {
-    let paths: Vec<_> = super::candidates(&repository, context.max_files)
+    let paths: Vec<_> = super::candidates(&repository, context.env.limits.max_files)
         .filter(|file| {
             SupportLang::from_path(&file.path).is_some_and(|lang| context.env.in_family(lang))
         })
@@ -457,7 +457,10 @@ impl Phase<DirtyGraph> for Resolve {
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
         let DirtyGraph { mut state, dirty } = input;
         let env = context.env;
-        let resolve_budget = context.run.child("resolve", "", context.resolve_timeout_ms);
+        let resolve_budget =
+            context
+                .run
+                .child("resolve", "", context.env.limits.cross_file_resolve_ms);
         let walk = state.project_tree(env);
         let tree_by_path: FxHashMap<&str, usize> = state
             .trees
@@ -570,7 +573,7 @@ impl Phase<Displayed> for Export<'_> {
             &state.edges,
             &context.env.lang,
             &export::ExportPlan::from_config(
-                context.export_config,
+                &context.env.export_config,
                 self.ontology,
                 &context.env.lang,
             )?,
