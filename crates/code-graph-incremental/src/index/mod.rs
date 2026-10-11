@@ -61,6 +61,16 @@ pub fn run<E: std::fmt::Display>(
     mut emit: impl FnMut(Vec<(String, RecordBatch)>) -> Result<(), E>,
 ) -> Result<Outcome, Error> {
     let started = Instant::now();
+    let limits = Limits {
+        file_parse_ms: millis(options.parse_timeout),
+        file_rewrite_ms: millis(options.rewrite_timeout),
+        file_link_ms: millis(options.link_timeout),
+        file_resolve_ms: millis(options.resolve_timeout),
+        ..Limits::load()?
+    };
+    let run =
+        Sentinel::new("run", "", limits.total_ms).with_cancellation(options.cancelled.clone());
+    run.check()?;
     let selected: FxHashSet<_> = candidates(&repository, options.max_files)
         .map(|file| file.path.to_string())
         .collect();
@@ -92,7 +102,6 @@ pub fn run<E: std::fmt::Display>(
             .count(),
         ..Outcome::default()
     };
-    let run = Sentinel::disabled().with_cancellation(options.cancelled.clone());
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(options.worker_threads)
         .stack_size(8 * 1024 * 1024)
@@ -102,13 +111,6 @@ pub fn run<E: std::fmt::Display>(
     for (family, language) in &families {
         run.check()?;
         let family_started = Instant::now();
-        let limits = Limits {
-            file_parse_ms: millis(options.parse_timeout),
-            file_rewrite_ms: millis(options.rewrite_timeout),
-            file_link_ms: millis(options.link_timeout),
-            file_resolve_ms: millis(options.resolve_timeout),
-            total_ms: u64::MAX,
-        };
         let env = Env::with_limits(*language, limits)?;
         let mut context = Context::new(&env);
         context.run = run.clone();
