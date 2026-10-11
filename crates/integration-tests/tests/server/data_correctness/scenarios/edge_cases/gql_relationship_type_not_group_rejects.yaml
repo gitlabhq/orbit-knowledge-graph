@@ -1,0 +1,11 @@
+description: type(r) inside a NOT group rejects at its position without echoing the type name
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE NOT (type(r) = 'PRIVATE_QUERY_TYPE' AND mr.state = 'opened')
+    RETURN u LIMIT 10
+
+expect:
+  compile_error: "type(r) cannot be used inside a NOT group"
+  compile_error_not_contains: ["PRIVATE_QUERY_TYPE"]

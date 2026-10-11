@@ -1,0 +1,16 @@
+description: type(r) <> 'AUTHORED' is the same complement as NOT type(r) = 'AUTHORED'
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE type(r) <> 'AUTHORED'
+    RETURN u, mr.title LIMIT 50
+
+expect:
+  node_count: 2
+  nodes:
+    MergeRequest:
+      ids: [2002]
+      absent: [2000, 2001]
+  edges:
+    APPROVED: [[1, 2002]]

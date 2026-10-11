@@ -1,0 +1,19 @@
+description: NOT type(r) = 'AUTHORED' keeps every other relationship type the pattern allows
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE NOT type(r) = 'AUTHORED'
+    RETURN u, mr.title, type(r) LIMIT 50
+
+expect:
+  node_count: 2
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2002]
+      absent: [2000, 2001]
+  edges:
+    APPROVED: [[1, 2002]]
+  gql_columns:
+    type(r): ['"APPROVED"']

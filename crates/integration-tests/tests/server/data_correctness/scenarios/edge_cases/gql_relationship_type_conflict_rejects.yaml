@@ -5,4 +5,4 @@ query:
     MATCH (u:User {id: 1})-[r:AUTHORED]->(mr:MergeRequest) WHERE type(r) = 'APPROVED' RETURN u, mr LIMIT 10
 
 expect:
-  compile_error: "type(r) excludes every relationship type the pattern allows for it"
+  compile_error: "type(r) excludes every relationship type the pattern allows"

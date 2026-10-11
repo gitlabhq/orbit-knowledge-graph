@@ -5,5 +5,5 @@ query:
     MATCH (u:User {id: 1})-[r]->(mr:MergeRequest) WHERE type(r) IN ['AUTHORED', 'private query literal'] RETURN u LIMIT 10
 
 expect:
-  compile_error: "type(r) supports = or IN with relationship type names"
+  compile_error: "type() names a relationship type that the schema does not have"
   compile_error_not_contains: ["private query literal"]

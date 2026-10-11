@@ -1,0 +1,8 @@
+description: Neighbors queries reject NOT type(r) IN [...] like any other negated list
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})<-[r]-(n) WHERE NOT type(r) IN ['MEMBER_OF'] RETURN g, n
+
+expect:
+  compile_error: "neighbors queries support NOT only on =, <>, IS NULL, and IS NOT NULL conditions"

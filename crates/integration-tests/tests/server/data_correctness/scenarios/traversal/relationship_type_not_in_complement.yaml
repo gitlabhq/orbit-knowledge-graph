@@ -1,0 +1,19 @@
+description: NOT type(r) IN [...] removes the listed types from the types the pattern declares
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
+    WHERE NOT type(r) IN ['APPROVED']
+    RETURN u, mr.title, type(r) LIMIT 50
+
+expect:
+  node_count: 3
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000, 2001]
+      absent: [2002]
+  edges:
+    AUTHORED: [[1, 2000], [1, 2001]]
+  gql_columns:
+    type(r): ['"AUTHORED"', '"AUTHORED"']

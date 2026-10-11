@@ -1,0 +1,10 @@
+description: NOT type(r) that removes every type the pattern declares rejects instead of returning nothing
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r:AUTHORED|APPROVED]->(mr:MergeRequest)
+    WHERE NOT type(r) IN ['AUTHORED', 'APPROVED']
+    RETURN u LIMIT 10
+
+expect:
+  compile_error: "type(r) excludes every relationship type the pattern allows"

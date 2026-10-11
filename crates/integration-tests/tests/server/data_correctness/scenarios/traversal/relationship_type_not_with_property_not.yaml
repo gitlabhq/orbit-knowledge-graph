@@ -1,0 +1,19 @@
+description: NOT type(r) combines with a negated property group on the same query
+
+query:
+  gql: |
+    MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+    WHERE NOT type(r) = 'APPROVED' AND NOT (mr.state = 'opened' AND mr.title = 'Fix bug B')
+    RETURN u, mr.title, type(r) LIMIT 50
+
+expect:
+  node_count: 2
+  referential_integrity: true
+  nodes:
+    MergeRequest:
+      ids: [2000]
+      absent: [2001, 2002]
+  edges:
+    AUTHORED: [[1, 2000]]
+  gql_columns:
+    type(r): ['"AUTHORED"']
