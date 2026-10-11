@@ -315,8 +315,8 @@
           "additionalProperties": {
             "$ref": "#/$defs/FilterEntry"
           },
-          "maxProperties": 10,
-          "default": {}
+          "minProperties": 1,
+          "maxProperties": 10
         },
         "node_ids": {
           "type": "array",

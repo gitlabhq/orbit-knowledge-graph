@@ -1,0 +1,8 @@
+description: An empty JSON not object is rejected, so it never stands for a condition
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","node_ids":[4000],"not":{}}],"limit":10}
+
+expect:
+  compile_error: "has less than 1 property at /nodes/0/not"
