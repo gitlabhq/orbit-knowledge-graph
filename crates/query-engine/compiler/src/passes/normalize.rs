@@ -168,7 +168,6 @@ fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
 }
 
 fn coerce_filter(filter: &mut InputFilter, property: Option<&query_data_model::Property>) {
-    // Only coerce int-based enums; string enums are already strings in the source
     if let Some(property) = property
         && property.enum_type == EnumType::Int
         && let Some(enum_values) = &property.enum_values
