@@ -780,15 +780,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             let filters = std::slice::from_ref(&condition.filter);
             match &condition.target {
                 PredicateTarget::Node(alias) => {
-                    let node = input
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == *alias)
-                        .ok_or_else(|| {
-                            QueryError::ReferenceError(format!(
-                                "condition references undefined node \"{alias}\""
-                            ))
-                        })?;
+                    let node = input.node(alias).ok_or_else(|| {
+                        QueryError::ReferenceError(format!(
+                            "condition references undefined node \"{alias}\""
+                        ))
+                    })?;
                     self.check_node_filters(input, node, &condition.property, filters)?;
                 }
                 PredicateTarget::Relationship(index) => {

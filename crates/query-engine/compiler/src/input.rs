@@ -262,11 +262,16 @@ impl Input {
             .any(|condition| condition.references(target))
     }
 
+    pub fn node(&self, alias: &str) -> Option<&InputNode> {
+        self.nodes.iter().find(|node| node.id == alias)
+    }
+
+    pub fn node_mut(&mut self, alias: &str) -> Option<&mut InputNode> {
+        self.nodes.iter_mut().find(|node| node.id == alias)
+    }
+
     pub fn entity_of(&self, alias: &str) -> Option<&str> {
-        self.nodes
-            .iter()
-            .find(|node| node.id == alias)
-            .and_then(|node| node.entity.as_deref())
+        self.node(alias)?.entity.as_deref()
     }
 
     pub fn has_negation(&self) -> bool {
@@ -291,9 +296,7 @@ impl Input {
                     let filters = match &condition.target {
                         PredicateTarget::Node(alias) => {
                             &mut self
-                                .nodes
-                                .iter_mut()
-                                .find(|node| node.id == *alias)
+                                .node_mut(alias)
                                 .ok_or_else(|| {
                                     crate::error::QueryError::PipelineInvariant(format!(
                                         "condition node '{alias}' is not declared"
