@@ -217,7 +217,10 @@ The existing file-size and total-byte limits also apply, with total bytes charge
 
 Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
 File and directory rows are emitted once across language families, including files rejected by the content policy.
-The server adds version fields, branch relationships, and endpoint tags before routing batches through the existing buffered writer.
+The server reuses the embedded export mapping with ontology-derived output schemas.
+The envelope supplies typed values for extra schema columns and overrides header constants such as traversal path.
+The engine validates mapped columns against the ontology and output schema. Required envelope values must be present.
+The server adds branch relationships and endpoint tags before routing batches through the existing buffered writer.
 Both engines share locking, heartbeats, stale-data cleanup, and checkpoint handling.
 Write failures and cancelled runs do not advance the checkpoint.
 Tree-sitter polls cancellation and the per-file parse deadline while parsing.

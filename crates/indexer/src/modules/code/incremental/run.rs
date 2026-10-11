@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::pipeline::IndexingReport;
 use code_graph::v2::{OnBatch, SinkError};
-use code_graph_incremental::{Envelope, Scalar, templates};
+use code_graph_incremental::{Envelope, Scalar, export::ExportConfig, templates};
 
 use super::super::{
     arrow_converter::{IndexerEnvelope, route_graph},
@@ -42,6 +42,16 @@ pub(in crate::modules::code) fn run(
     };
     let mut output = Output::new(&envelope, &ontology);
     let cancelled = options.cancelled.clone();
+    let mut export_config = ExportConfig::embedded().clone();
+    for name in ontology.local_entity_names() {
+        let table = ontology
+            .table_name(name)
+            .map_err(|error| SinkError(error.to_string()))?;
+        export_config.schemas.insert(
+            table.to_owned(),
+            super::super::arrow_converter::entity_specs(&ontology, name),
+        );
+    }
     let report = templates::repository(
         repository,
         options,
@@ -49,8 +59,15 @@ pub(in crate::modules::code) fn run(
             ("project_id", Scalar::Int(envelope.project_id)),
             ("branch", Scalar::Str(&envelope.branch)),
             ("commit_sha", Scalar::Str(&envelope.commit_sha)),
+            (
+                "traversal_path",
+                Scalar::Str(envelope.traversal_path.as_str()),
+            ),
+            ("_version", Scalar::Int(envelope.version_micros)),
+            ("_deleted", Scalar::Bool(false)),
         ]),
         &ontology,
+        &export_config,
         |batches| -> Result<(), SinkError> {
             let batches = output.convert(batches)?;
             stats.files_indexed += batches.files.num_rows();

@@ -1,12 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use arrow::array::{ArrayRef, BooleanArray, StringArray, TimestampMicrosecondArray};
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use ontology::Ontology;
 use orbit_utils::arrow::{ArrowUtils, AsRecordBatch, BatchBuilder};
+use std::collections::HashMap;
 
 use super::super::arrow_converter::{
     ConvertedGraphData, IndexerEdgeRow, IndexerEnvelope, build_tag_properties, compute_branch_id,
@@ -20,8 +17,10 @@ pub(super) struct Output<'a> {
 }
 
 fn text(batch: &RecordBatch, column: &str, row: usize) -> Result<String, SinkError> {
-    ArrowUtils::get_column_string(batch, column, row)
-        .ok_or_else(|| SinkError(format!("missing {column} at row {row}")))
+    let array = batch
+        .column_by_name(column)
+        .ok_or_else(|| SinkError(format!("missing {column} at row {row}")))?;
+    arrow::util::display::array_value_to_string(array.as_ref(), row).map_err(SinkError::from)
 }
 
 fn id(batch: &RecordBatch, column: &str, row: usize) -> Result<i64, SinkError> {
@@ -77,7 +76,7 @@ impl<'a> Output<'a> {
                     structure.push((id, kind, text(&batch, "path", row)?));
                 }
             }
-            entities.push(self.entity(kind, batch)?);
+            entities.push(batch);
         }
         let mut edges = BatchBuilder::new(&edge_specs(self.ontology), 0)?;
         let empty_tags = Vec::new();
@@ -156,38 +155,5 @@ impl<'a> Output<'a> {
             imported_symbols,
             edges: edges.finish()?,
         })
-    }
-
-    fn entity(&self, kind: &str, batch: RecordBatch) -> Result<RecordBatch, SinkError> {
-        let schema = BatchBuilder::new(&entity_specs(self.ontology, kind), 0)?
-            .finish()?
-            .schema();
-        let count = batch.num_rows();
-        let columns = schema
-            .fields()
-            .iter()
-            .map(|field| {
-                let column: ArrayRef = match field.name().as_str() {
-                    "traversal_path" => {
-                        Arc::new(StringArray::from(vec![
-                            self.envelope.traversal_path.as_str();
-                            count
-                        ]))
-                    }
-                    "_version" => Arc::new(TimestampMicrosecondArray::from(vec![
-                            self.envelope
-                                .version_micros;
-                            count
-                        ])),
-                    "_deleted" => Arc::new(BooleanArray::from(vec![false; count])),
-                    name => batch
-                        .column_by_name(name)
-                        .cloned()
-                        .ok_or_else(|| SinkError(format!("missing {kind}.{name}")))?,
-                };
-                arrow::compute::cast(&column, field.data_type()).map_err(SinkError::from)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(RecordBatch::try_new(schema, columns)?)
     }
 }
