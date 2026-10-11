@@ -158,11 +158,19 @@ Create Project
     RETURN    ${project}
 
 Create Issue
-    [Arguments]    ${project_id}    ${title}
+    [Arguments]    ${project_id}    ${title}    ${confidential}=${False}
     ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    title=${title}
+    ${body}=    Create Dictionary    title=${title}    confidential=${confidential}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/issues
     ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Close Issue
+    [Arguments]    ${project_id}    ${issue_iid}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    state_event=close
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}
+    ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
 Link Issues
@@ -277,6 +285,15 @@ Add Group Member
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    user_id=${user_id}    access_level=${access_level}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/groups/${group_id}/members
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Add Project Member
+    [Documentation]    Add ${user_id} to ${project_id} at the given built-in ${access_level}.
+    [Arguments]    ${project_id}    ${user_id}    ${access_level}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    user_id=${user_id}    access_level=${access_level}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/members
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
 
