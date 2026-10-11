@@ -286,7 +286,7 @@ column. Common causes:
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
 - Unsupported syntax: `OR`, `XOR`, `x NOT IN [...]`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
-- Only `NOT` conditions anchor a node. Add a positive ID or literal filter; the error says "NOT conditions do not count".
+- A node whose only conditions are `NOT` groups, or `NOT` over a list, range, or text match, is not anchored. The error says "NOT conditions do not count"; add a positive ID or literal filter. `NOT` on `=`, `<>`, `IS NULL`, or `IS NOT NULL` acts like its opposite form and anchors like it.
 - `PAGE ... AFTER` with a cursor from a different query. The cursor binds to the query text.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.

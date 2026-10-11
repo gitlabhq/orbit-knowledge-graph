@@ -76,7 +76,7 @@ Validation and restriction check both sides of every leaf, and normalization coe
 Planning binds a tree that reads one node to that node's scan. It applies other trees after the joins, where a node ID reads the edge column that binds the node.
 Nodes and relationships that a tree reads keep their table scans: foreign-key elision and FK chains skip them, and aggregation scope proofs exclude them.
 Trees never make a node selective, so a node whose only condition is `NOT` gets no candidate or filter keys.
-Queries with `NOT` set `transform_null_in = 0`, so a NULL value under `IN` stays NULL at every depth of negation.
+Queries that keep a `NOT` node after normalization set `transform_null_in = 0`, so a NULL value under `IN` stays NULL at every depth of negation. A complemented `NOT` is an ordinary filter and does not set it.
 All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
 Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
 The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
