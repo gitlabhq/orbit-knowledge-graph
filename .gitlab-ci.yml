@@ -543,6 +543,7 @@ lint-check:
   script:
     - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
     - cargo clippy -p duckdb-client --all-targets -- -D warnings
+    - cargo clippy -p duckdb-client --all-targets --features static-fts -- -D warnings
     - sccache --show-stats || true
 
 # Security Stage
@@ -759,6 +760,18 @@ unit-test:
   needs: []
   script:
     - ./scripts/dev/run-unit-tests.sh --profile ci
+    - sccache --show-stats || true
+
+# Tests gated on `static-fts` (statically linked DuckDB extensions) are skipped by
+# unit-test, so run them here. The bundled libduckdb-sys build is slow when cold.
+duckdb-client-static-fts-test:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo nextest run --profile ci -p duckdb-client --features static-fts --no-fail-fast
     - sccache --show-stats || true
 
 compiler-integration-test:
