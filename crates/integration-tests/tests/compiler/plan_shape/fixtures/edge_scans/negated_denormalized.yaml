@@ -1,0 +1,19 @@
+name: NOT over a denormalized property reads the node table instead of edge tags
+query:
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)
+    WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
+    RETURN a, b
+missing_frontends:
+  json: JSON filters cannot express NOT over a list.
+logical:
+  expect:
+    - (Filter NOT (a.definition_type IN ['function', 'method']) (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Scan Table(gl_definition) AS a)
+        - (Filter NOT (a.definition_type IN ['function', 'method']), ... (_))
+      reject:
+        - (Filter e0.source_tags HAS ANY ['definition_type:function', 'definition_type:method'], ... (_))

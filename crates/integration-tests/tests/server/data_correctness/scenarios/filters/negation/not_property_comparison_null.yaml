@@ -1,0 +1,21 @@
+description: >
+  NOT over same-node property comparisons drops rows where either side is
+  NULL. Work item 4002 has no weight, so both the complemented comparison
+  and the negated group evaluate to NULL for it.
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010
+      AND NOT wi.weight = wi.iid
+      AND NOT (wi.weight >= wi.iid AND wi.state = 'opened')
+    RETURN wi.weight, wi.iid LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    WorkItem:
+      ids: [4001]
+      absent: [4000, 4002, 4003, 4010]
+      filters:
+        weight: { in: [8] }

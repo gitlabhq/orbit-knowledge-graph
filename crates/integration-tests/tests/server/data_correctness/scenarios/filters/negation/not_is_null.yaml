@@ -1,0 +1,18 @@
+description: NOT IS NULL matches the same rows as IS NOT NULL
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"is_not_null":true}},"columns":["weight"]}],"limit":10}
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IS NULL
+    RETURN wi.weight LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    WorkItem:
+      ids: [4000, 4001, 4003, 4010]
+      filters:
+        weight: { is_not_null: true }
+      absent: [4002]

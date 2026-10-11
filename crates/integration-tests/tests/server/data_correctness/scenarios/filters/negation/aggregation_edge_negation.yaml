@@ -1,0 +1,16 @@
+description: An aggregation counts only the memberships outside a negated relationship list
+
+query:
+  gql: |
+    MATCH (u:User)-[m:MEMBER_OF]->(g:Group)
+    WHERE g.id IN [100, 101] AND NOT m.source_id IN [2, 3]
+    RETURN g{.name}, count(u) AS members LIMIT 10
+
+expect:
+  groups:
+    g:
+      entity: Group
+      ids: [100, 101]
+      rows:
+        - { entity: Group, id: 100, values: { members: 2 } }
+        - { entity: Group, id: 101, values: { members: 3 } }

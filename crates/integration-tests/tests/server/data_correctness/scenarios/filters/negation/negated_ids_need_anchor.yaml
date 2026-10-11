@@ -1,0 +1,5 @@
+description: Negated ID bounds do not become a selective positive anchor
+query:
+  gql: MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
+expect:
+  compile_error: add filters or node_ids to at least one node (NOT conditions do not count)

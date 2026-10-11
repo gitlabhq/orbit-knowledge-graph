@@ -1237,5 +1237,17 @@ mod tests {
             assert!(message.contains(position), "{message}");
             assert!(!message.contains("private-query-literal"), "{message}");
         }
+        for raw in [
+            "MATCH (u:User {username: 'private-query-literal'}) WHERE u.id = 1 OR u.id = 2 RETURN u",
+            "MATCH (u:User {id: 1}) WHERE u.username = 'private-query-literal' XOR u.id = 2 RETURN u",
+            "MATCH (u:User {id: 1}) WHERE u.username NOT IN ['private-query-literal'] RETURN u",
+            "MATCH (u:User {id: 1}) WHERE NOT u.traversal_path STARTS WITH 'private-query-literal' RETURN u",
+        ] {
+            let error = compile(raw, Frontend::Gql, &ontology, &security).unwrap_err();
+            let message = error.to_string();
+            assert!(error.is_client_safe(), "{message}");
+            assert!(message.contains("line 1, column"), "{message}");
+            assert!(!message.contains("private-query-literal"), "{message}");
+        }
     }
 }

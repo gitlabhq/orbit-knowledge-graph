@@ -1,0 +1,22 @@
+description: Aggregation with NOT on a mutable property counts the latest row only
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_work_item:
+      - { id: 9410, title: was closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 9410, title: now opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-06-01 00:00:00" }
+      - { id: 9411, title: was opened, state: opened, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-01-01 00:00:00" }
+      - { id: 9411, title: now closed, state: closed, weight: 3, project_id: 1000, namespace_id: 100, traversal_path: "1/100/", _version: "2024-06-01 00:00:00" }
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id IN [9410, 9411] AND NOT wi.state IN ['closed']
+    RETURN count(wi) AS open_items
+
+expect:
+  skip_requirements: [node_ids]
+  row_count: 1
+  row_values:
+    - { open_items: 1 }

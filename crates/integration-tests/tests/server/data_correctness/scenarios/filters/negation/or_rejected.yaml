@@ -1,0 +1,11 @@
+description: GQL rejects OR with a message that points to AND, NOT, and IN
+
+query:
+  gql: |
+    MATCH (wi:WorkItem)
+    WHERE wi.id = 4000 OR wi.id = 4001
+    RETURN wi.state LIMIT 10
+
+expect:
+  compile_error: "OR and XOR are not supported; combine conditions with AND and NOT, or use IN [...] to match one of several values"
+  compile_error_not_contains: ["Orbit query syntax", "4001"]

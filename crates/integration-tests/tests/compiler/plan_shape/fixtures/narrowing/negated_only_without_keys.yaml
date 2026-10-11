@@ -1,0 +1,21 @@
+name: A node whose only condition is NOT gets no candidate or filter keys
+query:
+  gql: |
+    MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition)
+    WHERE NOT b.name IN ['skip', 'other']
+    RETURN b.name
+missing_frontends:
+  json: JSON filters cannot express NOT over a list.
+logical:
+  expect:
+    - (Filter NOT (b.name IN ['skip', 'other']) (_))
+physical:
+  clickhouse:
+    planned:
+      ctes:
+        absent: true
+      expect:
+        - (Filter NOT (b.name IN ['skip', 'other']), ... (_))
+    emitted:
+      ctes:
+        absent: true

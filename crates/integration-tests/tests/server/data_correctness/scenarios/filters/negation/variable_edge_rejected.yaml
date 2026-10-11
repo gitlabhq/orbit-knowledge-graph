@@ -1,0 +1,6 @@
+description: A variable-length relationship list cannot be used as a scalar predicate
+query:
+  gql: |
+    MATCH (a:Definition {id: 12000})-[calls:CALLS*1..2]->(b:Definition) WHERE NOT calls.source_id = 12000 RETURN b.id
+expect:
+  compile_error: relationship-list

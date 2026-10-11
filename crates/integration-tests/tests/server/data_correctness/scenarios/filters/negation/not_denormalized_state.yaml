@@ -1,0 +1,22 @@
+description: NOT = on a denormalized property matches the same rows as the JSON ne filter
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","filters":{"state":{"ne":"closed"}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
+    WHERE u.id IN [1, 2] AND NOT wi.state = 'closed'
+    RETURN u, wi.state LIMIT 20
+
+expect:
+  node_count: 3
+  nodes:
+    User:
+      ids: [1]
+    WorkItem:
+      ids: [4000, 4002]
+      absent: [4001]
+      filters:
+        state: opened
+  edges:
+    AUTHORED: [[1, 4000], [1, 4002]]

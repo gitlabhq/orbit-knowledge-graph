@@ -1,0 +1,13 @@
+description: A complemented NOT on a neighbors center removes the closed work item and its neighbors
+
+query:
+  gql: |
+    MATCH (wi:WorkItem {id: 4001})-[:IN_GROUP]->(n)
+    WHERE NOT wi.state = 'closed'
+    RETURN n
+
+expect:
+  skip_requirements: [node_ids, "filter:state"]
+  node_count: 0
+  edges:
+    IN_GROUP: []
