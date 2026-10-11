@@ -23,6 +23,7 @@ mod limits;
 mod loading;
 mod policy;
 mod scratch;
+pub mod sources;
 mod store;
 
 #[cfg(test)]
@@ -58,6 +59,8 @@ pub enum SourceError {
     Cap(#[from] CapExceeded),
     #[error("source error: {0}")]
     Io(#[from] io::Error),
+    #[error("source contained no entries (empty or truncated stream)")]
+    Empty,
     #[error("load cancelled")]
     Cancelled,
 }
