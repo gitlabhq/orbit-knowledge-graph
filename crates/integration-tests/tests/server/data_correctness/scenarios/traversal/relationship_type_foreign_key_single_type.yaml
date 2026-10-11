@@ -1,0 +1,30 @@
+description: >
+  type(r) on a one-type hop that the scanner's project_id answers labels the
+  row with that type. Two types that share the column reject instead, as in
+  gql_relationship_type_shared_foreign_key_rejects.
+
+config:
+  security: admin
+  redaction:
+    allow:
+      vulnerability_scanner: [8500]
+      project: [1000]
+  extra_seed:
+    gl_vulnerability_scanner:
+      - { id: 8500, external_id: gemnasium, name: Gemnasium, vendor: GitLab, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  gql: |
+    MATCH (s:VulnerabilityScanner)-[r:SCANS]->(p:Project {id: 1000})
+    RETURN s, p, type(r) LIMIT 10
+
+expect:
+  node_count: 2
+  referential_integrity: true
+  nodes:
+    VulnerabilityScanner:
+      ids: [8500]
+  edges:
+    SCANS: [[8500, 1000]]
+  gql_columns:
+    type(r): ['"SCANS"']

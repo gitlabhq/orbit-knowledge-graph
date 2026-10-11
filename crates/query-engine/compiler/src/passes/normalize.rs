@@ -74,6 +74,7 @@ pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) 
     }
     infer_wildcard_relationship_kinds(&mut input, model);
     resolve_relationship_types(&mut input, model)?;
+    check_shared_foreign_keys(&input, model)?;
     Ok(input)
 }
 
@@ -109,6 +110,26 @@ fn resolve_relationship_types(
             return Err(QueryError::Validation(
                 "type(r) excludes every relationship type the pattern allows".into(),
             ));
+        }
+    }
+    Ok(())
+}
+
+fn check_shared_foreign_keys(
+    input: &Input,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Result<()> {
+    for (index, rel) in input.relationships.iter().enumerate() {
+        if rel.types.len() > 1
+            && input.relationship_return.uses(index)
+            && let (Some(from), Some(to)) = (input.entity_of(&rel.from), input.entity_of(&rel.to))
+            && model.foreign_key(&rel.types, from, to).is_some()
+        {
+            return Err(QueryError::Validation(format!(
+                "{} share one foreign key between {from} and {to}, so type() and a returned relationship cannot tell them apart; match one relationship type, such as -[r:{}]->",
+                rel.types.join("|"),
+                rel.types[0]
+            )));
         }
     }
     Ok(())
