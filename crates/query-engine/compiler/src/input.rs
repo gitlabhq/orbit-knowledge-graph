@@ -289,6 +289,19 @@ impl Input {
             .any(|condition| condition.references(target))
     }
 
+    pub fn remove_relationship(&mut self, index: usize) -> InputRelationship {
+        for root in &mut self.predicates {
+            root.visit_mut(&mut |Condition::Property(predicate)| {
+                if let PredicateTarget::Relationship(position) = &mut predicate.target
+                    && *position > index
+                {
+                    *position -= 1;
+                }
+            });
+        }
+        self.relationships.remove(index)
+    }
+
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {

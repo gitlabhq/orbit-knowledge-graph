@@ -1,0 +1,23 @@
+description: >
+  The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT
+  group on the IN_PROJECT relationship still reads IN_PROJECT. Every
+  IN_PROJECT edge has source_kind MergeRequest, so the group is false and
+  both authored merge requests count. Reading the AUTHORED edge instead
+  (source_kind User) would drop both opened merge requests.
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
+    WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+    RETURN p{.name}, count(mr) AS mrs LIMIT 10
+
+expect:
+  sql_contains:
+    - "(e0.relationship_kind = 'IN_PROJECT')"
+    - "NOT ((e0.source_kind = 'User') AND (mr.state = 'opened'))"
+  groups:
+    p:
+      entity: Project
+      ids: [1000]
+      rows:
+        - { entity: Project, id: 1000, values: { mrs: 2 } }

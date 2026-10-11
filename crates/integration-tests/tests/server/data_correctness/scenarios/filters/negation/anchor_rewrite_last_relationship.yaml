@@ -1,0 +1,20 @@
+description: >
+  When the group-anchor rewrite removes the first relationship, a NOT group
+  on the remaining IN_PROJECT relationship still binds to its edge scan and
+  counts every merge request in the project.
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
+    WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+    RETURN p{.name}, count(mr) AS mrs LIMIT 10
+
+expect:
+  sql_contains:
+    - "NOT ((e0.source_kind = 'User') AND (mr.state = 'opened'))"
+  groups:
+    p:
+      entity: Project
+      ids: [1000]
+      rows:
+        - { entity: Project, id: 1000, values: { mrs: 4 } }
