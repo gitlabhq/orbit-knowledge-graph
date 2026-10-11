@@ -5,8 +5,9 @@ mod syntax;
 
 use std::sync::Arc;
 
-use crate::config::{self, CompilerCtx as _};
+use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
+use crate::passes::codegen::PaginationContext;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{
@@ -41,9 +42,25 @@ pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
 const MAX_QUERY_BYTES: usize = 32 * 1024;
 const MAX_NESTING: usize = 32;
 
+#[derive(Debug, Clone)]
+pub struct ParsedQuery {
+    pub input: Input,
+    pub query_hash: u64,
+}
+
+impl ParsedQuery {
+    pub(crate) fn load(self, ctx: &mut impl CompilerCtx) {
+        ctx.set_input(self.input);
+        ctx.set_pagination(PaginationContext {
+            query_hash: self.query_hash,
+            ..Default::default()
+        });
+    }
+}
+
 #[derive(Debug)]
 pub enum RoutedStatement {
-    Query(Box<Input>),
+    Query(Box<ParsedQuery>),
     Schema(SchemaResponse),
 }
 
@@ -61,7 +78,7 @@ pub fn prepare(
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
     match route(raw, ontology, scope)? {
-        RoutedStatement::Query(input) => compile_query(*input, ontology, security_context)
+        RoutedStatement::Query(query) => compile_query(*query, ontology, security_context)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
     }
@@ -70,7 +87,6 @@ pub fn prepare(
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
         ast::Statement::Query(query) => lower::lower(raw, *query)
-            .map(|(input, _)| input)
             .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
@@ -81,10 +97,10 @@ pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Resul
 }
 
 pub fn parse(raw: &str) -> Result<Input> {
-    parse_with_hash(raw).map(|(input, _)| input)
+    parse_with_hash(raw).map(|query| query.input)
 }
 
-pub fn parse_with_hash(raw: &str) -> Result<(Input, u64)> {
+pub fn parse_with_hash(raw: &str) -> Result<ParsedQuery> {
     match parse_statement(raw)? {
         ast::Statement::Query(query) => lower::lower(raw, *query),
         ast::Statement::SchemaCall { .. } => Err(QueryError::Validation(
@@ -94,23 +110,23 @@ pub fn parse_with_hash(raw: &str) -> Result<(Input, u64)> {
 }
 
 pub fn compile_query(
-    input: Input,
+    query: ParsedQuery,
     ontology: &Ontology,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let ontology = Arc::new(ontology.clone());
     let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_query_model(input, &data_model, security_context)
+    compile_query_model(query, &data_model, security_context)
 }
 
 pub fn compile_query_model(
-    input: Input,
+    query: ParsedQuery,
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
+    query.load(&mut ctx);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }
 

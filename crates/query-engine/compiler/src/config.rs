@@ -204,12 +204,7 @@ fn json_dsl_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
     if let Some(raw) = ctx.take_raw() {
-        let (input, query_hash) = frontend::gql::parse_with_hash(&raw)?;
-        ctx.set_input(input);
-        ctx.set_pagination(PaginationContext {
-            query_hash,
-            ..Default::default()
-        });
+        frontend::gql::parse_with_hash(&raw)?.load(ctx);
     }
     Ok(())
 }
