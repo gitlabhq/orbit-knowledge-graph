@@ -80,7 +80,7 @@ fn rule_label(rule: &Rule) -> String {
         | Rule::ParenthesizedExpression
         | Rule::ComparisonExpression
         | Rule::TokenPredicate => "a condition",
-        Rule::Negation => "NOT",
+        Rule::Negation | Rule::Not => "NOT",
         Rule::UnsupportedBooleanOperator => "AND",
         Rule::TokenFunction => "token_match, all_tokens, or any_tokens",
         Rule::ComparisonOperator => "a comparison operator",
